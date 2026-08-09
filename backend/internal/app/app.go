@@ -74,6 +74,7 @@ import (
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/update"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"go.uber.org/zap"
@@ -319,6 +320,7 @@ func NewApp() (*App, error) {
 	adminService.SetPermissionGroupModelLookup(channelRepo)
 	adminService.SetPermissionGroupBillingPlanReferenceChecker(billingService)
 	adminHandler := adminhttp.NewHandler(adminService)
+	adminHandler.SetUpdater(update.NewClient(cfg.UpdateSocketPath))
 	adminHandler.SetConversationExporter(conversationService)
 	adminModule := adminhttp.NewModule(adminHandler)
 	userSettingsRepo := usersettingsrepo.NewRepo(db)

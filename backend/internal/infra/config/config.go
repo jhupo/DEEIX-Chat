@@ -225,6 +225,7 @@ type yamlConfig struct {
 		ReadTimeoutSeconds       int    `yaml:"read_timeout_seconds"`
 		IdleTimeoutSeconds       int    `yaml:"idle_timeout_seconds"`
 		MaxHeaderBytes           int    `yaml:"max_header_bytes"`
+		UpdateSocketPath         string `yaml:"update_socket_path"`
 	} `yaml:"server"`
 	Security struct {
 		JWTSecret              string `yaml:"jwt_secret"`
@@ -327,6 +328,7 @@ type Config struct {
 	HTTPReadTimeoutSeconds       int
 	HTTPIdleTimeoutSeconds       int
 	HTTPMaxHeaderBytes           int
+	UpdateSocketPath             string
 	JWTSecret                    string
 	DataEncryptionKey            string
 	SSRFProtectionEnabled        bool
@@ -562,6 +564,7 @@ func Load() Config {
 		HTTPReadTimeoutSeconds:       envOrInt("HTTP_READ_TIMEOUT_SECONDS", yc.Server.ReadTimeoutSeconds, defaultHTTPReadTimeoutSeconds),
 		HTTPIdleTimeoutSeconds:       envOrInt("HTTP_IDLE_TIMEOUT_SECONDS", yc.Server.IdleTimeoutSeconds, defaultHTTPIdleTimeoutSeconds),
 		HTTPMaxHeaderBytes:           envOrInt("HTTP_MAX_HEADER_BYTES", yc.Server.MaxHeaderBytes, defaultHTTPMaxHeaderBytes),
+		UpdateSocketPath:             envOr("UPDATE_SOCKET_PATH", yc.Server.UpdateSocketPath, "/run/deeix-updater/deeix-updater.sock"),
 		JWTSecret:                    envOr("JWT_SECRET", yc.Security.JWTSecret, defaultJWTSecret),
 		DataEncryptionKey:            envOr("DATA_ENCRYPTION_KEY", yc.Security.DataEncryptionKey, defaultDataEncryptionKey),
 		SSRFProtectionEnabled:        envOrBoolPtr("SSRF_PROTECTION_ENABLED", yc.Security.SSRFProtectionEnabled, false),
@@ -753,6 +756,9 @@ func Load() Config {
 
 // Validate 检查关键配置是否合法。
 func (c Config) Validate() error {
+	if c.UpdateSocketPath != "" && (!strings.HasPrefix(c.UpdateSocketPath, "/") || strings.ContainsAny(c.UpdateSocketPath, "\r\n\t\x00")) {
+		return errors.New("invalid UPDATE_SOCKET_PATH")
+	}
 	if err := c.validateDatabase(); err != nil {
 		return err
 	}

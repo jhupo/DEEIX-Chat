@@ -20,6 +20,8 @@ server:
   read_timeout_seconds: 120
   idle_timeout_seconds: 120
   max_header_bytes: 1048576
+  # Read-only Unix socket exposed by the host deeix-updater service. The app never receives Docker access.
+  update_socket_path: "/run/deeix-updater/deeix-updater.sock"
 
 security:
   # Required. Replace both values with strong random secrets before deployment.

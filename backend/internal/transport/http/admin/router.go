@@ -1,9 +1,18 @@
 package admin
 
-import "github.com/gin-gonic/gin"
+import (
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
+	"github.com/gin-gonic/gin"
+)
 
 // RegisterRoutes 注册后台管理路由（由管理员中间件保护）。
 func (m *Module) RegisterRoutes(adminGroup *gin.RouterGroup) {
+	updates := adminGroup.Group("/update")
+	updates.Use(middleware.SuperAdminOnly())
+	updates.GET("/status", m.Handler.UpdateStatus)
+	updates.POST("/check", m.Handler.CheckUpdate)
+	updates.POST("/install", m.Handler.InstallUpdate)
+	updates.GET("/jobs/:job_id", m.Handler.UpdateJob)
 	adminGroup.POST("/users", m.Handler.CreateUser)
 	adminGroup.GET("/users", m.Handler.ListUsers)
 	adminGroup.POST("/users/import/openwebui", m.Handler.ImportOpenWebUIUsers)

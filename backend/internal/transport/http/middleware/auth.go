@@ -98,3 +98,15 @@ func AdminOnly() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// SuperAdminOnly restricts a route to the exact superadmin role.
+func SuperAdminOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if MustUserRole(c) != domainuser.RoleSuperAdmin {
+			response.Error(c, http.StatusForbidden, "superadmin permission required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

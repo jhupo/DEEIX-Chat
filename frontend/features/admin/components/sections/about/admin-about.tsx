@@ -1,8 +1,8 @@
 "use client";
 
-import { useSyncExternalStore, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CircleArrowUp, RefreshCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import packageMeta from "@/package.json";
 import { Button } from "@/components/ui/button";
@@ -17,198 +17,300 @@ import {
 } from "@/components/ui/dialog";
 import { AdminUpdateTooltipContent } from "@/features/admin/components/admin-update-tooltip-content";
 import {
-  compareReleaseVersions,
+  checkAdminUpdate,
+  getAdminUpdateJob,
+  getAdminUpdateStatus,
+  installAdminUpdate,
+  type AdminUpdateJob,
+  type AdminUpdateStatus,
+} from "@/features/admin/api/update";
+import {
   formatReleaseVersion,
   getCachedLatestReleaseSnapshot,
   getServerLatestReleaseSnapshot,
-  LATEST_RELEASE_ENDPOINT,
   resolveAvailableRelease,
   subscribeLatestReleaseChange,
-  type ReleaseInfo,
   writeCachedLatestRelease,
 } from "@/features/admin/model/update-check";
 import { AboutSettingsContent } from "@/shared/components/about-settings-content";
+import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { cn } from "@/lib/utils";
 
-type GitHubRelease = {
-  tag_name?: string;
-  html_url?: string;
-};
+type DialogState = "current" | "available" | "confirming" | "job" | "failed";
 
-type UpdateDialogState =
-  | { type: "current" }
-  | { type: "available"; release: ReleaseInfo }
-  | { type: "failed" };
+const terminalStatuses = new Set<AdminUpdateJob["status"]>([
+  "succeeded",
+  "failed",
+  "outcome_unknown",
+]);
+
+function dialogForStatus(status: AdminUpdateStatus): DialogState {
+  if (relevantJob(status)) {
+    return "job";
+  }
+  return status.updateAvailable ? "available" : "current";
+}
+
+function relevantJob(status: AdminUpdateStatus): AdminUpdateJob | undefined {
+  const job = status.job;
+  if (!job || (terminalStatuses.has(job.status) && job.version !== status.candidate?.version)) {
+    return undefined;
+  }
+  return job;
+}
+
+function cacheCandidate(status: AdminUpdateStatus) {
+  if (status.candidate) {
+    writeCachedLatestRelease({
+      version: status.candidate.version,
+      url: status.candidate.releaseURL,
+    });
+  }
+}
+
+function AdminAboutVersionBadge({ available }: { available: boolean }) {
+  const t = useTranslations("adminUsers.aboutPage");
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>{formatReleaseVersion(packageMeta.version)}</span>
+      {available ? (
+        <CircleArrowUp
+          className="size-3.5 text-rose-500"
+          aria-label={t("updateAvailableIndicator")}
+        />
+      ) : null}
+    </span>
+  );
+}
 
 function AdminUpdateCheck() {
   const t = useTranslations("adminUsers.aboutPage");
+  const { accessToken, user } = useAuthSession();
+  const [status, setStatus] = useState<AdminUpdateStatus | null>(null);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
   const [checking, setChecking] = useState(false);
-  const [dialogState, setDialogState] = useState<UpdateDialogState | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [key, setKey] = useState("");
+  const completedJobID = useRef("");
+  const superadmin = user?.role === "superadmin";
+  const job = status ? relevantJob(status) : undefined;
+  const jobID = job?.id ?? "";
+  const jobStatus = job?.status;
+  const candidate = status?.candidate;
 
-  async function handleCheckUpdate() {
+  const loadStatus = useCallback(
+    async (open: boolean) => {
+      const next = await getAdminUpdateStatus(accessToken);
+      setStatus(next);
+      cacheCandidate(next);
+      if (open) setDialog(dialogForStatus(next));
+      return next;
+    },
+    [accessToken],
+  );
+
+  useEffect(() => {
+    if (!superadmin) return;
+    void loadStatus(false).catch(() => undefined);
+  }, [loadStatus, superadmin]);
+
+  useEffect(() => {
+    if (!jobID || !jobStatus || terminalStatuses.has(jobStatus)) return;
+
+    const timer = window.setInterval(() => {
+      void getAdminUpdateJob(accessToken, jobID)
+        .then((job) => {
+          setReconnecting(false);
+          setStatus((current) => (current ? { ...current, job } : current));
+          if (terminalStatuses.has(job.status) && completedJobID.current !== job.id) {
+            completedJobID.current = job.id;
+            void loadStatus(false).catch(() => setReconnecting(true));
+          }
+        })
+        .catch(() => setReconnecting(true));
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [accessToken, jobID, jobStatus, loadStatus]);
+
+  const state = useDialogSnapshot(dialog);
+
+  if (!superadmin) return null;
+
+  const check = async () => {
     if (checking) return;
-
     setChecking(true);
     try {
-      const response = await fetch(LATEST_RELEASE_ENDPOINT, {
-        cache: "no-store",
-        headers: { Accept: "application/vnd.github+json" },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Release check failed with HTTP ${response.status}`);
-      }
-
-      const release = (await response.json()) as GitHubRelease;
-      const latestVersion = release.tag_name?.trim();
-      const releaseURL = release.html_url?.trim();
-
-      if (!latestVersion || !releaseURL) {
-        throw new Error("Latest release payload is incomplete");
-      }
-
-      const currentVersion = packageMeta.version;
-      const compareResult = compareReleaseVersions(currentVersion, latestVersion);
-
-      if (compareResult === "available" || compareResult === "unknown") {
-        const release = { version: latestVersion, url: releaseURL };
-        writeCachedLatestRelease(release);
-        setDialogState({ type: "available", release });
-        return;
-      }
-
-      writeCachedLatestRelease({ version: latestVersion, url: releaseURL });
-      setDialogState({ type: "current" });
+      const next = await checkAdminUpdate(accessToken);
+      setStatus(next);
+      cacheCandidate(next);
+      setDialog(dialogForStatus(next));
     } catch {
-      setDialogState({ type: "failed" });
+      setDialog("failed");
     } finally {
       setChecking(false);
     }
-  }
+  };
+
+  const beginInstall = () => {
+    setKey("");
+    setInstallError(false);
+    setDialog("confirming");
+  };
+
+  const startInstall = async () => {
+    if (!candidate || installing) return;
+
+    const attemptKey = key || crypto.randomUUID();
+    setKey(attemptKey);
+    setInstallError(false);
+    setInstalling(true);
+    try {
+      const job = await installAdminUpdate(accessToken, attemptKey, {
+        version: candidate.version,
+        manifestDigest: candidate.manifestDigest,
+        confirmation: `install ${candidate.version} ${candidate.manifestDigest}`,
+      });
+      setStatus((current) => (current ? { ...current, job } : current));
+      setDialog("job");
+    } catch {
+      setInstallError(true);
+      setDialog("confirming");
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const current = status?.installedVersion || packageMeta.version;
+  const canInstall = Boolean(
+    candidate &&
+      status?.updateAvailable &&
+      (!jobStatus || terminalStatuses.has(jobStatus)) &&
+      !installing,
+  );
+  const statusLabel = jobStatus ? t(`updateDialog.states.${jobStatus}`) : t("updateDialog.ready");
+  const retryableJob = jobStatus === "failed" || jobStatus === "outcome_unknown";
 
   return (
     <>
       <button
         type="button"
         className="inline-flex items-center gap-1 text-xs text-muted-foreground/80 transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-70"
-        onClick={() => void handleCheckUpdate()}
+        onClick={() => void check()}
         disabled={checking}
       >
         <RefreshCw className={cn("size-3", checking && "animate-spin")} />
         <span>{checking ? t("checkingUpdate") : t("checkUpdate")}</span>
       </button>
-      <UpdateResultDialog
-        state={dialogState}
-        onOpenChange={(open) => {
-          if (!open) setDialogState(null);
-        }}
-        onRetry={() => void handleCheckUpdate()}
-      />
-    </>
-  );
-}
-
-function AdminAboutVersionBadge({ updateRelease }: { updateRelease: ReleaseInfo | null }) {
-  const t = useTranslations("adminUsers.aboutPage");
-  const currentVersion = formatReleaseVersion(packageMeta.version);
-
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{currentVersion}</span>
-      {updateRelease ? (
-        <CircleArrowUp className="size-3.5 text-rose-500" aria-label={t("updateAvailableIndicator")} />
-      ) : null}
-    </span>
-  );
-}
-
-function UpdateResultDialog({
-  state,
-  onOpenChange,
-  onRetry,
-}: {
-  state: UpdateDialogState | null;
-  onOpenChange: (open: boolean) => void;
-  onRetry: () => void;
-}) {
-  const t = useTranslations("adminUsers.aboutPage");
-  const currentVersion = formatReleaseVersion(packageMeta.version);
-  const stableState = useDialogSnapshot(state);
-  const latestVersion = stableState?.type === "available" ? formatReleaseVersion(stableState.release.version) : "";
-
-  return (
-    <Dialog open={state !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[420px]">
-        <DialogHeader className="shrink-0 px-4 py-4">
-          <DialogTitle>
-            {stableState?.type === "available"
-              ? t("updateDialog.availableTitle")
-              : stableState?.type === "failed"
+      <Dialog open={dialog !== null} onOpenChange={(open) => !open && setDialog(null)}>
+        <DialogContent className="flex max-h-[min(86vh,760px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[420px]">
+          <DialogHeader className="shrink-0 px-4 py-4">
+            <DialogTitle>
+              {state === "failed"
                 ? t("updateDialog.failedTitle")
-                : t("updateDialog.currentTitle")}
-          </DialogTitle>
-          <DialogDescription>
-            {stableState?.type === "available"
-              ? t("updateDialog.availableDescription", { current: currentVersion, latest: latestVersion })
-              : stableState?.type === "failed"
+                : state === "job"
+                  ? t("updateDialog.jobTitle")
+                  : state === "confirming"
+                    ? t("updateDialog.confirmTitle")
+                    : state === "available"
+                      ? t("updateDialog.availableTitle")
+                      : t("updateDialog.currentTitle")}
+            </DialogTitle>
+            <DialogDescription>
+              {state === "failed"
                 ? t("updateDialog.failedDescription")
-                : t("updateDialog.currentDescription", { current: currentVersion })}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-          {stableState?.type === "available" ? (
-            <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
-              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
-                <span className="text-muted-foreground">{t("updateDialog.currentVersion")}</span>
-                <span className="font-medium">{currentVersion}</span>
-                <span className="text-muted-foreground">{t("updateDialog.latestVersion")}</span>
-                <span className="font-medium">{latestVersion}</span>
+                : state === "confirming"
+                  ? t("updateDialog.confirmDescription", { version: candidate?.version ?? "" })
+                  : state === "available"
+                    ? t("updateDialog.availableDescription", { current, latest: candidate?.version ?? "" })
+                    : t("updateDialog.currentDescription", { current })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2" aria-live="polite">
+            {installError ? (
+              <p className="mb-3 text-xs text-destructive">{t("updateDialog.installFailed")}</p>
+            ) : null}
+            {candidate ? (
+              <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+                  <span className="text-muted-foreground">{t("updateDialog.currentVersion")}</span>
+                  <span>{current}</span>
+                  <span className="text-muted-foreground">{t("updateDialog.latestVersion")}</span>
+                  <span>{candidate.version}</span>
+                  {state === "job" ? (
+                    <>
+                      <span className="text-muted-foreground">{t("updateDialog.status")}</span>
+                      <span>{reconnecting ? t("updateDialog.reconnecting") : statusLabel}</span>
+                    </>
+                  ) : null}
+                </div>
               </div>
-            </div>
-          ) : null}
-        </div>
-
-        <DialogFooter className="shrink-0 px-4 py-3">
-          <DialogClose asChild>
-            <Button type="button" variant="ghost">
-              {t("updateDialog.close")}
-            </Button>
-          </DialogClose>
-          {stableState?.type === "failed" ? (
-            <Button type="button" onClick={onRetry}>
-              {t("updateDialog.retry")}
-            </Button>
-          ) : null}
-          {stableState?.type === "available" ? (
-            <Button asChild type="button">
-              <a href={stableState.release.url} target="_blank" rel="noopener noreferrer">
-                {t("updateDialog.openRelease")}
-              </a>
-            </Button>
-          ) : null}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            ) : null}
+          </div>
+          <DialogFooter className="shrink-0 px-4 py-3">
+            <DialogClose asChild>
+              <Button type="button" variant="ghost">
+                {t("updateDialog.close")}
+              </Button>
+            </DialogClose>
+            {state === "failed" ? (
+              <Button type="button" onClick={() => void check()}>
+                {t("updateDialog.retry")}
+              </Button>
+            ) : null}
+            {candidate ? (
+              <Button asChild type="button" variant="outline">
+                <a href={candidate.releaseURL} target="_blank" rel="noopener noreferrer">
+                  {t("updateDialog.openRelease")}
+                </a>
+              </Button>
+            ) : null}
+            {state === "available" ? (
+              <Button type="button" disabled={!canInstall} onClick={beginInstall}>
+                {t("updateDialog.install")}
+              </Button>
+            ) : null}
+            {state === "confirming" ? (
+              <Button type="button" disabled={!canInstall} onClick={() => void startInstall()}>
+                {installing ? t("updateDialog.installing") : t("updateDialog.confirmAction")}
+              </Button>
+            ) : null}
+            {retryableJob ? (
+              <Button type="button" disabled={!canInstall} onClick={beginInstall}>
+                {t("updateDialog.retryInstall")}
+              </Button>
+            ) : null}
+            {jobStatus === "succeeded" ? (
+              <Button type="button" onClick={() => window.location.reload()}>
+                {t("updateDialog.reload")}
+              </Button>
+            ) : null}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
 export function AdminAboutPage() {
   const t = useTranslations("adminUsers.aboutPage");
-  const cachedLatestRelease = useSyncExternalStore(
+  const cached = useSyncExternalStore(
     subscribeLatestReleaseChange,
     getCachedLatestReleaseSnapshot,
     getServerLatestReleaseSnapshot,
   );
-  const updateRelease = resolveAvailableRelease(packageMeta.version, cachedLatestRelease);
+  const updateRelease = resolveAvailableRelease(packageMeta.version, cached);
 
   return (
     <AboutSettingsContent
       title={t("title")}
       description={t("description")}
       consoleLabel={t("adminConsole")}
-      versionBadgeContent={<AdminAboutVersionBadge updateRelease={updateRelease} />}
+      versionBadgeContent={<AdminAboutVersionBadge available={Boolean(updateRelease)} />}
       versionBadgeTooltip={<AdminUpdateTooltipContent updateRelease={updateRelease} />}
       versionActions={<AdminUpdateCheck />}
       labels={{

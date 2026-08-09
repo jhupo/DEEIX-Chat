@@ -21,6 +21,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/update"
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,7 +43,11 @@ type conversationExportManifest struct {
 type Handler struct {
 	service            *appadmin.Service
 	conversationExport conversationExporter
+	updater            *update.Client
 }
+
+// SetUpdater attaches the private host updater client.
+func (h *Handler) SetUpdater(client *update.Client) { h.updater = client }
 
 // NewHandler 创建处理器。
 func NewHandler(service *appadmin.Service) *Handler {
