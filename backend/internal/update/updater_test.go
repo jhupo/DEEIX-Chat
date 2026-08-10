@@ -35,7 +35,7 @@ func testUpdater(t *testing.T, manifests ...[]byte) (*Updater, string, *int, *[]
 	_ = os.MkdirAll(filepath.Dir(socket), 0700)
 	_ = os.WriteFile(compose, []byte("services: {}\n"), 0600)
 	_ = os.WriteFile(env, []byte("DEEIX_CHAT_IMAGE=old\n"), 0600)
-	u := &Updater{cfg: HostConfig{Repository: "owner/repo", SocketPath: socket, StateFile: state, DeploymentDir: d, ComposeFile: compose, EnvFile: env, AppBaseURL: "http://127.0.0.1:8080", ReadyTimeout: time.Second}}
+	u := &Updater{cfg: HostConfig{Repository: "owner/repo", SocketPath: socket, StateFile: state, DeploymentDir: d, ComposeFile: compose, EnvFile: env, AppBaseURL: "http://127.0.0.1:8080", PullTimeout: time.Second, ReadyTimeout: time.Second}}
 	i := 0
 	calls := []string{}
 	u.http = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -145,6 +145,45 @@ func TestFreshJournalCheckAndInstallHigherVersion(t *testing.T) {
 	}
 	if _, e = os.Stat(u.lockPath()); !errors.Is(e, os.ErrNotExist) {
 		t.Fatal("lock retained")
+	}
+}
+
+func TestApplyUsesSeparatePullAndReadinessTimeouts(t *testing.T) {
+	m := testManifest("0.3.5")
+	u, _, _, _ := testUpdater(t, m, m)
+	u.cfg.PullTimeout = 30 * time.Minute
+	u.cfg.ReadyTimeout = 5 * time.Minute
+	var pullRemaining, startRemaining, readyRemaining time.Duration
+	u.run = func(ctx context.Context, _ string, args []string, _ []string) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("command context has no deadline")
+		}
+		if args[len(args)-2] == "pull" {
+			pullRemaining = time.Until(deadline)
+		} else {
+			startRemaining = time.Until(deadline)
+		}
+		return nil
+	}
+	u.ready = func(ctx context.Context, _ string) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("ready context has no deadline")
+		}
+		readyRemaining = time.Until(deadline)
+		return nil
+	}
+
+	status, err := u.Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = u.Install(context.Background(), installReq(status.Candidate)); err != nil {
+		t.Fatal(err)
+	}
+	if pullRemaining < 29*time.Minute || startRemaining < 4*time.Minute || startRemaining > 5*time.Minute || readyRemaining < 4*time.Minute || readyRemaining > 5*time.Minute {
+		t.Fatalf("timeouts: pull=%s start=%s ready=%s", pullRemaining, startRemaining, readyRemaining)
 	}
 }
 func TestInstallRefetchMismatchRejected(t *testing.T) {

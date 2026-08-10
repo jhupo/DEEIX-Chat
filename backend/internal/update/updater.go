@@ -41,7 +41,7 @@ var (
 
 type HostConfig struct {
 	Repository, SocketPath, StateFile, DeploymentDir, ComposeFile, EnvFile, AppBaseURL string
-	ReadyTimeout                                                                       time.Duration
+	PullTimeout, ReadyTimeout                                                          time.Duration
 }
 
 type manifest struct {
@@ -133,7 +133,7 @@ func validateHostConfig(cfg *HostConfig) error {
 	if !repositoryPattern.MatchString(cfg.Repository) || len(cfg.Repository) > 160 || !filepath.IsAbs(cfg.SocketPath) || !filepath.IsAbs(cfg.StateFile) || !filepath.IsAbs(cfg.DeploymentDir) || !filepath.IsAbs(cfg.ComposeFile) || !filepath.IsAbs(cfg.EnvFile) {
 		return errors.New("invalid updater configuration")
 	}
-	if cfg.ReadyTimeout <= 0 || cfg.ReadyTimeout > 30*time.Minute {
+	if cfg.PullTimeout <= 0 || cfg.PullTimeout > 2*time.Hour || cfg.ReadyTimeout <= 0 || cfg.ReadyTimeout > 30*time.Minute {
 		return errors.New("invalid updater timeout")
 	}
 	deployment, err := filepath.EvalSymlinks(cfg.DeploymentDir)
@@ -514,12 +514,13 @@ func (u *Updater) apply(id string, c *Candidate) {
 	if err := u.transition(id, "pulling", ""); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), u.cfg.ReadyTimeout)
-	defer cancel()
-	if err := u.command(ctx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "pull", "app"); err != nil {
+	pullCtx, cancelPull := context.WithTimeout(context.Background(), u.cfg.PullTimeout)
+	if err := u.command(pullCtx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "pull", "app"); err != nil {
+		cancelPull()
 		release = u.transition(id, "failed", "image pull failed") == nil
 		return
 	}
+	cancelPull()
 	if err := u.transition(id, "applying", ""); err != nil {
 		return
 	}
@@ -527,18 +528,20 @@ func (u *Updater) apply(id string, c *Candidate) {
 		release = u.transition(id, "failed", "deployment environment update failed") == nil
 		return
 	}
-	if err := u.command(ctx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "up", "-d", "--no-deps", "app"); err != nil {
+	readyCtx, cancelReady := context.WithTimeout(context.Background(), u.cfg.ReadyTimeout)
+	defer cancelReady()
+	if err := u.command(readyCtx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "up", "-d", "--no-deps", "app"); err != nil {
 		release = u.transition(id, "outcome_unknown", "candidate start failed") == nil
 		return
 	}
 	if err := u.transition(id, "verifying", ""); err != nil {
 		return
 	}
-	if err := u.ready(ctx, c.Version); err != nil {
+	if err := u.ready(readyCtx, c.Version); err != nil {
 		release = u.transition(id, "outcome_unknown", "candidate verification failed") == nil
 		return
 	}
-	if err := u.verifyRunningImage(ctx, c.ImageRef); err != nil {
+	if err := u.verifyRunningImage(readyCtx, c.ImageRef); err != nil {
 		release = u.transition(id, "outcome_unknown", "candidate image verification failed") == nil
 		return
 	}
