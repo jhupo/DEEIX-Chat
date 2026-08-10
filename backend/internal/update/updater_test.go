@@ -99,6 +99,24 @@ func TestWaitReadyUsesConfiguredPortForReadinessAndVersion(t *testing.T) {
 	}
 }
 
+func TestStatusRefreshesVersionAfterExternalDeployment(t *testing.T) {
+	u, _, _, _ := testUpdater(t, testManifest("0.3.5"))
+	u.journal.InstalledVersion = "0.3.4"
+	u.journal.InstalledDigest = "sha256:old"
+	u.journal.Candidate = &Candidate{Version: "0.3.5"}
+	u.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/v1/version" {
+			return response(http.StatusOK, []byte(`{"version":"0.3.6"}`)), nil
+		}
+		return response(http.StatusNotFound, nil), nil
+	})
+
+	status := u.Status(context.Background())
+	if status.InstalledVersion != "0.3.6" || status.InstalledDigest != "" || status.UpdateAvailable {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
 func TestFreshJournalCheckAndInstallHigherVersion(t *testing.T) {
 	u, env, _, calls := testUpdater(t, testManifest("0.3.5"))
 	s, e := u.Check(context.Background())

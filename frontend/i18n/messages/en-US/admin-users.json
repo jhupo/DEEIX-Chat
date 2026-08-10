@@ -32,6 +32,8 @@
       "description": "Check updates to review the update dialog."
     },
     "updateDialog": {
+      "checkingTitle": "Checking for updates",
+      "checkingDescription": "Fetching the latest release.",
       "currentTitle": "You are already on the latest version",
       "currentDescription": "Current version {current} is the latest published release.",
       "availableTitle": "New version available",

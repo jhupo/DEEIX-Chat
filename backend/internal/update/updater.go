@@ -289,23 +289,15 @@ func (u *Updater) load() error {
 }
 
 func (u *Updater) Status(ctx context.Context) Status {
+	current, discoverErr := u.discover(ctx)
 	u.mu.Lock()
-	missing := u.journal.InstalledVersion == ""
-	status := u.statusLocked()
-	u.mu.Unlock()
-	if !missing {
-		return status
+	defer u.mu.Unlock()
+	if discoverErr == nil && current != u.journal.InstalledVersion {
+		u.journal.InstalledVersion = current
+		u.journal.InstalledDigest = ""
+		_ = u.save()
 	}
-	if version, err := u.discover(ctx); err == nil {
-		u.mu.Lock()
-		if u.journal.InstalledVersion == "" {
-			u.journal.InstalledVersion = version
-			_ = u.save()
-		}
-		status = u.statusLocked()
-		u.mu.Unlock()
-	}
-	return status
+	return u.statusLocked()
 }
 func (u *Updater) statusLocked() Status {
 	var job *Job

@@ -37,7 +37,7 @@ import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { cn } from "@/lib/utils";
 
-type DialogState = "current" | "available" | "confirming" | "job" | "failed";
+type DialogState = "checking" | "current" | "available" | "confirming" | "job" | "failed";
 
 const terminalStatuses = new Set<AdminUpdateJob["status"]>([
   "succeeded",
@@ -144,6 +144,7 @@ function AdminUpdateCheck() {
   const check = async () => {
     if (checking) return;
     setChecking(true);
+    setDialog("checking");
     try {
       const next = await checkAdminUpdate(accessToken);
       setStatus(next);
@@ -212,6 +213,8 @@ function AdminUpdateCheck() {
             <DialogTitle>
               {state === "failed"
                 ? t("updateDialog.failedTitle")
+                : state === "checking"
+                  ? t("updateDialog.checkingTitle")
                 : state === "job"
                   ? t("updateDialog.jobTitle")
                   : state === "confirming"
@@ -223,6 +226,8 @@ function AdminUpdateCheck() {
             <DialogDescription>
               {state === "failed"
                 ? t("updateDialog.failedDescription")
+                : state === "checking"
+                  ? t("updateDialog.checkingDescription")
                 : state === "confirming"
                   ? t("updateDialog.confirmDescription", { version: candidate?.version ?? "" })
                   : state === "available"
@@ -231,6 +236,11 @@ function AdminUpdateCheck() {
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2" aria-live="polite">
+            {state === "checking" ? (
+              <div className="flex min-h-16 items-center justify-center">
+                <RefreshCw className="size-5 animate-spin text-muted-foreground" aria-hidden="true" />
+              </div>
+            ) : null}
             {installError ? (
               <p className="mb-3 text-xs text-destructive">{t("updateDialog.installFailed")}</p>
             ) : null}
