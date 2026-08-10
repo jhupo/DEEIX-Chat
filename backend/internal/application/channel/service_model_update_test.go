@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
@@ -146,7 +145,7 @@ func TestUpdateModelUpstreamSourceUpdatesRouteCircuitSettings(t *testing.T) {
 
 func TestListModelsNormalizesCircuitOpenSourceCount(t *testing.T) {
 	ctx := context.Background()
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	if err := cache.OpenModelCircuit(ctx, 10, bindingCircuitKey("upm_a")); err != nil {
 		t.Fatalf("OpenModelCircuit() error = %v", err)
 	}
@@ -183,7 +182,7 @@ func TestListModelsNormalizesCircuitOpenSourceCount(t *testing.T) {
 
 func TestListUpstreamsNormalizesCircuitOpenModelCount(t *testing.T) {
 	ctx := context.Background()
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	if err := cache.OpenModelCircuit(ctx, 1, bindingCircuitKey("upm_a")); err != nil {
 		t.Fatalf("OpenModelCircuit() error = %v", err)
 	}

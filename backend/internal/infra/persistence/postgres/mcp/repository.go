@@ -205,15 +205,9 @@ func (r *Repo) ReplaceServerTools(ctx context.Context, serverID uint, tools []do
 			})
 		}
 		if len(rows) > 0 {
-			targetColumn := func(name string) string {
-				if tx.Dialector.Name() == "postgres" {
-					return `"mcp_tools"."` + name + `"`
-				}
-				return `"` + name + `"`
-			}
-			metadataCustomizedColumn := targetColumn("metadata_customized")
-			displayNameColumn := targetColumn("display_name")
-			descriptionColumn := targetColumn("description")
+			metadataCustomizedColumn := `"mcp_tools"."metadata_customized"`
+			displayNameColumn := `"mcp_tools"."display_name"`
+			descriptionColumn := `"mcp_tools"."description"`
 			legacyMetadataDiffers := "(" + displayNameColumn + ` <> excluded."display_name" OR ` + descriptionColumn + ` <> excluded."description")`
 			metadataAssignments := map[string]interface{}{
 				"display_name":        gorm.Expr("CASE WHEN COALESCE(" + metadataCustomizedColumn + ", TRUE) THEN " + displayNameColumn + ` ELSE excluded."display_name" END`),

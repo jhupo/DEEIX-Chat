@@ -2,14 +2,12 @@ package memory
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/sqlitevec"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"gorm.io/gorm"
 )
@@ -49,10 +47,6 @@ func NewRepo(db *gorm.DB) *Repo {
 	return &Repo{db: db}
 }
 
-func (r *Repo) sqliteDialect() bool {
-	return r != nil && r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite"
-}
-
 // UpsertUserMemory 更新或插入用户长期记忆。
 func (r *Repo) UpsertUserMemory(ctx context.Context, item *domainmemory.UserMemory) error {
 	if item == nil {
@@ -90,15 +84,6 @@ func (r *Repo) clearUserMemoryEmbedding(ctx context.Context, tx *gorm.DB, memory
 	if memoryID == 0 {
 		return nil
 	}
-	if r.sqliteDialect() {
-		return translateError(tx.Exec(
-			fmt.Sprintf(`DELETE FROM %s WHERE memory_id = ?`, sqlitevec.UserMemoryVectorTable),
-			memoryID,
-		).Error)
-	}
-	if !r.postgresUserMemoryEmbeddingColumnAvailable(ctx, tx) {
-		return nil
-	}
 	return translateError(tx.Exec(`UPDATE "user_memories" SET embedding = NULL WHERE id = ?`, memoryID).Error)
 }
 
@@ -122,18 +107,7 @@ func (r *Repo) postgresUserMemoryEmbeddingColumnAvailable(ctx context.Context, t
 // DeleteUserMemory 删除用户长期记忆（按 key 匹配，物理删除）。
 func (r *Repo) DeleteUserMemory(ctx context.Context, userID uint, memoryKey string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if r.sqliteDialect() {
-			if err := tx.Exec(
-				fmt.Sprintf(`DELETE FROM %s WHERE memory_id IN (
-					SELECT id FROM user_memories WHERE user_id = ? AND memory_key = ?
-				)`, sqlitevec.UserMemoryVectorTable),
-				userID,
-				memoryKey,
-			).Error; err != nil {
-				return translateError(err)
-			}
-		}
-		return translateError(tx.
+		return translateError(tx.Unscoped().
 			Where("user_id = ? AND memory_key = ?", userID, memoryKey).
 			Delete(&model.UserMemory{}).Error)
 	})
@@ -179,55 +153,16 @@ func (r *Repo) SearchUserMemoriesByEmbedding(ctx context.Context, userID uint, q
 	if len(queryEmbedding) == 0 || topK <= 0 {
 		return nil, nil
 	}
-	if r.sqliteDialect() {
-		return r.searchSQLiteUserMemoriesByEmbedding(ctx, userID, queryEmbedding, topK, minSimilarity)
-	}
 	vec := float32SliceToVec(queryEmbedding)
 	query := `
 		SELECT id, user_id, memory_key, value, scope, updated_by,
 		       (1 - (embedding <=> ?::vector)) AS similarity
 		FROM user_memories
-		WHERE user_id = ? AND embedding IS NOT NULL
+		WHERE user_id = ? AND embedding IS NOT NULL AND deleted_at IS NULL
 		ORDER BY similarity DESC
 		LIMIT ?`
 	var rows []userMemorySearchRow
 	if err := r.db.WithContext(ctx).Raw(query, vec, userID, topK).Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
-	}
-	results := make([]domainmemory.UserMemory, 0, len(rows))
-	for _, row := range rows {
-		if row.Similarity < minSimilarity {
-			continue
-		}
-		results = append(results, domainmemory.UserMemory{
-			ID:        row.ID,
-			UserID:    row.UserID,
-			MemoryKey: row.MemoryKey,
-			Value:     row.Value,
-			Scope:     row.Scope,
-			UpdatedBy: row.UpdatedBy,
-		})
-	}
-	return results, nil
-}
-
-func (r *Repo) searchSQLiteUserMemoriesByEmbedding(ctx context.Context, userID uint, queryEmbedding []float32, topK int, minSimilarity float64) ([]domainmemory.UserMemory, error) {
-	vector, err := sqlitevec.SerializeFloat32(queryEmbedding)
-	if err != nil {
-		return nil, err
-	}
-	query := fmt.Sprintf(`
-		SELECT memories.id, memories.user_id, memories.memory_key, memories.value, memories.scope, memories.updated_by,
-		       (1.0 - vectors.distance) AS similarity
-		FROM %s AS vectors
-		JOIN user_memories AS memories
-			ON memories.id = vectors.memory_id
-		WHERE vectors.embedding MATCH ?
-			AND vectors.k = ?
-			AND vectors.user_id = ?
-		ORDER BY vectors.distance ASC`, sqlitevec.UserMemoryVectorTable)
-	var rows []userMemorySearchRow
-	if err := r.db.WithContext(ctx).Raw(query, vector, topK, userID).Scan(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
 	results := make([]domainmemory.UserMemory, 0, len(rows))
@@ -252,11 +187,8 @@ func (r *Repo) UpsertUserMemoryEmbedding(ctx context.Context, userID uint, memor
 	if len(embedding) == 0 {
 		return nil
 	}
-	if r.sqliteDialect() {
-		return r.upsertSQLiteUserMemoryEmbedding(ctx, userID, memoryKey, expectedValue, embedding)
-	}
 	vec := float32SliceToVec(embedding)
-	query := `UPDATE "user_memories" SET embedding = ?::vector WHERE user_id = ? AND memory_key = ?`
+	query := `UPDATE "user_memories" SET embedding = ?::vector WHERE user_id = ? AND memory_key = ? AND deleted_at IS NULL`
 	args := []interface{}{vec, userID, memoryKey}
 	if strings.TrimSpace(expectedValue) != "" {
 		query += ` AND value = ?`
@@ -266,33 +198,4 @@ func (r *Repo) UpsertUserMemoryEmbedding(ctx context.Context, userID uint, memor
 		query,
 		args...,
 	).Error
-}
-
-func (r *Repo) upsertSQLiteUserMemoryEmbedding(ctx context.Context, userID uint, memoryKey string, expectedValue string, embedding []float32) error {
-	var item model.UserMemory
-	query := r.db.WithContext(ctx).Where("user_id = ? AND memory_key = ?", userID, memoryKey)
-	if strings.TrimSpace(expectedValue) != "" {
-		query = query.Where("value = ?", strings.TrimSpace(expectedValue))
-	}
-	if err := query.First(&item).Error; err != nil {
-		if dberror.IsRecordNotFound(err) {
-			return nil
-		}
-		return translateError(err)
-	}
-	vector, err := sqlitevec.SerializeFloat32(embedding)
-	if err != nil {
-		return err
-	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE memory_id = ?`, sqlitevec.UserMemoryVectorTable), item.ID).Error; err != nil {
-			return translateError(err)
-		}
-		return translateError(tx.Exec(
-			fmt.Sprintf(`INSERT INTO %s (memory_id, user_id, embedding) VALUES (?, ?, ?)`, sqlitevec.UserMemoryVectorTable),
-			item.ID,
-			item.UserID,
-			vector,
-		).Error)
-	})
 }

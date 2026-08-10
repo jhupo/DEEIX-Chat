@@ -6,12 +6,12 @@ import (
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
-func TestDismissAnnouncementTodaySQLiteUsesDeclaredUniqueIndex(t *testing.T) {
-	db := openAnnouncementSQLiteTestDB(t)
+func TestDismissAnnouncementTodayPostgresUsesDeclaredUniqueIndex(t *testing.T) {
+	db := openAnnouncementPostgresTestDB(t)
 	if !db.Migrator().HasIndex(&model.AnnouncementUserState{}, "idx_announcement_user_states_version") {
 		t.Fatal("expected announcement user state version unique index")
 	}
@@ -44,22 +44,9 @@ func TestDismissAnnouncementTodaySQLiteUsesDeclaredUniqueIndex(t *testing.T) {
 	}
 }
 
-func openAnnouncementSQLiteTestDB(t *testing.T) *gorm.DB {
+func openAnnouncementPostgresTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open("file:announcement_user_state?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("resolve sql db: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
-
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.Announcement{}, &model.AnnouncementUserState{}); err != nil {
 		t.Fatalf("migrate announcement tables: %v", err)
 	}

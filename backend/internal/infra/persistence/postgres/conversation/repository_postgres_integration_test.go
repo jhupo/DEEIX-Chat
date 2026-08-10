@@ -2,26 +2,16 @@ package conversation
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"strings"
 	"testing"
-	"time"
 
+	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("DEEIX_TEST_DATABASE_DSN"))
-	if dsn == "" {
-		t.Skip("set DEEIX_TEST_DATABASE_DSN to run PostgreSQL branch-scoped vector integration test")
-	}
-
-	db, cleanup := openConversationPostgresIntegrationDB(t, dsn)
-	t.Cleanup(cleanup)
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.Message{}, &model.MessageChunk{}); err != nil {
 		t.Fatalf("migrate conversation vector models: %v", err)
 	}
@@ -93,38 +83,34 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 	}
 }
 
-func openConversationPostgresIntegrationDB(t *testing.T, dsn string) (*gorm.DB, func()) {
-	t.Helper()
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+func TestReplaceFileChunksSearchesNearestPostgresChunk(t *testing.T) {
+	db := testutil.Postgres(t)
+	if err := db.AutoMigrate(&model.FileChunk{}); err != nil {
+		t.Fatalf("migrate file chunks: %v", err)
+	}
+	if err := db.Exec(`ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536)`).Error; err != nil {
+		t.Fatalf("add file chunk embedding column: %v", err)
+	}
+
+	queryEmbedding := make([]float32, 1536)
+	queryEmbedding[0] = 1
+	otherEmbedding := make([]float32, 1536)
+	otherEmbedding[1] = 1
+	chunks := []domainconversation.FileChunk{
+		{FileObjID: 10, UserID: 1, ChunkIndex: 0, Content: "alpha search target", TokenCount: 3},
+		{FileObjID: 10, UserID: 1, ChunkIndex: 1, Content: "beta unrelated", TokenCount: 2},
+	}
+
+	repo := NewRepo(db)
+	ctx := context.Background()
+	if err := repo.ReplaceFileChunks(ctx, 10, chunks, [][]float32{queryEmbedding, otherEmbedding}); err != nil {
+		t.Fatalf("replace file chunks: %v", err)
+	}
+	results, err := repo.SearchFileChunks(ctx, 1, []uint{10}, queryEmbedding, 2)
 	if err != nil {
-		t.Fatalf("open postgres: %v", err)
+		t.Fatalf("search file chunks: %v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("resolve postgres db: %v", err)
+	if len(results) != 2 || results[0].Content != chunks[0].Content {
+		t.Fatalf("expected nearest file chunk first, got %#v", results)
 	}
-	sqlDB.SetMaxOpenConns(1)
-	var vectorAvailable bool
-	if err := db.Raw(`SELECT to_regtype('vector') IS NOT NULL`).Scan(&vectorAvailable).Error; err != nil {
-		_ = sqlDB.Close()
-		t.Fatalf("check pgvector extension: %v", err)
-	}
-	if !vectorAvailable {
-		_ = sqlDB.Close()
-		t.Skip("pgvector extension is required for PostgreSQL branch-scoped vector integration test")
-	}
-	schemaName := fmt.Sprintf("deeix_test_conversation_scope_%d", time.Now().UnixNano())
-	if err := db.Exec(`CREATE SCHEMA ` + schemaName).Error; err != nil {
-		_ = sqlDB.Close()
-		t.Fatalf("create test schema: %v", err)
-	}
-	cleanup := func() {
-		_ = db.Exec(`DROP SCHEMA IF EXISTS ` + schemaName + ` CASCADE`).Error
-		_ = sqlDB.Close()
-	}
-	if err := db.Exec(`SET search_path TO ` + schemaName + `, public`).Error; err != nil {
-		cleanup()
-		t.Fatalf("set test search path: %v", err)
-	}
-	return db, cleanup
 }

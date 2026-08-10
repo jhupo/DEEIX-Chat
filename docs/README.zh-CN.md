@@ -45,7 +45,7 @@ DEEIX Chat 是一款开源可部署的 AI 平台，面向需要长期、稳定�
 | 计费与支付 | 内置模型定价、工具按次定价、订阅、充值、余额、用量账本、计费快照、Stripe Checkout、易支付和 Webhook 校验。 |
 | 身份与安全 | 覆盖本地账号、会话管理、HttpOnly Refresh Cookie、2FA/TOTP、可信设备、SSO/OIDC/OAuth、联系方式验证和敏感信息加密。 |
 | 管理与审计 | 后台集中管理用户、角色、上游、模型、路由、价格、订阅、余额、调用日志、审计日志、认证事件和系统事件。 |
-| 部署与运维 | 支持单运行时托管前端与 API、Docker 部署、SQLite 或 PostgreSQL、内存缓存或 Redis、S3 兼容存储、Swagger、结构化日志、版本接口、GeoIP 和 OpenTelemetry。 |
+| 部署与运维 | 支持单运行时托管前端与 API、Docker 部署、PostgreSQL + pgvector、Redis、S3 兼容存储、Swagger、结构化日志、版本接口、GeoIP 和 OpenTelemetry。 |
 
 <p align="center">
   <img src="../frontend/public/DEEIX-Chat-Image.png" alt="DEEIX Chat 图片生成" width="49.45%" />
@@ -84,8 +84,8 @@ flowchart TB
   end
 
   subgraph Data["数据与存储"]
-    DB["PostgreSQL + pgvector<br/>或 SQLite + sqlite-vec"]
-    Cache["Redis<br/>或内存缓存"]
+    DB["PostgreSQL + pgvector"]
+    Cache["Redis"]
     Storage["本地文件系统<br/>或 S3 兼容存储"]
   end
 
@@ -106,11 +106,11 @@ flowchart TB
 | --- | --- | --- |
 | 前端 | 用户对话、后台管理、静态构建 | Next.js 16、React 19、TypeScript、Tailwind CSS、Shadcn/UI、Streamdown、KaTeX、Mermaid、Recharts、Motion |
 | 后端运行时 | API、认证授权、业务编排、协议适配、静态资源托管 | Go 1.26、Gin、Gorm、Swagger、OpenTelemetry、Zap |
-| 数据与缓存 | 领域数据、向量检索、会话状态、运行时缓存 | PostgreSQL、pgvector、SQLite、sqlite-vec、Redis、内存缓存 |
+| 数据与缓存 | 领域数据、向量检索、会话状态、运行时缓存 | PostgreSQL、pgvector、Redis |
 | 文件与存储 | 上传文件、生成文件、对象存储和本地持久化 | 本地文件系统、S3 兼容对象存储 |
 | 文件处理 | 文本提取、OCR、文档解析和 LLM OCR 回退 | 内置提取、Apache Tika、Docling、RapidOCR、Tesseract OCR、Paddle OCR、云 OCR 适配、MinerU |
 | 工具协议 | MCP 工具接入和厂商官方原生工具调用 | MCP Streamable HTTP JSON-RPC、Provider Native Tools |
-| 部署运行 | 单节点轻量部署或多节点生产部署 | Docker、Docker Compose、SQLite/内存缓存、PostgreSQL/Redis |
+| 部署运行 | 应用与必需基础设施的统一部署 | Docker、Docker Compose、PostgreSQL/pgvector、Redis |
 
 后端内部保持清晰分层：`cmd/internal/cli` 负责启动入口，`internal/app` 负责应用装配，`transport/http` 负责 HTTP 边界，`application` 负责业务用例与事务编排，`domain` 表达领域语义，`infra` 承载数据库、缓存、存储和外部协议实现。数据层按领域前缀组织表结构，财务流水、审计日志、系统事件和高增长向量数据保持独立事实源。
 
@@ -120,7 +120,7 @@ flowchart TB
 
 ### 本地开发
 
-本地开发适合改动源码并分别启动前后端。默认配置连接本机 PostgreSQL 和 Redis；如果只是低依赖试用，建议直接使用下面的 Docker 轻量安装。
+本地开发适合改动源码并分别启动前后端。默认配置连接本机 PostgreSQL 和 Redis；需要本地运行栈时，使用下方唯一的 Full Docker 部署。
 
 1. 准备后端配置：
 
@@ -163,65 +163,47 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
 
 ### Docker 部署
 
-Docker 部署先选择安装方案，再复制对应的配置文件。三套根目录 compose 文件都默认将应用暴露在 `http://localhost:8080`，并把仓库根目录的 `config.yaml` 挂载到容器内 `/app/config.yaml`。
+唯一支持的 Docker 部署使用根目录 `compose.yaml` 启动应用、PostgreSQL + pgvector 和 Redis，并把仓库根目录的 `config.yaml` 挂载到容器内 `/app/config.yaml`。迁移与在线更新说明见 [Agent Runtime Full deployment and online update](./agent-runtime/06-full-deployment-and-online-update.md)。
 
 | 方案 | 适合场景 | 配置文件 | Compose 文件 | 内置依赖 |
 | --- | --- | --- | --- | --- |
-| 轻量安装 | 本地试用、个人部署、小型单节点 | `config.sqlite.example.yaml` | `docker-compose.sqlite.yml` | 仅应用容器，SQLite + sqlite-vec + 内存缓存 |
-| 默认安装 | 已有外部 PostgreSQL 和 Redis | `config.example.yaml` | `docker-compose.yml` | 仅应用容器 |
-| 全量安装 | 单机同时部署应用、PostgreSQL 和 Redis | `config.full.example.yaml` | `docker-compose.full.yml` | 应用、PostgreSQL、Redis |
+| Full 部署 | 本地开发、单机和生产部署 | `config.example.yaml` | `compose.yaml` | 应用、PostgreSQL + pgvector、Redis |
 
-#### 1. 轻量安装：SQLite
+#### Full 部署
 
-依赖最少的部署方式，只启动 `app` 容器。数据和本地向量索引使用 SQLite，缓存使用进程内 memory，适合本地试用、个人部署和小型单节点场景。
-
-```bash
-cp config.sqlite.example.yaml config.yaml
-docker compose -f docker-compose.sqlite.yml up -d
-```
-
-SQLite + memory cache 只适合单进程。多节点、高并发或更严格的生产部署建议使用 PostgreSQL + Redis。
-
-#### 2. 默认安装：外部 PostgreSQL + Redis
-
-适合已经有外部 PostgreSQL 和 Redis 的部署环境。启动前需要把数据库和 Redis 地址改成容器内可访问的地址；如果服务在 Docker 宿主机上，通常可以使用 `host.docker.internal`。
+复制唯一配置样例，为部署环境替换开发密钥和公开地址，然后启动应用及其内置 PostgreSQL + pgvector、Redis 服务。
 
 ```bash
 cp config.example.yaml config.yaml
-# 修改 database.postgres.dsn、database.redis.* 和公开访问地址
-docker compose up -d
+docker compose -f compose.yaml up -d
 ```
 
-默认 `docker-compose.yml` 只启动应用容器。除非明确需要覆盖 `config.yaml`，否则不要在 compose 里额外写同名 `environment`。
+`compose.yaml` 通过 `POSTGRES_DSN`、`REDIS_ADDR` 和 `REDIS_PASSWORD` 提供容器网络中的数据库与 Redis 连接配置，因此这些值会覆盖 `config.yaml` 中用于本地开发的连接值。
 
-#### 3. 全量安装：PostgreSQL + Redis 容器
+Compose 可从 `.env` 读取 `DEEIX_BIND_ADDRESS`、`DEEIX_HTTP_PORT`、`POSTGRES_USER`、`POSTGRES_DB`、`POSTGRES_PASSWORD` 和 `REDIS_PASSWORD`。应用端口默认绑定到 `127.0.0.1:8080`；远程部署可用以下 `.env` 固定监听地址和端口，而无需修改 Compose：
 
-适合希望 compose 同时启动应用、PostgreSQL 和 Redis 的部署方式。
-
-```bash
-cp config.full.example.yaml config.yaml
-docker compose -f docker-compose.full.yml up -d
+```dotenv
+DEEIX_BIND_ADDRESS=0.0.0.0
+DEEIX_HTTP_PORT=50001
 ```
-
-`docker-compose.full.yml` 会在 compose `environment` 中设置 `POSTGRES_DSN`、`REDIS_ADDR`、`REDIS_USERNAME` 和 `REDIS_PASSWORD`，因此这些值会覆盖 `config.yaml` 里的数据库和 Redis 配置。
 
 #### 配置、持久化和镜像
 
 配置优先级是：`环境变量 > config.yaml > 代码内置默认值`。`config.yaml` 负责品牌和静态基础设施、安全配置，例如品牌资源、服务地址、数据库、缓存、存储、GeoIP、Trace、JWT 和加密密钥。运行时业务配置存储在数据库中，并通过后台管理修改。
 
-默认 compose 会持久化应用数据：
+唯一 compose 栈会持久化应用数据：
 
 | 数据 | 容器路径 |
 | --- | --- |
-| SQLite 数据库 | `/app/data/deeix.db` |
 | 上传文件和生成文件 | `/app/storage` |
-| PostgreSQL 数据 | `/var/lib/postgresql/data`，仅全量安装 |
-| Redis 数据 | `/data`，仅全量安装 |
+| PostgreSQL 数据 | `/var/lib/postgresql/data` |
+| Redis 数据 | `/data` |
 
-默认应用镜像为 `ghcr.io/deeix-ai/deeix-chat:latest`。测试自定义构建时可通过 `DEEIX_CHAT_IMAGE` 覆盖：
+默认应用镜像为 `ghcr.io/jhupo/deeix-chat:latest`。测试自定义构建或 updater 选择的镜像时可通过 `DEEIX_CHAT_IMAGE` 覆盖：
 
 ```bash
-DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
+docker build -t deeix-chat:local .
+DEEIX_CHAT_IMAGE=deeix-chat:local docker compose -f compose.yaml up -d
 ```
 
 `APP_ENV` 支持 `dev`/`development` 和 `prod`/`production`，内部会规范化为 `dev` 或 `prod`；未配置时默认 `prod`。`dev` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
@@ -229,7 +211,7 @@ DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
 #### 可选安装服务
 
 这些服务不是必须安装。只有在后台或 `config.yaml` 中启用对应文件处理能力时才需要启动。
-这些 compose 文件会接入 `deeix-chat-network`；请先启动任一根目录 compose 方案，或手动执行 `docker network create deeix-chat-network`。
+这些 compose 文件会接入 `deeix-chat-network`；请先启动根目录 `compose.yaml`，或手动执行 `docker network create deeix-chat-network`。
 
 ```bash
 docker compose -f docker/tika/docker-compose.yml up -d
@@ -279,19 +261,19 @@ docker compose -f docker/docling/docker-compose.yml up -d --build
    | --- | --- |
    | `/_next/static/*` | 缓存 1 年，并启用 immutable 静态资源缓存。 |
    | `/logo*.svg`、`/*.ico`、`/*.png`、`/*.jpg`、`/*.webp`、`/*.woff2` | 缓存 1 天到 30 天。 |
-   | `/`、`/*.html`、`/chat*`、`/recent*`、`/files*`、`/setting*`、`/admin*`、`/share*` | 不做长期缓存，建议使用 `no-cache` 或较短 TTL。 |
+   | `/`、`/*.html`、`/chat*`、`/agent*`、`/recent*`、`/files*`、`/setting*`、`/admin*`、`/share*` | 不做长期缓存，建议使用 `no-cache` 或较短 TTL。 |
    | `/api/*`、`/healthz`、`/readyz`、`/swagger/*` | 绕过 CDN 缓存，并完整转发请求头、方法、查询参数和请求体。 |
 
-   如果 CDN 从对象存储托管 `frontend/out`，需要开启路由回退，让无扩展名地址能命中导出的 `index.html`，例如 `/chat` -> `/chat/index.html`。
+   如果 CDN 从对象存储托管 `frontend/out`，需要开启路由回退，让无扩展名地址命中导出的 `<route>.html` 并保留原查询参数，例如 `/chat` -> `/chat.html`、`/agent` -> `/agent.html`。
 
 ### 启动后检查与首次登录
 
-应用启动后，先确认健康检查、配置文件和启动日志。Docker 部署可用：
+应用启动后，先确认健康检查、配置文件和启动日志。使用上文远程 `.env` 示例时：
 
 ```bash
-curl http://localhost:8080/healthz
-docker compose exec app ls -l /app/config.yaml
-docker compose logs app
+curl http://127.0.0.1:50001/healthz
+docker compose -f compose.yaml exec app ls -l /app/config.yaml
+docker compose -f compose.yaml logs app
 ```
 
 如果数据库中还不存在超级管理员，后端会在首次启动时自动创建初始管理员，并且只在创建当次输出一次初始密码。
@@ -339,21 +321,11 @@ docker compose logs app
 | 安全 | `SSRF_ALLOWED_HOSTS` | 部署级集成或可信私网重定向目标的主机名，逗号分隔。 |
 | 安全 | `SSRF_ALLOWED_CIDRS` | 部署级集成或可信私网重定向目标的 CIDR 网段，逗号分隔。 |
 | 安全 | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify 端点。 |
-| 数据库 | `DATABASE_DRIVER` | `postgres` 或 `sqlite`。 |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN。 |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | 最大打开连接数。 |
 | PostgreSQL | `POSTGRES_MAX_IDLE_CONNS` | 最大空闲连接数。 |
 | PostgreSQL | `POSTGRES_CONN_MAX_LIFETIME_MINUTES` | 连接最长生命周期。 |
 | PostgreSQL | `POSTGRES_CONN_MAX_IDLE_TIME_MINUTES` | 连接最长空闲时间。 |
-| SQLite | `SQLITE_PATH` | 数据库文件路径。 |
-| SQLite | `SQLITE_DSN` | 完整 DSN；设置后优先于路径拼装。 |
-| SQLite | `SQLITE_MAX_OPEN_CONNS` | 最大打开连接数，默认 `1`。 |
-| SQLite | `SQLITE_BUSY_TIMEOUT_MS` | busy timeout。 |
-| SQLite | `SQLITE_CACHE_SIZE_KB` | page cache 大小。 |
-| SQLite | `SQLITE_MMAP_SIZE_BYTES` | mmap 大小。 |
-| SQLite | `SQLITE_SYNCHRONOUS` | 同步模式：`OFF`、`NORMAL`、`FULL`、`EXTRA`。 |
-| SQLite | `SQLITE_TEMP_STORE` | 临时存储：`DEFAULT`、`FILE`、`MEMORY`。 |
-| 缓存 | `CACHE_DRIVER` | `redis` 或 `memory`；`memory` 仅适用于单进程。 |
 | Redis | `REDIS_ADDR` | Redis 地址。 |
 | Redis | `REDIS_USERNAME` | Redis ACL 用户名；使用仅密码或默认用户 Redis 时留空。 |
 | Redis | `REDIS_PASSWORD` | Redis 密码。 |
@@ -415,6 +387,7 @@ Web、App 与桌面端会自动复用当前实例的这个回调。外部身份�
 
 ## 文档入口
 
+- [普通聊天 + Agent Runtime / Codex app-server 并存设计](./agent-runtime/README.md)
 - [快速开始](https://deeix.com/zh/docs/deeix-chat/quickstart)
 - [配置说明](https://deeix.com/zh/docs/deeix-chat/configuration)
 - [用户指南](https://deeix.com/zh/docs/deeix-chat/new-chat)

@@ -176,7 +176,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 
 // ImportOpenWebUIUsers godoc
 // @Summary 管理员导入 OpenWebUI 用户
-// @Description 从 OpenWebUI SQLite 或 PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改
+// @Description 从 OpenWebUI PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改
 // @Tags admin
 // @Accept json
 // @Produce json

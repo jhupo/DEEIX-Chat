@@ -2,15 +2,11 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
-	memorycache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
 	rediscache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/redis"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	postgresdb "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres"
-	sqlitedb "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/sqlite"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -19,140 +15,74 @@ import (
 )
 
 func openDatabase(cfg config.Config) (*gorm.DB, error) {
-	switch strings.ToLower(strings.TrimSpace(cfg.DatabaseDriver)) {
-	case "", "postgres":
-		return postgresdb.New(cfg)
-	case "sqlite":
-		return sqlitedb.New(cfg)
-	default:
-		return nil, fmt.Errorf("unsupported database driver %q", cfg.DatabaseDriver)
-	}
+	return postgresdb.New(cfg)
 }
 
-func openCache(cfg config.Config) (*redis.Client, *memorycache.Cache, error) {
-	switch strings.ToLower(strings.TrimSpace(cfg.CacheDriver)) {
-	case "", "redis":
-		client, err := rediscache.NewRedis(cfg)
-		if err != nil {
-			return nil, nil, err
-		}
-		return client, nil, nil
-	case "memory":
-		return nil, memorycache.New(), nil
-	default:
-		return nil, nil, fmt.Errorf("unsupported cache driver %q", cfg.CacheDriver)
-	}
+func openCache(cfg config.Config) (*redis.Client, error) {
+	return rediscache.NewRedis(cfg)
 }
 
-func buildSettingsCache(cfg config.Config, redisClient *redis.Client, memoryCache *memorycache.Cache) repository.SettingsCacheRepository {
-	if useRedisCache(cfg, redisClient) {
-		return rediscache.NewSettingsCache(redisClient)
-	}
-	if memoryCache != nil {
-		return memorycache.NewSettingsCache(memoryCache)
-	}
-	return nil
+func buildSettingsCache(redisClient *redis.Client) repository.SettingsCacheRepository {
+	return rediscache.NewSettingsCache(redisClient)
 }
 
-func buildChannelCache(cfg config.Config, redisClient *redis.Client, memoryCache *memorycache.Cache) repository.ChannelCacheRepository {
-	if useRedisCache(cfg, redisClient) {
-		return rediscache.NewChannelCache(redisClient)
-	}
-	if memoryCache != nil {
-		return memorycache.NewChannelCache(memoryCache)
-	}
-	return nil
+func buildChannelCache(redisClient *redis.Client) repository.ChannelCacheRepository {
+	return rediscache.NewChannelCache(redisClient)
 }
 
-func buildConversationCache(cfg config.Config, redisClient *redis.Client, memoryCache *memorycache.Cache) repository.ConversationCacheRepository {
-	if useRedisCache(cfg, redisClient) {
-		return rediscache.NewConversationCache(redisClient)
-	}
-	if memoryCache != nil {
-		return memorycache.NewConversationCache(memoryCache)
-	}
-	return nil
+func buildConversationCache(redisClient *redis.Client) repository.ConversationCacheRepository {
+	return rediscache.NewConversationCache(redisClient)
 }
 
-func buildRateLimiter(cfg config.Config, redisClient *redis.Client, memoryCache *memorycache.Cache) middleware.RateLimiter {
-	if useRedisCache(cfg, redisClient) {
-		return rediscache.NewRateLimiter(redisClient)
-	}
-	if memoryCache != nil {
-		return memorycache.NewRateLimiter(memoryCache)
-	}
-	return nil
+func buildRateLimiter(redisClient *redis.Client) middleware.RateLimiter {
+	return rediscache.NewRateLimiter(redisClient)
 }
 
-func buildProviderAuthBridge(cfg config.Config, redisClient *redis.Client, memoryCache *memorycache.Cache) repository.ProviderAuthBridgeRepository {
-	if useRedisCache(cfg, redisClient) {
-		return rediscache.NewProviderAuthBridge(redisClient)
-	}
-	if memoryCache != nil {
-		return memorycache.NewProviderAuthBridge(memoryCache)
-	}
-	return nil
-}
-
-func useRedisCache(cfg config.Config, redisClient *redis.Client) bool {
-	return redisClient != nil && strings.EqualFold(strings.TrimSpace(cfg.CacheDriver), "redis")
+func buildProviderAuthBridge(redisClient *redis.Client) repository.ProviderAuthBridgeRepository {
+	return rediscache.NewProviderAuthBridge(redisClient)
 }
 
 type healthChecker struct {
-	db          *gorm.DB
-	cacheDriver string
-	redis       *redis.Client
+	db    *gorm.DB
+	redis *redis.Client
 }
 
-func newHealthChecker(db *gorm.DB, cacheDriver string, redisClient *redis.Client) platformhttp.HealthChecker {
-	return &healthChecker{
-		db:          db,
-		cacheDriver: strings.ToLower(strings.TrimSpace(cacheDriver)),
-		redis:       redisClient,
-	}
+func newHealthChecker(db *gorm.DB, redisClient *redis.Client) platformhttp.HealthChecker {
+	return &healthChecker{db: db, redis: redisClient}
 }
 
 func (h *healthChecker) CheckHealth(ctx context.Context) ([]platformhttp.HealthCheck, bool) {
 	checks := make([]platformhttp.HealthCheck, 0, 2)
 	healthy := true
 
-	if h.db != nil {
-		sqlDB, err := h.db.DB()
+	if h.db == nil {
+		checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "not_configured"})
+		healthy = false
+	} else if sqlDB, err := h.db.DB(); err != nil {
+		checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "error: " + err.Error()})
+		healthy = false
+	} else {
+		dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err = sqlDB.PingContext(dbCtx)
+		cancel()
 		if err != nil {
-			checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "error: " + err.Error()})
+			checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "error"})
 			healthy = false
 		} else {
-			dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			defer cancel()
-			if err = sqlDB.PingContext(dbCtx); err != nil {
-				checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "error"})
-				healthy = false
-			} else {
-				checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "ok"})
-			}
+			checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "ok"})
 		}
-	} else {
-		checks = append(checks, platformhttp.HealthCheck{Name: "db", Status: "not_configured"})
 	}
 
-	switch h.cacheDriver {
-	case "redis", "":
-		redisCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if h.redis == nil {
-			checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "not_configured"})
-			healthy = false
-		} else if err := h.redis.Ping(redisCtx).Err(); err != nil {
-			checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "error"})
-			healthy = false
-		} else {
-			checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "ok"})
-		}
-	case "memory":
-		checks = append(checks, platformhttp.HealthCheck{Name: "cache", Status: "memory"})
-	default:
-		checks = append(checks, platformhttp.HealthCheck{Name: "cache", Status: "unsupported"})
+	redisCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if h.redis == nil {
+		checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "not_configured"})
 		healthy = false
+	} else if err := h.redis.Ping(redisCtx).Err(); err != nil {
+		checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "error"})
+		healthy = false
+	} else {
+		checks = append(checks, platformhttp.HealthCheck{Name: "redis", Status: "ok"})
 	}
 
 	return checks, healthy

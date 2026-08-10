@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -81,7 +80,7 @@ func TestResolveRouteExcludesPreviouslyAttemptedRoutes(t *testing.T) {
 		config.Config{DataEncryptionKey: encryptionKey},
 		repo,
 		nil,
-		memory.NewChannelCache(memory.New()),
+		newChannelTestCache(),
 		nil,
 	)
 
@@ -207,7 +206,7 @@ func TestBuildResolvedRouteSnapshotsModelIdentity(t *testing.T) {
 }
 
 func TestRecordCircuitFailureUsesPlatformModelDefaults(t *testing.T) {
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	service := &Service{
 		repo:  &modelUpdateRepo{},
 		cache: cache,
@@ -233,7 +232,7 @@ func TestRecordCircuitFailureUsesPlatformModelDefaults(t *testing.T) {
 }
 
 func TestRecordCircuitFailureRouteOverrideBeatsPlatformModelDefaults(t *testing.T) {
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	service := &Service{
 		repo:  &modelUpdateRepo{},
 		cache: cache,
@@ -262,7 +261,7 @@ func TestRecordCircuitFailureRouteOverrideBeatsPlatformModelDefaults(t *testing.
 }
 
 func TestRecordCircuitFailurePlatformModelPolicyEnforcedBeatsRouteOverride(t *testing.T) {
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	service := &Service{
 		repo:  &modelUpdateRepo{},
 		cache: cache,
@@ -344,7 +343,7 @@ func TestRouteScopeAllowsInternalModelForInternalScope(t *testing.T) {
 }
 
 func TestApplyModelSourceCircuitStatusPrefersUpstreamCircuit(t *testing.T) {
-	cache := memory.NewChannelCache(memory.New())
+	cache := newChannelTestCache()
 	service := &Service{cache: cache}
 	ctx := context.Background()
 

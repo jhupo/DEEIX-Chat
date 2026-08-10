@@ -366,6 +366,19 @@ func TestValidateAllowsOnlyDevAndProdEnvironment(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresPostgresAndRedisEndpoints(t *testing.T) {
+	cfg := validConfigForEnv("dev")
+	cfg.PostgresDSN = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted an empty PostgreSQL DSN")
+	}
+	cfg = validConfigForEnv("dev")
+	cfg.RedisAddr = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() accepted an empty Redis address")
+	}
+}
+
 func validConfigForEnv(env string) Config {
 	return Config{
 		Env:               env,
@@ -375,6 +388,8 @@ func validConfigForEnv(env string) Config {
 		CORSAllowOrigin:   "https://example.com",
 		PublicAPIBaseURL:  "https://api.example.com",
 		PublicWebBaseURL:  "https://example.com",
+		PostgresDSN:       "postgres://deeix:secret@postgres:5432/deeix?sslmode=disable",
+		RedisAddr:         "redis:6379",
 	}
 }
 

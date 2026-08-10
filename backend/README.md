@@ -7,8 +7,7 @@ DEEIX Chat 后端是 Go API 服务，负责认证、用户、对话、模型渠�
 - Go 1.26
 - Gin
 - Gorm
-- PostgreSQL + pgvector 或 SQLite + sqlite-vec
-- Redis 或进程内 memory cache
+- PostgreSQL + pgvector 和 Redis
 - Swagger (`swag`)
 - S3 兼容对象存储（可选）
 - OpenTelemetry Trace（可选）
@@ -63,10 +62,6 @@ DEEIX Chat 后端是 Go API 服务，负责认证、用户、对话、模型渠�
 
 ```bash
 cp config.example.yaml config.yaml
-# Docker Compose full stack
-cp config.full.example.yaml config.yaml
-# SQLite + memory cache
-cp config.sqlite.example.yaml config.yaml
 ```
 
 关键配置：
@@ -128,7 +123,7 @@ Web、App 和桌面端统一通过当前实例完成第三方 OAuth 回调。部
 <PUBLIC_API_BASE_URL>/api/v1/auth/providers/<provider-slug>/callback
 ```
 
-`POST /auth/providers/:slug/authorize` 创建短时事务并使用服务端独立 PKCE 访问上游；`GET /auth/providers/:slug/callback` 在服务端兑换上游授权码；`POST /auth/providers/:slug/exchange` 使用公共客户端 PKCE verifier 原子兑换一次性 DEEIX grant。事务与 grant 使用现有 Redis/内存缓存后端，外部 provider code、Client Secret 和 Token 均不会进入公共客户端。旧 `/start` 与 `POST /callback` 流程继续保留，用于账号身份绑定与旧版 Web 客户端兼容。
+`POST /auth/providers/:slug/authorize` 创建短时事务并使用服务端独立 PKCE 访问上游；`GET /auth/providers/:slug/callback` 在服务端兑换上游授权码；`POST /auth/providers/:slug/exchange` 使用公共客户端 PKCE verifier 原子兑换一次性 DEEIX grant。事务与 grant 使用 Redis 后端，外部 provider code、Client Secret 和 Token 均不会进入公共客户端。旧 `/start` 与 `POST /callback` 流程继续保留，用于账号身份绑定与旧版 Web 客户端兼容。
 
 生产环境安全校验：
 
@@ -147,17 +142,13 @@ https://api.example.com/api/v1/billing/payments/stripe/webhook
 
 ## 本地启动
 
-先确保 PostgreSQL 和 Redis 可用。若本机已有依赖，可以只启动默认应用容器；若需要完整本地栈，使用 `docker-compose.full.yml`：
+从仓库根目录仅启动 PostgreSQL 和 Redis 依赖，不启动应用容器：
 
 ```bash
-docker compose up -d
+docker compose -f compose.yaml up -d postgres redis
 ```
 
-```bash
-docker compose -f docker-compose.full.yml up -d
-```
-
-启动后端：
+然后在宿主机启动后端（监听 `8080`）：
 
 ```bash
 cd backend

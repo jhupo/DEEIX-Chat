@@ -27,7 +27,7 @@ func response(code int, body []byte) *http.Response {
 func testUpdater(t *testing.T, manifests ...[]byte) (*Updater, string, *int, *[]string) {
 	t.Helper()
 	d, _ := filepath.Abs(t.TempDir())
-	compose := filepath.Join(d, "docker-compose.full.yml")
+	compose := filepath.Join(d, "compose.yaml")
 	env := filepath.Join(d, ".env")
 	state := filepath.Join(d, "state", "journal.json")
 	socket := filepath.Join(d, "run", "updater.sock")
@@ -72,6 +72,31 @@ func testUpdater(t *testing.T, manifests ...[]byte) (*Updater, string, *int, *[]
 }
 func installReq(c *Candidate) InstallRequest {
 	return InstallRequest{Version: c.Version, ManifestDigest: c.ManifestDigest, Confirmation: "install " + c.Version + " " + c.ManifestDigest, IdempotencyKey: "1234567890abcdef", ActorUserID: 1, ActorUsername: "root", RequestID: "request-1"}
+}
+
+func TestWaitReadyUsesConfiguredPortForReadinessAndVersion(t *testing.T) {
+	u, _, _, _ := testUpdater(t)
+	u.cfg.AppBaseURL = "http://127.0.0.1:50001"
+	var targets []string
+	u.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		targets = append(targets, r.URL.Host+r.URL.Path)
+		switch r.URL.Path {
+		case "/readyz":
+			return response(http.StatusOK, nil), nil
+		case "/api/v1/version":
+			return response(http.StatusOK, []byte(`{"version":"0.3.4"}`)), nil
+		default:
+			return response(http.StatusNotFound, nil), nil
+		}
+	})
+
+	if err := u.waitReady(context.Background(), "0.3.4"); err != nil {
+		t.Fatalf("waitReady() error = %v", err)
+	}
+	want := []string{"127.0.0.1:50001/readyz", "127.0.0.1:50001/api/v1/version"}
+	if strings.Join(targets, ",") != strings.Join(want, ",") {
+		t.Fatalf("readiness/version targets = %#v, want %#v", targets, want)
+	}
 }
 
 func TestFreshJournalCheckAndInstallHigherVersion(t *testing.T) {
@@ -302,7 +327,7 @@ func TestSymlinkPathsRejected(t *testing.T) {
 	}
 }
 func TestPullUsesCandidateImageAndAppOnly(t *testing.T) {
-	u := &Updater{cfg: HostConfig{ComposeFile: "/deploy/docker-compose.full.yml", EnvFile: "/deploy/.env"}}
+	u := &Updater{cfg: HostConfig{ComposeFile: "/deploy/compose.yaml", EnvFile: "/deploy/.env"}}
 	var gotName string
 	var gotArgs, gotEnv []string
 	u.run = func(_ context.Context, name string, args []string, env []string) error {
@@ -313,7 +338,7 @@ func TestPullUsesCandidateImageAndAppOnly(t *testing.T) {
 	if err := u.command(context.Background(), []string{"DEEIX_CHAT_IMAGE=" + image}, "pull", "app"); err != nil {
 		t.Fatal(err)
 	}
-	if gotName != "docker" || strings.Join(gotArgs, " ") != "compose -f /deploy/docker-compose.full.yml --env-file /deploy/.env pull app" || len(gotEnv) != 1 || gotEnv[0] != "DEEIX_CHAT_IMAGE="+image {
+	if gotName != "docker" || strings.Join(gotArgs, " ") != "compose -f /deploy/compose.yaml --env-file /deploy/.env pull app" || len(gotEnv) != 1 || gotEnv[0] != "DEEIX_CHAT_IMAGE="+image {
 		t.Fatalf("name=%q args=%q env=%q", gotName, gotArgs, gotEnv)
 	}
 }

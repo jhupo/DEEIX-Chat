@@ -4,11 +4,11 @@ import (
 	"context"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
-	memorycache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/cache/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
@@ -139,7 +139,7 @@ func TestProviderAuthBridgeRejectsUnregisteredNativeRedirect(t *testing.T) {
 	}
 }
 
-func newProviderAuthBridgeTestService() (*Service, *memorycache.Cache) {
+func newProviderAuthBridgeTestService() (*Service, *providerAuthBridgeTestStore) {
 	provider := &domainuser.IdentityProvider{
 		ID:                  10,
 		Type:                domainuser.IdentityProviderTypeOAuth2,
@@ -161,7 +161,78 @@ func newProviderAuthBridgeTestService() (*Service, *memorycache.Cache) {
 		TokenTTLHours:          1,
 		RefreshTokenTTLHours:   720,
 	}, repo, nil)
-	store := memorycache.New()
-	service.SetProviderAuthBridge(memorycache.NewProviderAuthBridge(store))
+	store := newProviderAuthBridgeTestStore()
+	service.SetProviderAuthBridge(store)
 	return service, store
+}
+
+type providerAuthBridgeTestStore struct {
+	mu           sync.Mutex
+	transactions map[string]providerAuthTransactionTestRecord
+	grants       map[string]providerAuthGrantTestRecord
+}
+
+type providerAuthTransactionTestRecord struct {
+	value     repository.ProviderAuthTransaction
+	expiresAt time.Time
+}
+
+type providerAuthGrantTestRecord struct {
+	value     repository.ProviderAuthGrant
+	expiresAt time.Time
+}
+
+func newProviderAuthBridgeTestStore() *providerAuthBridgeTestStore {
+	return &providerAuthBridgeTestStore{
+		transactions: make(map[string]providerAuthTransactionTestRecord),
+		grants:       make(map[string]providerAuthGrantTestRecord),
+	}
+}
+
+func (s *providerAuthBridgeTestStore) PutProviderAuthTransaction(_ context.Context, id string, item repository.ProviderAuthTransaction, ttl time.Duration) error {
+	if id == "" || ttl <= 0 {
+		return repository.ErrInvalidInput
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transactions[id] = providerAuthTransactionTestRecord{value: item, expiresAt: time.Now().Add(ttl)}
+	return nil
+}
+
+func (s *providerAuthBridgeTestStore) ConsumeProviderAuthTransaction(_ context.Context, id string) (*repository.ProviderAuthTransaction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.transactions[id]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	delete(s.transactions, id)
+	if time.Now().After(record.expiresAt) {
+		return nil, repository.ErrNotFound
+	}
+	return &record.value, nil
+}
+
+func (s *providerAuthBridgeTestStore) PutProviderAuthGrant(_ context.Context, key string, item repository.ProviderAuthGrant, ttl time.Duration) error {
+	if key == "" || ttl <= 0 {
+		return repository.ErrInvalidInput
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.grants[key] = providerAuthGrantTestRecord{value: item, expiresAt: time.Now().Add(ttl)}
+	return nil
+}
+
+func (s *providerAuthBridgeTestStore) ConsumeProviderAuthGrant(_ context.Context, key string) (*repository.ProviderAuthGrant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.grants[key]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	delete(s.grants, key)
+	if time.Now().After(record.expiresAt) {
+		return nil, repository.ErrNotFound
+	}
+	return &record.value, nil
 }

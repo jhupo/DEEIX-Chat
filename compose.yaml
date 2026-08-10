@@ -1,0 +1,63 @@
+name: deeix-chat
+
+services:
+  app:
+    image: ${DEEIX_CHAT_IMAGE:-ghcr.io/jhupo/deeix-chat:latest}
+    container_name: deeix-chat-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-deeix_chat}:${POSTGRES_PASSWORD:-deeix_chat_2026}@postgres:5432/${POSTGRES_DB:-deeix_chat}?sslmode=disable&TimeZone=Asia/Shanghai
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-deeix_chat_2026}
+      UPDATE_SOCKET_PATH: /run/deeix-updater/deeix-updater.sock
+    ports:
+      - "${DEEIX_BIND_ADDRESS:-127.0.0.1}:${DEEIX_HTTP_PORT:-8080}:8080"
+    volumes:
+      - app_storage:/app/storage
+      - app_data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+      - /run/deeix-updater:/run/deeix-updater:ro
+    networks: [deeix-chat]
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: deeix-chat-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-deeix_chat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deeix_chat_2026}
+      POSTGRES_DB: ${POSTGRES_DB:-deeix_chat}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [deeix-chat]
+  redis:
+    image: redis:7
+    container_name: deeix-chat-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-deeix_chat_2026}
+    volumes: [redis_data:/data]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-deeix_chat_2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [deeix-chat]
+
+volumes:
+  app_storage: {name: deeix-chat-app-storage}
+  app_data: {name: deeix-chat-app-data}
+  postgres_data: {name: deeix-chat-postgres-data}
+  redis_data: {name: deeix-chat-redis-data}
+networks:
+  deeix-chat: {name: deeix-chat-network}

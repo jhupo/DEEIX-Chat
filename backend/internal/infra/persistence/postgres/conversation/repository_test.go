@@ -12,7 +12,7 @@ import (
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -862,17 +862,17 @@ func TestUpdateAssistantMessageCompletionPersistsReasoningContent(t *testing.T) 
 	}
 }
 
-func TestUpdateConversationMetadataSQLiteUsesPortableTrim(t *testing.T) {
+func TestUpdateConversationMetadataTrimsTitle(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 
 	conversation := model.Conversation{
 		UserID:     1,
-		PublicID:   "conv_metadata_sqlite",
+		PublicID:   "conv_metadata_trim",
 		Title:      " 新对话 ",
 		LabelsJSON: "[]",
-		SessionKey: "session_metadata_sqlite",
+		SessionKey: "session_metadata_trim",
 		Status:     "active",
 	}
 	if err := db.Create(&conversation).Error; err != nil {
@@ -880,13 +880,13 @@ func TestUpdateConversationMetadataSQLiteUsesPortableTrim(t *testing.T) {
 	}
 
 	updated, err := repo.UpdateConversationMetadata(ctx, conversation.ID, repository.ConversationMetadataPatch{
-		Title: "SQLite 标题",
+		Title: "trimmed title",
 	})
 	if err != nil {
 		t.Fatalf("UpdateConversationMetadata() error = %v", err)
 	}
-	if updated.Title != "SQLite 标题" {
-		t.Fatalf("updated title = %q, want %q", updated.Title, "SQLite 标题")
+	if updated.Title != "trimmed title" {
+		t.Fatalf("updated title = %q, want %q", updated.Title, "trimmed title")
 	}
 }
 
@@ -956,6 +956,10 @@ func TestUpdateConversationLabelsGeneratedLabelsDoNotOverwriteManualLabels(t *te
 	if err := db.Create(&conversation).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
+	var persisted model.Conversation
+	if err := db.First(&persisted, conversation.ID).Error; err != nil {
+		t.Fatalf("reload conversation: %v", err)
+	}
 
 	updated, applied, err := repo.SetGeneratedConversationLabelsIfEligible(context.Background(), conversation.ID, `["自动标签"]`)
 	if err != nil {
@@ -967,8 +971,8 @@ func TestUpdateConversationLabelsGeneratedLabelsDoNotOverwriteManualLabels(t *te
 	if updated.LabelsJSON != `["手动标签"]` {
 		t.Fatalf("generated labels overwrote manual labels: %q", updated.LabelsJSON)
 	}
-	if !updated.UpdatedAt.Equal(conversation.UpdatedAt) {
-		t.Fatalf("skipped generated labels changed updated_at: got %v, want %v", updated.UpdatedAt, conversation.UpdatedAt)
+	if !updated.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("skipped generated labels changed updated_at: got %v, want %v", updated.UpdatedAt, persisted.UpdatedAt)
 	}
 }
 
@@ -976,16 +980,20 @@ func TestUpdateConversationLabelsGeneratedLabelsDoNotRestoreManuallyClearedLabel
 	db := openConversationRepositoryTestDB(t)
 	repo := NewRepo(db)
 	conversation := model.Conversation{
-		PublicID:              "generated-label-manual-clear-race",
+		PublicID:              "generated-label-manual-clear",
 		UserID:                1,
 		Title:                 "已有标题",
 		LabelsJSON:            `[]`,
 		LabelsManuallyManaged: true,
-		SessionKey:            "generated-label-manual-clear-race-session",
+		SessionKey:            "gen-label-manual-clear",
 		Status:                "active",
 	}
 	if err := db.Create(&conversation).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
+	}
+	var persisted model.Conversation
+	if err := db.First(&persisted, conversation.ID).Error; err != nil {
+		t.Fatalf("reload conversation: %v", err)
 	}
 
 	updated, applied, err := repo.SetGeneratedConversationLabelsIfEligible(context.Background(), conversation.ID, `["自动标签"]`)
@@ -998,8 +1006,8 @@ func TestUpdateConversationLabelsGeneratedLabelsDoNotRestoreManuallyClearedLabel
 	if updated.LabelsJSON != `[]` {
 		t.Fatalf("generated labels restored manually cleared labels: %q", updated.LabelsJSON)
 	}
-	if !updated.UpdatedAt.Equal(conversation.UpdatedAt) {
-		t.Fatalf("skipped generated labels changed updated_at: got %v, want %v", updated.UpdatedAt, conversation.UpdatedAt)
+	if !updated.UpdatedAt.Equal(persisted.UpdatedAt) {
+		t.Fatalf("skipped generated labels changed updated_at: got %v, want %v", updated.UpdatedAt, persisted.UpdatedAt)
 	}
 }
 
@@ -1331,17 +1339,7 @@ func TestListLatestBranchPreviewMessagesReturnsLatestVisibleWindow(t *testing.T)
 
 func openConversationRepositoryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() {
-		sqlDB, dbErr := db.DB()
-		if dbErr == nil {
-			_ = sqlDB.Close()
-		}
-	})
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.Conversation{}, &model.ConversationProject{}, &model.ConversationProjectMCPTool{}, &model.ConversationProjectSkill{}, &model.ConversationShare{}, &model.Message{}, &model.Attachment{}, &model.FileObject{}, &model.ConversationRun{}, &model.ChatRunEvent{}); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}

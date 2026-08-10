@@ -4,12 +4,13 @@ app:
   env: dev
 
 server:
-  # Optional. Change these values only when local ports or public URLs differ.
+  # Full deployment uses the bundled app origin on port 8080. Source developers
+  # may override public_web_base_url and cors_allow_origin for localhost:3000.
   http_port: "8080"
-  cors_allow_origin: "http://127.0.0.1:8080,http://localhost:8080,http://127.0.0.1:3000,http://localhost:3000"
+  cors_allow_origin: "http://127.0.0.1:8080,http://localhost:8080"
   trusted_proxies: "127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7"
   public_api_base_url: "http://127.0.0.1:8080"
-  public_web_base_url: "http://localhost:3000"
+  public_web_base_url: "http://127.0.0.1:8080"
   frontend_dist_dir: "./frontend/out"
   read_header_timeout_seconds: 10
   read_timeout_seconds: 120
@@ -43,30 +44,25 @@ branding:
   apple_touch_icon_180_url: /pwa/apple-touch-icon.png
   
 database:
-  # Required. PostgreSQL is used for this profile.
-  driver: postgres
+  # PostgreSQL and Redis are required for every deployment.
   postgres:
-    # Required when database.driver is postgres.
-    dsn: "postgres://deeix_chat:deeix_chat_dev_2026@127.0.0.1:5432/deeix_chat?sslmode=disable&TimeZone=Asia/Shanghai"
+    # Required.
+    dsn: "postgres://deeix_chat:deeix_chat_2026@127.0.0.1:5432/deeix_chat?sslmode=disable&TimeZone=Asia/Shanghai"
     max_open_conns: 30
     max_idle_conns: 10
     conn_max_lifetime_minutes: 60
     conn_max_idle_time_minutes: 10
   redis:
-    # Required when cache.driver is redis.
+    # Required.
     addr: "127.0.0.1:6379"
     # Optional. Set when Redis ACL requires a username.
     username: ""
-    password: "deeix_chat_redis_dev"
+    password: "deeix_chat_2026"
     db: 0
     # Optional. Enable TLS for providers such as Upstash Redis.
     tls_enabled: false
     # Optional. Skip Redis TLS certificate verification only for nonstandard endpoints.
     tls_insecure_skip_verify: false
-
-cache:
-  # Required. Redis is used for this profile.
-  driver: redis
 
 storage:
   # Required. Use local for filesystem storage or s3 for object storage.

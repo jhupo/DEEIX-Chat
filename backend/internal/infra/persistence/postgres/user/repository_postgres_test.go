@@ -8,16 +8,13 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/schema"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestListUsersSearchesBeforePagination(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:list_users_search?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err = db.AutoMigrate(&model.User{}); err != nil {
+	db := testutil.Postgres(t)
+	var err error
+	if err := db.AutoMigrate(&model.User{}); err != nil {
 		t.Fatalf("migrate users: %v", err)
 	}
 
@@ -43,11 +40,9 @@ func TestListUsersSearchesBeforePagination(t *testing.T) {
 }
 
 func TestListUsersFiltersByIdentityProviderAndSubscriptionStatus(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:list_users_filters?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err = db.AutoMigrate(
+	db := testutil.Postgres(t)
+	var err error
+	if err := db.AutoMigrate(
 		&model.User{},
 		&model.AuthIdentityProvider{},
 		&model.UserIdentity{},
@@ -126,11 +121,9 @@ func TestListUsersFiltersByIdentityProviderAndSubscriptionStatus(t *testing.T) {
 }
 
 func TestDeleteAccountHardRemovesUserScopedAssociations(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:delete_user_permission_groups?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err = db.AutoMigrate(schema.Models()...); err != nil {
+	db := testutil.Postgres(t)
+	var err error
+	if err := schema.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

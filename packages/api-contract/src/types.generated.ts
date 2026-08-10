@@ -6032,7 +6032,7 @@ export namespace Admin {
   }
 
   /**
-   * @description 从 OpenWebUI SQLite 或 PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改
+   * @description 从 OpenWebUI PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改
    * @tags admin
    * @name UsersImportOpenwebuiCreate
    * @summary 管理员导入 OpenWebUI 用户

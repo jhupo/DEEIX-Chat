@@ -121,6 +121,7 @@ cp frontend/.env.example frontend/.env.local
 同时启动前端和后端：
 
 ```bash
+docker compose -f compose.yaml up -d postgres redis
 pnpm dev
 ```
 
@@ -131,11 +132,7 @@ pnpm dev:web
 pnpm dev:api
 ```
 
-后端数据库、缓存和存储配置继续由根目录 `config.yaml` 或环境变量提供；前端不复制这些服务端配置。完整 PostgreSQL + Redis 本地依赖可使用：
-
-```bash
-docker compose -f docker-compose.full.yml up -d
-```
+后端数据库、缓存和存储配置继续由根目录 `config.yaml` 或环境变量提供；前端不复制这些服务端配置。上方命令仅启动 PostgreSQL 和 Redis 依赖，宿主机 API 监听 `8080`，前端监听 `3000`。
 
 访问地址：
 

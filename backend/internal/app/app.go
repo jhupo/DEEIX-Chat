@@ -160,7 +160,7 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 
-	redisClient, memoryCache, err := openCache(cfg)
+	redisClient, err := openCache(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func NewApp() (*App, error) {
 	settingsService.SetAuditWriter(auditService)
 	runtimeService := appruntime.NewService(runtimeCfg)
 	runtimeService.SetDockerRunner(platformruntime.NewDockerRunner())
-	settingsCache := buildSettingsCache(cfg, redisClient, memoryCache)
+	settingsCache := buildSettingsCache(redisClient)
 	runtimeSettings := settings.NewRuntimeSettings(settingsRepo, settingsCache, cfg.DataEncryptionKey)
 	settingsHandler := settingshttp.NewHandler(settingsService, runtimeSettings, runtimeService, runtimeCfg)
 	settingsModule := settingshttp.NewModule(settingsHandler)
@@ -222,7 +222,7 @@ func NewApp() (*App, error) {
 		identityProviderClient,
 	)
 	authService.SetLogger(log)
-	authService.SetProviderAuthBridge(buildProviderAuthBridge(cfg, redisClient, memoryCache))
+	authService.SetProviderAuthBridge(buildProviderAuthBridge(redisClient))
 	authService.SetObjectStoreProvider(objectStoreProvider)
 	authService.SetAuditWriter(auditService)
 	settingsService.SetAuthSafetyService(authService)
@@ -239,7 +239,7 @@ func NewApp() (*App, error) {
 	memoryHandler := memoryhttp.NewHandler(memoryService)
 	memoryModule := memoryhttp.NewModule(memoryHandler)
 	channelRepo := channelrepo.NewRepo(db)
-	channelCache := buildChannelCache(cfg, redisClient, memoryCache)
+	channelCache := buildChannelCache(redisClient)
 	trustedOutboundPolicy := cfg.TrustedOutboundPolicy()
 	strictOutboundPolicy := cfg.StrictOutboundPolicy()
 	llmClient := llm.NewClient(trustedOutboundPolicy)
@@ -261,7 +261,7 @@ func NewApp() (*App, error) {
 	channelModule := channelhttp.NewModule(channelHandler)
 	conversationRepo := conversationrepo.NewRepo(db)
 	settingsService.SetVectorStoreAvailabilityService(conversationRepo)
-	conversationCache := buildConversationCache(cfg, redisClient, memoryCache)
+	conversationCache := buildConversationCache(redisClient)
 	mcpRepo := mcprepo.NewRepo(db)
 	embedClient := embedding.New(trustedOutboundPolicy)
 	compactService := compact.NewServiceWithRuntime(runtimeCfg, conversationRepo, log)
@@ -343,8 +343,8 @@ func NewApp() (*App, error) {
 	skillHandler := skillhttp.NewHandler(skillService)
 	skillModule := skillhttp.NewModule(skillHandler)
 
-	hc := newHealthChecker(db, cfg.CacheDriver, redisClient)
-	rateLimiter := buildRateLimiter(cfg, redisClient, memoryCache)
+	hc := newHealthChecker(db, redisClient)
+	rateLimiter := buildRateLimiter(redisClient)
 	engine, err := platformhttp.NewEngine(runtimeCfg, log, platformhttp.Modules{
 		Auth:         authModule,
 		AuthService:  authService,

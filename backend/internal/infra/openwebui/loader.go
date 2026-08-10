@@ -7,7 +7,6 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	gormpostgres "gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -63,21 +62,14 @@ func openDB(dsn string) (*gorm.DB, error) {
 	if trimmed == "" {
 		return nil, repository.ErrInvalidInput
 	}
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "postgres://") || strings.HasPrefix(lower, "postgresql://") {
-		if _, err := url.Parse(trimmed); err != nil {
-			return nil, repository.ErrInvalidInput
-		}
-		return gorm.Open(gormpostgres.Open(trimmed), &gorm.Config{})
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed == nil || parsed.Host == "" {
+		return nil, repository.ErrInvalidInput
 	}
-	const sqliteScheme = "sqlite://"
-	if strings.HasPrefix(lower, sqliteScheme) {
-		trimmed = trimmed[len(sqliteScheme):]
-		if strings.TrimSpace(trimmed) == "" {
-			return nil, repository.ErrInvalidInput
-		}
+	if !strings.EqualFold(parsed.Scheme, "postgres") && !strings.EqualFold(parsed.Scheme, "postgresql") {
+		return nil, repository.ErrInvalidInput
 	}
-	return gorm.Open(sqlite.Open(trimmed), &gorm.Config{})
+	return gorm.Open(gormpostgres.Open(trimmed), &gorm.Config{})
 }
 
 func importQuery(hasCredit bool) string {

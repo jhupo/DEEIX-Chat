@@ -45,10 +45,6 @@ ARG BUILD_TIME=""
 COPY VERSION /src/VERSION
 COPY backend/go.mod backend/go.sum ./
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends libsqlite3-dev \
-  && rm -rf /var/lib/apt/lists/*
-
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
@@ -58,7 +54,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     VERSION="$(cat /src/VERSION)" \
     && if [ -z "${BUILD_TIME}" ]; then BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi \
-    && CGO_ENABLED=1 \
+    && CGO_ENABLED=0 \
        go build -trimpath \
        -ldflags="-s -w -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Version=${VERSION} -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Commit=${GIT_COMMIT} -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.BuildTime=${BUILD_TIME}" \
        -o /out/deeix-chat ./cmd/server

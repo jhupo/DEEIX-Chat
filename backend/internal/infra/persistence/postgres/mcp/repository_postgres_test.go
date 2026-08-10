@@ -9,12 +9,12 @@ import (
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
-func TestReorderServersWithToolsSQLitePersistsToolOrder(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+func TestReorderServersWithToolsPostgresPersistsToolOrder(t *testing.T) {
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 
@@ -61,7 +61,7 @@ func TestReorderServersWithToolsSQLitePersistsToolOrder(t *testing.T) {
 }
 
 func TestReplaceServerToolsRefreshesRemoteMetadataAndPreservesCustomizedMetadata(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 	server := createMCPServer(t, db, "server-metadata")
@@ -276,7 +276,7 @@ func TestReplaceServerToolsRefreshesRemoteMetadataAndPreservesCustomizedMetadata
 }
 
 func TestReplaceServerToolsPreservesLegacyMetadataAfterConfirmation(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 	server := createMCPServer(t, db, "server-legacy-metadata")
@@ -360,7 +360,7 @@ func TestReplaceServerToolsPreservesLegacyMetadataAfterConfirmation(t *testing.T
 }
 
 func TestRemovingMCPToolsCleansConversationProjectAssociations(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 	server := createMCPServer(t, db, "server-cascade")
@@ -405,8 +405,8 @@ func TestRemovingMCPToolsCleansConversationProjectAssociations(t *testing.T) {
 	}
 }
 
-func TestReorderServersWithToolsSQLiteRejectsForeignTool(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+func TestReorderServersWithToolsPostgresRejectsForeignTool(t *testing.T) {
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 
@@ -434,8 +434,8 @@ func TestReorderServersWithToolsSQLiteRejectsForeignTool(t *testing.T) {
 	}
 }
 
-func TestReorderServersWithToolsSQLiteRejectsPartialToolOrder(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+func TestReorderServersWithToolsPostgresRejectsPartialToolOrder(t *testing.T) {
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 
@@ -458,8 +458,8 @@ func TestReorderServersWithToolsSQLiteRejectsPartialToolOrder(t *testing.T) {
 	}
 }
 
-func TestReorderServersWithToolsSQLitePersistsServerOrder(t *testing.T) {
-	db := openMCPSQLiteTestDB(t)
+func TestReorderServersWithToolsPostgresPersistsServerOrder(t *testing.T) {
+	db := openMCPPostgresTestDB(t)
 	ctx := context.Background()
 	repo := NewRepo(db)
 
@@ -499,14 +499,11 @@ func TestReorderServersWithToolsSQLitePersistsServerOrder(t *testing.T) {
 	}
 }
 
-func openMCPSQLiteTestDB(t *testing.T) *gorm.DB {
+func openMCPPostgresTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.MCPServer{}, &model.MCPTool{}, &model.ConversationProjectMCPTool{}); err != nil {
-		t.Fatalf("migrate sqlite: %v", err)
+		t.Fatalf("migrate PostgreSQL tables: %v", err)
 	}
 	return db
 }

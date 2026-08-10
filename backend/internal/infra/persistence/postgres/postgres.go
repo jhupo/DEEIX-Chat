@@ -194,7 +194,7 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := schema.CleanupRemovedColumns(db); err != nil {
 		return err
 	}
-	if err := applyVectorBaseline(db, vectorBaselineRequired(cfg)); err != nil {
+	if err := applyVectorBaseline(db); err != nil {
 		return err
 	}
 	if err := schema.SeedLLMSettings(db); err != nil {
@@ -452,14 +452,10 @@ func applyConversationBaselineIndexes(db *gorm.DB) error {
 	return nil
 }
 
-func vectorBaselineRequired(cfg config.Config) bool {
-	return cfg.EmbeddingEnabled || cfg.RAGEnabled || cfg.MessageEmbeddingEnabled || cfg.SemanticContextEnabled
-}
-
 // applyVectorBaseline 确保 pgvector 扩展、向量列和检索索引存在。
-func applyVectorBaseline(db *gorm.DB, required bool) error {
+func applyVectorBaseline(db *gorm.DB) error {
 	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
-		return handleOptionalVectorBaselineError(required, "create pgvector extension", err)
+		return fmt.Errorf("create pgvector extension: %w", err)
 	}
 
 	statements := []struct {
@@ -500,21 +496,8 @@ func applyVectorBaseline(db *gorm.DB, required bool) error {
 
 	for _, statement := range statements {
 		if err := db.Exec(statement.sql).Error; err != nil {
-			if baselineErr := handleOptionalVectorBaselineError(required, statement.name, err); baselineErr != nil {
-				return baselineErr
-			}
+			return fmt.Errorf("%s: %w", statement.name, err)
 		}
 	}
-	return nil
-}
-
-func handleOptionalVectorBaselineError(required bool, operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-	if required {
-		return fmt.Errorf("%s failed: %w", operation, err)
-	}
-	log.Printf("postgres vector baseline skipped: %s failed: %v", operation, err)
 	return nil
 }

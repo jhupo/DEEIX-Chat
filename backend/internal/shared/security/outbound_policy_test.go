@@ -25,8 +25,10 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 			files:  map[string]struct{}{},
 		},
 		"http.Get(": {
-			reason: "package-level HTTP helpers bypass the SSRF policy; use an explicit client",
-			files:  map[string]struct{}{},
+			reason: "package-level HTTP helpers bypass the SSRF policy; updater.go is allowed because this substring is its explicit client field call against the configured local readiness endpoint",
+			files: allowFiles(
+				"internal/update/updater.go",
+			),
 		},
 		"http.Post(": {
 			reason: "package-level HTTP helpers bypass the SSRF policy; use an explicit client",
@@ -37,7 +39,7 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 			files:  map[string]struct{}{},
 		},
 		"&http.Client{": {
-			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries",
+			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries; updater.go is limited to the fixed GitHub release boundary with allowGitHubRedirect, while client.go dials only its configured Unix socket",
 			files: allowFiles(
 				"internal/infra/embedding/client.go",
 				"internal/infra/extract/mineru/client.go",
@@ -47,6 +49,8 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 				"internal/infra/mediaartifact/client.go",
 				"internal/infra/observability/tracing/http.go",
 				"internal/shared/security/outbound.go",
+				"internal/update/client.go",
+				"internal/update/updater.go",
 			),
 		},
 		"platformtracing.NewHTTPClient(": {

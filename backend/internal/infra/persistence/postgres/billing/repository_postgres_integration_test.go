@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,25 +11,16 @@ import (
 	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestReserveUsageBalanceSerializesConcurrentPostgresRequests(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("DEEIX_TEST_DATABASE_DSN"))
-	if dsn == "" {
-		t.Skip("set DEEIX_TEST_DATABASE_DSN to run PostgreSQL billing concurrency integration test")
-	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open postgres: %v", err)
-	}
+	db := testutil.Postgres(t)
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatalf("resolve postgres db: %v", err)
 	}
 	sqlDB.SetMaxOpenConns(8)
-	defer sqlDB.Close()
 	if err = db.AutoMigrate(&model.UsageLedger{}, &model.BillingAccount{}, &model.BalanceTransaction{}, &model.UsageReservation{}); err != nil {
 		t.Fatalf("migrate billing tables: %v", err)
 	}

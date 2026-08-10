@@ -45,7 +45,7 @@ The system is designed around simple deployment, efficient static delivery, and 
 | Billing and payments | Model pricing, per-call tool pricing, subscriptions, top-ups, balances, usage ledgers, billing snapshots, Stripe Checkout, EPay, and webhook validation. |
 | Identity and security | Local accounts, session management, HttpOnly refresh cookies, 2FA/TOTP, trusted devices, SSO/OIDC/OAuth, contact verification, and encrypted sensitive data. |
 | Administration and audit | Centralized management for users, roles, upstreams, models, routes, pricing, subscriptions, balances, usage logs, audit logs, auth events, and system events. |
-| Deployment and operations | Single-runtime frontend/API serving, Docker deployment, SQLite or PostgreSQL, in-memory cache or Redis, S3-compatible storage, Swagger, structured logs, version endpoint, GeoIP, and OpenTelemetry. |
+| Deployment and operations | Single-runtime frontend/API serving, Docker deployment with PostgreSQL + pgvector and Redis, S3-compatible storage, Swagger, structured logs, version endpoint, GeoIP, and OpenTelemetry. |
 
 <p align="center">
   <img src="./frontend/public/DEEIX-Chat-Image.png" alt="DEEIX Chat image generation" width="49.45%" />
@@ -84,8 +84,8 @@ flowchart TB
   end
 
   subgraph Data["Data and Storage"]
-    DB["PostgreSQL + pgvector<br/>or SQLite + sqlite-vec"]
-    Cache["Redis<br/>or In-Memory Cache"]
+    DB["PostgreSQL + pgvector"]
+    Cache["Redis"]
     Storage["Local Filesystem<br/>or S3-Compatible Storage"]
   end
 
@@ -106,11 +106,11 @@ flowchart TB
 | --- | --- | --- |
 | Frontend | Chat UI, admin console, and static builds | Next.js 16, React 19, TypeScript, Tailwind CSS, Shadcn/UI, Streamdown, KaTeX, Mermaid, Recharts, Motion |
 | Backend runtime | APIs, authentication, authorization, orchestration, protocol adaptation, and static serving | Go 1.26, Gin, Gorm, Swagger, OpenTelemetry, Zap |
-| Data and cache | Domain data, vector retrieval, session state, and runtime cache | PostgreSQL, pgvector, SQLite, sqlite-vec, Redis, in-memory cache |
+| Data and cache | Domain data, vector retrieval, session state, and runtime cache | PostgreSQL, pgvector, Redis |
 | Files and storage | Uploaded files, generated files, object storage, and local persistence | Local filesystem, S3-compatible object storage |
 | File processing | Text extraction, OCR, document parsing, and LLM OCR fallback | Built-in extractors, Apache Tika, Docling, RapidOCR, Tesseract OCR, Paddle OCR, cloud OCR adapters, MinerU |
 | Tool protocol | MCP tool integration and provider-native official tools | MCP Streamable HTTP JSON-RPC, provider-native tools |
-| Deployment runtime | Lightweight single-node deployment or multi-node production deployment | Docker, Docker Compose, SQLite/in-memory cache, PostgreSQL/Redis |
+| Deployment runtime | Canonical application, PostgreSQL + pgvector, and Redis deployment | Docker, Docker Compose, PostgreSQL/Redis |
 
 The backend keeps clear internal boundaries: `cmd/internal/cli` handles entrypoints, `internal/app` assembles the application, `transport/http` owns the HTTP boundary, `application` coordinates use cases and transactions, `domain` expresses business semantics, and `infra` contains database, cache, storage, and external protocol implementations. The data layer uses domain-prefixed tables, while financial records, audit trails, system events, and high-growth vector data remain separate sources of truth.
 
@@ -120,7 +120,7 @@ The backend keeps clear internal boundaries: `cmd/internal/cli` handles entrypoi
 
 ### Local Development
 
-Local development is intended for editing source code and running the frontend and backend separately. The default config connects to local PostgreSQL and Redis. If you only want a low-dependency trial, use the lightweight Docker installation below.
+Local development is intended for editing source code and running the frontend and backend separately. The default config connects to local PostgreSQL and Redis. Start the Full Docker deployment below when you need the local runtime stack.
 
 1. Prepare backend configuration:
 
@@ -130,20 +130,28 @@ cp config.example.yaml config.yaml
 
 Adjust `database.postgres.dsn`, `database.redis.*`, and public URLs in `config.yaml` for your local environment.
 
-2. Install workspace dependencies and prepare the frontend environment:
+2. Start only the PostgreSQL and Redis dependencies. This does not start the app container:
+
+```bash
+docker compose -f compose.yaml up -d postgres redis
+```
+
+3. Install workspace dependencies and prepare the frontend environment:
 
 ```bash
 pnpm install
 cp frontend/.env.example frontend/.env.local
 ```
 
-3. Start the frontend and backend together:
+4. Start the host frontend and backend together:
 
 ```bash
 pnpm dev
 ```
 
-Use `pnpm dev:web` or `pnpm dev:api` to start only one workspace.
+Use `pnpm dev:web` or `pnpm dev:api` to start only one workspace. The host API listens on `8080` and the frontend on `3000`.
+
+For source development, override `server.public_web_base_url` and add the frontend origin (for example `http://localhost:3000`) to `server.cors_allow_origin` in `config.yaml`.
 
 The frontend uses `NEXT_PUBLIC_API_BASE_URL` for API requests. For local development, confirm that `frontend/.env.local` contains:
 
@@ -163,65 +171,49 @@ If `NEXT_PUBLIC_API_BASE_URL` is omitted, local development defaults to `localho
 
 ### Docker Deployment
 
-Choose one installation profile first, then copy the matching config file. All root compose profiles expose the app at `http://localhost:8080` by default and mount the repository-level `config.yaml` to `/app/config.yaml` inside the container.
+The only supported deployment starts the application, PostgreSQL with pgvector, and Redis from `compose.yaml`. It mounts the repository-level `config.yaml` at `/app/config.yaml`.
 
 | Profile | Use case | Config file | Compose file | Built-in dependencies |
 | --- | --- | --- | --- | --- |
-| Lightweight | Local evaluation, personal use, small single-node deployments | `config.sqlite.example.yaml` | `docker-compose.sqlite.yml` | App only, SQLite + sqlite-vec + in-memory cache |
-| Default | External PostgreSQL and Redis already exist | `config.example.yaml` | `docker-compose.yml` | App only |
-| Full | Single-machine stack with app, PostgreSQL, and Redis | `config.full.example.yaml` | `docker-compose.full.yml` | App, PostgreSQL, Redis |
+| Full | Application with bundled PostgreSQL + pgvector and Redis | `config.example.yaml` | `compose.yaml` | App, PostgreSQL, Redis |
 
-#### 1. Lightweight Installation: SQLite
+#### Full Installation
 
-This is the lowest-dependency deployment. It starts only the `app` container, stores data and local vector indexes in SQLite, and uses the in-process memory cache. Use it for local evaluation, personal deployments, and small single-node setups.
-
-```bash
-cp config.sqlite.example.yaml config.yaml
-docker compose -f docker-compose.sqlite.yml up -d
-```
-
-SQLite + memory cache is single-process only. It is good for local use, evaluation, and small single-node deployments. Use PostgreSQL + Redis for multi-node or high-concurrency production deployments.
-
-#### 2. Default Installation: External PostgreSQL + Redis
-
-Use this when PostgreSQL and Redis are already managed outside this compose stack. Before starting, set database and Redis addresses to values reachable from inside the container; if the services run on the Docker host, `host.docker.internal` is usually the right hostname.
+Copy the sole configuration sample, replace the development secrets and public URLs for your environment, then start the application with its bundled PostgreSQL + pgvector and Redis services.
 
 ```bash
 cp config.example.yaml config.yaml
-# Edit database.postgres.dsn, database.redis.*, and public URLs.
-docker compose up -d
+docker compose -f compose.yaml up -d
 ```
 
-The default `docker-compose.yml` starts only the application container. Keep compose `environment` empty unless you intentionally want environment variables to override `config.yaml`.
+`compose.yaml` supplies the container-network PostgreSQL and Redis connection settings through `POSTGRES_DSN`, `REDIS_ADDR`, and `REDIS_PASSWORD`. These values override the local-development connection values in `config.yaml`.
 
-#### 3. Full Installation: PostgreSQL + Redis Containers
+Compose reads optional overrides from `.env`. `DEEIX_BIND_ADDRESS` and `DEEIX_HTTP_PORT` control the host application listener and default to `127.0.0.1:8080`. `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD` are database and Redis credentials applied consistently to the database service, application DSN, Redis service, and health checks. Production deployments must set strong URL-safe credential values; the documented defaults are for local development only.
 
-Use this when you want compose to start the app, PostgreSQL, and Redis together.
+To publish the application at a fixed remote listener without editing Compose, create `.env` with:
 
-```bash
-cp config.full.example.yaml config.yaml
-docker compose -f docker-compose.full.yml up -d
+```dotenv
+DEEIX_BIND_ADDRESS=0.0.0.0
+DEEIX_HTTP_PORT=50001
 ```
-
-`docker-compose.full.yml` sets `POSTGRES_DSN`, `REDIS_ADDR`, `REDIS_USERNAME`, and `REDIS_PASSWORD` in compose `environment`, so those values override the database and Redis values in `config.yaml`.
 
 #### Configuration, Persistence, and Image
 
 Configuration priority is `environment variables > config.yaml > built-in defaults`. `config.yaml` is for static infrastructure and security configuration such as server URLs, database, cache, storage, GeoIP, tracing, JWT, and encryption keys. Runtime business settings are stored in the database and managed in the admin console.
 
-The default compose files persist application data:
+The canonical compose stack persists application data:
 
 | Data | Container path |
 | --- | --- |
-| SQLite database | `/app/data/deeix.db` |
 | Uploaded and generated files | `/app/storage` |
-| PostgreSQL data | `/var/lib/postgresql/data`, full installation only |
-| Redis data | `/data`, full installation only |
+| PostgreSQL data | `/var/lib/postgresql/data` |
+| Redis data | `/data` |
 
-The default application image is `ghcr.io/deeix-ai/deeix-chat:latest`. Override it with `DEEIX_CHAT_IMAGE` when testing a custom build:
+The default application image is `ghcr.io/jhupo/deeix-chat:latest`. Override it with `DEEIX_CHAT_IMAGE` when testing a custom build or an updater-selected image:
 
 ```bash
-DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
+docker build -t deeix-chat:local .
+DEEIX_CHAT_IMAGE=deeix-chat:local docker compose -f compose.yaml up -d
 ```
 
 `APP_ENV` accepts `dev`/`development` and `prod`/`production`, normalizes them to `dev` or `prod`, and defaults to `prod` when omitted. Use `dev` only for local development. Public production deployments should keep `APP_ENV=prod` or `APP_ENV=production` and use production secrets.
@@ -229,7 +221,7 @@ DEEIX_CHAT_IMAGE=deeix-chat:local docker compose up -d --build
 #### Optional Installation Services
 
 These services are optional. Start only the ones you enable in the admin console or `config.yaml`.
-They attach to `deeix-chat-network`; start one root compose profile first, or create the network manually with `docker network create deeix-chat-network`.
+They attach to `deeix-chat-network`; start the canonical root stack first, or create the network manually with `docker network create deeix-chat-network`.
 
 ```bash
 docker compose -f docker/tika/docker-compose.yml up -d
@@ -286,12 +278,12 @@ Use this mode when the frontend and backend are served from different public ori
 
 ### Startup Check and First Login
 
-After the application starts, verify the health endpoint, config file, and startup logs. For Docker deployments:
+After the application starts, verify the health endpoint, config file, and startup logs. For the remote `.env` example above:
 
 ```bash
-curl http://localhost:8080/healthz
-docker compose exec app ls -l /app/config.yaml
-docker compose logs app
+curl http://127.0.0.1:50001/healthz
+docker compose -f compose.yaml exec app ls -l /app/config.yaml
+docker compose -f compose.yaml logs app
 ```
 
 If the database does not contain a superadmin account, the backend creates the initial administrator on first startup and prints the initial password only once.
@@ -339,21 +331,11 @@ Static configuration environment variables:
 | Security | `SSRF_ALLOWED_HOSTS` | Exact hostnames for deployment-level integrations or trusted private redirect targets, comma-separated. |
 | Security | `SSRF_ALLOWED_CIDRS` | Trusted deployment-level integration or private redirect CIDRs, comma-separated. |
 | Security | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify endpoint. |
-| Database | `DATABASE_DRIVER` | `postgres` or `sqlite`. |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN. |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | Maximum open connections. |
 | PostgreSQL | `POSTGRES_MAX_IDLE_CONNS` | Maximum idle connections. |
 | PostgreSQL | `POSTGRES_CONN_MAX_LIFETIME_MINUTES` | Maximum connection lifetime. |
 | PostgreSQL | `POSTGRES_CONN_MAX_IDLE_TIME_MINUTES` | Maximum idle connection time. |
-| SQLite | `SQLITE_PATH` | Database file path. |
-| SQLite | `SQLITE_DSN` | Full DSN; takes priority over path-based DSN construction. |
-| SQLite | `SQLITE_MAX_OPEN_CONNS` | Maximum open connections, default `1`. |
-| SQLite | `SQLITE_BUSY_TIMEOUT_MS` | Busy timeout. |
-| SQLite | `SQLITE_CACHE_SIZE_KB` | Page cache size. |
-| SQLite | `SQLITE_MMAP_SIZE_BYTES` | Mmap size. |
-| SQLite | `SQLITE_SYNCHRONOUS` | Synchronous mode: `OFF`, `NORMAL`, `FULL`, or `EXTRA`. |
-| SQLite | `SQLITE_TEMP_STORE` | Temporary storage: `DEFAULT`, `FILE`, or `MEMORY`. |
-| Cache | `CACHE_DRIVER` | `redis` or `memory`; `memory` is single-process only. |
 | Redis | `REDIS_ADDR` | Redis address. |
 | Redis | `REDIS_USERNAME` | Redis ACL username; leave empty for password-only/default-user Redis. |
 | Redis | `REDIS_PASSWORD` | Redis password. |

@@ -12,12 +12,12 @@ import (
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
-func TestListModelsSQLiteUsesPortableRouteStats(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresUsesRouteStats(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	activeUpstream := model.LLMUpstream{Name: "active-upstream", Status: "active"}
@@ -97,8 +97,8 @@ func TestListModelsSQLiteUsesPortableRouteStats(t *testing.T) {
 	}
 }
 
-func TestModelPresentationSQLiteJoinsMetadataAndClearsDeletedGroup(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestModelPresentationPostgresJoinsMetadataAndClearsDeletedGroup(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	vendor := model.LLMModelVendor{Key: "acme-ai", Name: "Acme AI", Icon: "acme", SortOrder: 100}
@@ -155,8 +155,8 @@ func TestModelPresentationSQLiteJoinsMetadataAndClearsDeletedGroup(t *testing.T)
 	}
 }
 
-func TestModelDisplayGroupSQLiteReplacesMembersAtomically(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestModelDisplayGroupPostgresReplacesMembersAtomically(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	oldGroup := model.LLMModelDisplayGroup{Name: "Old group", SortOrder: 100}
 	if err := db.Create(&oldGroup).Error; err != nil {
@@ -195,8 +195,8 @@ func TestModelDisplayGroupSQLiteReplacesMembersAtomically(t *testing.T) {
 	assertModelDisplayGroupID(t, db, modelsToGroup[2].ID, &group.ID)
 }
 
-func TestModelDisplayGroupSQLiteSetsSelectedModelsAtomically(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestModelDisplayGroupPostgresSetsSelectedModelsAtomically(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	group := model.LLMModelDisplayGroup{Name: "Featured", SortOrder: 100}
 	if err := db.Create(&group).Error; err != nil {
@@ -231,8 +231,8 @@ func TestModelDisplayGroupSQLiteSetsSelectedModelsAtomically(t *testing.T) {
 	assertModelDisplayGroupID(t, db, platformModels[1].ID, &group.ID)
 }
 
-func TestModelVendorSQLiteAllowsDuplicateDisplayNames(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestModelVendorPostgresAllowsDuplicateDisplayNames(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 
@@ -263,8 +263,8 @@ func assertModelDisplayGroupID(t *testing.T, db *gorm.DB, modelID uint, want *ui
 	}
 }
 
-func TestListUpstreamsSQLiteExcludesInactiveUpstreamFromActiveModelCount(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListUpstreamsPostgresExcludesInactiveUpstreamFromActiveModelCount(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	inactiveUpstream := model.LLMUpstream{Name: "inactive-upstream", Status: "inactive"}
@@ -307,8 +307,8 @@ func TestListUpstreamsSQLiteExcludesInactiveUpstreamFromActiveModelCount(t *test
 	}
 }
 
-func TestListUpstreamsSQLiteExcludesInactivePlatformModelFromActiveModelCount(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListUpstreamsPostgresExcludesInactivePlatformModelFromActiveModelCount(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	upstream := model.LLMUpstream{Name: "openrouter", Status: "active"}
@@ -361,8 +361,8 @@ func TestListUpstreamsSQLiteExcludesInactivePlatformModelFromActiveModelCount(t 
 	}
 }
 
-func TestListModelsSQLiteSortOrderKeepsVendorGroups(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresSortOrderKeepsVendorGroups(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -401,8 +401,8 @@ func TestListModelsSQLiteSortOrderKeepsVendorGroups(t *testing.T) {
 	}
 }
 
-func TestListModelsSQLiteSortOrderKeepsCrossVendorDisplayGroups(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresSortOrderKeepsCrossVendorDisplayGroups(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 	paidGroup := model.LLMModelDisplayGroup{Name: "Paid", SortOrder: 100}
@@ -434,8 +434,8 @@ func TestListModelsSQLiteSortOrderKeepsCrossVendorDisplayGroups(t *testing.T) {
 	}
 }
 
-func TestListModelsSQLiteSortOrderIgnoresHiddenDisabledVendorAnchors(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresSortOrderIgnoresHiddenDisabledVendorAnchors(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -469,8 +469,8 @@ func TestListModelsSQLiteSortOrderIgnoresHiddenDisabledVendorAnchors(t *testing.
 	}
 }
 
-func TestListModelsSQLiteSortOrderGroupsByAvailability(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresSortOrderGroupsByAvailability(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -503,8 +503,8 @@ func TestListModelsSQLiteSortOrderGroupsByAvailability(t *testing.T) {
 	}
 }
 
-func TestListModelsSQLiteOnlyAvailableReturnsPublicRoutableModels(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresOnlyAvailableReturnsPublicRoutableModels(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -546,8 +546,8 @@ func TestListModelsSQLiteOnlyAvailableReturnsPublicRoutableModels(t *testing.T) 
 	}
 }
 
-func TestListUpstreamsSQLiteCountsOnlyRouteBindings(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListUpstreamsPostgresCountsOnlyRouteBindings(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	upstream := model.LLMUpstream{Name: "openrouter", Status: "active"}
@@ -582,7 +582,7 @@ func TestListUpstreamsSQLiteCountsOnlyRouteBindings(t *testing.T) {
 }
 
 func TestPermissionGroupDynamicModelRulesMatchCurrentModels(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	groups := []model.PermissionGroup{
@@ -695,7 +695,7 @@ func TestPermissionGroupDynamicModelRulesMatchCurrentModels(t *testing.T) {
 }
 
 func TestSetModelManualGroupsDoesNotTouchDynamicRules(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	groups := []model.PermissionGroup{
@@ -755,7 +755,7 @@ func TestSetModelManualGroupsDoesNotTouchDynamicRules(t *testing.T) {
 }
 
 func TestDeleteModelCascadeRemovesManualPermissionGroupAccess(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	group := model.PermissionGroup{Name: "default", IsDefault: true}
@@ -789,7 +789,7 @@ func TestDeleteModelCascadeRemovesManualPermissionGroupAccess(t *testing.T) {
 }
 
 func TestDeleteUpstreamCascadeRemovesUpstreamPermissionGroupRules(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	group := model.PermissionGroup{Name: "default", IsDefault: true}
@@ -837,7 +837,7 @@ func TestDeleteUpstreamCascadeRemovesUpstreamPermissionGroupRules(t *testing.T) 
 }
 
 func TestListPermissionGroupsCountsDefaultGroupUsers(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	groups := []model.PermissionGroup{
@@ -937,7 +937,7 @@ func TestListPermissionGroupsCountsDefaultGroupUsers(t *testing.T) {
 }
 
 func TestGetUserModelGroupRateMultiplierUsesMatchedModelGroups(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	groups := []model.PermissionGroup{
@@ -995,8 +995,8 @@ func TestGetUserModelGroupRateMultiplierUsesMatchedModelGroups(t *testing.T) {
 	}
 }
 
-func TestListModelsSQLiteFiltersByActiveUpstream(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestListModelsPostgresFiltersByActiveUpstream(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 
 	upstreams := []model.LLMUpstream{
@@ -1062,8 +1062,8 @@ func TestListModelsSQLiteFiltersByActiveUpstream(t *testing.T) {
 	assertUpstreamNamesJSON(t, items[1].UpstreamNamesJSON, []string{"upstream-a", "upstream-b"})
 }
 
-func TestReorderModelsSQLiteUpdatesSubmittedModelsOnly(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+func TestReorderModelsPostgresUpdatesSubmittedModelsOnly(t *testing.T) {
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -1109,7 +1109,7 @@ func TestReorderModelsSQLiteUpdatesSubmittedModelsOnly(t *testing.T) {
 }
 
 func TestListActiveRoutesByModelIncludesPlatformCircuitDefaults(t *testing.T) {
-	db := openChannelSQLiteTestDB(t)
+	db := openChannelPostgresTestDB(t)
 	ctx := context.Background()
 	upstreamModel := createActiveRouteTarget(t, db)
 
@@ -1164,22 +1164,9 @@ func TestListActiveRoutesByModelIncludesPlatformCircuitDefaults(t *testing.T) {
 	}
 }
 
-func openChannelSQLiteTestDB(t *testing.T) *gorm.DB {
+func openChannelPostgresTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("resolve sql db: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
-
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(
 		&model.LLMUpstream{},
 		&model.LLMUpstreamModel{},

@@ -43,8 +43,8 @@ func TestIsUniqueConstraint(t *testing.T) {
 		{name: "postgres sql state", err: sqlStateTestError{state: "23505"}, want: true},
 		{name: "wrapped postgres sql state", err: errors.Join(errors.New("insert user"), sqlStateTestError{state: "23505"}), want: true},
 		{name: "postgres duplicate message", err: errors.New(`ERROR: duplicate key value violates unique constraint "users_email_key"`), want: true},
-		{name: "sqlite unique message", err: errors.New("UNIQUE constraint failed: users.email"), want: true},
-		{name: "sqlite check constraint", err: errors.New("CHECK constraint failed: users_balance_check"), want: false},
+		{name: "postgres duplicate key", err: errors.New("duplicate key value violates unique constraint"), want: true},
+		{name: "postgres check constraint", err: errors.New("new row violates check constraint"), want: false},
 		{name: "other error", err: errors.New("connection refused"), want: false},
 	}
 

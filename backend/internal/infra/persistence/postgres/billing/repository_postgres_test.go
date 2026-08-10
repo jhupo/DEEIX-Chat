@@ -11,12 +11,12 @@ import (
 	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
-func TestUsageQueriesUseSQLitePortableExpressions(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+func TestUsageQueriesUsePostgresExpressions(t *testing.T) {
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 
@@ -162,7 +162,7 @@ func TestUsageQueriesUseSQLitePortableExpressions(t *testing.T) {
 }
 
 func TestUsageStatisticsFiltersByCurrentPermissionGroupMembership(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	if err := db.AutoMigrate(
 		&model.PermissionGroup{},
 		&model.PermissionGroupUserAccess{},
@@ -259,7 +259,7 @@ func TestUsageStatisticsFiltersByCurrentPermissionGroupMembership(t *testing.T) 
 }
 
 func TestAddUsageAndSettleBalanceRecordsDebtWithoutReservation(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
@@ -290,7 +290,7 @@ func TestAddUsageAndSettleBalanceRecordsDebtWithoutReservation(t *testing.T) {
 }
 
 func TestAddUsageAndSettleBalanceRecordsDebtBeyondReservation(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
@@ -325,7 +325,7 @@ func TestAddUsageAndSettleBalanceRecordsDebtBeyondReservation(t *testing.T) {
 }
 
 func TestAddUsageAndSettleBalanceChargesActualBelowReservation(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
@@ -360,7 +360,7 @@ func TestAddUsageAndSettleBalanceChargesActualBelowReservation(t *testing.T) {
 }
 
 func TestAddUsageAndSettleBalanceLeavesFreeModelBalanceUnchanged(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
@@ -476,7 +476,7 @@ func usageReservationRequest(userID uint, amountNanousd int64, refNo string) dom
 }
 
 func TestReserveUsageBalanceDefaultBudgetAllowsFiveConcurrentCalls(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	if err := db.Create(&model.BillingAccount{UserID: 1, Currency: "USD", BalanceNanousd: 100, Status: "active"}).Error; err != nil {
@@ -517,7 +517,7 @@ func TestSettledReservationReopensSlotOnlyWhenBudgetRemains(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := openBillingSQLiteTestDB(t)
+			db := openBillingPostgresTestDB(t)
 			repo := NewRepo(db)
 			ctx := context.Background()
 			if err := db.Create(&model.BillingAccount{UserID: 1, Currency: "USD", BalanceNanousd: 100, Status: "active"}).Error; err != nil {
@@ -558,7 +558,7 @@ func TestSettledReservationReopensSlotOnlyWhenBudgetRemains(t *testing.T) {
 }
 
 func TestReserveUsageBalanceRejectsReusedReference(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Now()
@@ -611,7 +611,7 @@ func TestReserveUsageBalanceRejectsReusedReference(t *testing.T) {
 }
 
 func TestReserveUsageBalanceRejectsLegacyReference(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	account := model.BillingAccount{UserID: 1, Currency: "USD", BalanceNanousd: 100, Status: "active"}
@@ -636,7 +636,7 @@ func TestReserveUsageBalanceRejectsLegacyReference(t *testing.T) {
 }
 
 func TestRenewUsageBalanceReservationExtendsActiveLease(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	if err := db.Create(&model.BillingAccount{UserID: 1, Currency: "USD", BalanceNanousd: 100, Status: "active"}).Error; err != nil {
@@ -663,7 +663,7 @@ func TestRenewUsageBalanceReservationExtendsActiveLease(t *testing.T) {
 }
 
 func TestReconciliationReservationContinuesBlockingBudgetAfterExpiry(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	if err := db.Create(&model.BillingAccount{UserID: 1, Currency: "USD", BalanceNanousd: 100, Status: "active"}).Error; err != nil {
@@ -696,7 +696,7 @@ func TestReconciliationReservationContinuesBlockingBudgetAfterExpiry(t *testing.
 }
 
 func TestMarkUsageReservationReconciliationRejectsMissingReservation(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 
 	err := repo.MarkUsageReservationReconciliationRequired(context.Background(), 1, "missing_run", "settle_failed")
@@ -706,7 +706,7 @@ func TestMarkUsageReservationReconciliationRejectsMissingReservation(t *testing.
 }
 
 func TestReservePeriodUsageDefaultBudgetAllowsFiveConcurrentCalls(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Now()
@@ -740,7 +740,7 @@ func TestReservePeriodUsageDefaultBudgetAllowsFiveConcurrentCalls(t *testing.T) 
 }
 
 func TestAddPeriodUsageAndSettleOverageSplitsCreditAndBalance(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
@@ -870,7 +870,7 @@ func TestAddPeriodUsageAndSettleOverageSplitsCreditAndBalance(t *testing.T) {
 }
 
 func TestAddPeriodUsageAndSettleOverageRecordsDebt(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
@@ -926,7 +926,7 @@ func TestAddPeriodUsageAndSettleOverageRecordsDebt(t *testing.T) {
 }
 
 func TestAddPeriodUsageAndSettleOverageUsesBillingAtForPeriodBoundary(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	repo := NewRepo(db)
 	ctx := context.Background()
 	periodStart := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
@@ -995,7 +995,7 @@ func TestAddPeriodUsageAndSettleOverageUsesBillingAtForPeriodBoundary(t *testing
 }
 
 func TestValidateRedeemableCodeAllowsUsageCodeInPeriodModeOnly(t *testing.T) {
-	db := openBillingSQLiteTestDB(t)
+	db := openBillingPostgresTestDB(t)
 	now := time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC)
 
 	usageCode := model.RedemptionCode{
@@ -1030,22 +1030,9 @@ func TestValidateRedeemableCodeAllowsUsageCodeInPeriodModeOnly(t *testing.T) {
 	}
 }
 
-func openBillingSQLiteTestDB(t *testing.T) *gorm.DB {
+func openBillingPostgresTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-
-	db, err := gorm.Open(sqlite.Open("file:billing_usage_queries?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("resolve sql db: %v", err)
-	}
-	sqlDB.SetMaxOpenConns(1)
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
-
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.UsageLedger{}, &model.BillingAccount{}, &model.BalanceTransaction{}, &model.UsageReservation{}, &model.Redemption{}); err != nil {
 		t.Fatalf("migrate billing tables: %v", err)
 	}

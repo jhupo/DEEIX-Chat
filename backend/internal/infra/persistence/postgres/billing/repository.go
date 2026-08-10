@@ -42,35 +42,19 @@ func NewRepo(db *gorm.DB) *Repo {
 	return &Repo{db: db}
 }
 
-func (r *Repo) sqliteDialect() bool {
-	return r != nil && r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite"
-}
-
 func (r *Repo) pricingModeExpression() string {
-	if r.sqliteDialect() {
-		return "COALESCE(NULLIF(json_extract(pricing_snapshot_json, '$.pricing_mode'), ''), 'token')"
-	}
 	return "COALESCE(NULLIF(pricing_snapshot_json, '')::jsonb ->> 'pricing_mode', 'token')"
 }
 
 func (r *Repo) usageDayKeyExpression() string {
-	if r.sqliteDialect() {
-		return "strftime('%Y-%m-%d', usage_date)"
-	}
 	return "TO_CHAR(usage_date, 'YYYY-MM-DD')"
 }
 
 func (r *Repo) usageMonthKeyExpression() string {
-	if r.sqliteDialect() {
-		return "strftime('%Y-%m-01', usage_date)"
-	}
 	return "TO_CHAR(date_trunc('month', usage_date), 'YYYY-MM-DD')"
 }
 
 func (r *Repo) usageWeekKeyExpression() string {
-	if r.sqliteDialect() {
-		return "date(usage_date, '-' || ((CAST(strftime('%w', usage_date) AS INTEGER) + 6) % 7) || ' days')"
-	}
 	return "TO_CHAR(date_trunc('week', usage_date), 'YYYY-MM-DD')"
 }
 
@@ -1814,9 +1798,6 @@ func (r *Repo) ListPaymentOrders(ctx context.Context, filter repository.PaymentO
 		order = "paid_at DESC NULLS LAST, id DESC"
 	case "amount_desc":
 		order = "pay_amount_cents DESC, id DESC"
-	}
-	if r.sqliteDialect() && strings.TrimSpace(filter.Sort) == "paid_desc" {
-		order = "paid_at IS NULL ASC, paid_at DESC, id DESC"
 	}
 	if err := query.
 		Order(order).

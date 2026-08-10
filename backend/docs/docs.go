@@ -6473,7 +6473,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "从 OpenWebUI SQLite 或 PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改",
+                "description": "从 OpenWebUI PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改",
                 "consumes": [
                     "application/json"
                 ],
@@ -23651,7 +23651,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.3.4",
+	Version:          "0.3.5",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

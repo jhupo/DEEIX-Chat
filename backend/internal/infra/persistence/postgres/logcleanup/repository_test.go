@@ -7,16 +7,13 @@ import (
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestDeleteConversationRunsDeletesOnlySelectedRunEvents(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:cleanup_conversation_runs?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err = db.AutoMigrate(&model.ChatRunEvent{}); err != nil {
+	db := testutil.Postgres(t)
+	var err error
+	if err := db.AutoMigrate(&model.ChatRunEvent{}); err != nil {
 		t.Fatalf("migrate chat run events: %v", err)
 	}
 

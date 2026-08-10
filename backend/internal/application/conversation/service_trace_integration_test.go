@@ -8,15 +8,11 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	persistencemodels "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	persistenceconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/conversation"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestCanceledTraceSettlementPersistsCompleteReasoningForReload(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:trace_cancel_settlement?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&persistencemodels.ChatRunEvent{}); err != nil {
 		t.Fatalf("migrate trace table: %v", err)
 	}

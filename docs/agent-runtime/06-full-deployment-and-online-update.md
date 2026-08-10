@@ -12,10 +12,24 @@
 For a stable release, download the matching `deeix-updater-linux-amd64.tar.gz` or `deeix-updater-linux-arm64.tar.gz`, verify its `.sha256`, and extract it. Each bundle contains `deeix-updater`, `deeix-updater.service`, and `install-deeix-updater.sh` in one directory. Run:
 
 ```bash
-sudo ./install-deeix-updater.sh /srv/deeix-chat owner/repo http://127.0.0.1:8080
+sudo ./install-deeix-updater.sh /srv/deeix-chat owner/repo http://127.0.0.1:50001
 ```
 
-The supplied deployment directory must be canonical and absolute, with regular non-symlink `docker-compose.full.yml` and `.env` files. The installer verifies Docker Compose/systemd/root access, atomically installs the binary and generated systemd unit, writes `/etc/deeix-updater/deeix-updater.env`, then enables and restarts the service. Its state is `/var/lib/deeix-updater/journal.json`; its socket is `/run/deeix-updater/deeix-updater.sock`.
+The supplied deployment directory must be canonical and absolute, with regular non-symlink `compose.yaml` and `.env` files. The installer verifies Docker Compose/systemd/root access, atomically installs the binary and generated systemd unit, writes `/etc/deeix-updater/deeix-updater.env`, then enables and restarts the service. Its state is `/var/lib/deeix-updater/journal.json`; its socket is `/run/deeix-updater/deeix-updater.sock`.
+
+Set the application listener in the deployment `.env`; Compose keeps these values when the updater replaces only the app image:
+
+```dotenv
+DEEIX_BIND_ADDRESS=0.0.0.0
+DEEIX_HTTP_PORT=50001
+```
+
+The defaults are `DEEIX_BIND_ADDRESS=127.0.0.1` and `DEEIX_HTTP_PORT=8080`.
+When the installer URL argument is omitted, it derives the loopback URL from `DEEIX_HTTP_PORT`; an explicit URL remains limited to a loopback `http` or `https` URL.
+
+The sole Full profile does not automatically migrate data or configuration from prior non-Full profiles. Preserve a validated backup before going live.
+
+For an existing host, stage `compose.yaml` and config; validate `docker compose -f compose.yaml config`; install or restart the matching updater so its environment points at `compose.yaml`; verify updater service/socket and application readiness; only then remove the old deployment compose artifact. No automatic rollback is claimed.
 
 ## Release Contract And Boundary
 
@@ -39,6 +53,6 @@ Before candidate start, a pull failure leaves `.env` untouched. The updater pass
 
 Stable tags must exactly equal `v$(cat VERSION)`. The release workflow keeps the existing branch/dev multiarch image flow, resolves the published multiarch digest, builds static Linux amd64/arm64 updater bundles, writes compact `update-manifest.json` plus checksums whose entries use release asset basenames, and creates or updates the GitHub Release assets.
 
-Local disposable-copy verification passed the updater and config suites and the Linux updater cross-build. `gofmt`, `bash -n scripts/install-deeix-updater.sh`, `pnpm --filter @deeix/web check`, and `git diff --check` also passed locally. The exact Go 1.26.5 full backend suite, `docker compose -f docker-compose.full.yml config`, and `actionlint` remain CI/deployment-machine verification because the local toolchain or executables are unavailable.
+Local disposable-copy verification passed the updater and config suites and the Linux updater cross-build. `gofmt`, `bash -n scripts/install-deeix-updater.sh`, `pnpm --filter @deeix/web check`, and `git diff --check` also passed locally. The exact Go 1.26.5 full backend suite, `docker compose -f compose.yaml config`, and `actionlint` remain CI/deployment-machine verification because the local toolchain or executables are unavailable.
 
-Future work retains signed attestations, step-up/CSRF protection, backup/restore, compatibility-aware rollback, updater self-update, and the remaining sole-Full-profile deployment cleanup.
+Future work retains signed attestations, step-up/CSRF protection, backup/restore, compatibility-aware rollback, and updater self-update.

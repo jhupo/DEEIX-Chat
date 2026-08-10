@@ -1,13 +1,12 @@
 package schema
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
-	"gorm.io/driver/sqlite"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 	"gorm.io/gorm"
 )
 
@@ -28,11 +27,8 @@ func (legacyMCPTool) TableName() string {
 }
 
 func TestMigrateLeavesLegacyMCPToolMetadataPendingConfirmation(t *testing.T) {
-	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testutil.UnmigratedPostgres(t)
+	var err error
 	if err = db.AutoMigrate(&legacyMCPTool{}); err != nil {
 		t.Fatalf("migrate legacy MCP tool: %v", err)
 	}
@@ -67,17 +63,8 @@ func TestMigrateLeavesLegacyMCPToolMetadataPendingConfirmation(t *testing.T) {
 }
 
 func TestBackfillContextArtifactMessageIDsUsesAssistantRunOwner(t *testing.T) {
-	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() {
-		sqlDB, dbErr := db.DB()
-		if dbErr == nil {
-			_ = sqlDB.Close()
-		}
-	})
+	db := testutil.UnmigratedPostgres(t)
+	var err error
 	if err = db.AutoMigrate(&model.Message{}, &model.ChatContextRecord{}); err != nil {
 		t.Fatalf("migrate context artifacts: %v", err)
 	}
@@ -372,11 +359,8 @@ func TestSeedPermissionGroupsDoesNotRecreateDefaultAllRuleAfterAccessConfigured(
 }
 
 func TestSeedModelVendorsPromotesBuiltInsPreservesEditsAndBackfillsExistingKeys(t *testing.T) {
-	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testutil.UnmigratedPostgres(t)
+	var err error
 	if err = db.AutoMigrate(&model.LLMModelVendor{}, &model.LLMPlatformModel{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -425,11 +409,8 @@ func TestSeedModelVendorsPromotesBuiltInsPreservesEditsAndBackfillsExistingKeys(
 
 func openSchemaTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dbName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
-	db, err := gorm.Open(sqlite.Open("file:"+dbName+"?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testutil.UnmigratedPostgres(t)
+	var err error
 	if err = db.AutoMigrate(
 		&model.PermissionGroup{},
 		&model.PermissionGroupUserAccess{},

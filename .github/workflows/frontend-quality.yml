@@ -13,7 +13,11 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "Dockerfile"
+      - "compose.yaml"
+      - "config.example.yaml"
       - "scripts/sync-version.mjs"
+      - "scripts/install-deeix-updater.sh"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
   pull_request:
@@ -28,7 +32,11 @@ on:
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
       - "turbo.json"
+      - "Dockerfile"
+      - "compose.yaml"
+      - "config.example.yaml"
       - "scripts/sync-version.mjs"
+      - "scripts/install-deeix-updater.sh"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
   workflow_dispatch:
@@ -40,10 +48,37 @@ jobs:
   quality:
     name: Frontend and backend checks
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: deeix
+          POSTGRES_PASSWORD: deeix
+          POSTGRES_DB: deeix
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U deeix -d deeix"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DEEIX_TEST_DATABASE_DSN: postgres://deeix:deeix@localhost:5432/deeix?sslmode=disable
+      DEEIX_TEST_REDIS_ADDR: localhost:6379
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate Full Compose configuration
+        run: |
+          cp config.example.yaml config.yaml
+          docker compose -f compose.yaml config -q
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

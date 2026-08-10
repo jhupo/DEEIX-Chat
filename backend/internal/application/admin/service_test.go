@@ -421,7 +421,7 @@ func TestImportOpenWebUIUsersRequiresRowLoader(t *testing.T) {
 		context.Background(),
 		"req_1",
 		1,
-		OpenWebUIImportInput{DSN: "sqlite:///tmp/openwebui.db", CreditMultiplier: 1},
+		OpenWebUIImportInput{DSN: "postgres://user:password@127.0.0.1:5432/openwebui?sslmode=disable", CreditMultiplier: 1},
 		"127.0.0.1",
 		"test",
 	)

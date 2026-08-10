@@ -5,24 +5,14 @@ import (
 	"testing"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestDeleteSkillCleansConversationProjectAssociations(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:skill_project_cascade?mode=memory&cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("open sqlite connection: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-	})
-	if err = db.AutoMigrate(&model.Skill{}, &model.ConversationProjectSkill{}); err != nil {
-		t.Fatalf("migrate sqlite: %v", err)
+	db := testutil.Postgres(t)
+	var err error
+	if err := db.AutoMigrate(&model.Skill{}, &model.ConversationProjectSkill{}); err != nil {
+		t.Fatalf("migrate PostgreSQL tables: %v", err)
 	}
 
 	skill := model.Skill{
