@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"regexp"
 	"time"
 
@@ -32,29 +33,26 @@ func (h *Handler) updateContext(c *gin.Context) (context.Context, context.Cancel
 
 func updateError(c *gin.Context, err error) {
 	status, code := mapUpdateError(err)
-	response.ErrorWithCode(c, status, code, "updater unavailable")
+	response.ErrorWithCode(c, status, code, "update operation failed")
 }
 
 func mapUpdateError(err error) (int, string) {
 	if err == nil {
 		return http.StatusBadGateway, "updater_unavailable"
 	}
-	status, code := http.StatusServiceUnavailable, "updater_unavailable"
+	status, code := http.StatusInternalServerError, "update.internal"
 	if errors.Is(err, context.DeadlineExceeded) {
 		status, code = http.StatusGatewayTimeout, "updater_timeout"
 	}
-	var remote *update.HTTPError
-	if errors.As(err, &remote) {
-		switch remote.Status {
-		case http.StatusBadRequest:
-			status, code = http.StatusBadRequest, "update.invalid_request"
-		case http.StatusNotFound:
-			status, code = http.StatusNotFound, "update.not_found"
-		case http.StatusConflict:
-			status, code = http.StatusConflict, "update.conflict"
-		default:
-			status, code = http.StatusBadGateway, "updater_unavailable"
-		}
+	switch {
+	case errors.Is(err, update.ErrInvalidRequest):
+		status, code = http.StatusBadRequest, "update.invalid_request"
+	case errors.Is(err, update.ErrConflict):
+		status, code = http.StatusConflict, "update.conflict"
+	case errors.Is(err, update.ErrUpstream):
+		status, code = http.StatusBadGateway, "update.upstream"
+	case errors.Is(err, os.ErrNotExist):
+		status, code = http.StatusNotFound, "update.not_found"
 	}
 	return status, code
 }
@@ -129,4 +127,17 @@ func (h *Handler) UpdateJob(c *gin.Context) {
 		return
 	}
 	response.Success(c, job)
+}
+
+func (h *Handler) RestartAfterUpdate(c *gin.Context) {
+	ctx, cancel, ok := h.updateContext(c)
+	if !ok {
+		return
+	}
+	defer cancel()
+	if err := h.updater.Restart(ctx); err != nil {
+		updateError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"restarting": true})
 }

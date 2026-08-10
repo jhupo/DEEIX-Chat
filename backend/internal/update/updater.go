@@ -1,6 +1,8 @@
 package update
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -20,10 +21,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	xproxy "golang.org/x/net/proxy"
 )
 
 const (
 	maxManifestBytes = 64 << 10
+	maxArchiveBytes  = 512 << 20
+	maxExtractBytes  = 1024 << 20
+	maxArchiveFiles  = 100000
 	maxActorText     = 64
 	maxRequestID     = 128
 )
@@ -36,32 +42,39 @@ var (
 	idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{16,128}$`)
 	commitPattern      = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	platformPattern    = regexp.MustCompile(`^linux/(amd64|arm64)$`)
-	containerIDPattern = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 )
 
-type HostConfig struct {
-	Repository, SocketPath, StateFile, DeploymentDir, ComposeFile, EnvFile, AppBaseURL string
-	PullTimeout, ReadyTimeout                                                          time.Duration
+type Config struct {
+	Repository      string
+	RuntimeDir      string
+	StateFile       string
+	CurrentVersion  string
+	ProxyURL        string
+	DownloadTimeout time.Duration
+	Restart         func()
 }
 
 type manifest struct {
-	SchemaVersion   int      `json:"schemaVersion"`
-	Repository      string   `json:"repository"`
-	Tag             string   `json:"tag"`
-	Version         string   `json:"version"`
-	Commit          string   `json:"commit"`
-	PublishedAt     string   `json:"publishedAt"`
-	ImageRepository string   `json:"imageRepository"`
-	ImageDigest     string   `json:"imageDigest"`
-	ReleaseURL      string   `json:"releaseURL"`
-	Platforms       []string `json:"platforms"`
+	SchemaVersion int              `json:"schemaVersion"`
+	Repository    string           `json:"repository"`
+	Tag           string           `json:"tag"`
+	Version       string           `json:"version"`
+	Commit        string           `json:"commit"`
+	PublishedAt   string           `json:"publishedAt"`
+	ReleaseURL    string           `json:"releaseURL"`
+	Bundles       []manifestBundle `json:"bundles"`
+}
+
+type manifestBundle struct {
+	Platform string `json:"platform"`
+	URL      string `json:"url"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
 }
 
 type journal struct {
-	InstalledVersion string      `json:"installedVersion"`
-	InstalledDigest  string      `json:"installedDigest"`
-	Candidate        *Candidate  `json:"candidate,omitempty"`
-	Jobs             []storedJob `json:"jobs"`
+	Candidate *Candidate  `json:"candidate,omitempty"`
+	Jobs      []storedJob `json:"jobs"`
 }
 
 type storedJob struct {
@@ -74,139 +87,81 @@ type storedJob struct {
 }
 
 type Updater struct {
-	cfg     HostConfig
+	cfg     Config
 	mu      sync.Mutex
 	journal journal
 	http    *http.Client
-	run     func(context.Context, string, []string, []string) error
-	output  func(context.Context, string, []string, []string) (string, error)
 	start   func(func())
-	ready   func(context.Context, string) error
-	locked  bool
 }
 
-func NewUpdater(cfg HostConfig) (*Updater, error) {
-	if err := validateHostConfig(&cfg); err != nil {
+var (
+	ErrInvalidRequest = errors.New("invalid update request")
+	ErrConflict       = errors.New("update conflict")
+	ErrUpstream       = errors.New("update upstream failure")
+	ErrInternal       = errors.New("update internal failure")
+)
+
+func NewUpdater(cfg Config) (*Updater, error) {
+	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	u := &Updater{cfg: cfg, http: &http.Client{Timeout: 5 * time.Second, CheckRedirect: allowGitHubRedirect}}
-	u.run = func(ctx context.Context, name string, args []string, env []string) error {
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Dir = cfg.DeploymentDir
-		cmd.Env = commandEnv(env)
-		return cmd.Run()
+	if err := os.MkdirAll(filepath.Join(cfg.RuntimeDir, "releases"), 0o755); err != nil {
+		return nil, err
 	}
-	u.output = func(ctx context.Context, name string, args []string, env []string) (string, error) {
-		cmd := exec.CommandContext(ctx, name, args...)
-		cmd.Dir = cfg.DeploymentDir
-		cmd.Env = commandEnv(env)
-		out, err := cmd.Output()
-		return string(out), err
+	if err := os.MkdirAll(filepath.Dir(cfg.StateFile), 0o700); err != nil {
+		return nil, err
 	}
-	u.start = func(fn func()) { go fn() }
-	u.ready = u.waitReady
+	transport, err := updateTransport(cfg.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
+	u := &Updater{
+		cfg:   cfg,
+		http:  &http.Client{Transport: transport, CheckRedirect: allowGitHubRedirect},
+		start: func(fn func()) { go fn() },
+	}
 	if err := u.load(); err != nil {
 		return nil, err
 	}
 	return u, nil
 }
 
-func commandEnv(overrides []string) []string {
-	keys := make(map[string]struct{}, len(overrides))
-	for _, override := range overrides {
-		key, _, found := strings.Cut(override, "=")
-		if found && key != "" {
-			keys[key] = struct{}{}
-		}
-	}
-	env := make([]string, 0, len(os.Environ())+len(overrides))
-	for _, value := range os.Environ() {
-		key, _, _ := strings.Cut(value, "=")
-		if _, overridden := keys[key]; !overridden {
-			env = append(env, value)
-		}
-	}
-	return append(env, overrides...)
-}
-
-func validateHostConfig(cfg *HostConfig) error {
-	if !repositoryPattern.MatchString(cfg.Repository) || len(cfg.Repository) > 160 || !filepath.IsAbs(cfg.SocketPath) || !filepath.IsAbs(cfg.StateFile) || !filepath.IsAbs(cfg.DeploymentDir) || !filepath.IsAbs(cfg.ComposeFile) || !filepath.IsAbs(cfg.EnvFile) {
+func validateConfig(cfg Config) error {
+	if !repositoryPattern.MatchString(cfg.Repository) || !strictVersion(cfg.CurrentVersion) || !filepath.IsAbs(cfg.RuntimeDir) || !filepath.IsAbs(cfg.StateFile) || cfg.DownloadTimeout < 30*time.Second || cfg.DownloadTimeout > 2*time.Hour || cfg.Restart == nil {
 		return errors.New("invalid updater configuration")
 	}
-	if cfg.PullTimeout <= 0 || cfg.PullTimeout > 2*time.Hour || cfg.ReadyTimeout <= 0 || cfg.ReadyTimeout > 30*time.Minute {
-		return errors.New("invalid updater timeout")
+	return nil
+}
+
+func updateTransport(rawProxy string) (*http.Transport, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	if rawProxy == "" {
+		return transport, nil
 	}
-	deployment, err := filepath.EvalSymlinks(cfg.DeploymentDir)
+	proxyURL, err := url.Parse(rawProxy)
 	if err != nil {
-		return errors.New("invalid deployment directory")
+		return nil, errors.New("invalid update proxy")
 	}
-	if !filepath.IsAbs(deployment) {
-		return errors.New("invalid deployment directory")
-	}
-	cfg.DeploymentDir = deployment
-	for _, p := range []*string{&cfg.ComposeFile, &cfg.EnvFile} {
-		if !inside(cfg.DeploymentDir, *p) || regularFile(*p) != nil {
-			return errors.New("invalid deployment file")
+	switch proxyURL.Scheme {
+	case "http", "https":
+		transport.Proxy = http.ProxyURL(proxyURL)
+	case "socks5", "socks5h":
+		dialer, err := xproxy.FromURL(proxyURL, &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second})
+		if err != nil {
+			return nil, errors.New("invalid update proxy")
 		}
-		resolved, err := filepath.EvalSymlinks(*p)
-		if err != nil || !inside(cfg.DeploymentDir, resolved) {
-			return errors.New("invalid deployment file")
+		contextDialer, ok := dialer.(xproxy.ContextDialer)
+		if !ok {
+			return nil, errors.New("update proxy lacks context support")
 		}
-		*p = resolved
+		transport.DialContext = contextDialer.DialContext
+	default:
+		return nil, errors.New("invalid update proxy")
 	}
-	if err := validateAppURL(cfg.AppBaseURL); err != nil {
-		return err
-	}
-	for _, p := range []string{cfg.SocketPath, cfg.StateFile} {
-		if err := safeParent(p); err != nil {
-			return err
-		}
-	}
-	return nil
+	return transport, nil
 }
-func inside(root, value string) bool {
-	rel, err := filepath.Rel(root, value)
-	return err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
-}
-func regularFile(p string) error {
-	info, err := os.Lstat(p)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return errors.New("non-regular file")
-	}
-	return nil
-}
-func safeParent(p string) error {
-	parent := filepath.Dir(p)
-	resolved, err := filepath.EvalSymlinks(parent)
-	if err != nil || filepath.Clean(resolved) != filepath.Clean(parent) {
-		return errors.New("unsafe parent")
-	}
-	info, err := os.Lstat(parent)
-	if err != nil {
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return errors.New("unsafe parent")
-	}
-	return nil
-}
-func validateAppURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || !isLoopback(u.Hostname()) {
-		return errors.New("invalid app base url")
-	}
-	return nil
-}
-func isLoopback(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
+
 func allowGitHubRedirect(req *http.Request, via []*http.Request) error {
 	host := strings.ToLower(req.URL.Hostname())
 	if req.URL.Scheme != "https" || !(host == "github.com" || strings.HasSuffix(host, ".github.com") || strings.HasSuffix(host, ".githubusercontent.com")) {
@@ -218,149 +173,84 @@ func allowGitHubRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-func (u *Updater) lockPath() string { return u.cfg.StateFile + ".lock" }
 func (u *Updater) load() error {
-	if err := noSymlink(u.cfg.StateFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := rejectSymlink(u.cfg.StateFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	b, err := os.ReadFile(u.cfg.StateFile)
 	if errors.Is(err, os.ErrNotExist) {
-		if _, e := os.Lstat(u.lockPath()); e == nil {
-			return errors.New("stale update lock requires reconciliation")
-		}
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	if err = json.Unmarshal(b, &u.journal); err != nil {
+	if err != nil || json.Unmarshal(b, &u.journal) != nil {
 		return errors.New("invalid update journal")
 	}
-	active := make([]int, 0, 1)
+	changed := false
 	for i := range u.journal.Jobs {
 		if !terminal(u.journal.Jobs[i].Status) {
-			active = append(active, i)
+			u.journal.Jobs[i].Status = "outcome_unknown"
+			u.journal.Jobs[i].Error = "application restarted during update"
+			u.journal.Jobs[i].UpdatedAt = time.Now().UTC()
+			changed = true
 		}
 	}
-	if len(active) > 1 {
-		return errors.New("multiple active update jobs require reconciliation")
+	if changed {
+		return u.save()
 	}
-	if len(active) == 1 {
-		if err := noSymlink(u.lockPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		lockBytes, lockErr := os.ReadFile(u.lockPath())
-		if lockErr == nil && strings.TrimSpace(string(lockBytes)) != u.journal.Jobs[active[0]].ID {
-			return errors.New("update lock does not match active job")
-		}
-		if lockErr != nil && !errors.Is(lockErr, os.ErrNotExist) {
-			return lockErr
-		}
-		u.journal.Jobs[active[0]].Status = "outcome_unknown"
-		u.journal.Jobs[active[0]].Error = "daemon restarted during update"
-		u.journal.Jobs[active[0]].UpdatedAt = time.Now().UTC()
-		if err := u.save(); err != nil {
-			return err
-		}
-		if lockErr == nil {
-			if err := removeLock(u.lockPath()); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := noSymlink(u.lockPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	lockBytes, err := os.ReadFile(u.lockPath())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	lockID := strings.TrimSpace(string(lockBytes))
-	for _, j := range u.journal.Jobs {
-		if j.ID == lockID && terminal(j.Status) {
-			return removeLock(u.lockPath())
-		}
-	}
-	return errors.New("stale update lock requires reconciliation")
+	return nil
 }
 
-func (u *Updater) Status(ctx context.Context) Status {
-	current, discoverErr := u.discover(ctx)
+func (u *Updater) Status(context.Context) (Status, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if discoverErr == nil && current != u.journal.InstalledVersion {
-		u.journal.InstalledVersion = current
-		u.journal.InstalledDigest = ""
-		_ = u.save()
-	}
-	return u.statusLocked()
+	return u.statusLocked(), nil
 }
+
 func (u *Updater) statusLocked() Status {
 	var job *Job
 	for i := len(u.journal.Jobs) - 1; i >= 0; i-- {
-		if !terminal(u.journal.Jobs[i].Status) {
-			j := u.journal.Jobs[i].Job
-			job = &j
+		stored := u.journal.Jobs[i]
+		if !terminal(stored.Status) || (u.journal.Candidate != nil && stored.Version == u.journal.Candidate.Version) {
+			copy := stored.Job
+			job = &copy
 			break
 		}
 	}
-	if job == nil && u.journal.Candidate != nil {
-		for i := len(u.journal.Jobs) - 1; i >= 0; i-- {
-			if terminal(u.journal.Jobs[i].Status) && u.journal.Jobs[i].Version == u.journal.Candidate.Version {
-				j := u.journal.Jobs[i].Job
-				job = &j
-				break
-			}
-		}
+	return Status{
+		InstalledVersion: u.cfg.CurrentVersion,
+		Candidate:        u.journal.Candidate,
+		UpdateAvailable:  u.journal.Candidate != nil && compareVersions(u.journal.Candidate.Version, u.cfg.CurrentVersion) > 0,
+		Job:              job,
 	}
-	return Status{InstalledVersion: u.journal.InstalledVersion, InstalledDigest: u.journal.InstalledDigest, Candidate: u.journal.Candidate, UpdateAvailable: u.journal.Candidate != nil && compareVersions(u.journal.Candidate.Version, u.journal.InstalledVersion) > 0, Job: job}
 }
 
 func (u *Updater) Check(ctx context.Context) (Status, error) {
-	current, err := u.discover(ctx)
-	if err != nil {
-		return Status{}, fmt.Errorf("%w: %v", ErrUpstream, err)
+	u.mu.Lock()
+	for _, stored := range u.journal.Jobs {
+		if !terminal(stored.Status) {
+			u.mu.Unlock()
+			return Status{}, ErrConflict
+		}
 	}
-	candidate, err := u.fetch(ctx)
+	u.mu.Unlock()
+	candidate, err := u.fetchManifest(ctx)
 	if err != nil {
 		return Status{}, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.journal.InstalledVersion = current
+	for _, stored := range u.journal.Jobs {
+		if !terminal(stored.Status) {
+			return Status{}, ErrConflict
+		}
+	}
 	u.journal.Candidate = candidate
 	if err := u.save(); err != nil {
 		return Status{}, fmt.Errorf("%w: %v", ErrInternal, err)
 	}
 	return u.statusLocked(), nil
 }
-func (u *Updater) discover(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(u.cfg.AppBaseURL, "/")+"/api/v1/version", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := u.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", errors.New("app version unavailable")
-	}
-	var data struct {
-		Version string `json:"version"`
-	}
-	dec := json.NewDecoder(io.LimitReader(resp.Body, 4096))
-	if err = dec.Decode(&data); err != nil || dec.Decode(&struct{}{}) != io.EOF || !strictVersion(data.Version) {
-		return "", errors.New("invalid app version")
-	}
-	return data.Version, nil
-}
-func (u *Updater) fetch(ctx context.Context) (*Candidate, error) {
+
+func (u *Updater) fetchManifest(ctx context.Context) (*Candidate, error) {
 	rawURL := "https://github.com/" + u.cfg.Repository + "/releases/latest/download/update-manifest.json"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -381,13 +271,14 @@ func (u *Updater) fetch(ctx context.Context) (*Candidate, error) {
 	var m manifest
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
-	if err = dec.Decode(&m); err != nil || dec.Decode(&struct{}{}) != io.EOF {
+	if err := dec.Decode(&m); err != nil || dec.Decode(&struct{}{}) != io.EOF {
 		return nil, errors.New("invalid release manifest")
 	}
 	return validateManifest(u.cfg.Repository, m, b)
 }
-func validateManifest(repo string, m manifest, b []byte) (*Candidate, error) {
-	if len(m.Repository) > 160 || len(m.Tag) > 32 || len(m.Version) > 32 || len(m.Commit) != 40 || len(m.PublishedAt) > 40 || len(m.ImageRepository) > 180 || len(m.ImageDigest) != 71 || len(m.ReleaseURL) > 512 || m.SchemaVersion != 1 || m.Repository != repo || m.ImageRepository != "ghcr.io/"+strings.ToLower(repo) || !tagPattern.MatchString(m.Tag) || !strictVersion(m.Version) || m.Version != strings.TrimPrefix(m.Tag, "v") || !commitPattern.MatchString(m.Commit) || !digestPattern.MatchString(m.ImageDigest) || m.ReleaseURL != "https://github.com/"+repo+"/releases/tag/"+m.Tag || len(m.Platforms) == 0 || len(m.Platforms) > 4 {
+
+func validateManifest(repo string, m manifest, raw []byte) (*Candidate, error) {
+	if m.SchemaVersion != 2 || m.Repository != repo || len(m.Repository) > 160 || !tagPattern.MatchString(m.Tag) || !strictVersion(m.Version) || m.Version != strings.TrimPrefix(m.Tag, "v") || !commitPattern.MatchString(m.Commit) || m.ReleaseURL != "https://github.com/"+repo+"/releases/tag/"+m.Tag || len(m.Bundles) == 0 || len(m.Bundles) > 4 {
 		return nil, errors.New("invalid release manifest")
 	}
 	published, err := time.Parse(time.RFC3339, m.PublishedAt)
@@ -395,22 +286,29 @@ func validateManifest(repo string, m manifest, b []byte) (*Candidate, error) {
 		return nil, errors.New("invalid release manifest")
 	}
 	wanted := "linux/" + runtime.GOARCH
-	seen := map[string]bool{}
-	found := false
-	for _, p := range m.Platforms {
-		if !platformPattern.MatchString(p) || seen[p] {
+	seen := make(map[string]bool, len(m.Bundles))
+	var selected *manifestBundle
+	for i := range m.Bundles {
+		bundle := &m.Bundles[i]
+		expectedURL := "https://github.com/" + repo + "/releases/download/" + m.Tag + "/deeix-chat-linux-" + strings.TrimPrefix(bundle.Platform, "linux/") + ".tar.gz"
+		if !platformPattern.MatchString(bundle.Platform) || seen[bundle.Platform] || bundle.URL != expectedURL || !digestPattern.MatchString(bundle.SHA256) || bundle.Size <= 0 || bundle.Size > maxArchiveBytes {
 			return nil, errors.New("invalid release manifest")
 		}
-		seen[p] = true
-		if p == wanted {
-			found = true
+		seen[bundle.Platform] = true
+		if bundle.Platform == wanted {
+			selected = bundle
 		}
 	}
-	if !found {
+	if selected == nil {
 		return nil, errors.New("platform unavailable")
 	}
-	sum := sha256.Sum256(b)
-	return &Candidate{Version: m.Version, Tag: m.Tag, ReleaseURL: m.ReleaseURL, ManifestDigest: "sha256:" + hex.EncodeToString(sum[:]), ImageRef: m.ImageRepository + "@" + m.ImageDigest, Commit: m.Commit, PublishedAt: published}, nil
+	sum := sha256.Sum256(raw)
+	return &Candidate{
+		Version: m.Version, Tag: m.Tag, ReleaseURL: m.ReleaseURL,
+		ManifestDigest: "sha256:" + hex.EncodeToString(sum[:]),
+		BundleURL:      selected.URL, BundleDigest: selected.SHA256, BundleSize: selected.Size,
+		Commit: m.Commit, PublishedAt: published,
+	}, nil
 }
 
 func (u *Updater) Install(ctx context.Context, in InstallRequest) (Job, error) {
@@ -421,35 +319,36 @@ func (u *Updater) Install(ctx context.Context, in InstallRequest) (Job, error) {
 	u.mu.Lock()
 	for _, old := range u.journal.Jobs {
 		if old.Key == in.IdempotencyKey {
+			u.mu.Unlock()
 			if old.Input != input {
-				u.mu.Unlock()
 				return Job{}, ErrConflict
 			}
-			u.mu.Unlock()
 			return old.Job, nil
 		}
 	}
-	u.mu.Unlock()
-	current, err := u.discover(ctx)
-	if err != nil || !strictVersion(current) {
-		return Job{}, fmt.Errorf("%w: current version unavailable", ErrUpstream)
+	for _, old := range u.journal.Jobs {
+		if !terminal(old.Status) {
+			u.mu.Unlock()
+			return Job{}, ErrConflict
+		}
 	}
-	candidate, err := u.fetch(ctx)
+	u.mu.Unlock()
+
+	candidate, err := u.fetchManifest(ctx)
 	if err != nil {
 		return Job{}, fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
 	u.mu.Lock()
 	for _, old := range u.journal.Jobs {
 		if old.Key == in.IdempotencyKey {
+			u.mu.Unlock()
 			if old.Input != input {
-				u.mu.Unlock()
 				return Job{}, ErrConflict
 			}
-			u.mu.Unlock()
 			return old.Job, nil
 		}
 	}
-	if u.journal.Candidate == nil || candidate.Version != u.journal.Candidate.Version || candidate.ManifestDigest != u.journal.Candidate.ManifestDigest || candidate.ImageRef != u.journal.Candidate.ImageRef || candidate.Version != in.Version || candidate.ManifestDigest != in.ManifestDigest || compareVersions(candidate.Version, current) <= 0 {
+	if u.journal.Candidate == nil || *candidate != *u.journal.Candidate || candidate.Version != in.Version || candidate.ManifestDigest != in.ManifestDigest || compareVersions(candidate.Version, u.cfg.CurrentVersion) <= 0 {
 		u.mu.Unlock()
 		return Job{}, ErrConflict
 	}
@@ -460,238 +359,304 @@ func (u *Updater) Install(ctx context.Context, in InstallRequest) (Job, error) {
 		}
 	}
 	now := time.Now().UTC()
-	jobID := fmt.Sprintf("upd-%d", now.UnixNano())
-	if err := u.acquireLock(jobID); err != nil {
-		u.mu.Unlock()
-		if errors.Is(err, os.ErrExist) {
-			return Job{}, ErrConflict
-		}
-		return Job{}, fmt.Errorf("%w: %v", ErrInternal, err)
+	stored := storedJob{
+		Job: Job{ID: fmt.Sprintf("upd-%d", now.UnixNano()), Version: in.Version, Status: "queued", CreatedAt: now, UpdatedAt: now},
+		Key: in.IdempotencyKey, Input: input, ActorUserID: in.ActorUserID, ActorUsername: in.ActorUsername, RequestID: in.RequestID,
 	}
-	j := storedJob{Job: Job{ID: jobID, Version: in.Version, Status: "queued", CreatedAt: now, UpdatedAt: now}, Key: in.IdempotencyKey, Input: input, ActorUserID: in.ActorUserID, ActorUsername: in.ActorUsername, RequestID: in.RequestID}
-	u.journal.InstalledVersion = current
 	u.journal.Candidate = candidate
-	u.journal.Jobs = append(u.journal.Jobs, j)
+	u.journal.Jobs = append(u.journal.Jobs, stored)
 	if len(u.journal.Jobs) > 32 {
 		u.journal.Jobs = u.journal.Jobs[len(u.journal.Jobs)-32:]
 	}
 	if err := u.save(); err != nil {
-		_ = u.releaseLock()
 		u.mu.Unlock()
 		return Job{}, fmt.Errorf("%w: %v", ErrInternal, err)
 	}
 	u.mu.Unlock()
-	u.start(func() { u.apply(j.ID, candidate) })
-	return j.Job, nil
+	u.start(func() { u.apply(stored.ID, candidate) })
+	return stored.Job, nil
 }
 
-var (
-	ErrInvalidRequest = errors.New("invalid update request")
-	ErrConflict       = errors.New("update conflict")
-	ErrUpstream       = errors.New("update upstream failure")
-	ErrInternal       = errors.New("update internal failure")
-)
-
-func (u *Updater) Job(id string) (Job, error) {
+func (u *Updater) Job(_ context.Context, id string) (Job, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	for _, j := range u.journal.Jobs {
-		if j.ID == id {
-			return j.Job, nil
+	for _, stored := range u.journal.Jobs {
+		if stored.ID == id {
+			return stored.Job, nil
 		}
 	}
 	return Job{}, os.ErrNotExist
 }
-func (u *Updater) apply(id string, c *Candidate) {
-	release := false
-	defer func() {
-		if release {
-			u.mu.Lock()
-			_ = u.releaseLock()
-			u.mu.Unlock()
-		}
-	}()
+
+func (u *Updater) Restart(context.Context) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.journal.Candidate == nil || len(u.journal.Jobs) == 0 {
+		return ErrConflict
+	}
+	latest := u.journal.Jobs[len(u.journal.Jobs)-1]
+	if latest.Status != "succeeded" || latest.Version != u.journal.Candidate.Version {
+		return ErrConflict
+	}
+	wanted, err := filepath.EvalSymlinks(filepath.Join(u.cfg.RuntimeDir, "current"))
+	if err != nil || filepath.Clean(wanted) != filepath.Join(u.cfg.RuntimeDir, "releases", latest.Version) {
+		return ErrConflict
+	}
+	u.start(func() {
+		time.Sleep(500 * time.Millisecond)
+		u.cfg.Restart()
+	})
+	return nil
+}
+
+func (u *Updater) apply(id string, candidate *Candidate) {
 	if err := u.transition(id, "pulling", ""); err != nil {
 		return
 	}
-	pullCtx, cancelPull := context.WithTimeout(context.Background(), u.cfg.PullTimeout)
-	if err := u.command(pullCtx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "pull", "app"); err != nil {
-		cancelPull()
-		release = u.transition(id, "failed", "image pull failed") == nil
+	ctx, cancel := context.WithTimeout(context.Background(), u.cfg.DownloadTimeout)
+	defer cancel()
+	archivePath, err := u.download(ctx, id, candidate)
+	if err != nil {
+		_ = u.transition(id, "failed", "release download or checksum verification failed")
 		return
 	}
-	cancelPull()
+	defer os.Remove(archivePath)
 	if err := u.transition(id, "applying", ""); err != nil {
 		return
 	}
-	if err := replaceImage(u.cfg.EnvFile, c.ImageRef); err != nil {
-		release = u.transition(id, "failed", "deployment environment update failed") == nil
+	if err := u.installArchive(archivePath, id, candidate.Version); err != nil {
+		_ = u.transition(id, "failed", "release extraction or activation failed")
 		return
 	}
-	readyCtx, cancelReady := context.WithTimeout(context.Background(), u.cfg.ReadyTimeout)
-	defer cancelReady()
-	if err := u.command(readyCtx, []string{"DEEIX_CHAT_IMAGE=" + c.ImageRef}, "up", "-d", "--no-deps", "app"); err != nil {
-		release = u.transition(id, "outcome_unknown", "candidate start failed") == nil
-		return
-	}
-	if err := u.transition(id, "verifying", ""); err != nil {
-		return
-	}
-	if err := u.ready(readyCtx, c.Version); err != nil {
-		release = u.transition(id, "outcome_unknown", "candidate verification failed") == nil
-		return
-	}
-	if err := u.verifyRunningImage(readyCtx, c.ImageRef); err != nil {
-		release = u.transition(id, "outcome_unknown", "candidate image verification failed") == nil
-		return
-	}
-	u.mu.Lock()
-	u.journal.InstalledVersion = c.Version
-	u.journal.InstalledDigest = strings.TrimPrefix(c.ImageRef, c.ImageRef[:strings.LastIndex(c.ImageRef, "@")+1])
-	u.setLocked(id, "succeeded", "")
-	release = u.save() == nil
-	u.mu.Unlock()
+	_ = u.transition(id, "succeeded", "")
 }
-func (u *Updater) command(ctx context.Context, env []string, args ...string) error {
-	argv := append([]string{"compose", "-f", u.cfg.ComposeFile, "--env-file", u.cfg.EnvFile}, args...)
-	return u.run(ctx, "docker", argv, env)
-}
-func (u *Updater) commandOutput(ctx context.Context, env []string, args ...string) (string, error) {
-	argv := append([]string{"compose", "-f", u.cfg.ComposeFile, "--env-file", u.cfg.EnvFile}, args...)
-	return u.output(ctx, "docker", argv, env)
-}
-func (u *Updater) verifyRunningImage(ctx context.Context, expected string) error {
-	id, err := u.commandOutput(ctx, nil, "ps", "-q", "app")
-	if err != nil || !containerIDPattern.MatchString(strings.TrimSpace(id)) {
-		return errors.New("app container unavailable")
+
+func (u *Updater) download(ctx context.Context, id string, candidate *Candidate) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate.BundleURL, nil)
+	if err != nil {
+		return "", err
 	}
-	image, err := u.output(ctx, "docker", []string{"inspect", "--format={{.Config.Image}}", strings.TrimSpace(id)}, nil)
-	if err != nil || strings.TrimSpace(image) != expected {
-		return errors.New("app image mismatch")
+	resp, err := u.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.ContentLength > candidate.BundleSize {
+		return "", errors.New("release bundle unavailable")
+	}
+	path := filepath.Join(u.cfg.RuntimeDir, ".download-"+id)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	ok := false
+	defer func() {
+		_ = file.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(resp.Body, candidate.BundleSize+1))
+	if err != nil || written != candidate.BundleSize || "sha256:"+hex.EncodeToString(hash.Sum(nil)) != candidate.BundleDigest {
+		return "", errors.New("invalid release bundle")
+	}
+	if err := file.Sync(); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return path, nil
+}
+
+func (u *Updater) installArchive(archivePath, id, version string) error {
+	stage := filepath.Join(u.cfg.RuntimeDir, ".staging-"+id)
+	if err := os.Mkdir(stage, 0o755); err != nil {
+		return err
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.RemoveAll(stage)
+		}
+	}()
+	if err := extractBundle(archivePath, stage); err != nil {
+		return err
+	}
+	if err := validateRelease(stage, version); err != nil {
+		return err
+	}
+	target := filepath.Join(u.cfg.RuntimeDir, "releases", version)
+	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+		if err := os.Rename(stage, target); err != nil {
+			return err
+		}
+		keep = true
+	} else if err != nil || validateRelease(target, version) != nil {
+		return errors.New("existing release is invalid")
+	}
+	return switchCurrent(u.cfg.RuntimeDir, version)
+}
+
+func extractBundle(archivePath, stage string) error {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	reader := tar.NewReader(gz)
+	var total int64
+	entries := 0
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil || header.Name == "" || strings.Contains(header.Name, "\\") {
+			return errors.New("invalid release archive")
+		}
+		entries++
+		if entries > maxArchiveFiles {
+			return errors.New("too many release archive entries")
+		}
+		clean := filepath.Clean(filepath.FromSlash(header.Name))
+		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return errors.New("invalid release archive path")
+		}
+		destination := filepath.Join(stage, clean)
+		rel, err := filepath.Rel(stage, destination)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("invalid release archive path")
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(destination, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if header.Size < 0 || total+header.Size > maxExtractBytes {
+				return errors.New("release archive too large")
+			}
+			total += header.Size
+			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+				return err
+			}
+			out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+			if err != nil {
+				return err
+			}
+			written, copyErr := io.Copy(out, io.LimitReader(reader, header.Size+1))
+			closeErr := out.Close()
+			if copyErr != nil || closeErr != nil || written != header.Size {
+				return errors.New("invalid release archive file")
+			}
+		default:
+			return errors.New("unsupported release archive entry")
+		}
 	}
 	return nil
 }
-func (u *Updater) waitReady(ctx context.Context, version string) error {
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
+
+func validateRelease(root, version string) error {
+	versionFile := filepath.Join(root, "VERSION")
+	binary := filepath.Join(root, "deeix-chat")
+	index := filepath.Join(root, "frontend", "out", "index.html")
+	for _, path := range []string{versionFile, binary, index} {
+		if err := regularFile(path); err != nil {
+			return errors.New("release is incomplete")
 		}
-		r, e := u.http.Get(strings.TrimRight(u.cfg.AppBaseURL, "/") + "/readyz")
-		if e == nil && r.StatusCode == http.StatusOK {
-			r.Body.Close()
-			if got, e := u.discover(ctx); e == nil && got == version {
-				return nil
-			}
-		} else if r != nil {
-			r.Body.Close()
-		}
-		time.Sleep(time.Second)
 	}
+	b, err := os.ReadFile(versionFile)
+	if err != nil || strings.TrimSpace(string(b)) != version {
+		return errors.New("release version mismatch")
+	}
+	return os.Chmod(binary, 0o755)
 }
+
+func switchCurrent(runtimeDir, version string) error {
+	current := filepath.Join(runtimeDir, "current")
+	if info, err := os.Lstat(current); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		return errors.New("current release is not a symlink")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	temporary := filepath.Join(runtimeDir, ".current-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err := os.Symlink(filepath.Join("releases", version), temporary); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, current); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return syncParent(runtimeDir)
+}
+
 func (u *Updater) transition(id, status, message string) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.setLocked(id, status, message)
-	return u.save()
-}
-func (u *Updater) setLocked(id, status, message string) {
 	for i := range u.journal.Jobs {
 		if u.journal.Jobs[i].ID == id {
 			u.journal.Jobs[i].Status = status
 			u.journal.Jobs[i].Error = message
 			u.journal.Jobs[i].UpdatedAt = time.Now().UTC()
+			return u.save()
 		}
 	}
+	return os.ErrNotExist
 }
-func (u *Updater) acquireLock(jobID string) error {
-	f, err := os.OpenFile(u.lockPath(), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+
+func (u *Updater) save() error {
+	b, err := json.Marshal(u.journal)
 	if err != nil {
 		return err
 	}
-	if _, err = f.WriteString(jobID + "\n"); err == nil {
-		err = f.Sync()
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		_ = os.Remove(u.lockPath())
-		return err
-	}
-	u.locked = true
-	if err := syncParent(filepath.Dir(u.lockPath())); err != nil {
-		u.locked = false
-		_ = os.Remove(u.lockPath())
-		return err
-	}
-	return nil
+	return atomicWrite(u.cfg.StateFile, b, 0o600)
 }
-func (u *Updater) releaseLock() error {
-	if !u.locked {
-		return nil
-	}
-	u.locked = false
-	return removeLock(u.lockPath())
-}
-func removeLock(p string) error {
-	if err := noSymlink(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return syncParent(filepath.Dir(p))
-}
-func (u *Updater) save() error { return atomicWrite(u.cfg.StateFile, mustJSON(u.journal), 0600) }
-func mustJSON(v any) []byte    { b, _ := json.Marshal(v); return b }
+
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	if err := noSymlink(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := rejectSymlink(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := noSymlink(tmp); err == nil {
-		return errors.New("temporary file exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
+	temporary := path + ".tmp"
+	if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}
 	ok := false
 	defer func() {
+		_ = file.Close()
 		if !ok {
-			_ = os.Remove(tmp)
+			_ = os.Remove(temporary)
 		}
 	}()
-	if _, err = f.Write(data); err == nil {
-		err = f.Sync()
+	if _, err = file.Write(data); err == nil {
+		err = file.Sync()
 	}
-	if closeErr := f.Close(); err == nil {
+	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
 		return err
 	}
-	if err = os.Rename(tmp, path); err != nil {
+	if err := os.Rename(temporary, path); err != nil {
 		return err
 	}
 	ok = true
 	return syncParent(filepath.Dir(path))
 }
-func syncParent(dir string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	f, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
-}
-func noSymlink(p string) error {
-	info, err := os.Lstat(p)
+
+func rejectSymlink(path string) error {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
@@ -700,58 +665,63 @@ func noSymlink(p string) error {
 	}
 	return nil
 }
-func replaceImage(path, image string) error {
-	if err := regularFile(path); err != nil {
-		return err
-	}
-	info, _ := os.Stat(path)
-	b, err := os.ReadFile(path)
+
+func regularFile(path string) error {
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(string(b), "\n")
-	found := false
-	for i, line := range lines {
-		if strings.HasPrefix(line, "DEEIX_CHAT_IMAGE=") {
-			lines[i] = "DEEIX_CHAT_IMAGE=" + image
-			found = true
-		}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return errors.New("non-regular file")
 	}
-	if !found {
-		lines = append(lines, "DEEIX_CHAT_IMAGE="+image)
-	}
-	return atomicWrite(path, []byte(strings.Join(lines, "\n")), info.Mode().Perm())
+	return nil
 }
-func terminal(s string) bool { return s == "succeeded" || s == "failed" || s == "outcome_unknown" }
-func strictVersion(v string) bool {
-	m := versionPattern.FindStringSubmatch(v)
-	if m == nil || len(v) > 32 {
+
+func syncParent(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
+}
+
+func terminal(status string) bool {
+	return status == "succeeded" || status == "failed" || status == "outcome_unknown"
+}
+
+func strictVersion(version string) bool {
+	match := versionPattern.FindStringSubmatch(version)
+	if match == nil || len(version) > 32 {
 		return false
 	}
-	for _, p := range m[1:] {
-		if len(p) > 1 && p[0] == '0' {
+	for _, part := range match[1:] {
+		if len(part) > 1 && part[0] == '0' {
 			return false
 		}
-		n, e := strconv.ParseUint(p, 10, 31)
-		if e != nil || n > 1<<31-1 {
+		value, err := strconv.ParseUint(part, 10, 31)
+		if err != nil || value > 1<<31-1 {
 			return false
 		}
 	}
 	return true
 }
+
 func compareVersions(a, b string) int {
 	if !strictVersion(a) || !strictVersion(b) {
 		return 0
 	}
-	aa := strings.Split(a, ".")
-	bb := strings.Split(b, ".")
-	for i := range aa {
-		ai, _ := strconv.ParseUint(aa[i], 10, 31)
-		bi, _ := strconv.ParseUint(bb[i], 10, 31)
-		if ai > bi {
+	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range left {
+		leftPart, _ := strconv.ParseUint(left[i], 10, 31)
+		rightPart, _ := strconv.ParseUint(right[i], 10, 31)
+		if leftPart > rightPart {
 			return 1
 		}
-		if ai < bi {
+		if leftPart < rightPart {
 			return -1
 		}
 	}

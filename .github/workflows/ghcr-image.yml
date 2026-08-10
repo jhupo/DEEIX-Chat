@@ -129,16 +129,22 @@ jobs:
       - name: Inspect image
         run: docker buildx imagetools inspect "${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}"
 
-  release_updater:
-    name: Package stable updater release
+  release_application:
+    name: Package stable application release
     runs-on: ubuntu-latest
     needs: merge
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
-      packages: read
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
@@ -147,39 +153,40 @@ jobs:
         run: |
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Resolve published image digest
-        id: image
+      - name: Build frontend
         shell: bash
         run: |
-          image="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          digest=$(docker buildx imagetools inspect "$image:$GITHUB_REF_NAME" --format '{{json .Manifest}}' | jq -r '.digest // empty')
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "repository=$image" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-      - name: Build updater binaries
+          pnpm install --frozen-lockfile
+          pnpm --filter @deeix/web build
+      - name: Build application bundles
         shell: bash
         run: |
-          mkdir -p dist/amd64/deeix-updater dist/arm64/deeix-updater
+          mkdir -p dist
+          version=$(cat VERSION)
+          build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -C backend -trimpath -ldflags='-s -w' -o "../dist/$arch/deeix-updater/deeix-updater" ./cmd/deeix-updater
-            cp deploy/deeix-updater/deeix-updater.service "dist/$arch/deeix-updater/"
-            cp scripts/install-deeix-updater.sh "dist/$arch/deeix-updater/"
-            tar -C "dist/$arch" -czf "dist/deeix-updater-linux-$arch.tar.gz" deeix-updater
-            (cd dist && sha256sum "deeix-updater-linux-$arch.tar.gz" > "deeix-updater-linux-$arch.tar.gz.sha256")
+            root="dist/release-$arch"
+            mkdir -p "$root/frontend"
+            cp VERSION "$root/VERSION"
+            cp -a frontend/out "$root/frontend/out"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -C backend -trimpath \
+              -ldflags="-s -w -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Version=$version -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Commit=$GITHUB_SHA -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.BuildTime=$build_time" \
+              -o "../$root/deeix-chat" ./cmd/server
+            tar -C "$root" -czf "dist/deeix-chat-linux-$arch.tar.gz" VERSION deeix-chat frontend
+            (cd dist && sha256sum "deeix-chat-linux-$arch.tar.gz" > "deeix-chat-linux-$arch.tar.gz.sha256")
           done
       - name: Generate release manifest
         shell: bash
         run: |
-          repo="$GITHUB_REPOSITORY"; image="${{ steps.image.outputs.repository }}"; digest="${{ steps.image.outputs.digest }}"
+          repo="$GITHUB_REPOSITORY"
           published=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          amd64_sha=$(sha256sum dist/deeix-chat-linux-amd64.tar.gz | awk '{print $1}')
+          arm64_sha=$(sha256sum dist/deeix-chat-linux-arm64.tar.gz | awk '{print $1}')
+          amd64_size=$(stat -c '%s' dist/deeix-chat-linux-amd64.tar.gz)
+          arm64_size=$(stat -c '%s' dist/deeix-chat-linux-arm64.tar.gz)
+          base="https://github.com/$repo/releases/download/$GITHUB_REF_NAME"
           cat > dist/update-manifest.json <<EOF
-          {"schemaVersion":1,"repository":"$repo","tag":"$GITHUB_REF_NAME","version":"${GITHUB_REF_NAME#v}","commit":"$GITHUB_SHA","publishedAt":"$published","imageRepository":"$image","imageDigest":"$digest","releaseURL":"https://github.com/$repo/releases/tag/$GITHUB_REF_NAME","platforms":["linux/amd64","linux/arm64"]}
+          {"schemaVersion":2,"repository":"$repo","tag":"$GITHUB_REF_NAME","version":"${GITHUB_REF_NAME#v}","commit":"$GITHUB_SHA","publishedAt":"$published","releaseURL":"https://github.com/$repo/releases/tag/$GITHUB_REF_NAME","bundles":[{"platform":"linux/amd64","url":"$base/deeix-chat-linux-amd64.tar.gz","sha256":"sha256:$amd64_sha","size":$amd64_size},{"platform":"linux/arm64","url":"$base/deeix-chat-linux-arm64.tar.gz","sha256":"sha256:$arm64_sha","size":$arm64_size}]}
           EOF
           (cd dist && sha256sum update-manifest.json > update-manifest.json.sha256)
       - name: Publish release assets
@@ -188,4 +195,4 @@ jobs:
         shell: bash
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-updater-linux-*.tar.gz dist/deeix-updater-linux-*.tar.gz.sha256 --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 --clobber

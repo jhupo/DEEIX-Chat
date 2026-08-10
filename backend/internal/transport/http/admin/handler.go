@@ -43,11 +43,11 @@ type conversationExportManifest struct {
 type Handler struct {
 	service            *appadmin.Service
 	conversationExport conversationExporter
-	updater            *update.Client
+	updater            *update.Updater
 }
 
-// SetUpdater attaches the private host updater client.
-func (h *Handler) SetUpdater(client *update.Client) { h.updater = client }
+// SetUpdater attaches the in-process application updater.
+func (h *Handler) SetUpdater(updater *update.Updater) { h.updater = updater }
 
 // NewHandler 创建处理器。
 func NewHandler(service *appadmin.Service) *Handler {

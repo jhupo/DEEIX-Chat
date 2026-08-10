@@ -7,7 +7,9 @@ type Candidate struct {
 	Tag            string    `json:"tag"`
 	ReleaseURL     string    `json:"releaseURL"`
 	ManifestDigest string    `json:"manifestDigest"`
-	ImageRef       string    `json:"imageRef"`
+	BundleURL      string    `json:"bundleURL"`
+	BundleDigest   string    `json:"bundleDigest"`
+	BundleSize     int64     `json:"bundleSize"`
 	Commit         string    `json:"commit"`
 	PublishedAt    time.Time `json:"publishedAt"`
 }
@@ -23,7 +25,6 @@ type Job struct {
 
 type Status struct {
 	InstalledVersion string     `json:"installedVersion"`
-	InstalledDigest  string     `json:"installedDigest,omitempty"`
 	Candidate        *Candidate `json:"candidate,omitempty"`
 	UpdateAvailable  bool       `json:"updateAvailable"`
 	Job              *Job       `json:"job,omitempty"`

@@ -5,7 +5,9 @@ export type AdminUpdateCandidate = {
   tag: string;
   releaseURL: string;
   manifestDigest: string;
-  imageRef: string;
+  bundleURL: string;
+  bundleDigest: string;
+  bundleSize: number;
   commit: string;
   publishedAt: string;
 };
@@ -21,7 +23,6 @@ export type AdminUpdateJob = {
 
 export type AdminUpdateStatus = {
   installedVersion: string;
-  installedDigest?: string;
   candidate?: AdminUpdateCandidate;
   updateAvailable: boolean;
   job?: AdminUpdateJob;
@@ -46,4 +47,8 @@ export function installAdminUpdate(accessToken: string, idempotencyKey: string, 
 
 export function getAdminUpdateJob(accessToken: string, jobID: string) {
   return authedRequest<AdminUpdateJob>(`/api/v1/admin/update/jobs/${encodeURIComponent(jobID)}`, { accessToken }, true);
+}
+
+export function restartAdminUpdate(accessToken: string) {
+  return authedRequest<{ restarting: boolean }>("/api/v1/admin/update/restart", { method: "POST", accessToken }, true);
 }

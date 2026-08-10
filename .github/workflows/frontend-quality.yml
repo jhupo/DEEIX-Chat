@@ -16,8 +16,8 @@ on:
       - "Dockerfile"
       - "compose.yaml"
       - "config.example.yaml"
+      - "deploy/docker-entrypoint.sh"
       - "scripts/sync-version.mjs"
-      - "scripts/install-deeix-updater.sh"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
   pull_request:
@@ -35,8 +35,8 @@ on:
       - "Dockerfile"
       - "compose.yaml"
       - "config.example.yaml"
+      - "deploy/docker-entrypoint.sh"
       - "scripts/sync-version.mjs"
-      - "scripts/install-deeix-updater.sh"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
   workflow_dispatch:

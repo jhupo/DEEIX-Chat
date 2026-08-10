@@ -75,14 +75,16 @@ COPY --from=runtime-deps /etc/ssl/certs /etc/ssl/certs
 COPY --from=runtime-deps /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=runtime-deps /etc/localtime /etc/localtime
 COPY --from=runtime-deps /etc/timezone /etc/timezone
-COPY --from=backend-builder /out/deeix-chat /app/deeix-chat
-COPY --from=frontend-builder /src/frontend/out /app/frontend/out
+COPY --from=backend-builder /out/deeix-chat /app/image-runtime/deeix-chat
+COPY --from=frontend-builder /src/frontend/out /app/image-runtime/frontend/out
+COPY VERSION /app/image-runtime/VERSION
+COPY --chmod=0755 deploy/docker-entrypoint.sh /usr/local/bin/deeix-chat-entrypoint
 COPY LICENSE NOTICE /app/licenses/DEEIX-Chat/
 
-ENV FRONTEND_DIST_DIR=/app/frontend/out
+ENV FRONTEND_DIST_DIR=/app/runtime/current/frontend/out
 
 EXPOSE 8080
 
-VOLUME ["/app/storage", "/app/data"]
+VOLUME ["/app/storage", "/app/data", "/app/runtime"]
 
-CMD ["/app/deeix-chat"]
+ENTRYPOINT ["/usr/local/bin/deeix-chat-entrypoint"]

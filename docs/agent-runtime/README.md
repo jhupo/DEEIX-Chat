@@ -31,7 +31,7 @@ Web /agent -> /api/v1/agent/*         -> AgentThread / Turn / Item
 | [03-protocol-and-data-model.md](./03-protocol-and-data-model.md) | REST/WSS contract、表、事务、状态机与保留策略 |
 | [04-source-migration.md](./04-source-migration.md) | 当前源码 retain/add/modify 清单与实施批次 |
 | [05-web-experience.md](./05-web-experience.md) | `/agent` launcher/workbench、侧栏、reducer 与可访问流程 |
-| [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md) | target Full Docker profile、tag release 和 Superadmin host-updater online update |
+| [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md) | Full Docker、tag 全量应用包、持久化运行卷和 Superadmin 在线更新 |
 | [07-sub2api-account-and-billing.md](./07-sub2api-account-and-billing.md) | 历史 Sub2API 双 authority 调研；已由 08 替代 |
 | [08-clean-slate-identity-commerce-runtime.md](./08-clean-slate-identity-commerce-runtime.md) | 只改 DEEIX：Sub2 REST 登录与 commerce BFF、保留订阅/充值/兑换 UI、Chat-only key binding、本地现有 key 的 HMAC 准入证明 |
 

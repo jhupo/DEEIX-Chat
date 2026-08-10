@@ -12,6 +12,7 @@ func (m *Module) RegisterRoutes(adminGroup *gin.RouterGroup) {
 	updates.GET("/status", m.Handler.UpdateStatus)
 	updates.POST("/check", m.Handler.CheckUpdate)
 	updates.POST("/install", m.Handler.InstallUpdate)
+	updates.POST("/restart", m.Handler.RestartAfterUpdate)
 	updates.GET("/jobs/:job_id", m.Handler.UpdateJob)
 	adminGroup.POST("/users", m.Handler.CreateUser)
 	adminGroup.GET("/users", m.Handler.ListUsers)

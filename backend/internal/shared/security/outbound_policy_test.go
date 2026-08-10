@@ -39,7 +39,7 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 			files:  map[string]struct{}{},
 		},
 		"&http.Client{": {
-			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries; updater.go is limited to the fixed GitHub release boundary with allowGitHubRedirect, while client.go dials only its configured Unix socket",
+			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries; updater.go is limited to the fixed GitHub release boundary with allowGitHubRedirect",
 			files: allowFiles(
 				"internal/infra/embedding/client.go",
 				"internal/infra/extract/mineru/client.go",
@@ -49,7 +49,6 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 				"internal/infra/mediaartifact/client.go",
 				"internal/infra/observability/tracing/http.go",
 				"internal/shared/security/outbound.go",
-				"internal/update/client.go",
 				"internal/update/updater.go",
 			),
 		},

@@ -3,16 +3,25 @@ package admin
 import (
 	"context"
 	"errors"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/update"
 	"net/http"
+	"os"
 	"testing"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/update"
 )
 
 func TestMapUpdateError(t *testing.T) {
 	cases := []struct {
 		err    error
 		status int
-	}{{errors.New("network"), 503}, {context.DeadlineExceeded, 504}, {&update.HTTPError{Status: http.StatusBadRequest}, 400}, {&update.HTTPError{Status: http.StatusNotFound}, 404}, {&update.HTTPError{Status: http.StatusConflict}, 409}, {&update.HTTPError{Status: http.StatusInternalServerError}, 502}, {&update.HTTPError{Status: http.StatusBadGateway}, 502}}
+	}{
+		{errors.New("internal"), http.StatusInternalServerError},
+		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{update.ErrInvalidRequest, http.StatusBadRequest},
+		{os.ErrNotExist, http.StatusNotFound},
+		{update.ErrConflict, http.StatusConflict},
+		{update.ErrUpstream, http.StatusBadGateway},
+	}
 	for _, tc := range cases {
 		got, _ := mapUpdateError(tc.err)
 		if got != tc.status {

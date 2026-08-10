@@ -21,6 +21,7 @@ import {
   getAdminUpdateJob,
   getAdminUpdateStatus,
   installAdminUpdate,
+  restartAdminUpdate,
   type AdminUpdateJob,
   type AdminUpdateStatus,
 } from "@/features/admin/api/update";
@@ -54,7 +55,11 @@ function dialogForStatus(status: AdminUpdateStatus): DialogState {
 
 function relevantJob(status: AdminUpdateStatus): AdminUpdateJob | undefined {
   const job = status.job;
-  if (!job || (terminalStatuses.has(job.status) && job.version !== status.candidate?.version)) {
+  if (
+    !job ||
+    (terminalStatuses.has(job.status) &&
+      (job.version !== status.candidate?.version || job.version === status.installedVersion))
+  ) {
     return undefined;
   }
   return job;
@@ -93,6 +98,7 @@ function AdminUpdateCheck() {
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState(false);
+  const [restartError, setRestartError] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [key, setKey] = useState("");
   const completedJobID = useRef("");
@@ -186,6 +192,32 @@ function AdminUpdateCheck() {
     }
   };
 
+  const restart = async () => {
+    if (!candidate || reconnecting) return;
+    setRestartError(false);
+    setReconnecting(true);
+    try {
+      await restartAdminUpdate(accessToken);
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        try {
+          const next = await getAdminUpdateStatus(accessToken);
+          if (next.installedVersion === candidate.version) {
+            window.location.reload();
+            return;
+          }
+        } catch {
+          // The application is expected to be briefly unavailable while restarting.
+        }
+      }
+      setRestartError(true);
+    } catch {
+      setRestartError(true);
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
   const current = status?.installedVersion || packageMeta.version;
   const canInstall = Boolean(
     candidate &&
@@ -244,6 +276,9 @@ function AdminUpdateCheck() {
             {installError ? (
               <p className="mb-3 text-xs text-destructive">{t("updateDialog.installFailed")}</p>
             ) : null}
+            {restartError ? (
+              <p className="mb-3 text-xs text-destructive">{t("updateDialog.restartFailed")}</p>
+            ) : null}
             {candidate ? (
               <div className="rounded-md bg-muted/50 px-3 py-2 text-xs">
                 <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
@@ -295,7 +330,7 @@ function AdminUpdateCheck() {
               </Button>
             ) : null}
             {jobStatus === "succeeded" ? (
-              <Button type="button" onClick={() => window.location.reload()}>
+              <Button type="button" disabled={reconnecting} onClick={() => void restart()}>
                 {t("updateDialog.reload")}
               </Button>
             ) : null}

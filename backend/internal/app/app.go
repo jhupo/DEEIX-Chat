@@ -60,6 +60,7 @@ import (
 	userrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/user"
 	usersettingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/usersettings"
 	platformruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/runtime"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
@@ -320,7 +321,19 @@ func NewApp() (*App, error) {
 	adminService.SetPermissionGroupModelLookup(channelRepo)
 	adminService.SetPermissionGroupBillingPlanReferenceChecker(billingService)
 	adminHandler := adminhttp.NewHandler(adminService)
-	adminHandler.SetUpdater(update.NewClient(cfg.UpdateSocketPath))
+	applicationUpdater, err := update.NewUpdater(update.Config{
+		Repository:      cfg.UpdateRepository,
+		RuntimeDir:      cfg.UpdateRuntimeDir,
+		StateFile:       cfg.UpdateStateFile,
+		CurrentVersion:  buildinfo.ResolveVersion(),
+		ProxyURL:        cfg.UpdateProxyURL,
+		DownloadTimeout: time.Duration(cfg.UpdateDownloadTimeoutSeconds) * time.Second,
+		Restart:         func() { os.Exit(0) },
+	})
+	if err != nil {
+		return nil, fmt.Errorf("init updater: %w", err)
+	}
+	adminHandler.SetUpdater(applicationUpdater)
 	adminHandler.SetConversationExporter(conversationService)
 	adminModule := adminhttp.NewModule(adminHandler)
 	userSettingsRepo := usersettingsrepo.NewRepo(db)

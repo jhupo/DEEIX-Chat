@@ -196,15 +196,19 @@ DEEIX_HTTP_PORT=50001
 | 数据 | 容器路径 |
 | --- | --- |
 | 上传文件和生成文件 | `/app/storage` |
+| 应用版本和当前运行版本 | `/app/runtime` |
+| 应用文件和更新日志 | `/app/data` |
 | PostgreSQL 数据 | `/var/lib/postgresql/data` |
 | Redis 数据 | `/data` |
 
-默认应用镜像为 `ghcr.io/jhupo/deeix-chat:latest`。测试自定义构建或 updater 选择的镜像时可通过 `DEEIX_CHAT_IMAGE` 覆盖：
+默认应用镜像为 `ghcr.io/jhupo/deeix-chat:latest`。测试自定义构建时可通过 `DEEIX_CHAT_IMAGE` 覆盖：
 
 ```bash
 docker build -t deeix-chat:local .
 DEEIX_CHAT_IMAGE=deeix-chat:local docker compose -f compose.yaml up -d
 ```
+
+稳定 tag 同时发布 Linux 全量应用包。Superadmin 可在“关于”页面检查、安装并重启应用；`app_runtime` 命名卷保证在线安装的版本在容器重启或重建后继续保留。服务器访问 GitHub 需要代理时，可把 `UPDATE_PROXY_URL` 设为 `http`、`https`、`socks5` 或 `socks5h` 转发代理。完整说明见 [Full 部署与在线更新](./agent-runtime/06-full-deployment-and-online-update.md)。
 
 `APP_ENV` 支持 `dev`/`development` 和 `prod`/`production`，内部会规范化为 `dev` 或 `prod`；未配置时默认 `prod`。`dev` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
 

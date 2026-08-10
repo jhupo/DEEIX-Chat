@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,8 @@ import (
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 	"gopkg.in/yaml.v3"
 )
+
+var regexpRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 const (
 	defaultAppName                      = "DEEIX Chat"
@@ -225,8 +228,14 @@ type yamlConfig struct {
 		ReadTimeoutSeconds       int    `yaml:"read_timeout_seconds"`
 		IdleTimeoutSeconds       int    `yaml:"idle_timeout_seconds"`
 		MaxHeaderBytes           int    `yaml:"max_header_bytes"`
-		UpdateSocketPath         string `yaml:"update_socket_path"`
 	} `yaml:"server"`
+	Update struct {
+		Repository             string `yaml:"repository"`
+		ProxyURL               string `yaml:"proxy_url"`
+		RuntimeDir             string `yaml:"runtime_dir"`
+		StateFile              string `yaml:"state_file"`
+		DownloadTimeoutSeconds int    `yaml:"download_timeout_seconds"`
+	} `yaml:"update"`
 	Security struct {
 		JWTSecret              string `yaml:"jwt_secret"`
 		DataEncryptionKey      string `yaml:"data_encryption_key"`
@@ -314,7 +323,11 @@ type Config struct {
 	HTTPReadTimeoutSeconds       int
 	HTTPIdleTimeoutSeconds       int
 	HTTPMaxHeaderBytes           int
-	UpdateSocketPath             string
+	UpdateRepository             string
+	UpdateProxyURL               string
+	UpdateRuntimeDir             string
+	UpdateStateFile              string
+	UpdateDownloadTimeoutSeconds int
 	JWTSecret                    string
 	DataEncryptionKey            string
 	SSRFProtectionEnabled        bool
@@ -540,7 +553,11 @@ func Load() Config {
 		HTTPReadTimeoutSeconds:       envOrInt("HTTP_READ_TIMEOUT_SECONDS", yc.Server.ReadTimeoutSeconds, defaultHTTPReadTimeoutSeconds),
 		HTTPIdleTimeoutSeconds:       envOrInt("HTTP_IDLE_TIMEOUT_SECONDS", yc.Server.IdleTimeoutSeconds, defaultHTTPIdleTimeoutSeconds),
 		HTTPMaxHeaderBytes:           envOrInt("HTTP_MAX_HEADER_BYTES", yc.Server.MaxHeaderBytes, defaultHTTPMaxHeaderBytes),
-		UpdateSocketPath:             envOr("UPDATE_SOCKET_PATH", yc.Server.UpdateSocketPath, "/run/deeix-updater/deeix-updater.sock"),
+		UpdateRepository:             envOr("UPDATE_REPOSITORY", yc.Update.Repository, "jhupo/DEEIX-Chat"),
+		UpdateProxyURL:               envOr("UPDATE_PROXY_URL", yc.Update.ProxyURL, ""),
+		UpdateRuntimeDir:             absoluteConfigPath(envOrPath("UPDATE_RUNTIME_DIR", yc.Update.RuntimeDir, "./data/runtime", yc.sourceDir)),
+		UpdateStateFile:              absoluteConfigPath(envOrPath("UPDATE_STATE_FILE", yc.Update.StateFile, "./data/update-journal.json", yc.sourceDir)),
+		UpdateDownloadTimeoutSeconds: envOrInt("UPDATE_DOWNLOAD_TIMEOUT_SECONDS", yc.Update.DownloadTimeoutSeconds, 1800),
 		JWTSecret:                    envOr("JWT_SECRET", yc.Security.JWTSecret, defaultJWTSecret),
 		DataEncryptionKey:            envOr("DATA_ENCRYPTION_KEY", yc.Security.DataEncryptionKey, defaultDataEncryptionKey),
 		SSRFProtectionEnabled:        envOrBoolPtr("SSRF_PROTECTION_ENABLED", yc.Security.SSRFProtectionEnabled, false),
@@ -722,8 +739,15 @@ func Load() Config {
 
 // Validate 检查关键配置是否合法。
 func (c Config) Validate() error {
-	if c.UpdateSocketPath != "" && (!strings.HasPrefix(c.UpdateSocketPath, "/") || strings.ContainsAny(c.UpdateSocketPath, "\r\n\t\x00")) {
-		return errors.New("invalid UPDATE_SOCKET_PATH")
+	updateConfigured := c.UpdateRepository != "" || c.UpdateProxyURL != "" || c.UpdateRuntimeDir != "" || c.UpdateStateFile != "" || c.UpdateDownloadTimeoutSeconds != 0
+	if updateConfigured && (!regexpRepository.MatchString(c.UpdateRepository) || !filepath.IsAbs(c.UpdateRuntimeDir) || !filepath.IsAbs(c.UpdateStateFile) || c.UpdateDownloadTimeoutSeconds < 30 || c.UpdateDownloadTimeoutSeconds > 7200) {
+		return errors.New("invalid update configuration")
+	}
+	if updateConfigured && c.UpdateProxyURL != "" {
+		proxyURL, err := url.Parse(c.UpdateProxyURL)
+		if err != nil || proxyURL.Host == "" || (proxyURL.Scheme != "http" && proxyURL.Scheme != "https" && proxyURL.Scheme != "socks5" && proxyURL.Scheme != "socks5h") || proxyURL.Path != "" || proxyURL.RawQuery != "" || proxyURL.Fragment != "" {
+			return errors.New("invalid UPDATE_PROXY_URL")
+		}
 	}
 	if err := c.validateDatabase(); err != nil {
 		return err
@@ -972,6 +996,14 @@ func resolveConfigPath(value string, sourceDir string) string {
 		return trimmed
 	}
 	return filepath.Clean(filepath.Join(sourceDir, trimmed))
+}
+
+func absoluteConfigPath(value string) string {
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return value
+	}
+	return absolute
 }
 
 func envOrInt(envKey string, yamlVal int, defaultVal int) int {

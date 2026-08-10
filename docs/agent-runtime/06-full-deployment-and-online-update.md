@@ -1,58 +1,98 @@
 # Full Deployment And Online Update
 
-| Area | v1 status | Later hardening |
-| --- | --- | --- |
-| Host updater | Implemented: systemd process, Unix socket, journal and lock | Updater self-update |
-| Release trust | Fixed GitHub repository, HTTPS, strict manifest and immutable digest | Signed attestations and verification |
-| Install authorization | Exact `superadmin` plus explicit browser confirmation | Step-up authentication and CSRF controls |
-| Failure handling | Pull failure is `failed`; post-start failure is `outcome_unknown` | Backup-aware, compatibility-aware rollback |
+DEEIX Chat has one deployment profile: application, PostgreSQL with pgvector, and Redis from the root `compose.yaml`. SQLite, memory-only cache, Lite deployment, and a host updater are not deployment options.
 
-## Operator Install And Upgrade
-
-For a stable release, download the matching `deeix-updater-linux-amd64.tar.gz` or `deeix-updater-linux-arm64.tar.gz`, verify its `.sha256`, and extract it. Each bundle contains `deeix-updater`, `deeix-updater.service`, and `install-deeix-updater.sh` in one directory. Run:
+## Initial Full Deployment
 
 ```bash
-sudo ./install-deeix-updater.sh /srv/deeix-chat owner/repo http://127.0.0.1:50001
-```
-
-The supplied deployment directory must be canonical and absolute, with regular non-symlink `compose.yaml` and `.env` files. The installer verifies Docker Compose/systemd/root access, atomically installs the binary and generated systemd unit, writes `/etc/deeix-updater/deeix-updater.env`, then enables and restarts the service. Its state is `/var/lib/deeix-updater/journal.json`; its socket is `/run/deeix-updater/deeix-updater.sock`.
-
-Set the application listener in the deployment `.env`; Compose keeps these values when the updater replaces only the app image:
-
-```dotenv
+cp config.example.yaml config.yaml
+cat > .env <<'EOF'
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
+EOF
+docker compose -f compose.yaml up -d
 ```
 
-The defaults are `DEEIX_BIND_ADDRESS=127.0.0.1` and `DEEIX_HTTP_PORT=8080`.
-When the installer URL argument is omitted, it derives the loopback URL from `DEEIX_HTTP_PORT`; an explicit URL remains limited to a loopback `http` or `https` URL.
+The application container uses `restart: unless-stopped`. PostgreSQL and Redis must pass their health checks before the application starts.
 
-The sole Full profile does not automatically migrate data or configuration from prior non-Full profiles. Preserve a validated backup before going live.
+## Persistent Data And Runtime
 
-For an existing host, stage `compose.yaml` and config; validate `docker compose -f compose.yaml config`; install or restart the matching updater so its environment points at `compose.yaml`; verify updater service/socket and application readiness; only then remove the old deployment compose artifact. No automatic rollback is claimed.
+| Named volume | Container path | Ownership |
+| --- | --- | --- |
+| `deeix-chat-app-storage` | `/app/storage` | Uploaded and generated files |
+| `deeix-chat-app-data` | `/app/data` | Application files and update journal |
+| `deeix-chat-app-runtime` | `/app/runtime` | Active and previously installed application releases |
+| `deeix-chat-postgres-data` | `/var/lib/postgresql/data` | PostgreSQL business data and migrations |
+| `deeix-chat-redis-data` | `/data` | Redis cache and wake state |
 
-## Release Contract And Boundary
+An online update writes only `deeix-chat-app-runtime` and the journal in `deeix-chat-app-data`. It does not recreate PostgreSQL, flush Redis, replace `config.yaml`, or touch uploaded files.
 
-The updater derives the only feed from `https://github.com/<owner/repo>/releases/latest/download/update-manifest.json`. Schema v1 fixes repository, stable `vMAJOR.MINOR.PATCH` tag/version, commit, UTC publication time, release URL, GHCR repository, Linux platforms, and `sha256:` image digest. The manifest digest is SHA-256 over the exact downloaded bytes. It pulls only `ghcr.io/<owner/repo>@sha256:<digest>`.
+The image contains a baseline release under `/app/image-runtime`. The entrypoint seeds that release into the runtime volume on first boot and atomically selects `/app/runtime/current`. If a later container image contains a version newer than the active runtime release, it seeds and selects the image version. Recreating the container with the same named volume preserves an application release installed online.
 
-This is a v1 trust boundary: HTTPS to the configured GitHub repository and strict digest validation. It does not claim signed release verification. The app mounts only `/run/deeix-updater` read-only; it never receives `docker.sock`, a Compose path, registry URL, command, or host credential. The host updater is the only Docker/Compose authority.
+## Online Update Flow
 
-## Admin API And UI
+The Superadmin About page uses these endpoints:
 
-The application exposes `GET /api/v1/admin/update/status`, `POST /api/v1/admin/update/check`, `POST /api/v1/admin/update/install`, and `GET /api/v1/admin/update/jobs/:job_id`. Each requires the exact `superadmin` role. Install accepts only `version`, `manifestDigest`, `confirmation`, and required `Idempotency-Key`; actor user ID/name and request ID are derived server-side and journaled.
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/update/status` | Read running version, candidate, and latest job |
+| `POST` | `/api/v1/admin/update/check` | Fetch and validate the latest release manifest |
+| `POST` | `/api/v1/admin/update/install` | Download, verify, extract, and activate a release |
+| `GET` | `/api/v1/admin/update/jobs/:job_id` | Poll durable job progress |
+| `POST` | `/api/v1/admin/update/restart` | Exit after the HTTP response so Docker restarts into the active release |
 
-The About dialog checks through this API, displays current/candidate versions and release notes, then requires a second in-dialog confirmation. It retains one idempotency key per install attempt and polls the durable job across app replacement. There is no browser-to-GitHub update check and no rollback control.
+All endpoints require the exact `superadmin` role. Install requests require an `Idempotency-Key` plus exact version, manifest digest, and confirmation string. Actor identity and request ID come from the authenticated server context and are journaled.
 
-## Journal, Lock, And Crash Semantics
+Jobs progress through `queued`, `pulling`, `applying`, then `succeeded`, `failed`, or `outcome_unknown`. A process restart during a nonterminal job records `outcome_unknown`. Installation success means the bundle is active on disk; the UI then offers **Restart and apply**, waits for the target version to answer, and reloads.
 
-Jobs progress through `queued`, `pulling`, `applying`, `verifying`, then `succeeded`, `failed`, or `outcome_unknown`. A cross-process create-exclusive lock is written before the queued job is durable and released only after a terminal outcome. Restart converts nonterminal jobs to `outcome_unknown` and removes the recovered lock; an orphan lock without a matching job fails closed for operator reconciliation. Idempotency replay returns its recorded job; a changed request or actor binding conflicts.
+## Release Contract
 
-Before candidate start, a pull failure leaves `.env` untouched. The updater passes the digest-pinned candidate image explicitly to both `docker compose pull app` and `docker compose up -d --no-deps app`, then checks the running app container image exactly matches that candidate. After application start begins, a command/readiness/version/image-verification error remains `outcome_unknown`. No automatic or UI rollback is attempted because application startup currently runs PostgreSQL migrations and there is no manifest compatibility plus verified backup/restore contract.
+The only feed is:
 
-## Tag Workflow And Verification
+```text
+https://github.com/<repository>/releases/latest/download/update-manifest.json
+```
 
-Stable tags must exactly equal `v$(cat VERSION)`. The release workflow keeps the existing branch/dev multiarch image flow, resolves the published multiarch digest, builds static Linux amd64/arm64 updater bundles, writes compact `update-manifest.json` plus checksums whose entries use release asset basenames, and creates or updates the GitHub Release assets.
+Schema v2 fixes the repository, stable `vMAJOR.MINOR.PATCH` tag/version, 40-character commit, UTC publication time, canonical GitHub release URL, and one application bundle per Linux architecture. Each bundle entry includes the canonical GitHub Release asset URL, exact byte size, and `sha256:` digest.
 
-Local disposable-copy verification passed the updater and config suites and the Linux updater cross-build. `gofmt`, `bash -n scripts/install-deeix-updater.sh`, `pnpm --filter @deeix/web check`, and `git diff --check` also passed locally. The exact Go 1.26.5 full backend suite, `docker compose -f compose.yaml config`, and `actionlint` remain CI/deployment-machine verification because the local toolchain or executables are unavailable.
+The updater selects only `linux/amd64` or `linux/arm64` matching the running process. It limits manifest, archive, and extracted sizes; verifies the exact byte count and SHA-256; rejects absolute paths, traversal, links, devices, and other special archive entries; requires `VERSION`, `deeix-chat`, and `frontend/out/index.html`; and atomically switches the `current` symlink only after validation.
 
-Future work retains signed attestations, step-up/CSRF protection, backup/restore, compatibility-aware rollback, and updater self-update.
+No Docker socket, Compose command, host credential, or registry credential is available to the application. Online update does not rebuild an image on the server.
+
+## Update Proxy
+
+`UPDATE_PROXY_URL` or `update.proxy_url` accepts a forward proxy URL using `http`, `https`, `socks5`, or `socks5h`:
+
+```dotenv
+UPDATE_PROXY_URL=http://127.0.0.1:7890
+```
+
+The proxy is applied to both the GitHub manifest request and Release bundle download. A URL-prefix download mirror is a different mechanism and is not accepted as this setting. Leave the value empty for a direct connection.
+
+## Tag Workflow
+
+A stable tag must equal `v$(cat VERSION)`. The release job builds the static frontend once, compiles the server for Linux amd64 and arm64, and publishes:
+
+```text
+deeix-chat-linux-amd64.tar.gz
+deeix-chat-linux-amd64.tar.gz.sha256
+deeix-chat-linux-arm64.tar.gz
+deeix-chat-linux-arm64.tar.gz.sha256
+update-manifest.json
+update-manifest.json.sha256
+```
+
+Each application archive has the same top-level layout expected by the updater: `VERSION`, `deeix-chat`, and `frontend/out`.
+
+## One-Time Migration From The Host Updater
+
+Deploy the first image containing this architecture with the current `compose.yaml`:
+
+```bash
+docker compose -f compose.yaml pull app
+docker compose -f compose.yaml up -d app
+```
+
+Verify `/readyz`, `/api/v1/version`, login, conversation history, PostgreSQL, Redis, and uploaded files. After that verification, remove the old host updater service and socket mount. Future stable application releases use the admin online update flow.
+
+There is no automatic database rollback. Application startup keeps the existing migration behavior, so production operators still need normal PostgreSQL backups before releases that introduce schema migrations.

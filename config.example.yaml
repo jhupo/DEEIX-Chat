@@ -17,6 +17,16 @@ server:
   idle_timeout_seconds: 120
   max_header_bytes: 1048576
 
+update:
+  # Stable GitHub release feed. Full deployment persists installed bundles in
+  # the app_runtime Docker volume and restarts through the container policy.
+  repository: "jhupo/DEEIX-Chat"
+  # Optional forward proxy: http, https, socks5, or socks5h.
+  proxy_url: ""
+  runtime_dir: "./data/runtime"
+  state_file: "./data/update-journal.json"
+  download_timeout_seconds: 1800
+
 security:
   # Required. Replace both values with strong random secrets before deployment.
   # Required. data_encryption_key protects upstream API keys, SSO secrets, MCP tokens, and TOTP secrets.
