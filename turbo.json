@@ -19,7 +19,8 @@
       "dependsOn": ["^check"]
     },
     "test": {
-      "dependsOn": ["^test"]
+      "dependsOn": ["^test"],
+      "env": ["DEEIX_TEST_DATABASE_DSN", "DEEIX_TEST_REDIS_ADDR"]
     },
     "dev": {
       "cache": false,
