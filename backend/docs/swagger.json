@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.2"
+        "version": "0.4.3"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -15844,19 +15844,14 @@
             "type": "object",
             "required": [
                 "amountMinorUnits",
-                "cancelURL",
                 "cycles",
                 "orderType",
                 "paymentProvider",
-                "priceID",
-                "successURL"
+                "priceID"
             ],
             "properties": {
                 "amountMinorUnits": {
                     "type": "integer"
-                },
-                "cancelURL": {
-                    "type": "string"
                 },
                 "cycles": {
                     "type": "integer"
@@ -15869,9 +15864,6 @@
                 },
                 "priceID": {
                     "type": "integer"
-                },
-                "successURL": {
-                    "type": "string"
                 }
             }
         },

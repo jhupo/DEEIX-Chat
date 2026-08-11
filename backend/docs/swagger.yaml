@@ -4320,8 +4320,6 @@ definitions:
     properties:
       amountMinorUnits:
         type: integer
-      cancelURL:
-        type: string
       cycles:
         type: integer
       orderType:
@@ -4330,16 +4328,12 @@ definitions:
         type: string
       priceID:
         type: integer
-      successURL:
-        type: string
     required:
     - amountMinorUnits
-    - cancelURL
     - cycles
     - orderType
     - paymentProvider
     - priceID
-    - successURL
     type: object
   Sub2CheckoutResponseDoc:
     properties:
@@ -6186,7 +6180,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.2"
+  version: "0.4.3"
 paths:
   /admin/announcements:
     get:

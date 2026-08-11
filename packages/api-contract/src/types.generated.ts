@@ -1933,12 +1933,10 @@ export interface Sub2CheckoutDataDTO {
 
 export interface Sub2CheckoutRequest {
   amountMinorUnits: number;
-  cancelURL: string;
   cycles: number;
   orderType: string;
   paymentProvider: string;
   priceID: number;
-  successURL: string;
 }
 
 export interface Sub2CheckoutResponseDoc {

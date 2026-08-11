@@ -34,7 +34,6 @@ type CheckoutInput struct {
 	PriceID          int64
 	AmountMinorUnits int64
 	PaymentProvider  string
-	SuccessURL       string
 }
 type CheckoutResult struct {
 	OrderNo            string
@@ -87,7 +86,6 @@ func (s *Service) Checkout(ctx context.Context, userID uint, sessionID, idempote
 	order := sub2api.CreatePaymentOrderInput{
 		OrderType:     mapOrderType(input.OrderType),
 		PaymentType:   input.PaymentProvider,
-		ReturnURL:     input.SuccessURL,
 		PaymentSource: "hosted_redirect",
 		IsMobile:      false,
 	}

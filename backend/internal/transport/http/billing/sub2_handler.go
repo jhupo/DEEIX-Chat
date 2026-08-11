@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -240,8 +239,6 @@ type Sub2CheckoutRequest struct {
 	AmountMinorUnits int64  `json:"amountMinorUnits"`
 	Cycles           *int   `json:"cycles"`
 	PaymentProvider  string `json:"paymentProvider"`
-	SuccessURL       string `json:"successURL"`
-	CancelURL        string `json:"cancelURL"`
 }
 type Sub2RedeemRequest struct {
 	Code string `json:"code"`
@@ -420,11 +417,11 @@ func (h *Sub2Handler) RedemptionHistory(c *gin.Context) {
 func (h *Sub2Handler) Checkout(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var req Sub2CheckoutRequest
-	if err := c.ShouldBindJSON(&req); err != nil || !validSub2CheckoutRequest(c, req) || !canonicalUUID(c.GetHeader("Idempotency-Key")) {
+	if err := c.ShouldBindJSON(&req); err != nil || !validSub2CheckoutRequest(req) || !canonicalUUID(c.GetHeader("Idempotency-Key")) {
 		response.Error(c, http.StatusBadRequest, "invalid checkout request")
 		return
 	}
-	result, err := h.service.Checkout(c, middleware.MustUserID(c), middleware.MustSessionID(c), strings.TrimSpace(c.GetHeader("Idempotency-Key")), app.CheckoutInput{OrderType: req.OrderType, PriceID: req.PriceID, AmountMinorUnits: req.AmountMinorUnits, PaymentProvider: req.PaymentProvider, SuccessURL: req.SuccessURL})
+	result, err := h.service.Checkout(c, middleware.MustUserID(c), middleware.MustSessionID(c), strings.TrimSpace(c.GetHeader("Idempotency-Key")), app.CheckoutInput{OrderType: req.OrderType, PriceID: req.PriceID, AmountMinorUnits: req.AmountMinorUnits, PaymentProvider: req.PaymentProvider})
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -476,7 +473,7 @@ func (h *Sub2Handler) writeWriteError(c *gin.Context, err error) {
 	}
 	response.Error(c, http.StatusBadGateway, "Sub2 service unavailable")
 }
-func validSub2CheckoutRequest(c *gin.Context, req Sub2CheckoutRequest) bool {
+func validSub2CheckoutRequest(req Sub2CheckoutRequest) bool {
 	if req.Cycles != nil && *req.Cycles != 1 {
 		return false
 	}
@@ -492,23 +489,7 @@ func validSub2CheckoutRequest(c *gin.Context, req Sub2CheckoutRequest) bool {
 	if req.OrderType == "topup" && (req.AmountMinorUnits < 100 || req.AmountMinorUnits > 2147483647) {
 		return false
 	}
-	publicHost := requestPublicHost(c)
-	return validReturnURL(publicHost, req.SuccessURL) && (req.CancelURL == "" || validReturnURL(publicHost, req.CancelURL))
-}
-
-func requestPublicHost(c *gin.Context) string {
-	if c == nil || c.Request == nil {
-		return ""
-	}
-	if host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host")); host != "" && !strings.Contains(host, ",") {
-		return host
-	}
-	return c.Request.Host
-}
-
-func validReturnURL(host, raw string) bool {
-	parsed, err := url.ParseRequestURI(strings.TrimSpace(raw))
-	return err == nil && !strings.Contains(raw, "#") && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == host && parsed.User == nil && parsed.Fragment == ""
+	return true
 }
 func canonicalUUID(raw string) bool {
 	parsed, err := uuid.Parse(strings.TrimSpace(raw))

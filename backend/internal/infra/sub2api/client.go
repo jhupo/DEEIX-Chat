@@ -102,7 +102,6 @@ type CreatePaymentOrderInput struct {
 	PlanID        int64   `json:"plan_id,omitempty"`
 	Amount        float64 `json:"amount,omitempty"`
 	PaymentType   string  `json:"payment_type"`
-	ReturnURL     string  `json:"return_url,omitempty"`
 	PaymentSource string  `json:"payment_source,omitempty"`
 	IsMobile      bool    `json:"is_mobile"`
 }

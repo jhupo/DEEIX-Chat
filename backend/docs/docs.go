@@ -15851,19 +15851,14 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "amountMinorUnits",
-                "cancelURL",
                 "cycles",
                 "orderType",
                 "paymentProvider",
-                "priceID",
-                "successURL"
+                "priceID"
             ],
             "properties": {
                 "amountMinorUnits": {
                     "type": "integer"
-                },
-                "cancelURL": {
-                    "type": "string"
                 },
                 "cycles": {
                     "type": "integer"
@@ -15876,9 +15871,6 @@ const docTemplate = `{
                 },
                 "priceID": {
                     "type": "integer"
-                },
-                "successURL": {
-                    "type": "string"
                 }
             }
         },
@@ -18511,7 +18503,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.2",
+	Version:          "0.4.3",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

@@ -141,8 +141,6 @@ export type CreateCheckoutRequest = {
   amountMinorUnits?: number;
   paymentProvider: string;
   cycles?: number;
-  successURL: string;
-  cancelURL?: string;
 };
 
 export type CheckoutData = {

@@ -9,7 +9,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 )
 
@@ -92,36 +91,22 @@ func TestSub2WriteNoStore(t *testing.T) {
 	}
 }
 func TestSub2CheckoutRequestValidation(t *testing.T) {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "http://app.example.test/billing/payments/checkout", nil)
-	c.Request.Host = "app.example.test"
-	valid := Sub2CheckoutRequest{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "https://app.example.test/ok"}
-	if !validSub2CheckoutRequest(c, valid) || !canonicalUUID("f47ac10b-58cc-4372-a567-0e02b2c3d479") {
+	valid := Sub2CheckoutRequest{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay"}
+	if !validSub2CheckoutRequest(valid) || !canonicalUUID("f47ac10b-58cc-4372-a567-0e02b2c3d479") {
 		t.Fatal("valid request rejected")
 	}
-	c.Request.Header.Set("X-Forwarded-Host", "chat.example.test")
-	proxied := Sub2CheckoutRequest{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "https://chat.example.test/ok"}
-	if !validSub2CheckoutRequest(c, proxied) {
-		t.Fatal("proxied public origin rejected")
-	}
-	c.Request.Header.Del("X-Forwarded-Host")
 	for _, value := range []Sub2CheckoutRequest{
-		{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "http://other.example.test/ok"},
-		{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "ftp://app.example.test/ok"},
-		{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "https://user@app.example.test/ok"},
-		{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "https://app.example.test/ok#x"},
-		{OrderType: "topup", AmountMinorUnits: 99, PaymentProvider: "alipay", SuccessURL: "https://app.example.test/ok"},
-		{OrderType: "subscription", PriceID: 0, PaymentProvider: "alipay", SuccessURL: "https://app.example.test/ok"},
+		{OrderType: "topup", AmountMinorUnits: 99, PaymentProvider: "alipay"},
+		{OrderType: "subscription", PriceID: 0, PaymentProvider: "alipay"},
+		{OrderType: "topup", AmountMinorUnits: 100},
+		{OrderType: "other", AmountMinorUnits: 100, PaymentProvider: "alipay"},
 	} {
-		if validSub2CheckoutRequest(c, value) {
+		if validSub2CheckoutRequest(value) {
 			t.Fatalf("invalid request accepted: %#v", value)
 		}
 	}
 	if canonicalUUID("not-a-uuid") {
 		t.Fatal("invalid UUID accepted")
-	}
-	if parsed, _ := url.Parse("https://app.example.test/ok"); parsed.Host != "app.example.test" {
-		t.Fatal("test URL malformed")
 	}
 }
 

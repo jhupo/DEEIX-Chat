@@ -100,7 +100,7 @@ func TestCheckoutPersistsKnownRemoteOrderAfterRequestCancellation(t *testing.T) 
 	repo := &atomicPaymentRepo{cancelBeforeComplete: cancel}
 	service := NewService(overviewTokenResolver{}, client, repo)
 	key := "f47ac10b-58cc-4372-a567-0e02b2c3d483"
-	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "http://example.test/return"}
+	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay"}
 	if _, err = service.Checkout(ctx, 1, "s", key, input); !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("checkout error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestCheckoutRecoversKnownRemoteOrderAfterCompletionWriteFailure(t *testing.
 	repo := &atomicPaymentRepo{failNextCompleteWrite: true}
 	service := NewService(overviewTokenResolver{}, client, repo)
 	key := "f47ac10b-58cc-4372-a567-0e02b2c3d481"
-	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "http://example.test/return"}
+	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay"}
 	if _, err = service.Checkout(context.Background(), 1, "s", key, input); !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("checkout error = %v", err)
 	}
@@ -157,7 +157,11 @@ func TestCheckoutIdempotencyStateMachine(t *testing.T) {
 	mux.HandleFunc("/api/v1/payment/orders", func(w http.ResponseWriter, r *http.Request) {
 		posts++
 		var request map[string]any
-		if json.NewDecoder(r.Body).Decode(&request) != nil || request["is_mobile"] != false || request["payment_source"] != "hosted_redirect" {
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			t.Fatalf("decode QR checkout request: %#v", request)
+		}
+		_, hasReturnURL := request["return_url"]
+		if request["is_mobile"] != false || request["payment_source"] != "hosted_redirect" || hasReturnURL {
 			t.Fatalf("unexpected QR checkout request: %#v", request)
 		}
 		if failing {
@@ -182,7 +186,7 @@ func TestCheckoutIdempotencyStateMachine(t *testing.T) {
 	repo := &atomicPaymentRepo{}
 	service := NewService(overviewTokenResolver{}, client, repo)
 	key := "f47ac10b-58cc-4372-a567-0e02b2c3d479"
-	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay", SuccessURL: "http://example.test/return"}
+	input := CheckoutInput{OrderType: "topup", AmountMinorUnits: 100, PaymentProvider: "alipay"}
 	first, err := service.Checkout(context.Background(), 1, "s", key, input)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +201,7 @@ func TestCheckoutIdempotencyStateMachine(t *testing.T) {
 	if _, err = service.Checkout(context.Background(), 1, "s", key, input); !errors.Is(err, ErrCheckoutAlreadyCreated) || posts != 1 {
 		t.Fatalf("replay err=%v posts=%d", err, posts)
 	}
-	if _, err = service.Checkout(context.Background(), 1, "s", key, CheckoutInput{OrderType: "topup", AmountMinorUnits: 200, PaymentProvider: "alipay", SuccessURL: "http://example.test/return"}); !errors.Is(err, ErrIdempotencyConflict) || posts != 1 {
+	if _, err = service.Checkout(context.Background(), 1, "s", key, CheckoutInput{OrderType: "topup", AmountMinorUnits: 200, PaymentProvider: "alipay"}); !errors.Is(err, ErrIdempotencyConflict) || posts != 1 {
 		t.Fatalf("conflict err=%v posts=%d", err, posts)
 	}
 	failing = true

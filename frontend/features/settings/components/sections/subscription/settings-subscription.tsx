@@ -87,13 +87,6 @@ type BillingRuntimeConfig = BillingConfigData["config"];
 type PaymentProvider = string;
 type PendingPayment = CheckoutData["checkout"] & { operationID: string };
 
-function paymentReturnURL(operationID: string, state: "success" | "cancel"): string {
-  const url = new URL("/setting/subscription", window.location.origin);
-  url.searchParams.set("payment", state);
-  url.searchParams.set("operation", operationID);
-  return url.toString();
-}
-
 export function SettingsSubscription() {
   const t = useTranslations("settings.subscriptionPage");
   const resolveErrorMessage = useLocalizedErrorMessage();
@@ -128,7 +121,6 @@ export function SettingsSubscription() {
   const [redemptionLoading, setRedemptionLoading] = React.useState(false);
   const [pendingPayment, setPendingPayment] = React.useState<PendingPayment | null>(null);
   const [paymentVerificationLoading, setPaymentVerificationLoading] = React.useState(false);
-  const paymentVerificationRef = React.useRef("");
   const billingMode: BillingMode = billingConfig?.mode ?? "usage";
   const billingDisplay = React.useMemo<BillingDisplayOptions>(
     () => ({
@@ -228,26 +220,6 @@ export function SettingsSubscription() {
   }, [accessToken, loadBillingData, loadUsageLogs, resolveErrorMessage, t]);
 
   React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const state = params.get("payment");
-    const operationID = params.get("operation") ?? "";
-    if ((state !== "success" && state !== "cancel") || !/^[0-9a-f-]{36}$/.test(operationID)) return;
-
-    if (state === "cancel") {
-      window.history.replaceState({}, "", window.location.pathname);
-      return;
-    }
-    if (paymentVerificationRef.current === operationID) return;
-    paymentVerificationRef.current = operationID;
-
-    void verifyPayment(operationID).then((verified) => {
-      if (verified) {
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    });
-  }, [verifyPayment]);
-
-  React.useEffect(() => {
     void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort);
   }, [loadUsageLogs, usageBillingType, usagePage, usagePageSize, usageQuery, usageSort]);
 
@@ -268,8 +240,6 @@ export function SettingsSubscription() {
         priceID: price.id,
         cycles: 1,
         paymentProvider,
-        successURL: paymentReturnURL(operationID, "success"),
-        cancelURL: paymentReturnURL(operationID, "cancel"),
       }, operationID);
       if (!data.checkout.checkoutURL && !data.checkout.qrCode) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
@@ -299,8 +269,6 @@ export function SettingsSubscription() {
         amountMinorUnits,
         cycles: 1,
         paymentProvider: selectedPaymentProvider,
-        successURL: paymentReturnURL(operationID, "success"),
-        cancelURL: paymentReturnURL(operationID, "cancel"),
       }, operationID);
       if (!data.checkout.checkoutURL && !data.checkout.qrCode) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
