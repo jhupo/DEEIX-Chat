@@ -37,3 +37,22 @@ func TestCleanupExpiredInMemoryCaches(t *testing.T) {
 		t.Fatal("expected fresh user setting cache entry to remain")
 	}
 }
+
+func TestInvalidateUserSettingCache(t *testing.T) {
+	svc := &Service{}
+	expiresAt := time.Now().Add(time.Minute)
+	svc.userSettingCache.Store("1:chat.default_protocol", &cachedUserSetting{value: "openai_chat_completions", valid: true, expiresAt: expiresAt})
+	svc.userSettingCache.Store("1:chat.file_mode", &cachedUserSetting{value: "auto", valid: true, expiresAt: expiresAt})
+	svc.userSettingCache.Store("2:chat.default_protocol", &cachedUserSetting{value: "openai_responses", valid: true, expiresAt: expiresAt})
+
+	svc.InvalidateUserSettingCache(1)
+
+	for _, key := range []string{"1:chat.default_protocol", "1:chat.file_mode"} {
+		if _, ok := svc.userSettingCache.Load(key); ok {
+			t.Fatalf("expected %s to be invalidated", key)
+		}
+	}
+	if _, ok := svc.userSettingCache.Load("2:chat.default_protocol"); !ok {
+		t.Fatal("expected another user's cache entry to remain")
+	}
+}

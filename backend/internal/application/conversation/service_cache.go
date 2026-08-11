@@ -83,6 +83,18 @@ func (s *Service) getUserSettingCached(ctx context.Context, userID uint, key str
 	return val, nil
 }
 
+// InvalidateUserSettingCache removes every cached setting for one user.
+func (s *Service) InvalidateUserSettingCache(userID uint) {
+	prefix := fmt.Sprintf("%d:", userID)
+	s.userSettingCache.Range(func(key, _ interface{}) bool {
+		cacheKey, ok := key.(string)
+		if ok && len(cacheKey) >= len(prefix) && cacheKey[:len(prefix)] == prefix {
+			s.userSettingCache.Delete(key)
+		}
+		return true
+	})
+}
+
 // getCachedUserMemories 从内存缓存读取用户长期记忆，未命中时回退到 DB 查询。
 func (s *Service) getCachedUserMemories(ctx context.Context, userID uint) ([]domainmemory.UserMemory, error) {
 	if v, ok := s.userMemCache.Load(userID); ok {

@@ -1,6 +1,42 @@
 package usersettings
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	domainusersettings "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/usersettings"
+)
+
+type userSettingsRepoStub struct {
+	items []domainusersettings.UserSetting
+}
+
+func (r *userSettingsRepoStub) ListByUserID(_ context.Context, userID uint) ([]domainusersettings.UserSetting, error) {
+	result := make([]domainusersettings.UserSetting, 0, len(r.items))
+	for _, item := range r.items {
+		if item.UserID == userID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func (r *userSettingsRepoStub) Upsert(_ context.Context, items []domainusersettings.UserSetting) error {
+	for _, incoming := range items {
+		updated := false
+		for i := range r.items {
+			if r.items[i].UserID == incoming.UserID && r.items[i].Key == incoming.Key {
+				r.items[i] = incoming
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			r.items = append(r.items, incoming)
+		}
+	}
+	return nil
+}
 
 func TestValidateDefaultMCPToolIDs(t *testing.T) {
 	t.Parallel()
@@ -80,6 +116,28 @@ func TestDefaultChatProtocolSettingIsAllowed(t *testing.T) {
 	}
 	if err := validateValue(key, "custom_protocol"); err == nil {
 		t.Fatal("expected unknown chat protocol to be rejected")
+	}
+}
+
+func TestPatchSettingsInvalidatesConversationSettingCache(t *testing.T) {
+	repo := &userSettingsRepoStub{}
+	service := NewService(repo)
+	invalidatedUserID := uint(0)
+	service.SetCacheInvalidator(func(userID uint) {
+		invalidatedUserID = userID
+	})
+
+	settings, err := service.PatchSettings(t.Context(), 7, map[string]string{
+		"chat.default_protocol": "openai_responses",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidatedUserID != 7 {
+		t.Fatalf("cache invalidated for user %d, want 7", invalidatedUserID)
+	}
+	if got := settings["chat.default_protocol"]; got != "openai_responses" {
+		t.Fatalf("saved protocol = %q, want openai_responses", got)
 	}
 }
 

@@ -132,12 +132,18 @@ func IsValidationError(err error) bool {
 
 // Service 封装用户配置业务逻辑。
 type Service struct {
-	repo repository.UserSettingsRepository
+	repo             repository.UserSettingsRepository
+	cacheInvalidator func(userID uint)
 }
 
 // NewService 创建服务。
 func NewService(repo repository.UserSettingsRepository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetCacheInvalidator registers the conversation cache invalidation callback.
+func (s *Service) SetCacheInvalidator(fn func(userID uint)) {
+	s.cacheInvalidator = fn
 }
 
 // ListSettings 返回指定用户的全部配置，缺失的 key 用默认值填充。
@@ -181,6 +187,9 @@ func (s *Service) PatchSettings(ctx context.Context, userID uint, patches map[st
 	}
 	if err := s.repo.Upsert(ctx, items); err != nil {
 		return nil, err
+	}
+	if s.cacheInvalidator != nil {
+		s.cacheInvalidator(userID)
 	}
 	return s.ListSettings(ctx, userID)
 }
