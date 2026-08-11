@@ -313,9 +313,6 @@
       "year": "year",
       "month": "month"
     },
-    "commerce": {
-      "open": "Top up & subscribe"
-    },
     "periodUsage": {
       "title": "Plan usage",
       "currentPeriod": "Current billing period",

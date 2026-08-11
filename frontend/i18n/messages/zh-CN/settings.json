@@ -313,9 +313,6 @@
       "year": "年",
       "month": "月"
     },
-    "commerce": {
-      "open": "充值与订阅"
-    },
     "periodUsage": {
       "title": "套餐使用情况",
       "currentPeriod": "当前计费周期",

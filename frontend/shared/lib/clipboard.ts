@@ -26,7 +26,8 @@ export async function writeClipboardText(value: string): Promise<void> {
   const selection = document.getSelection();
   const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null;
 
-  document.body.appendChild(textarea);
+  const container = activeElement?.closest<HTMLElement>("[role=dialog]") ?? document.body;
+  container.appendChild(textarea);
   textarea.focus({ preventScroll: true });
   textarea.select();
   textarea.setSelectionRange(0, value.length);

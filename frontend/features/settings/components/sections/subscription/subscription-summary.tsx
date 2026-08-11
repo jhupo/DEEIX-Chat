@@ -1,17 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Banknote, Check, ChevronDown, Ticket, WalletCards } from "lucide-react";
+import { Banknote, Check, Ticket, WalletCards } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { SpinnerLabel } from "@/components/ui/spinner";
 import type { BillingOverviewData } from "@/shared/api/billing.types";
@@ -243,29 +237,20 @@ export function SubscriptionSummary({
             title={t("usageBilling.title")}
             value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
             action={
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button type="button" variant="outline" disabled={billingLoading}>
-                    <WalletCards className="size-3.5" />
-                    {t("commerce.open")}
-                    <ChevronDown className="size-3.5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-44">
-                  <DropdownMenuItem disabled={topUpLoading || paymentDisabled} onSelect={() => onOpenTopUpDialog()}>
-                    <Banknote className="size-3.5" />
-                    {t("topUp.title")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={billingPlans.length === 0} onSelect={() => onPricingDialogOpenChange(true)}>
-                    <WalletCards className="size-3.5" />
-                    {t("plans.title")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={redemptionLoading} onSelect={() => onOpenRedemptionDialog()}>
-                    <Ticket className="size-3.5" />
-                    {t("redemption.title")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <div className="grid grid-cols-3 gap-2">
+                <Button type="button" variant="outline" disabled={redemptionLoading} onClick={onOpenRedemptionDialog}>
+                  <Ticket className="size-3.5" />
+                  {t("redemption.open")}
+                </Button>
+                <Button type="button" variant="outline" disabled={topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
+                  <Banknote className="size-3.5" />
+                  {t("topUp.title")}
+                </Button>
+                <Button type="button" variant="outline" disabled={billingPlans.length === 0} onClick={() => onPricingDialogOpenChange(true)}>
+                  <WalletCards className="size-3.5" />
+                  {t("plans.actions.subscribe")}
+                </Button>
+              </div>
             }
           />
         </section>
