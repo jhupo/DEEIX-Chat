@@ -372,6 +372,9 @@
     },
     "plans": {
       "title": "Subscription plans",
+      "currentBadge": "Current",
+      "originalPrice": "Was {price}",
+      "discount": "Save {percent}%",
       "actions": {
         "current": "Current plan",
         "unavailable": "Unavailable",

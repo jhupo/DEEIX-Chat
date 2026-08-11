@@ -4,12 +4,12 @@ import * as React from "react";
 import { Banknote, Check, Ticket, WalletCards } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { SpinnerLabel } from "@/components/ui/spinner";
-import type { BillingOverviewData } from "@/shared/api/billing.types";
-import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
+import { resolvePlanDiscountPercent } from "@/features/settings/model/plan-discount";
 import {
   formatAccountBalance,
   formatPlanCredit,
@@ -23,6 +23,7 @@ import {
   resolvePlanButtonVariant,
   resolvePlanFeatures,
 } from "@/features/settings/model/subscription-format";
+import type { BillingOverviewData, BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
 import type { BillingDisplayOptions } from "@/shared/lib/billing-display";
 import { formatBillingDisplayAmountFromUSD } from "@/shared/lib/billing-display";
 
@@ -263,103 +264,69 @@ export function SubscriptionSummary({
       ) : null}
 
       <Dialog open={pricingDialogOpen} onOpenChange={onPricingDialogOpenChange}>
-        <DialogContent className="xl:max-w-[1040px] xl:p-6">
+        <DialogContent className="sm:max-w-[680px] sm:p-6">
           <DialogHeader>
             <DialogTitle>{t("plans.title")}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-2 xl:hidden">
+          <div className="grid max-h-[min(72vh,42rem)] grid-cols-2 gap-3 overflow-y-auto pr-1">
             {billingPlans.map((plan) => {
               const price = resolveDefaultPrice(plan);
               const isCurrent = isCurrentBillingPlan(plan, currentPlan);
               const actionKind = resolvePlanActionKind(plan, price, isCurrent, currentPlan, protectedPaidPlanRank);
               const actionLabel = resolvePlanActionLabel(actionKind, planActionLabels);
               const disabled = billingLoading || actionKind === "current" || actionKind === "freeBlocked" || actionKind === "unavailable" || checkoutPriceID === price?.id;
+              const features = resolvePlanFeatures(plan, planFeatureLabels, billingDisplay).slice(0, 2);
               const isSelected = selectedPlan?.id === plan.id;
               const isHighlighted = isCurrent || isSelected;
               const buttonVariant = resolvePlanButtonVariant(actionKind);
-              const actionButton = (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 shrink-0 px-3 shadow-none"
-                  variant={buttonVariant}
-                  disabled={disabled}
-                  onClick={() => onSelectPlan(plan, price, isCurrent)}
-                >
-                  {checkoutPriceID === price?.id ? <SpinnerLabel>{t("actions.processing")}</SpinnerLabel> : actionLabel}
-                </Button>
-              );
+              const discountPercent = price ? resolvePlanDiscountPercent(plan.originalPriceCents, price.amountCents) : null;
+              const originalPrice = price && discountPercent
+                ? formatPlanPrice({ ...price, amountCents: plan.originalPriceCents }, intervalLabels, billingDisplay)
+                : "";
               return (
-                <div
+                <article
                   key={plan.id}
                   className={[
-                    "flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-3 transition-colors",
-                    isHighlighted ? "ring-1 ring-foreground" : "hover:bg-muted/45",
+                    "flex min-h-60 flex-col rounded-lg border bg-background p-4 transition-colors",
+                    isHighlighted ? "border-foreground ring-1 ring-foreground" : "border-border/70 hover:bg-muted/25",
                   ].join(" ")}
                 >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <p className="truncate text-sm font-medium">{plan.name}</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
-                  </div>
-                  {actionButton}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="hidden gap-4 pt-4 xl:grid xl:grid-cols-4">
-            {billingPlans.map((plan) => {
-              const price = resolveDefaultPrice(plan);
-              const isCurrent = isCurrentBillingPlan(plan, currentPlan);
-              const actionKind = resolvePlanActionKind(plan, price, isCurrent, currentPlan, protectedPaidPlanRank);
-              const actionLabel = resolvePlanActionLabel(actionKind, planActionLabels);
-              const disabled = billingLoading || actionKind === "current" || actionKind === "freeBlocked" || actionKind === "unavailable" || checkoutPriceID === price?.id;
-              const features = resolvePlanFeatures(plan, planFeatureLabels, billingDisplay).slice(0, 6);
-              const isSelected = selectedPlan?.id === plan.id;
-              const isHighlighted = isCurrent || isSelected;
-              const buttonVariant = resolvePlanButtonVariant(actionKind);
-              const actionButton = (
-                <Button
-                  type="button"
-                  className="mt-6 w-full shadow-none"
-                  variant={buttonVariant}
-                  disabled={disabled}
-                  onClick={() => onSelectPlan(plan, price, isCurrent)}
-                >
-                  {checkoutPriceID === price?.id ? <SpinnerLabel>{t("actions.processing")}</SpinnerLabel> : actionLabel}
-                </Button>
-              );
-              return (
-                <div
-                  key={plan.id}
-                  className={[
-                    "flex min-h-[26rem] flex-col rounded-lg border border-transparent bg-muted/30 p-5 transition-colors",
-                    isHighlighted ? "ring-2 ring-foreground" : "hover:bg-muted/45",
-                  ].join(" ")}
-                >
-                  <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="truncate text-lg font-semibold">{plan.name}</h3>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-2xl font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
-                    </div>
+                  <div className="flex min-w-0 items-start justify-between gap-2">
+                    <h3 className="truncate text-sm font-semibold">{plan.name}</h3>
+                    {isCurrent ? <Badge variant="secondary">{t("plans.currentBadge")}</Badge> : null}
                   </div>
 
-                  {actionButton}
+                  <p className="mt-4 text-lg font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
+                  <div className="mt-1 flex min-h-5 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {discountPercent ? (
+                      <>
+                        <span className="line-through">{t("plans.originalPrice", { price: originalPrice })}</span>
+                        <Badge variant="outline">{t("plans.discount", { percent: discountPercent })}</Badge>
+                      </>
+                    ) : null}
+                  </div>
 
-                  <div className="mt-6 hidden space-y-3 sm:block">
+                  <div className="mt-4 space-y-2">
                     {features.map((feature) => (
-                      <div key={feature} className="flex items-start gap-3 text-xs text-muted-foreground">
-                        <Check className="mt-0.5 size-3.5 shrink-0 text-foreground" />
-                        <span className="leading-5">{feature}</span>
+                      <div key={feature} className="flex items-start gap-2 text-xs text-muted-foreground">
+                        <Check className="mt-0.5 size-3 shrink-0 text-foreground" />
+                        <span className="line-clamp-2 leading-4">{feature}</span>
                       </div>
                     ))}
                   </div>
-                </div>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-auto w-full shadow-none"
+                    variant={buttonVariant}
+                    disabled={disabled}
+                    onClick={() => onSelectPlan(plan, price, isCurrent)}
+                  >
+                    {checkoutPriceID === price?.id ? <SpinnerLabel>{t("actions.processing")}</SpinnerLabel> : actionLabel}
+                  </Button>
+                </article>
               );
             })}
           </div>

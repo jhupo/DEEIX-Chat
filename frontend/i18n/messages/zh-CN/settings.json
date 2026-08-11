@@ -372,6 +372,9 @@
     },
     "plans": {
       "title": "订阅方案",
+      "currentBadge": "当前",
+      "originalPrice": "原价 {price}",
+      "discount": "省 {percent}%",
       "actions": {
         "current": "当前方案",
         "unavailable": "不可用",
