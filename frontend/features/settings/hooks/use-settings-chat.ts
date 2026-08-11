@@ -12,7 +12,7 @@ import {
 } from "@/features/settings/utils/chat-settings";
 import { dispatchUserSettingsUpdated } from "@/features/settings/events/user-settings-events";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
-import { listChatModels } from "@/shared/api/sub2-key";
+import { listPublicModels } from "@/shared/api/model";
 import { getChatContextPolicy } from "@/shared/api/settings";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
@@ -28,7 +28,7 @@ type UseSettingsChatResult = {
   handleDefaultModel: (value: string) => void;
 };
 
-export function useSettingsChat(defaultKeyBindingID: string): UseSettingsChatResult {
+export function useSettingsChat(): UseSettingsChatResult {
   const t = useTranslations("settings.chatPage.toasts");
   const translateError = useLocalizedErrorMessage();
   const { accessToken } = useAuthSession();
@@ -45,9 +45,7 @@ export function useSettingsChat(defaultKeyBindingID: string): UseSettingsChatRes
       try {
         const [map, modelList, contextPolicy] = await Promise.all([
           getUserSettings(accessToken),
-          defaultKeyBindingID
-            ? listChatModels(accessToken, defaultKeyBindingID).catch((): PublicModelDTO[] => [])
-            : Promise.resolve([] as PublicModelDTO[]),
+          listPublicModels(accessToken).catch((): PublicModelDTO[] => []),
           getChatContextPolicy(accessToken).catch(() => ({ contextCompactEnabled: false })),
         ]);
 
@@ -68,7 +66,7 @@ export function useSettingsChat(defaultKeyBindingID: string): UseSettingsChatRes
     return () => {
       cancelled = true;
     };
-  }, [accessToken, defaultKeyBindingID]);
+  }, [accessToken]);
 
   const modelGroups = React.useMemo(() => groupModelsForPresentation(models), [models]);
 

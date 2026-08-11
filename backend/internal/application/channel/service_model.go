@@ -68,12 +68,31 @@ func (s *Service) ListActiveModels(ctx context.Context, userID uint) ([]ModelVie
 	return s.filterModelsByPermission(ctx, userID, views)
 }
 
+// ResolveChatModel resolves one administrator-published model for a user.
+func (s *Service) ResolveChatModel(ctx context.Context, userID uint, platformModelName string) (*ModelView, error) {
+	name, err := normalizePlatformModelName(platformModelName)
+	if err != nil {
+		return nil, ErrModelNotFound
+	}
+	models, err := s.ListActiveModels(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range models {
+		if models[i].PlatformModelName == name {
+			model := models[i]
+			return &model, nil
+		}
+	}
+	return nil, ErrModelAccessDenied
+}
+
 func (s *Service) listActiveModelViews(ctx context.Context) ([]ModelView, error) {
 	items, err := s.listAllActiveModelRows(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return filterPublicRoutableModels(items), nil
+	return filterPublishedModels(items), nil
 }
 
 // filterModelsByPermission 按权限组过滤用户可访问的模型。
@@ -181,13 +200,10 @@ func cloneModelViews(items []ModelView) []ModelView {
 	return results
 }
 
-// filterPublicRoutableModels 过滤出公开接口可展示的有效可路由模型。
-func filterPublicRoutableModels(items []repository.ChannelModelListRow) []ModelView {
+// filterPublishedModels keeps the active public catalog configured by administrators.
+func filterPublishedModels(items []repository.ChannelModelListRow) []ModelView {
 	results := make([]ModelView, 0, len(items))
 	for _, item := range items {
-		if item.ActiveSourceCount <= 0 {
-			continue
-		}
 		if normalizeModelAccessScopeValue(item.AccessScope) != ModelAccessScopePublic {
 			continue
 		}

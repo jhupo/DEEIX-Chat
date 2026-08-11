@@ -196,7 +196,7 @@ v0.4 在修改 schema 前拒绝已填充的遗留 identity schema。先备份当
 
 #### 配置、持久化和镜像
 
-配置优先级是：`环境变量 > config.yaml > 代码内置默认值`。`config.yaml` 负责品牌和静态基础设施、安全配置，例如品牌资源、服务地址、数据库、缓存、存储、GeoIP、Trace、JWT 和加密密钥。运行时业务配置存储在数据库中，并通过后台管理修改。
+配置优先级是：`环境变量 > config.yaml > 代码内置默认值`。`config.yaml` 负责品牌和静态基础设施、安全配置，例如品牌资源、服务地址、数据库、缓存、存储、GeoIP、Trace、JWT 和加密密钥。DEEIX 自有运行时业务配置存储在数据库中，并通过后台管理修改；身份、用户公告、余额、订阅、套餐、用量、支付和兑换只通过当前登录用户的服务端 Sub2 session 读取或修改。对话模型与展示分组来自管理员发布的 DEEIX 模型目录，默认 Sub2 密钥只在对话设置中选择，发送时静默使用。
 
 唯一 compose 栈会持久化应用数据：
 
@@ -358,7 +358,7 @@ docker compose -f compose.yaml logs app
 | OpenTelemetry | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP exporter 协议：`grpc`、`http` 或 `http/protobuf`；默认 `grpc`。 |
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace 采样率，范围 `0~1`；`OTEL_TRACES_SAMPLER_ARG` 优先。 |
 
-DEEIX Token 有效期、限流、登录后路径、会话配置、模型参数策略、文件处理、RAG、Embedding、MCP、计费、支付和公告属于运行时业务配置。登录、注册、邮箱验证、登录因子、用户角色和账户状态由 Sub2 管理，DEEIX 后台不再重复提供这些控制项。
+DEEIX Token 有效期、限流、登录后路径、会话配置、管理员发布的模型目录与分组、模型参数策略、文件处理、RAG、Embedding 和 MCP 属于运行时业务配置。登录、注册、邮箱验证、登录因子、用户角色、账户状态、用户公告、计费和支付由 Sub2 管理，DEEIX 不再复制这些权威数据。
 
 生产环境启用 SSRF 防护后，管理员保存的模型、MCP 和 Embedding endpoint 按精确 origin（协议、主机和端口）获得局部授权，不需要加入全局白名单。跨 origin 的公网重定向可以继续访问，跨 origin 的私网重定向必须命中 `SSRF_ALLOWED_HOSTS` 或 `SSRF_ALLOWED_CIDRS`。模型生成的图片或视频由后端下载、校验并转存；私网制品 URL 只有与本次选中的模型 endpoint 同 origin 时才继承局部信任。`SUB2_BASE_URL` 独立按规范 origin 校验，且重定向不得改变 origin。链路本地、组播、未指定地址和已知云元数据目标始终禁止。
 

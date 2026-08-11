@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	domainsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/sub2key"
@@ -26,6 +27,8 @@ var (
 const (
 	remoteKeyPageSize = 100
 	maxRemoteKeys     = 10_000
+	remoteKeyCacheTTL = time.Minute
+	remoteKeyCacheMax = 256
 )
 
 type TokenResolver interface {
@@ -61,16 +64,11 @@ type RemoteKeyView struct {
 	Bound           bool
 	BindingPublicID *string
 }
-type ModelView struct {
-	ID          string
-	DisplayName string
-}
 type Execution struct {
 	BindingPublicID string
 	BindingVersion  uint
 	RemoteKeyID     int64
 	APIKey          string
-	Model           string
 }
 
 type Service struct {
@@ -78,10 +76,18 @@ type Service struct {
 	tokens        TokenResolver
 	client        *sub2api.Client
 	encryptionKey string
+	remoteCacheMu sync.Mutex
+	remoteCache   map[string]remoteKeyCacheEntry
+}
+
+type remoteKeyCacheEntry struct {
+	profile   sub2api.UserProfile
+	keys      []sub2api.APIKey
+	expiresAt time.Time
 }
 
 func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, client *sub2api.Client, encryptionKey string) *Service {
-	return &Service{repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey}
+	return &Service{repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey, remoteCache: make(map[string]remoteKeyCacheEntry)}
 }
 
 func (s *Service) List(ctx context.Context, principalID uint, sessionID string) ([]BindingView, error) {
@@ -128,15 +134,7 @@ func (s *Service) Bind(ctx context.Context, principalID uint, sessionID string, 
 	if replay, err := s.replayBinding(ctx, principalID, idempotencyKey, requestHash); err != nil || replay != nil {
 		return replay, err
 	}
-	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	profile, err := s.client.UserProfile(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := s.remoteKeys(ctx, token, profile.ID)
+	profile, keys, err := s.currentRemoteKeys(ctx, principalID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -212,42 +210,6 @@ func (s *Service) ResolveBinding(ctx context.Context, principalID uint, publicID
 	}
 	return &Execution{BindingPublicID: item.PublicID, BindingVersion: item.Version, RemoteKeyID: item.RemoteKeyID, APIKey: key}, nil
 }
-func (s *Service) ValidateModel(ctx context.Context, execution *Execution, requestedModel string) (*Execution, error) {
-	if execution == nil || strings.TrimSpace(execution.APIKey) == "" || strings.TrimSpace(requestedModel) == "" {
-		return nil, ErrInvalidBinding
-	}
-	models, err := s.client.GatewayModels(ctx, execution.APIKey)
-	if err != nil {
-		return nil, err
-	}
-	for _, candidate := range models.Data {
-		if candidate.ID == requestedModel {
-			validated := *execution
-			validated.Model = candidate.ID
-			return &validated, nil
-		}
-	}
-	return nil, ErrBindingUnavailable
-}
-func (s *Service) Models(ctx context.Context, principalID uint, publicID string) ([]ModelView, error) {
-	execution, err := s.ResolveBinding(ctx, principalID, publicID)
-	if err != nil {
-		return nil, err
-	}
-	models, err := s.client.GatewayModels(ctx, execution.APIKey)
-	if err != nil {
-		return nil, err
-	}
-	views := make([]ModelView, 0, len(models.Data))
-	for _, model := range models.Data {
-		name := strings.TrimSpace(model.DisplayName)
-		if name == "" {
-			name = model.ID
-		}
-		views = append(views, ModelView{ID: model.ID, DisplayName: name})
-	}
-	return views, nil
-}
 func (s *Service) remoteKeys(ctx context.Context, token string, expectedUserID int64) ([]sub2api.APIKey, error) {
 	keys := make([]sub2api.APIKey, 0)
 	total := -1
@@ -278,6 +240,19 @@ func (s *Service) remoteKeys(ctx context.Context, token string, expectedUserID i
 	}
 }
 func (s *Service) currentRemoteKeys(ctx context.Context, principalID uint, sessionID string) (*sub2api.UserProfile, []sub2api.APIKey, error) {
+	cacheKey := fmt.Sprintf("%d:%s", principalID, strings.TrimSpace(sessionID))
+	now := time.Now()
+	s.remoteCacheMu.Lock()
+	s.pruneRemoteCacheLocked(now, 0)
+	entry, found := s.remoteCache[cacheKey]
+	if found {
+		profile := entry.profile
+		keys := append([]sub2api.APIKey(nil), entry.keys...)
+		s.remoteCacheMu.Unlock()
+		return &profile, keys, nil
+	}
+	s.remoteCacheMu.Unlock()
+
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
 	if err != nil {
 		return nil, nil, err
@@ -290,7 +265,40 @@ func (s *Service) currentRemoteKeys(ctx context.Context, principalID uint, sessi
 	if err != nil {
 		return nil, nil, err
 	}
+	storedAt := time.Now()
+	s.remoteCacheMu.Lock()
+	reserve := 1
+	if _, exists := s.remoteCache[cacheKey]; exists {
+		reserve = 0
+	}
+	s.pruneRemoteCacheLocked(storedAt, reserve)
+	s.remoteCache[cacheKey] = remoteKeyCacheEntry{
+		profile: *profile, keys: append([]sub2api.APIKey(nil), keys...), expiresAt: storedAt.Add(remoteKeyCacheTTL),
+	}
+	s.remoteCacheMu.Unlock()
 	return profile, keys, nil
+}
+
+func (s *Service) pruneRemoteCacheLocked(now time.Time, reserve int) {
+	for key, entry := range s.remoteCache {
+		if !now.Before(entry.expiresAt) {
+			delete(s.remoteCache, key)
+		}
+	}
+	for len(s.remoteCache)+reserve > remoteKeyCacheMax {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for key, entry := range s.remoteCache {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey = key
+				oldestExpiry = entry.expiresAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.remoteCache, oldestKey)
+	}
 }
 
 func (s *Service) synchronizedBindings(ctx context.Context, principalID uint, sessionID string) ([]domainsub2key.Binding, error) {

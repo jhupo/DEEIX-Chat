@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
@@ -13,9 +15,83 @@ import {
 } from "@/features/settings/model/subscription-format";
 import type { BillingDisplayOptions } from "@/shared/lib/billing-display";
 import { formatBillingDisplayAmountFromUSD } from "@/shared/lib/billing-display";
+import { createQRCodeDataURL } from "@/shared/lib/qr-code";
 import { calculateTopUpPreview } from "./top-up-preview";
 
 type PaymentProvider = string;
+
+type PendingPaymentDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  qrCode: string;
+  checkoutURL: string;
+  orderNo: string;
+  payAmountCents: number;
+  payCurrency: string;
+  verifying: boolean;
+  onVerify: () => void;
+};
+
+export function PendingPaymentDialog({
+  open,
+  onOpenChange,
+  qrCode,
+  checkoutURL,
+  orderNo,
+  payAmountCents,
+  payCurrency,
+  verifying,
+  onVerify,
+}: PendingPaymentDialogProps) {
+  const t = useTranslations("settings.subscriptionPage.payment");
+  const stableQRCode = useDialogSnapshot(open ? qrCode : null) ?? "";
+  const qrDataURL = React.useMemo(
+    () => createQRCodeDataURL(stableQRCode, 5, t("qrCodeAlt")),
+    [stableQRCode, t],
+  );
+  const amount = React.useMemo(() => {
+    const currency = payCurrency.trim().toUpperCase() || "CNY";
+    return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(payAmountCents / 100);
+  }, [payAmountCents, payCurrency]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px]">
+        <DialogHeader>
+          <DialogTitle>{t("pendingTitle")}</DialogTitle>
+          <DialogDescription>{t("pendingDescription", { amount })}</DialogDescription>
+        </DialogHeader>
+
+        <div className="flex min-h-56 items-center justify-center py-2">
+          {qrDataURL ? (
+            <img src={qrDataURL} alt={t("qrCodeAlt")} className="size-56 max-w-full bg-white object-contain" />
+          ) : (
+            <p className="text-center text-sm text-muted-foreground">{t("qrCodeUnavailable")}</p>
+          )}
+        </div>
+
+        <p className="truncate text-center font-mono text-xs text-muted-foreground" title={orderNo}>
+          {t("orderNo", { orderNo })}
+        </p>
+
+        <DialogFooter>
+          {checkoutURL ? (
+            <Button type="button" variant="outline" asChild>
+              <a href={checkoutURL} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+                {t("openCheckout")}
+              </a>
+            </Button>
+          ) : null}
+          <Button type="button" onClick={onVerify} disabled={verifying}>
+            <RefreshCw className={verifying ? "size-4 animate-spin" : "size-4"} />
+            {t("verifyStatus")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 function paymentMethodLabel(provider: string): string {
   const normalized = provider.trim().toLowerCase();

@@ -1,6 +1,6 @@
 # Clean-slate identity、订阅、Chat key 与本地 Runtime 设计
 
-> 状态：Phase 1 身份与会话基础、订阅页 commerce BFF 与普通 Chat key selector 已实现；Work/Bridge/Codex app-server Runtime 仍按本文后续阶段推进。
+> 状态：身份与会话基础、订阅页 commerce BFF、设置页默认 Chat key 与管理员模型目录已实现；Work/Bridge/Codex app-server Runtime 仍按本文后续阶段推进。
 >
 > 本文用于“不保留 DEEIX 本地账号密码、本地套餐、本地余额和本地计费兼容”的重构。
 > 它替代 [07-sub2api-account-and-billing.md](./07-sub2api-account-and-billing.md) 中的双 commerce authority 方案；
@@ -222,8 +222,8 @@ auth-proof 状态、最近上游错误和本地主机信息；设置页可以链
 
 ## 5. 仅用于 Chat 的 Sub2 key binding
 
-前端显示“密钥”选择器，但 Browser 永远不接收或提交 raw key。`Sub2KeyBinding` 是 DEEIX public ID 对该用户 Sub2 remote key
-的所有权受检绑定，只供普通 Chat 引用：
+默认密钥只在对话设置页选择，普通对话页不展示密钥控件。Browser 永远不接收或提交 raw key。`Sub2KeyBinding` 是 DEEIX public ID
+对该用户 Sub2 remote key 的所有权受检绑定，只供普通 Chat 引用：
 
 ```text
 Sub2KeyBinding
@@ -248,18 +248,19 @@ quota 和 expiry 返回 Browser；未选择的 raw key 不持久化。用户首�
 Chat API：
 
 ```http
+GET    /api/v1/me/sub2-keys
+GET    /api/v1/me/sub2-key-bindings
 POST   /api/v1/me/sub2-key-bindings
 DELETE /api/v1/me/sub2-key-bindings/:binding_id
-GET    /api/v1/chat/models?key_binding_id=BINDING
+GET    /api/v1/models
 ```
 
-key selector 和订阅页复用 commerce BFF 对 Sub2 `/keys` 的脱敏读取；已绑定项带 opaque `bindingId`，未绑定项只有 remote key
-metadata。`POST /api/v1/me/sub2-key-bindings` 的 DTO 是 `{ "remoteKeyID": 123 }`，使用 `Idempotency-Key`。Browser 只持久化该
-opaque DEEIX binding ID；默认值写入 DEEIX 用户设置 `chat.default_sub2_key_binding_id`，encrypted key material 仅保存在服务端。
-`GET /chat/models` 返回管理员 allowlist 与该 binding 的 key-authenticated `/models` 交集。key selector 和 model selector 是两个控件：
-先选 binding，再刷新可用 model；不把 key 伪装成 model group。
+设置页和订阅页复用 commerce BFF 对 Sub2 `/keys` 的脱敏读取；已绑定项带 opaque `bindingId`，未绑定项只有 remote key metadata。
+`POST /api/v1/me/sub2-key-bindings` 的 DTO 是 `{ "remoteKeyID": 123 }`，使用 `Idempotency-Key`。Browser 只持久化该 opaque DEEIX
+binding ID；默认值写入 DEEIX 用户设置 `chat.default_sub2_key_binding_id`，encrypted key material 仅保存在服务端。`GET /api/v1/models`
+独立返回当前用户有权访问的 DEEIX 管理员发布目录及展示分组，不调用 Sub2 `/v1/models`，也不以 key 或套餐推导模型目录。
 
-DEEIX 用户设置保存 `chat.default_sub2_key_binding_id` 作为新对话默认值；对话输入框切换 key 时同步更新该设置。每个 Run 在任何 route/network 前固定：
+DEEIX 用户设置保存 `chat.default_sub2_key_binding_id`；普通对话发送时静默读取该默认 binding。每个 Run 在任何 route/network 前固定：
 
 ```text
 principal_id
@@ -272,8 +273,9 @@ external_request_id
 known_token_usage
 ```
 
-切换 key 或 rotate 只影响新 Run。Run 开始时 binding 不属于当前 principal、状态失效、remote key 不可用或 model 不在交集时
-fail closed；不改用另一把 key。Conversation service 从 secret store 解析 key，直接以 deployment-fixed Sub2 base URL 请求模型端点。
+在设置页切换 key 或 rotate 只影响新 Run。Run 开始时 binding 不属于当前 principal、状态失效、remote key 不可用或请求模型不在
+DEEIX 管理员目录/权限范围时 fail closed；不改用另一把 key。Conversation service 从 secret store 解析 key，直接以 deployment-fixed
+Sub2 base URL 请求模型端点。
 不调用本地 `AuthorizeUsage`，不写本地金融 ledger；Sub2 返回的额度错误是执行结果。
 
 ## 6. 本地连接的 Codex Runtime
@@ -298,7 +300,7 @@ Bridge 在本机将它们解析为 raw app-server ID 和 canonical cwd。Codex a
 
 ### 6.1 硬边界
 
-- `/chat` 才有 Sub2 key selector；`/agent` 没有 key selector。
+- Sub2 key selector 只存在于普通对话设置页；`/chat` composer 与 `/agent` 都不展示该控件。
 - DEEIX 不创建或修改用户机器上的 `config.toml`、auth 文件、环境变量或系统 keychain。
 - Cloud 不向 Bridge 下发 Sub2 account token、Chat API key、gateway URL 或 provider config。
 - Bridge 只使用本地客户端/app-server 已经拥有的 auth；auth 不存在、过期或未匹配当前用户的 Sub2 key list 时，RuntimeProfile 不进入 `ready`。
@@ -430,14 +432,14 @@ profile 状态并调度 device command；它不读取 Chat `sub2_key_bindings`�
 | 页面 | 数据源 | 选择状态 |
 | --- | --- | --- |
 | `/setting/subscription` | `/billing/*` BFF -> Sub2 profile/payment/redeem/subscriptions/usage | 套餐购买、余额充值、兑换、订单/兑换/用量记录；通过既有页面刷新/重载控件手动刷新；无 local commerce mutation |
-| `/chat` | Sub2 key bindings + binding-scoped models | binding 与 model；Conversation 保存默认，Run 固定实际值 |
+| `/chat` | DEEIX 管理员发布的模型目录 + 服务端默认 Sub2 key binding | 对话页只选择管理员配置的模型与展示分组；默认 key 仅在对话设置中选择，发送时静默使用；Run 固定实际 model/binding/version |
 | `/agent` | Agent device/profile/workspace + app-server projection | 无 key selector；turn UI 选择 runtime/model/permission |
 | `/setting/account` | `GET /api/v1/me` composite、`/api/v1/auth/sessions`、Sub2 password-change BFF route | Principal projection、DEEIX browser sessions 和 password change |
 | `/setting/general` and chat preferences | DEEIX Principal/user-settings routes | displayName/avatar/timezone/locale/appearance/notification/conversation preferences；Sub2 profile 仅可在新 Principal 创建时提供初始投影，不进行写回 |
 | Runtime connections | Agent device APIs | pairing、revoke、online/schema/auth-proof status；不提供 auth 编辑 |
 
-Sub2 key 加载失败时保留当前选项的 disabled/error 状态，不静默切 key。binding 切换必须清理不再可用的 model 并要求用户
-确认新的有效 model。运行中的 stream 使用 Run pin，不响应另一个 tab 的 selector 变化。
+Sub2 key 加载失败时保留设置页的 disabled/error 状态，不静默切 key。对话页不展示 key selector，模型目录也不依赖 key；
+模型名称、展示分组、能力和可见范围由 DEEIX 管理员目录决定。运行中的 stream 使用 Run pin，不响应另一个 tab 的默认 key 或模型变化。
 
 Agent device 离线时历史 projection 仍可读，新 command 显示 `waiting_for_device`。auth 未证明时显示 `auth_verification_required`，
 只提供“重新校验”命令，不展示 key 输入框或 config 编辑器。不要把设备离线或 auth-proof failure 当作 Chat upstream failure，
@@ -452,7 +454,7 @@ Agent device 离线时历史 projection 仍可读，新 command 显示 `waiting_
 - `/api/v1/billing/*` 背后的 local repository/service、admin local billing、local checkout/top-up/redeem/subscribe 实现；这些 Web routes
   保留为具体 Sub2 commerce BFF；
 - 本地套餐/支付配置管理界面与本地钱包流水语义；现有 plan cards、支付/充值/兑换 dialogs、余额、订阅、用量和记录 UI 保留并改接 BFF；
-- 从 local plan/permission group 推导 Chat 模型资格的逻辑；模型资格改为 Sub2KeyBinding remote `/models` 与 admin allowlist 交集；
+- 从本地套餐推导 Chat 模型资格的逻辑，以及按 key 调用 Sub2 `/v1/models` 的目录路径；模型资格只由 DEEIX 管理员发布目录与权限组决定；
 - `User.subscriptionTier`、本地余额、password/2FA/email verification 等本地账户字段和流程；只保留经验证的 Sub2 BFF mapping 与 DEEIX browser-session security。
 - local TOTP recovery-code issue/regenerate DTO/backend branches，以及 usage 的 `balanceAfter`、local pricing snapshot/tooltips 和本地推算金额；保留 UI shell 时只显示有 Sub2 事实的字段。
 
@@ -522,9 +524,9 @@ create-order 不重放，也不从列表猜测绑定 remote order。
 
 ### Phase 2 - Sub2 key binding 与 Chat 执行
 
-实现 server-side Sub2 key list sanitization、选择时 encrypted binding、binding selector、binding-scoped `/models` 和 Run pin。验收：
-未选择 key 不落库、raw key 不出 Browser、不同用户同 key fingerprint conflict、binding switch 清理 model、并发 rotate、Run 中途
-切 key不漂移、Sub2 额度/key 错误原样归类且无本地回退、无本地 billing 调用。
+实现 server-side Sub2 key list sanitization、设置页默认 key 的 encrypted binding、DEEIX 管理员模型目录和 Run pin。验收：
+未选择 key 不落库、raw key 不出 Browser、对话页无 key selector、模型与展示分组不请求 Sub2 `/v1/models`、不同用户同 key fingerprint conflict、
+并发 rotate、Run 中途默认 key 变化不漂移、Sub2 额度/key 错误原样归类且无本地回退、无本地 billing 调用。
 
 ### Phase 3 - clean deletion
 
@@ -542,8 +544,8 @@ create-order 不重放，也不从列表猜测绑定 remote order。
 返回，Chat 与 Work 故障互不影响。
 
 最终端到端场景：用户以 Sub2 登录，在订阅页查看 Sub2 套餐/余额/订阅、购买套餐、充值、兑换并查看订单/兑换/用量记录；页面进入、
-每次操作完成或手动刷新时读取 Sub2 最新状态。在 Chat 选择一条 opaque
-`Sub2KeyBinding` 和可用模型并由 Sub2 实时扣费；在 Work 连接已经配置并已有 auth 的本地 Codex app-server，Bridge 对 challenge
+每次操作完成或手动刷新时读取 Sub2 最新状态。在对话设置中选择一条 opaque 默认 `Sub2KeyBinding`，在 Chat 仅选择 DEEIX 管理员发布的
+模型与展示分组，发送时静默使用默认 binding 并由 Sub2 实时扣费；在 Work 连接已经配置并已有 auth 的本地 Codex app-server，Bridge 对 challenge
 生成 HMAC proof，Cloud 用当前 Principal 的实时 Sub2 key list 匹配后才执行 thread。Chat key、Sub2 account token 与本地 Codex auth 三者互不复用；系统
 共享 Principal ownership，但不复制余额，也不混合 Chat/Agent 执行状态。
 

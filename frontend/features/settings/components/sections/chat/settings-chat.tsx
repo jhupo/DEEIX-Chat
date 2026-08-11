@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 
 import { Switch } from "@/components/ui/switch";
 import {
@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -432,7 +431,7 @@ export function SettingsChat() {
     handleBool,
     handleEnum,
     handleDefaultModel,
-  } = useSettingsChat(chatKeyBindings.selectedKeyBindingID);
+  } = useSettingsChat();
   const chatFont = useChatFontPreference();
   const chatFontWeight = useChatFontWeightPreference();
   const persistAppearancePreferences = useAppearancePreferencesPersistence();
@@ -516,21 +515,6 @@ export function SettingsChat() {
                   </SelectContent>
                 </Select>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => void chatKeyBindings.refresh()}
-                    disabled={chatKeyBindings.loading}
-                    aria-label={t("defaultKey.refresh")}
-                  >
-                    <RefreshCw className={chatKeyBindings.loading ? "animate-spin" : ""} />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{t("defaultKey.refresh")}</TooltipContent>
-              </Tooltip>
             </div>
           </SettingsFieldRow>
           <div className="pt-4">

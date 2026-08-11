@@ -119,6 +119,55 @@ func writeKeyEnvelope(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": value})
 }
 
+func TestRemoteKeyListUsesShortLivedCache(t *testing.T) {
+	profileCalls := 0
+	keyCalls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, _ *http.Request) {
+		profileCalls++
+		writeKeyEnvelope(w, map[string]any{"id": 7})
+	})
+	mux.HandleFunc("/api/v1/keys", func(w http.ResponseWriter, _ *http.Request) {
+		keyCalls++
+		writeKeyEnvelope(w, map[string]any{"total": 0, "items": []any{}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(keyTestRepo{}, keyTestTokens{}, client, "key")
+	for range 2 {
+		if _, _, err := service.currentRemoteKeys(context.Background(), 1, "session"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if profileCalls != 1 || keyCalls != 1 {
+		t.Fatalf("upstream calls = profile %d, keys %d", profileCalls, keyCalls)
+	}
+}
+
+func TestRemoteKeyCachePrunesExpiredEntriesAndStaysBounded(t *testing.T) {
+	now := time.Now()
+	service := &Service{remoteCache: make(map[string]remoteKeyCacheEntry)}
+	service.remoteCache["expired"] = remoteKeyCacheEntry{
+		keys:      []sub2api.APIKey{{Key: "raw-secret"}},
+		expiresAt: now.Add(-time.Second),
+	}
+	for i := 0; i < remoteKeyCacheMax+8; i++ {
+		service.remoteCache[strconv.Itoa(i)] = remoteKeyCacheEntry{expiresAt: now.Add(time.Duration(i+1) * time.Second)}
+	}
+
+	service.pruneRemoteCacheLocked(now, 0)
+	if _, found := service.remoteCache["expired"]; found {
+		t.Fatal("expired raw API key remained cached")
+	}
+	if len(service.remoteCache) != remoteKeyCacheMax {
+		t.Fatalf("cache size = %d, want %d", len(service.remoteCache), remoteKeyCacheMax)
+	}
+}
+
 type countingKeyRepo struct {
 	keyTestRepo
 	getCalls, revokeCalls int
@@ -256,9 +305,6 @@ func TestMalformedBindingPublicIDShortCircuitsRepositoryAndNetwork(t *testing.T)
 	for _, value := range []string{"", "sub2_0123456789abcdef0123456789abcde", "sub2_0123456789abcdef0123456789abcdeg", "sub2_0123456789ABCDEF0123456789abcdef"} {
 		if err := service.Delete(context.Background(), 1, value); err != ErrInvalidBinding {
 			t.Fatalf("Delete(%q) error = %v", value, err)
-		}
-		if _, err := service.Models(context.Background(), 1, value); err != ErrInvalidBinding {
-			t.Fatalf("Models(%q) error = %v", value, err)
 		}
 	}
 	if repo.getCalls != 0 || repo.revokeCalls != 0 {

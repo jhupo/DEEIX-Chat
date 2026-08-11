@@ -2,16 +2,27 @@ package announcement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	domainannouncement "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/announcement"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
+type announcementTokenResolver struct{}
+
+func (announcementTokenResolver) Sub2AccessTokenForSession(context.Context, uint, string) (string, error) {
+	return "token", nil
+}
+
 func TestCreateAnnouncementValidation(t *testing.T) {
-	service := NewService(&fakeRepo{})
+	service := NewService(&fakeRepo{}, nil, nil)
 	if _, err := service.Create(context.Background(), 1, WriteInput{Status: domainannouncement.StatusActive}); !errors.Is(err, ErrInvalidAnnouncement) {
 		t.Fatalf("Create() error = %v, want ErrInvalidAnnouncement", err)
 	}
@@ -24,7 +35,7 @@ func TestCreateAnnouncementAcceptsValidWindow(t *testing.T) {
 	start := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	repo := &fakeRepo{}
-	service := NewService(repo)
+	service := NewService(repo, nil, nil)
 
 	item, err := service.Create(context.Background(), 7, WriteInput{
 		Title:           "Notice",
@@ -46,49 +57,58 @@ func TestCreateAnnouncementAcceptsValidWindow(t *testing.T) {
 }
 
 func TestUpdateAnnouncementRejectsInvalidStatus(t *testing.T) {
-	service := NewService(&fakeRepo{})
+	service := NewService(&fakeRepo{}, nil, nil)
 	status := "archived"
 	if _, err := service.Update(context.Background(), 1, PatchInput{Status: &status}); !errors.Is(err, ErrInvalidAnnouncement) {
 		t.Fatalf("Update() error = %v, want ErrInvalidAnnouncement", err)
 	}
 }
 
-func TestDismissTodayRejectsInvalidInput(t *testing.T) {
-	service := NewService(&fakeRepo{})
-	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
-	if err := service.DismissToday(context.Background(), 0, 1, now, now, now.Add(time.Hour)); !errors.Is(err, repository.ErrInvalidInput) {
-		t.Fatalf("DismissToday() error = %v, want ErrInvalidInput", err)
-	}
-	if err := service.DismissToday(context.Background(), 1, 1, time.Time{}, now, now.Add(time.Hour)); !errors.Is(err, repository.ErrInvalidInput) {
-		t.Fatalf("DismissToday() error = %v, want ErrInvalidInput", err)
-	}
-	if err := service.DismissToday(context.Background(), 1, 1, now, now, now); !errors.Is(err, repository.ErrInvalidInput) {
-		t.Fatalf("DismissToday() error = %v, want ErrInvalidInput", err)
-	}
-}
-
-func TestListActivePassesIncludeDismissed(t *testing.T) {
-	repo := &fakeRepo{}
-	service := NewService(repo)
-	if _, err := service.ListActive(context.Background(), 1, time.Now(), true); err != nil {
-		t.Fatalf("ListActive() error = %v", err)
-	}
-	if !repo.includeDismissed {
-		t.Fatal("ListActive() did not pass includeDismissed to repository")
-	}
-}
-
 func TestCloseRejectsInvalidInput(t *testing.T) {
-	service := NewService(&fakeRepo{})
-	now := time.Now()
-	if err := service.Close(context.Background(), 0, 1, now, now); !errors.Is(err, repository.ErrInvalidInput) {
+	service := NewService(&fakeRepo{}, nil, nil)
+	if err := service.Close(context.Background(), 0, "session", 1); !errors.Is(err, repository.ErrInvalidInput) {
 		t.Fatalf("Close() error = %v, want ErrInvalidInput", err)
 	}
-	if err := service.Close(context.Background(), 1, 0, now, now); !errors.Is(err, repository.ErrInvalidInput) {
+	if err := service.Close(context.Background(), 1, "", 1); !errors.Is(err, repository.ErrInvalidInput) {
 		t.Fatalf("Close() error = %v, want ErrInvalidInput", err)
 	}
-	if err := service.Close(context.Background(), 1, 1, time.Time{}, now); !errors.Is(err, repository.ErrInvalidInput) {
+	if err := service.Close(context.Background(), 1, "session", 0); !errors.Is(err, repository.ErrInvalidInput) {
 		t.Fatalf("Close() error = %v, want ErrInvalidInput", err)
+	}
+}
+
+func TestSub2AnnouncementProjectionAndRead(t *testing.T) {
+	read := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/announcements", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" {
+			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []any{map[string]any{
+			"id": 7, "title": "Maintenance", "content": "Tonight", "notify_mode": "popup",
+			"created_at": "2026-08-11T00:00:00Z", "updated_at": "2026-08-11T01:00:00Z",
+		}}})
+	})
+	mux.HandleFunc("/api/v1/announcements/7/read", func(w http.ResponseWriter, r *http.Request) {
+		read = r.Method == http.MethodPost
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"message": "ok"}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(&fakeRepo{}, announcementTokenResolver{}, client)
+	items, err := service.ListActive(context.Background(), 1, "session")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("ListActive() = %#v, %v", items, err)
+	}
+	if items[0].NotifyMode != "popup" || !items[0].Pinned || items[0].Type != domainannouncement.TypeInfo {
+		t.Fatalf("projection = %#v", items[0])
+	}
+	if err := service.Close(context.Background(), 1, "session", 7); err != nil || !read {
+		t.Fatalf("Close() error = %v, read = %v", err, read)
 	}
 }
 

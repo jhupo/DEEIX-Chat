@@ -7,6 +7,7 @@ import (
 	"time"
 
 	domainannouncement "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/announcement"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
 
@@ -17,20 +18,56 @@ const (
 
 // Service 封装公告业务逻辑。
 type Service struct {
-	repo repository.AnnouncementRepository
+	repo   repository.AnnouncementRepository
+	tokens TokenResolver
+	client *sub2api.Client
+}
+
+type TokenResolver interface {
+	Sub2AccessTokenForSession(context.Context, uint, string) (string, error)
 }
 
 // NewService 创建公告服务。
-func NewService(repo repository.AnnouncementRepository) *Service {
-	return &Service{repo: repo}
+func NewService(repo repository.AnnouncementRepository, tokens TokenResolver, client *sub2api.Client) *Service {
+	return &Service{repo: repo, tokens: tokens, client: client}
 }
 
 // ListActive 查询当前用户可展示公告。
-func (s *Service) ListActive(ctx context.Context, userID uint, now time.Time, includeDismissed bool) ([]domainannouncement.Announcement, error) {
-	if userID == 0 {
+func (s *Service) ListActive(ctx context.Context, userID uint, sessionID string) ([]domainannouncement.Announcement, error) {
+	if userID == 0 || strings.TrimSpace(sessionID) == "" || s.tokens == nil || s.client == nil {
 		return nil, repository.ErrInvalidInput
 	}
-	return s.repo.ListActiveAnnouncements(ctx, userID, now, includeDismissed)
+	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.client.Announcements(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]domainannouncement.Announcement, 0, len(items))
+	for _, item := range items {
+		if item.ID <= 0 || uint64(item.ID) > uint64(^uint(0)) {
+			return nil, ErrInvalidAnnouncement
+		}
+		notifyMode := strings.TrimSpace(item.NotifyMode)
+		if notifyMode != "popup" {
+			notifyMode = "silent"
+		}
+		announcementType := domainannouncement.TypeGeneral
+		priority := 0
+		if notifyMode == "popup" {
+			announcementType = domainannouncement.TypeInfo
+			priority = 1
+		}
+		results = append(results, domainannouncement.Announcement{
+			ID: uint(item.ID), Title: item.Title, ContentMarkdown: item.Content,
+			Status: domainannouncement.StatusActive, Type: announcementType, NotifyMode: notifyMode,
+			Pinned: notifyMode == "popup", Priority: priority, StartsAt: item.StartsAt, ExpiresAt: item.EndsAt,
+			CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ClosedAt: item.ReadAt,
+		})
+	}
+	return results, nil
 }
 
 // ListAdmin 查询管理员公告列表。
@@ -81,20 +118,16 @@ func (s *Service) Delete(ctx context.Context, id uint) error {
 	return mapRepositoryError(s.repo.DeleteAnnouncement(ctx, id))
 }
 
-// DismissToday 记录当前用户今天不再显示指定公告版本。
-func (s *Service) DismissToday(ctx context.Context, userID uint, announcementID uint, announcementUpdatedAt time.Time, now time.Time, dismissedUntil time.Time) error {
-	if userID == 0 || announcementID == 0 || announcementUpdatedAt.IsZero() || !dismissedUntil.After(now) {
-		return repository.ErrInvalidInput
-	}
-	return mapRepositoryError(s.repo.DismissAnnouncementToday(ctx, userID, announcementID, announcementUpdatedAt, now, dismissedUntil))
-}
-
 // Close 记录当前用户关闭指定公告版本。
-func (s *Service) Close(ctx context.Context, userID uint, announcementID uint, announcementUpdatedAt time.Time, now time.Time) error {
-	if userID == 0 || announcementID == 0 || announcementUpdatedAt.IsZero() {
+func (s *Service) Close(ctx context.Context, userID uint, sessionID string, announcementID uint) error {
+	if userID == 0 || strings.TrimSpace(sessionID) == "" || announcementID == 0 || s.tokens == nil || s.client == nil {
 		return repository.ErrInvalidInput
 	}
-	return mapRepositoryError(s.repo.CloseAnnouncement(ctx, userID, announcementID, announcementUpdatedAt, now))
+	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return s.client.MarkAnnouncementRead(ctx, token, int64(announcementID))
 }
 
 // ListInput 定义公告列表入参。

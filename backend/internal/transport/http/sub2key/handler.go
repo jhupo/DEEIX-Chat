@@ -50,15 +50,6 @@ type remoteKeyResponse struct {
 	BindingPublicID *string    `json:"bindingPublicID"`
 }
 
-type modelResponse struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	PlatformModelName string `json:"platformModelName"`
-	KindsJSON         string `json:"kindsJSON"`
-	ProtocolsJSON     string `json:"protocolsJSON"`
-	CapabilitiesJSON  string `json:"capabilitiesJSON"`
-}
-
 func NewHandler(service *app.Service) *Handler { return &Handler{service: service} }
 func noStore(c *gin.Context)                   { c.Header("Cache-Control", "no-store") }
 func (h *Handler) ListRemote(c *gin.Context) {
@@ -108,20 +99,6 @@ func (h *Handler) Delete(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
-func (h *Handler) Models(c *gin.Context) {
-	noStore(c)
-	id := strings.TrimSpace(c.Query("key_binding_id"))
-	if id == "" {
-		response.Error(c, http.StatusBadRequest, "key binding id is required")
-		return
-	}
-	models, err := h.service.Models(c, middleware.MustUserID(c), id)
-	if err != nil {
-		h.writeError(c, err)
-		return
-	}
-	response.Success(c, modelResponses(models))
-}
 func (h *Handler) writeError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, app.ErrBindingUnavailable):
@@ -151,14 +128,6 @@ func remoteKeyResponses(items []app.RemoteKeyView) []remoteKeyResponse {
 	out := make([]remoteKeyResponse, 0, len(items))
 	for _, item := range items {
 		out = append(out, remoteKeyResponse{RemoteKeyID: item.RemoteKeyID, Label: item.Label, MaskedKey: item.MaskedKey, GroupID: item.GroupID, GroupName: item.GroupName, GroupPlatform: item.GroupPlatform, Status: item.Status, Quota: item.Quota, UsedQuota: item.UsedQuota, ExpiresAt: item.ExpiresAt, Bound: item.Bound, BindingPublicID: item.BindingPublicID})
-	}
-	return out
-}
-
-func modelResponses(items []app.ModelView) []modelResponse {
-	out := make([]modelResponse, 0, len(items))
-	for _, item := range items {
-		out = append(out, modelResponse{ID: item.ID, Name: item.DisplayName, PlatformModelName: item.ID, KindsJSON: `["chat"]`, ProtocolsJSON: `["openai_responses"]`, CapabilitiesJSON: `{}`})
 	}
 	return out
 }

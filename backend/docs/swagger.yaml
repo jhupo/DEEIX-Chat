@@ -305,23 +305,6 @@ definitions:
     - data
     - errorMsg
     type: object
-  AnnouncementDismissDataResponse:
-    properties:
-      dismissed:
-        type: boolean
-    required:
-    - dismissed
-    type: object
-  AnnouncementDismissResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/AnnouncementDismissDataResponse'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
   AnnouncementErrorDoc:
     properties:
       data: {}
@@ -369,6 +352,8 @@ definitions:
         x-omitempty: false
       id:
         type: integer
+      notifyMode:
+        type: string
       pinned:
         type: boolean
       priority:
@@ -392,6 +377,7 @@ definitions:
     - createdByUserID
     - expiresAt
     - id
+    - notifyMode
     - pinned
     - priority
     - startsAt
@@ -409,13 +395,6 @@ definitions:
     required:
     - data
     - errorMsg
-    type: object
-  AnnouncementStateRequest:
-    properties:
-      updatedAt:
-        type: string
-    required:
-    - updatedAt
     type: object
   AuditLogListResponseDoc:
     properties:
@@ -5620,6 +5599,8 @@ definitions:
         type: string
       provider:
         type: string
+      qrCode:
+        type: string
       status:
         type: string
     required:
@@ -5636,6 +5617,7 @@ definitions:
     - payAmountCents
     - payCurrency
     - provider
+    - qrCode
     - status
     type: object
   sub2CheckoutDataDTO:
@@ -6204,7 +6186,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.0"
+  version: "0.4.1"
 paths:
   /admin/announcements:
     get:
@@ -9253,11 +9235,6 @@ paths:
       consumes:
       - application/json
       description: 登录用户获取当前可展示的站点公告列表
-      parameters:
-      - description: 是否包含今日不再显示的公告
-        in: query
-        name: include_dismissed
-        type: boolean
       produces:
       - application/json
       responses:
@@ -9285,12 +9262,6 @@ paths:
         name: id
         required: true
         type: integer
-      - description: 公告版本
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/AnnouncementStateRequest'
       produces:
       - application/json
       responses:
@@ -9313,47 +9284,6 @@ paths:
       security:
       - BearerAuth: []
       summary: 关闭公告
-      tags:
-      - announcements
-  /announcements/{id}/dismiss-today:
-    post:
-      consumes:
-      - application/json
-      description: 登录用户对当前公告版本记录今日不再显示
-      parameters:
-      - description: 公告ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      - description: 公告版本
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/AnnouncementStateRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/AnnouncementDismissResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AnnouncementErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AnnouncementErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AnnouncementErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 今日不再显示公告
       tags:
       - announcements
   /auth/login:

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -204,6 +206,38 @@ func TestCheckoutIdempotencyStateMachine(t *testing.T) {
 	}
 }
 
+func TestQRCodePayloadIsKeptSeparateFromCheckoutURL(t *testing.T) {
+	if got := validQRCodePayload("weixin://wxpay/example"); got != "weixin://wxpay/example" {
+		t.Fatalf("QR payload = %q", got)
+	}
+	if got := trustedCheckoutURL("weixin://wxpay/example"); got != "" {
+		t.Fatalf("custom QR scheme became checkout URL: %q", got)
+	}
+	if got := validQRCodePayload("bad\nvalue"); got != "" {
+		t.Fatalf("control characters accepted: %q", got)
+	}
+	if got := validQRCodePayload(strings.Repeat("x", maxQRCodePayloadBytes+1)); got != "" {
+		t.Fatalf("oversized QR payload accepted: %d bytes", len(got))
+	}
+}
+
+func TestCheckoutCachePrunesExpiredEntriesAndStaysBounded(t *testing.T) {
+	now := time.Now()
+	service := &Service{checkoutCache: make(map[string]checkoutCacheEntry)}
+	service.checkoutCache["expired"] = checkoutCacheEntry{expiresAt: now.Add(-time.Second)}
+	for i := 0; i < checkoutCacheMax+8; i++ {
+		service.checkoutCache[strconv.Itoa(i)] = checkoutCacheEntry{expiresAt: now.Add(time.Duration(i+1) * time.Second)}
+	}
+
+	service.pruneCheckoutCacheLocked(now, 0)
+	if _, found := service.checkoutCache["expired"]; found {
+		t.Fatal("expired checkout entry remained cached")
+	}
+	if len(service.checkoutCache) != checkoutCacheMax {
+		t.Fatalf("cache size = %d, want %d", len(service.checkoutCache), checkoutCacheMax)
+	}
+}
+
 func TestAggregateMonthlyUsesUTCMonthStart(t *testing.T) {
 	rows := []DailyRow{
 		{UsageDate: "2026-01-31", CallCount: 1, RecordCount: 1, InputTokens: 2, OutputTokens: 3, TotalTokens: 5, ActualCost: "1.000000000001"},
@@ -282,10 +316,11 @@ func TestOverviewMapsSub2Entitlement(t *testing.T) {
 		write(w, map[string]any{"id": 7, "balance": 9.5, "status": "active"})
 	})
 	mux.HandleFunc("/api/v1/subscriptions/active", func(w http.ResponseWriter, r *http.Request) {
-		write(w, []any{map[string]any{"id": 12, "group_id": 3, "starts_at": "2026-01-01T00:00:00Z", "expires_at": "2099-02-01T00:00:00Z", "status": "active", "monthly_usage_usd": 2.5}})
-	})
-	mux.HandleFunc("/api/v1/payment/checkout-info", func(w http.ResponseWriter, r *http.Request) {
-		write(w, map[string]any{"plans": []any{map[string]any{"id": 9, "group_id": 3, "name": "Pro", "price": 10, "for_sale": true, "sort_order": 1, "monthly_limit_usd": 5}}})
+		write(w, []any{map[string]any{
+			"id": 12, "group_id": 3, "starts_at": "2026-01-01T00:00:00Z", "expires_at": "2099-02-01T00:00:00Z",
+			"status": "active", "monthly_usage_usd": 2.5,
+			"group": map[string]any{"name": "Pro Group", "description": "Group entitlement", "platform": "openai", "monthly_limit_usd": 5},
+		}})
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -298,11 +333,78 @@ func TestOverviewMapsSub2Entitlement(t *testing.T) {
 		t.Fatal(err)
 	}
 	overview := result.Overview
-	if overview.Account.Balance != 9.5 || overview.Plan == nil || overview.Plan.ID != 9 || overview.Plan.PeriodCreditUSD != 5 {
+	if overview.Account.Balance != 9.5 || overview.Plan == nil || overview.Plan.ID != 0 || overview.Plan.Name != "Pro Group" || overview.Plan.PeriodCreditUSD != 5 || len(overview.Plan.Prices) != 0 || !overview.Plan.IsActive {
 		t.Fatalf("bad overview %#v", overview)
 	}
 	ent := overview.SubscriptionEntitlements[0]
-	if !ent.IsCurrent || ent.Plan.ID != 9 || overview.PeriodCreditUSD != 5 || overview.PeriodUsedUSD != 2.5 || overview.PeriodRemainingUSD != 2.5 {
+	if !ent.IsCurrent || ent.PlanID != 0 || ent.PriceID != 0 || ent.Plan.Name != "Pro Group" || overview.PeriodCreditUSD != 5 || overview.PeriodUsedUSD != 2.5 || overview.PeriodRemainingUSD != 2.5 {
 		t.Fatalf("bad entitlement %#v", overview)
+	}
+}
+
+func TestPlansPreservePerPlanCurrency(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/payment/checkout-info", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, map[string]any{
+			"methods": map[string]any{
+				"alipay": map[string]any{"currency": "CNY"},
+				"stripe": map[string]any{"currency": "USD"},
+			},
+			"plans": []any{
+				map[string]any{"id": 1, "group_id": 3, "name": "Monthly", "price": 68, "currency": "CNY", "validity_unit": "month"},
+				map[string]any{"id": 2, "group_id": 3, "name": "Annual", "price": 99, "currency": "USD", "validity_unit": "year"},
+			},
+		})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewService(overviewTokenResolver{}, client, nil).Plans(context.Background(), 1, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Plans) != 2 || result.Plans[0].Prices[0].Currency != "CNY" || result.Plans[1].Prices[0].Currency != "USD" {
+		t.Fatalf("plan currencies = %#v", result.Plans)
+	}
+}
+
+func TestOverviewDoesNotGuessPlanFromSameGroupCatalog(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, map[string]any{"id": 7, "status": "active"})
+	})
+	mux.HandleFunc("/api/v1/subscriptions/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, []any{map[string]any{
+			"id": 12, "group_id": 3, "starts_at": "2026-01-01T00:00:00Z", "expires_at": "2099-02-01T00:00:00Z", "status": "active",
+			"group": map[string]any{"name": "Pro Group", "monthly_limit_usd": 5},
+		}})
+	})
+	mux.HandleFunc("/api/v1/payment/checkout-info", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, map[string]any{"plans": []any{
+			map[string]any{"id": 9, "group_id": 3, "name": "Monthly", "price": 10, "currency": "USD"},
+			map[string]any{"id": 10, "group_id": 3, "name": "Annual", "price": 100, "currency": "USD"},
+		}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(overviewTokenResolver{}, client, nil)
+	if _, err := service.Plans(context.Background(), 1, "s"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Overview(context.Background(), 1, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entitlement := result.Overview.SubscriptionEntitlements[0]
+	if entitlement.PlanID != 0 || entitlement.PriceID != 0 || entitlement.Plan.Name != "Pro Group" || len(entitlement.Plan.Prices) != 0 {
+		t.Fatalf("subscription guessed a checkout plan: %#v", entitlement)
 	}
 }

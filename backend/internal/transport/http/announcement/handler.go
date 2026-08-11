@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	appannouncement "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/announcement"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -29,53 +28,16 @@ func NewHandler(service *appannouncement.Service) *Handler {
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param include_dismissed query bool false "是否包含今日不再显示的公告"
 // @Success 200 {object} AnnouncementListResponseDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /announcements [get]
 func (h *Handler) ListAnnouncements(c *gin.Context) {
-	includeDismissed, _ := strconv.ParseBool(c.Query("include_dismissed"))
-	items, err := h.service.ListActive(c.Request.Context(), middleware.MustUserID(c), time.Now(), includeDismissed)
+	items, err := h.service.ListActive(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "list announcements failed")
 		return
 	}
 	response.Success(c, toAnnouncementResponses(items))
-}
-
-// DismissAnnouncementToday godoc
-// @Summary 今日不再显示公告
-// @Description 登录用户对当前公告版本记录今日不再显示
-// @Tags announcements
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param id path int true "公告ID"
-// @Param body body AnnouncementStateRequest true "公告版本"
-// @Success 200 {object} AnnouncementDismissResponseDoc
-// @Failure 400 {object} ErrorDoc
-// @Failure 404 {object} ErrorDoc
-// @Failure 500 {object} ErrorDoc
-// @Router /announcements/{id}/dismiss-today [post]
-func (h *Handler) DismissAnnouncementToday(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, strconv.IntSize)
-	if err != nil || id == 0 {
-		response.Error(c, http.StatusBadRequest, "invalid announcement id")
-		return
-	}
-	var req AnnouncementStateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.InvalidRequestBody(c, err)
-		return
-	}
-	now := time.Now()
-	year, month, day := now.Date()
-	dismissedUntil := time.Date(year, month, day+1, 0, 0, 0, 0, now.Location())
-	if err := h.service.DismissToday(c.Request.Context(), middleware.MustUserID(c), uint(id), req.UpdatedAt, now, dismissedUntil); err != nil {
-		writeAnnouncementError(c, err)
-		return
-	}
-	response.Success(c, AnnouncementDismissDataResponse{Dismissed: true})
 }
 
 // CloseAnnouncement godoc
@@ -86,24 +48,18 @@ func (h *Handler) DismissAnnouncementToday(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "公告ID"
-// @Param body body AnnouncementStateRequest true "公告版本"
 // @Success 200 {object} AnnouncementCloseResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /announcements/{id}/close [post]
 func (h *Handler) CloseAnnouncement(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, strconv.IntSize)
-	if err != nil || id == 0 {
+	id, ok := parseAnnouncementID(c.Param("id"))
+	if !ok {
 		response.Error(c, http.StatusBadRequest, "invalid announcement id")
 		return
 	}
-	var req AnnouncementStateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.InvalidRequestBody(c, err)
-		return
-	}
-	if err := h.service.Close(c.Request.Context(), middleware.MustUserID(c), uint(id), req.UpdatedAt, time.Now()); err != nil {
+	if err := h.service.Close(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), id); err != nil {
 		writeAnnouncementError(c, err)
 		return
 	}
@@ -190,8 +146,8 @@ func (h *Handler) CreateAnnouncement(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /admin/announcements/{id} [patch]
 func (h *Handler) PatchAnnouncement(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, strconv.IntSize)
-	if err != nil || id == 0 {
+	id, ok := parseAnnouncementID(c.Param("id"))
+	if !ok {
 		response.Error(c, http.StatusBadRequest, "invalid announcement id")
 		return
 	}
@@ -200,7 +156,7 @@ func (h *Handler) PatchAnnouncement(c *gin.Context) {
 		response.InvalidRequestBody(c, err)
 		return
 	}
-	item, err := h.service.Update(c.Request.Context(), uint(id), appannouncement.PatchInput{
+	item, err := h.service.Update(c.Request.Context(), id, appannouncement.PatchInput{
 		Title:           req.Title,
 		ContentMarkdown: req.ContentMarkdown,
 		Status:          req.Status,
@@ -233,16 +189,21 @@ func (h *Handler) PatchAnnouncement(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /admin/announcements/{id} [delete]
 func (h *Handler) DeleteAnnouncement(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, strconv.IntSize)
-	if err != nil || id == 0 {
+	id, ok := parseAnnouncementID(c.Param("id"))
+	if !ok {
 		response.Error(c, http.StatusBadRequest, "invalid announcement id")
 		return
 	}
-	if err := h.service.Delete(c.Request.Context(), uint(id)); err != nil {
+	if err := h.service.Delete(c.Request.Context(), id); err != nil {
 		writeAnnouncementError(c, err)
 		return
 	}
 	response.Success(c, AnnouncementDeleteDataResponse{Deleted: true})
+}
+
+func parseAnnouncementID(raw string) (uint, bool) {
+	id, err := strconv.ParseUint(raw, 10, 63)
+	return uint(id), err == nil && id > 0
 }
 
 func writeAnnouncementError(c *gin.Context, err error) {

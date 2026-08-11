@@ -25,6 +25,7 @@ type AnnouncementResponse struct {
 	ContentMarkdown string     `json:"contentMarkdown"`
 	Status          string     `json:"status"`
 	Type            string     `json:"type"`
+	NotifyMode      string     `json:"notifyMode"`
 	Pinned          bool       `json:"pinned"`
 	Priority        int        `json:"priority"`
 	StartsAt        *time.Time `json:"startsAt" extensions:"x-nullable,!x-omitempty"`
@@ -69,11 +70,6 @@ type PatchAnnouncementRequestDoc struct {
 	Priority        *int       `json:"priority,omitempty"`
 	StartsAt        *time.Time `json:"startsAt,omitempty" extensions:"x-nullable"`
 	ExpiresAt       *time.Time `json:"expiresAt,omitempty" extensions:"x-nullable"`
-}
-
-// AnnouncementStateRequest 更新用户公告状态请求。
-type AnnouncementStateRequest struct {
-	UpdatedAt time.Time `json:"updatedAt" binding:"required"`
 }
 
 type nullableTimeRequest struct {
@@ -141,17 +137,6 @@ type AnnouncementDeleteResponseDoc struct {
 	Data     AnnouncementDeleteDataResponse `json:"data"`
 }
 
-// AnnouncementDismissDataResponse 公告不再显示响应。
-type AnnouncementDismissDataResponse struct {
-	Dismissed bool `json:"dismissed"`
-}
-
-// AnnouncementDismissResponseDoc 公告不再显示响应文档。
-type AnnouncementDismissResponseDoc struct {
-	ErrorMsg string                          `json:"errorMsg"`
-	Data     AnnouncementDismissDataResponse `json:"data"`
-}
-
 // AnnouncementCloseDataResponse 公告关闭响应。
 type AnnouncementCloseDataResponse struct {
 	Closed bool `json:"closed"`
@@ -170,6 +155,7 @@ func toAnnouncementResponse(item domainannouncement.Announcement) AnnouncementRe
 		ContentMarkdown: item.ContentMarkdown,
 		Status:          item.Status,
 		Type:            item.Type,
+		NotifyMode:      announcementNotifyMode(item),
 		Pinned:          item.Pinned,
 		Priority:        item.Priority,
 		StartsAt:        item.StartsAt,
@@ -179,6 +165,13 @@ func toAnnouncementResponse(item domainannouncement.Announcement) AnnouncementRe
 		UpdatedAt:       item.UpdatedAt,
 		ClosedAt:        item.ClosedAt,
 	}
+}
+
+func announcementNotifyMode(item domainannouncement.Announcement) string {
+	if strings.TrimSpace(item.NotifyMode) == "popup" {
+		return "popup"
+	}
+	return "silent"
 }
 
 func toAnnouncementResponses(items []domainannouncement.Announcement) []AnnouncementResponse {

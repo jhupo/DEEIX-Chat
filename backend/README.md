@@ -109,7 +109,7 @@ DEEIX 仅保存稳定的本地 Principal projection、browser session 及 displa
 
 当前 Browser route 为：`POST /api/v1/auth/login`、`POST /api/v1/auth/login/2fa`、`POST /api/v1/auth/register/email/start`、`POST /api/v1/auth/register/email/complete`、cookie-backed `POST /api/v1/auth/refresh`、`POST /api/v1/auth/logout`、`POST /api/v1/auth/logout-all`、`GET/PATCH /api/v1/me` 和 `PUT /api/v1/me/password`。
 
-余额、订阅、套餐、每日用量、调用日志、支付、订单和兑换均由 BFF 使用当前登录用户的服务端 Sub2 session 访问。`/setting/subscription` 保留现有页面、手动刷新、充值和兑换入口；它不写入本地 commerce 数据。用量响应以精确十进制字符串 `actualCost` 透传 Sub2 `actual_cost`，月度汇总也使用精确十进制加法。普通 Chat 显示 Sub2 key 选择器，默认 binding ID 保存在 DEEIX 用户设置 `chat.default_sub2_key_binding_id` 中，raw key 只在服务端加密保存；选择 binding 后再获取可用模型。Work/Agent 不使用这个选择器。
+余额、订阅、套餐、每日用量、调用日志、支付、订单和兑换均由 BFF 使用当前登录用户的服务端 Sub2 session 访问。`/setting/subscription` 保留现有页面、手动刷新、充值和兑换入口；它不写入本地 commerce 数据。用量响应以精确十进制字符串 `actualCost` 透传 Sub2 `actual_cost`，月度汇总也使用精确十进制加法。普通 Chat 不展示 key 选择器；默认 binding ID 保存在 DEEIX 用户设置 `chat.default_sub2_key_binding_id` 中，发送时由服务端静默解析，raw key 只在服务端加密保存。可用模型与模型分组仅来自 DEEIX 管理员目录和权限组，不从 Sub2 key 推导。Work/Agent 不使用 Chat 的默认 binding。
 
 `APP_ENV` 未配置时默认 `prod`。`dev`/`development` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
 

@@ -24,7 +24,10 @@ var (
 	ErrCheckoutAlreadyCreated = errors.New("Sub2 checkout already created")
 )
 
-const paymentOutcomePersistTimeout = 3 * time.Second
+const (
+	paymentOutcomePersistTimeout = 3 * time.Second
+	maxQRCodePayloadBytes        = 229
+)
 
 type CheckoutInput struct {
 	OrderType        string
@@ -40,6 +43,7 @@ type CheckoutResult struct {
 	Status             string
 	ExternalCheckoutID string
 	CheckoutURL        string
+	QRCode             string
 	BaseAmountCents    int64
 	BaseCurrency       string
 	PayAmountCents     int64
@@ -64,7 +68,7 @@ func (s *Service) Checkout(ctx context.Context, userID uint, sessionID, idempote
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.client.CheckoutInfo(ctx, token)
+	info, err := s.checkoutInfo(ctx, userID, sessionID, token)
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +108,7 @@ func (s *Service) Checkout(ctx context.Context, userID uint, sessionID, idempote
 		currency = "USD"
 	}
 	checkoutURL := trustedCheckoutURL(remote.PayURL)
-	if checkoutURL == "" {
-		checkoutURL = trustedCheckoutURL(remote.QRCode)
-	}
+	qrCode := validQRCodePayload(remote.QRCode)
 	fxRate := "1"
 	if baseCents > 0 {
 		fxRate = strconv.FormatFloat(float64(payCents)/float64(baseCents), 'f', -1, 64)
@@ -122,7 +124,7 @@ func (s *Service) Checkout(ctx context.Context, userID uint, sessionID, idempote
 	if input.OrderType == "topup" && method.Currency != "" {
 		currency = strings.ToUpper(method.Currency)
 	}
-	result := &CheckoutResult{OrderNo: remoteID, OrderType: input.OrderType, Provider: firstNonEmpty(remote.PaymentType, input.PaymentProvider), Status: firstNonEmpty(remote.Status, "pending"), ExternalCheckoutID: remoteID, CheckoutURL: checkoutURL, BaseAmountCents: baseCents, BaseCurrency: "USD", PayAmountCents: payCents, PayCurrency: currency, FXRate: fxRate, CreditNanousd: usdNanousd(creditUSD), CreditUSD: creditUSD, ExpiredAt: remote.ExpiresAt}
+	result := &CheckoutResult{OrderNo: remoteID, OrderType: input.OrderType, Provider: firstNonEmpty(remote.PaymentType, input.PaymentProvider), Status: firstNonEmpty(remote.Status, "pending"), ExternalCheckoutID: remoteID, CheckoutURL: checkoutURL, QRCode: qrCode, BaseAmountCents: baseCents, BaseCurrency: "USD", PayAmountCents: payCents, PayCurrency: currency, FXRate: fxRate, CreditNanousd: usdNanousd(creditUSD), CreditUSD: creditUSD, ExpiredAt: remote.ExpiresAt}
 	if err := s.repo.FinishPaymentOperation(ctx, userID, idempotencyKey, "completed_success", result.ExternalCheckoutID); err != nil {
 		return nil, errors.Join(ErrOutcomeUnknown, s.markOutcomeUnknown(ctx, userID, idempotencyKey, result.ExternalCheckoutID))
 	}
@@ -209,4 +211,12 @@ func trustedCheckoutURL(raw string) string {
 		return ""
 	}
 	return parsed.String()
+}
+
+func validQRCodePayload(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" || len(value) > maxQRCodePayloadBytes || strings.ContainsAny(value, "\x00\r\n") {
+		return ""
+	}
+	return value
 }

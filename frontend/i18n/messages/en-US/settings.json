@@ -181,10 +181,9 @@
   "chatPage": {
     "defaultKey": {
       "title": "Default API key",
-      "description": "The Sub2 API key used by new chats and their model catalog.",
+      "description": "The Sub2 API key silently used to send regular chats. Models and display groups are configured by administrators.",
       "empty": "No available API key",
-      "loadFailed": "Failed to load API keys",
-      "refresh": "Refresh API keys"
+      "loadFailed": "Failed to load API keys"
     },
     "defaultModel": {
       "sectionTitle": "Conversation basics",
@@ -406,9 +405,17 @@
         "freeModelsNotIncluded": "Free models do not count toward the credit."
       }
     },
-    "payment": {
-      "title": "Payment method",
-      "renewTitle": "Renew subscription",
+      "payment": {
+        "title": "Payment method",
+        "pendingTitle": "Scan to pay",
+        "pendingDescription": "Pay {amount}, then refresh the payment status.",
+        "qrCodeAlt": "Payment QR code",
+        "qrCodeUnavailable": "The payment provider did not return a displayable QR code.",
+        "orderNo": "Order: {orderNo}",
+        "openCheckout": "Open checkout",
+        "verifyStatus": "Refresh status",
+        "statusPending": "The order is still awaiting payment.",
+        "renewTitle": "Renew subscription",
       "upgradeTitle": "Upgrade subscription",
       "description": "Confirm the payment method to continue.",
       "renewDescription": "Renewal adds time to your current plan.",
@@ -447,7 +454,7 @@
       "subscriptionLoadFailed": "Failed to load subscription information",
       "usageLogLoadFailed": "Failed to load usage logs",
       "checkoutCreateFailed": "Failed to create payment",
-      "checkoutURLMissing": "The payment provider did not return a checkout URL.",
+        "checkoutURLMissing": "The payment provider did not return a QR code or checkout URL.",
       "paymentVerified": "Payment status refreshed",
       "paymentVerifyFailed": "Failed to verify payment status",
       "planUpdated": "Subscription plan updated",

@@ -69,6 +69,53 @@ func messageRouteConfig(route *channel.ResolvedRoute, attributionReferer string,
 	}
 }
 
+func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelName, keyBindingID string) (*channel.ResolvedRoute, *appsub2key.Execution, error) {
+	chatModel, err := s.routeResolver.ResolveChatModel(ctx, userID, modelName)
+	if err != nil {
+		if errors.Is(err, channel.ErrModelNotFound) || errors.Is(err, channel.ErrModelAccessDenied) {
+			return nil, nil, ErrModelAccessDenied
+		}
+		return nil, nil, err
+	}
+	execution, err := s.sub2Resolver.ResolveBinding(ctx, userID, keyBindingID)
+	if err != nil {
+		if errors.Is(err, appsub2key.ErrInvalidBinding) {
+			return nil, nil, ErrInvalidKeyBinding
+		}
+		return nil, nil, ErrKeyBindingUnavailable
+	}
+	return &channel.ResolvedRoute{
+		PlatformModelID:       chatModel.ID,
+		PlatformModelName:     chatModel.PlatformModelName,
+		UpstreamName:          "sub2",
+		BindingCode:           execution.BindingPublicID,
+		Protocol:              llm.AdapterOpenAIResponses,
+		BaseURL:               s.cfg.Snapshot().Sub2BaseURL,
+		APIKey:                execution.APIKey,
+		ModelVendor:           chatModel.Vendor,
+		ModelIcon:             chatModel.Icon,
+		ModelCapabilitiesJSON: chatModel.CapabilitiesJSON,
+		ModelSystemPrompt:     chatModel.SystemPrompt,
+		UpstreamModel:         chatModel.PlatformModelName,
+	}, execution, nil
+}
+
+func pinSub2ChatRouteToRun(run *model.Run, route *channel.ResolvedRoute, execution *appsub2key.Execution) {
+	run.Endpoint = llm.DefaultEndpointForAdapter(route.Protocol)
+	run.ProviderProtocol = route.Protocol
+	run.UpstreamID = route.UpstreamID
+	run.UpstreamModelID = route.UpstreamModelID
+	run.UpstreamName = route.UpstreamName
+	run.PlatformModelName = route.PlatformModelName
+	run.RoutedBindingCode = route.BindingCode
+	run.ModelVendor = route.ModelVendor
+	run.ModelIcon = route.ModelIcon
+	run.UpstreamModelName = route.UpstreamModel
+	run.KeyBindingPublicID = execution.BindingPublicID
+	run.KeyBindingVersion = execution.BindingVersion
+	run.RemoteKeyID = execution.RemoteKeyID
+}
+
 // emitEvent 统一处理可选事件回调，调用方无需重复判断 nil。
 func emitEvent(onEvent func(string, map[string]interface{}) error, eventType string, payload map[string]interface{}) {
 	if onEvent == nil {
@@ -308,53 +355,18 @@ func (s *Service) sendMessageInternal(
 	s.persistInitialConversationFallbackTitle(ctx, *conversation, *userMessage)
 	traceRecorder = newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
 
-	if s.sub2Resolver == nil || s.llmClient == nil {
+	if s.routeResolver == nil || s.sub2Resolver == nil || s.llmClient == nil {
 		retErr = ErrModelRouteNotConfigured
 		return nil, retErr
 	}
 
-	execution, err := s.sub2Resolver.ResolveBinding(ctx, input.UserID, input.KeyBindingID)
+	route, execution, err := s.resolveSub2ChatRoute(ctx, input.UserID, targetPlatformModelName, input.KeyBindingID)
 	if err != nil {
-		if errors.Is(err, appsub2key.ErrInvalidBinding) {
-			retErr = ErrInvalidKeyBinding
-		} else {
-			retErr = ErrKeyBindingUnavailable
-		}
+		retErr = err
 		return nil, retErr
-	}
-	execution, err = s.sub2Resolver.ValidateModel(ctx, execution, targetPlatformModelName)
-	if err != nil {
-		if errors.Is(err, appsub2key.ErrInvalidBinding) {
-			retErr = ErrInvalidKeyBinding
-		} else {
-			retErr = ErrKeyBindingUnavailable
-		}
-		return nil, retErr
-	}
-	route := &channel.ResolvedRoute{
-		PlatformModelName: execution.Model,
-		UpstreamName:      "sub2",
-		BindingCode:       execution.BindingPublicID,
-		Protocol:          llm.AdapterOpenAIResponses,
-		BaseURL:           s.cfg.Snapshot().Sub2BaseURL,
-		APIKey:            execution.APIKey,
-		UpstreamModel:     execution.Model,
 	}
 	resolvedRoute = route
 	reasoningContentPassback := s.reasoningContentPassbackEnabled(ctx, input.UserID, route)
-	applyRouteToRun := func(currentRoute *channel.ResolvedRoute) {
-		resolvedRoute = currentRoute
-		run.Endpoint = llm.DefaultEndpointForAdapter(currentRoute.Protocol)
-		run.ProviderProtocol = currentRoute.Protocol
-		run.UpstreamID = currentRoute.UpstreamID
-		run.UpstreamModelID = currentRoute.UpstreamModelID
-		run.UpstreamName = currentRoute.UpstreamName
-		run.PlatformModelName = currentRoute.PlatformModelName
-		run.RoutedBindingCode = currentRoute.BindingCode
-		run.ModelVendor = currentRoute.ModelVendor
-		run.ModelIcon = currentRoute.ModelIcon
-		run.UpstreamModelName = currentRoute.UpstreamModel
-	}
 	if modelChanged || strings.TrimSpace(conversation.Model) != strings.TrimSpace(route.PlatformModelName) {
 		conversation.Model = strings.TrimSpace(route.PlatformModelName)
 		conversation.Provider = inferProvider(conversation.Model)
@@ -363,10 +375,7 @@ func (s *Service) sendMessageInternal(
 			return nil, err
 		}
 	}
-	applyRouteToRun(route)
-	run.KeyBindingPublicID = execution.BindingPublicID
-	run.KeyBindingVersion = execution.BindingVersion
-	run.RemoteKeyID = execution.RemoteKeyID
+	pinSub2ChatRouteToRun(run, route, execution)
 	if strings.TrimSpace(run.Provider) == "" {
 		run.Provider = inferProvider(conversation.Model)
 	}

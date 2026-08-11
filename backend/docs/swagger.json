@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.0"
+        "version": "0.4.1"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -4849,14 +4849,6 @@
                     "announcements"
                 ],
                 "summary": "获取当前公告",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "是否包含今日不再显示的公告",
-                        "name": "include_dismissed",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4898,15 +4890,6 @@
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "公告版本",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementStateRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -4914,70 +4897,6 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/AnnouncementCloseResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/announcements/{id}/dismiss-today": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "登录用户对当前公告版本记录今日不再显示",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "announcements"
-                ],
-                "summary": "今日不再显示公告",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "公告ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "公告版本",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementStateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementDismissResponseDoc"
                         }
                     },
                     "400": {
@@ -10208,32 +10127,6 @@
                 }
             }
         },
-        "AnnouncementDismissDataResponse": {
-            "type": "object",
-            "required": [
-                "dismissed"
-            ],
-            "properties": {
-                "dismissed": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "AnnouncementDismissResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/AnnouncementDismissDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "AnnouncementErrorDoc": {
             "type": "object",
             "required": [
@@ -10284,6 +10177,7 @@
                 "createdByUserID",
                 "expiresAt",
                 "id",
+                "notifyMode",
                 "pinned",
                 "priority",
                 "startsAt",
@@ -10314,6 +10208,9 @@
                 },
                 "id": {
                     "type": "integer"
+                },
+                "notifyMode": {
+                    "type": "string"
                 },
                 "pinned": {
                     "type": "boolean"
@@ -10351,17 +10248,6 @@
                     "$ref": "#/definitions/AnnouncementDataResponse"
                 },
                 "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "AnnouncementStateRequest": {
-            "type": "object",
-            "required": [
-                "updatedAt"
-            ],
-            "properties": {
-                "updatedAt": {
                     "type": "string"
                 }
             }
@@ -17764,6 +17650,7 @@
                 "payAmountCents",
                 "payCurrency",
                 "provider",
+                "qrCode",
                 "status"
             ],
             "properties": {
@@ -17804,6 +17691,9 @@
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "qrCode": {
                     "type": "string"
                 },
                 "status": {

@@ -17,7 +17,7 @@ import {
   type ChatContentWidth,
 } from "@/shared/model/chat-content-width";
 import { listConversationRuns } from "@/shared/api/conversation";
-import { listChatModels } from "@/shared/api/sub2-key";
+import { listPublicModels } from "@/shared/api/model";
 import { getMCPPolicy, getModelOptionPolicy } from "@/shared/api/settings";
 import { getUserSettings } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
@@ -322,12 +322,10 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
 export function useChatModelOptions({
   conversationPublicID,
   conversationModel,
-  keyBindingID,
   resetToken,
 }: {
   conversationPublicID: string | null;
   conversationModel?: string | null;
-  keyBindingID: string;
   resetToken?: number;
 }) {
   const t = useTranslations("chat.models");
@@ -350,7 +348,7 @@ export function useChatModelOptions({
   const activeConversationRef = React.useRef<string | null>(null);
   const userSelectedModelRef = React.useRef(false);
   const runModelRequestRef = React.useRef(0);
-  const modelCatalogRequestRef = React.useRef(new Map<string, Promise<ModelCatalogRefreshResult>>());
+  const modelCatalogRequestRef = React.useRef<Promise<ModelCatalogRefreshResult> | null>(null);
 
   const selectPlatformModelName = React.useCallback((platformModelName: string) => {
     userSelectedModelRef.current = true;
@@ -358,10 +356,7 @@ export function useChatModelOptions({
   }, []);
 
   const loadModelCatalog = React.useCallback((accessToken?: string): Promise<ModelCatalogRefreshResult> => {
-    const bindingID = keyBindingID.trim();
-    if (!bindingID) return Promise.resolve({ models: [], modelOptionPolicy: null });
-    const existing = modelCatalogRequestRef.current.get(bindingID);
-    if (existing) return existing;
+    if (modelCatalogRequestRef.current) return modelCatalogRequestRef.current;
 
     let request: Promise<ModelCatalogRefreshResult>;
     request = (async () => {
@@ -371,17 +366,17 @@ export function useChatModelOptions({
       }
 
       const [models, modelOptionPolicy] = await Promise.all([
-        listChatModels(token, bindingID),
+        listPublicModels(token),
         getModelOptionPolicy(token).catch(() => null),
       ]);
       return { models, modelOptionPolicy };
     })().finally(() => {
-      if (modelCatalogRequestRef.current.get(bindingID) === request) modelCatalogRequestRef.current.delete(bindingID);
+      if (modelCatalogRequestRef.current === request) modelCatalogRequestRef.current = null;
     });
 
-    modelCatalogRequestRef.current.set(bindingID, request);
+    modelCatalogRequestRef.current = request;
     return request;
-  }, [keyBindingID]);
+  }, []);
 
   const applyModelCatalog = React.useCallback((catalog: ModelCatalogRefreshResult) => {
     setAvailableModels(catalog.models);
@@ -407,23 +402,12 @@ export function useChatModelOptions({
   }, [refreshModelCatalog]);
 
   React.useEffect(() => {
-    setAvailableModels([]);
-    setSelectedPlatformModelName("");
-    userSelectedModelRef.current = false;
-  }, [keyBindingID]);
-
-  React.useEffect(() => {
     let cancelled = false;
 
     async function loadModels() {
       setModelsLoading(true);
       setModelsErrorMsg("");
       try {
-        if (!keyBindingID.trim()) {
-          setAvailableModels([]);
-          setSelectedPlatformModelName("");
-          return;
-        }
         const token = await resolveAccessToken();
         if (!token) {
           setModelsErrorMsg(t("signInRequired"));
@@ -468,7 +452,7 @@ export function useChatModelOptions({
     return () => {
       cancelled = true;
     };
-  }, [applyModelCatalog, keyBindingID, loadModelCatalog, t]);
+  }, [applyModelCatalog, loadModelCatalog, t]);
 
   React.useEffect(() => {
     const handleUserSettingsUpdated = (event: Event) => {

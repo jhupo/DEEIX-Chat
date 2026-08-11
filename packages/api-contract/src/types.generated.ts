@@ -132,15 +132,6 @@ export interface AnnouncementDeleteResponseDoc {
   errorMsg: string;
 }
 
-export interface AnnouncementDismissDataResponse {
-  dismissed: boolean;
-}
-
-export interface AnnouncementDismissResponseDoc {
-  data: AnnouncementDismissDataResponse;
-  errorMsg: string;
-}
-
 export interface AnnouncementErrorDoc {
   data: any;
   details?: any;
@@ -164,6 +155,7 @@ export interface AnnouncementResponse {
   createdByUserID: number;
   expiresAt: string | null;
   id: number;
+  notifyMode: string;
   pinned: boolean;
   priority: number;
   startsAt: string | null;
@@ -176,10 +168,6 @@ export interface AnnouncementResponse {
 export interface AnnouncementResponseDoc {
   data: AnnouncementDataResponse;
   errorMsg: string;
-}
-
-export interface AnnouncementStateRequest {
-  updatedAt: string;
 }
 
 export interface AuditLogListResponseDoc {
@@ -1934,6 +1922,7 @@ export interface Sub2CheckoutDTO {
   payAmountCents: number;
   payCurrency: string;
   provider: string;
+  qrCode: string;
   status: string;
 }
 
@@ -4608,10 +4597,7 @@ export namespace Announcements {
    */
   export namespace AnnouncementsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 是否包含今日不再显示的公告 */
-      include_dismissed?: boolean;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = AnnouncementListResponseDoc;
@@ -4631,28 +4617,9 @@ export namespace Announcements {
       id: number;
     };
     export type RequestQuery = {};
-    export type RequestBody = AnnouncementStateRequest;
+    export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = AnnouncementCloseResponseDoc;
-  }
-
-  /**
-   * @description 登录用户对当前公告版本记录今日不再显示
-   * @tags announcements
-   * @name DismissTodayCreate
-   * @summary 今日不再显示公告
-   * @request POST:/announcements/{id}/dismiss-today
-   * @secure
-   */
-  export namespace DismissTodayCreate {
-    export type RequestParams = {
-      /** 公告ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = AnnouncementStateRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = AnnouncementDismissResponseDoc;
   }
 }
 

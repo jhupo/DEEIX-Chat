@@ -35,13 +35,13 @@ const (
 
 type routeResolver interface {
 	ResolveRoute(ctx context.Context, input channel.ResolveRouteInput) (*channel.ResolvedRoute, error)
+	ResolveChatModel(ctx context.Context, userID uint, platformModelName string) (*channel.ModelView, error)
 	MarkRouteFailure(ctx context.Context, route *channel.ResolvedRoute, cause error)
 	MarkRouteSuccess(ctx context.Context, route *channel.ResolvedRoute)
 }
 
 type sub2ExecutionResolver interface {
 	ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error)
-	ValidateModel(context.Context, *appsub2key.Execution, string) (*appsub2key.Execution, error)
 }
 
 // defaultRouteResolver 表示按任务类型解析默认路由的可选能力。

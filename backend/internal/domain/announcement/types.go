@@ -27,6 +27,7 @@ type Announcement struct {
 	ContentMarkdown string
 	Status          string
 	Type            string
+	NotifyMode      string
 	Pinned          bool
 	Priority        int
 	StartsAt        *time.Time

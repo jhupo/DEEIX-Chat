@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
+	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
@@ -15,6 +17,8 @@ type textTaskRouteResolverStub struct {
 	routes       map[string]*channel.ResolvedRoute
 	defaultRoute *channel.ResolvedRoute
 	fail         map[string]error
+	chatModel    *channel.ModelView
+	chatModelErr error
 }
 
 func (r *textTaskRouteResolverStub) ResolveRoute(_ context.Context, input channel.ResolveRouteInput) (*channel.ResolvedRoute, error) {
@@ -26,6 +30,79 @@ func (r *textTaskRouteResolverStub) ResolveRoute(_ context.Context, input channe
 		return nil, errors.New("route not found")
 	}
 	return route, nil
+}
+
+func (r *textTaskRouteResolverStub) ResolveChatModel(_ context.Context, _ uint, name string) (*channel.ModelView, error) {
+	if r.chatModelErr != nil {
+		return nil, r.chatModelErr
+	}
+	if r.chatModel != nil {
+		model := *r.chatModel
+		return &model, nil
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, channel.ErrModelNotFound
+	}
+	return &channel.ModelView{PlatformModelName: name}, nil
+}
+
+type sub2ExecutionResolverStub struct {
+	calls     int
+	execution *appsub2key.Execution
+	err       error
+}
+
+func (r *sub2ExecutionResolverStub) ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error) {
+	r.calls++
+	return r.execution, r.err
+}
+
+func TestResolveSub2ChatRouteChecksCatalogBeforeBinding(t *testing.T) {
+	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{APIKey: "secret"}}
+	service := &Service{
+		cfg:           config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		routeResolver: &textTaskRouteResolverStub{chatModelErr: channel.ErrModelAccessDenied},
+		sub2Resolver:  binding,
+	}
+
+	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "admin-only-model", "sub2_binding"); !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("resolveSub2ChatRoute() error = %v", err)
+	}
+	if binding.calls != 0 {
+		t.Fatalf("binding resolved before model authorization: %d calls", binding.calls)
+	}
+}
+
+func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
+	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
+		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
+		BindingVersion:  3,
+		RemoteKeyID:     42,
+		APIKey:          "secret",
+	}}
+	service := &Service{
+		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
+			ID:                9,
+			PlatformModelName: "catalog-model",
+			Vendor:            "openai",
+			Icon:              "openai",
+		}},
+		sub2Resolver: binding,
+	}
+
+	route, execution, err := service.resolveSub2ChatRoute(t.Context(), 7, "catalog-model", binding.execution.BindingPublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &model.Run{}
+	pinSub2ChatRouteToRun(run, route, execution)
+	if route.PlatformModelID != 9 || route.PlatformModelName != "catalog-model" || route.UpstreamModel != "catalog-model" {
+		t.Fatalf("route did not use administrator catalog identity: %#v", route)
+	}
+	if run.PlatformModelName != "catalog-model" || run.RoutedBindingCode != binding.execution.BindingPublicID || run.KeyBindingVersion != 3 || run.RemoteKeyID != 42 {
+		t.Fatalf("run did not pin catalog route and binding: %#v", run)
+	}
 }
 
 func (r *textTaskRouteResolverStub) ResolveDefaultRoute(context.Context, channel.ResolveRouteInput) (*channel.ResolvedRoute, error) {

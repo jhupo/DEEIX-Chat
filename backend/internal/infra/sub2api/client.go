@@ -69,14 +69,16 @@ type APIKeyPage struct {
 	Total int      `json:"total"`
 }
 
-type GatewayModel struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	DisplayName string `json:"display_name"`
-}
-
-type GatewayModelList struct {
-	Data []GatewayModel `json:"data"`
+type Announcement struct {
+	ID         int64      `json:"id"`
+	Title      string     `json:"title"`
+	Content    string     `json:"content"`
+	NotifyMode string     `json:"notify_mode"`
+	StartsAt   *time.Time `json:"starts_at"`
+	EndsAt     *time.Time `json:"ends_at"`
+	ReadAt     *time.Time `json:"read_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type CheckoutInfo struct {
@@ -172,13 +174,13 @@ type PaymentPlan struct {
 	Description         string          `json:"description"`
 	Price               float64         `json:"price"`
 	OriginalPrice       float64         `json:"original_price"`
+	Currency            string          `json:"currency"`
 	RateMultiplier      float64         `json:"rate_multiplier"`
 	ModelRateMultiplier float64         `json:"model_rate_multiplier"`
 	ValidityUnit        string          `json:"validity_unit"`
 	ValidityDays        int             `json:"validity_days"`
 	Features            json.RawMessage `json:"features"`
-	ModelScopes         json.RawMessage `json:"model_scopes"`
-	ForSale             bool            `json:"for_sale"`
+	ModelScopes         json.RawMessage `json:"supported_model_scopes"`
 	SortOrder           int             `json:"sort_order"`
 	DailyLimitUSD       *float64        `json:"daily_limit_usd"`
 	WeeklyLimitUSD      *float64        `json:"weekly_limit_usd"`
@@ -226,14 +228,25 @@ type UsageTrend struct {
 	Trend       []TrendPoint `json:"trend"`
 }
 type Subscription struct {
-	ID              int64     `json:"id"`
-	GroupID         int64     `json:"group_id"`
-	StartsAt        time.Time `json:"starts_at"`
-	ExpiresAt       time.Time `json:"expires_at"`
-	Status          string    `json:"status"`
-	DailyUsageUSD   float64   `json:"daily_usage_usd"`
-	WeeklyUsageUSD  float64   `json:"weekly_usage_usd"`
-	MonthlyUsageUSD float64   `json:"monthly_usage_usd"`
+	ID              int64              `json:"id"`
+	GroupID         int64              `json:"group_id"`
+	StartsAt        time.Time          `json:"starts_at"`
+	ExpiresAt       time.Time          `json:"expires_at"`
+	Status          string             `json:"status"`
+	DailyUsageUSD   float64            `json:"daily_usage_usd"`
+	WeeklyUsageUSD  float64            `json:"weekly_usage_usd"`
+	MonthlyUsageUSD float64            `json:"monthly_usage_usd"`
+	Group           *SubscriptionGroup `json:"group,omitempty"`
+}
+
+type SubscriptionGroup struct {
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	Platform        string   `json:"platform"`
+	RateMultiplier  float64  `json:"rate_multiplier"`
+	DailyLimitUSD   *float64 `json:"daily_limit_usd"`
+	WeeklyLimitUSD  *float64 `json:"weekly_limit_usd"`
+	MonthlyLimitUSD *float64 `json:"monthly_limit_usd"`
 }
 
 type TokenPair struct {
@@ -392,14 +405,16 @@ func (c *Client) ListAPIKeys(ctx context.Context, accessToken string, page, page
 	return &result, nil
 }
 
-// GatewayModels uses the selected API key and intentionally bypasses the
-// management envelope because /v1/models is OpenAI-shaped JSON.
-func (c *Client) GatewayModels(ctx context.Context, apiKey string) (*GatewayModelList, error) {
-	var result GatewayModelList
-	if err := c.doRaw(ctx, http.MethodGet, "/v1/models", nil, &result, apiKey); err != nil {
-		return nil, err
+func (c *Client) Announcements(ctx context.Context, accessToken string) ([]Announcement, error) {
+	var result []Announcement
+	return result, c.get(ctx, "/api/v1/announcements", &result, accessToken)
+}
+
+func (c *Client) MarkAnnouncementRead(ctx context.Context, accessToken string, id int64) error {
+	if id <= 0 {
+		return errors.New("invalid announcement id")
 	}
-	return &result, nil
+	return c.post(ctx, "/api/v1/announcements/"+strconv.FormatInt(id, 10)+"/read", nil, nil, accessToken)
 }
 
 func (c *Client) CheckoutInfo(ctx context.Context, accessToken string) (CheckoutInfo, error) {

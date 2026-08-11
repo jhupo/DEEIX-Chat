@@ -1,4 +1,4 @@
-export type BillingMode = "usage";
+export type BillingMode = "period" | "usage";
 export type BillingUsageType = "balance" | "subscription";
 export type BillingUsageSort = "newest" | "oldest";
 
@@ -153,6 +153,7 @@ export type CheckoutData = {
     status: string;
     externalCheckoutID: string;
     checkoutURL: string;
+    qrCode: string;
     baseAmountCents: number;
     baseCurrency: string;
     payAmountCents: number;

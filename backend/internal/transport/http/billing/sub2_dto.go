@@ -162,6 +162,7 @@ type sub2CheckoutDTO struct {
 	Status             string     `json:"status"`
 	ExternalCheckoutID string     `json:"externalCheckoutID"`
 	CheckoutURL        string     `json:"checkoutURL"`
+	QRCode             string     `json:"qrCode"`
 	BaseAmountCents    int64      `json:"baseAmountCents"`
 	BaseCurrency       string     `json:"baseCurrency"`
 	PayAmountCents     int64      `json:"payAmountCents"`
@@ -299,7 +300,7 @@ func toSub2MonthlyData(v app.MonthlyData) sub2MonthlyDataDTO {
 	return sub2MonthlyDataDTO{Results: rows, ObservedAt: v.ObservedAt}
 }
 func toSub2Checkout(v app.CheckoutResult) sub2CheckoutDTO {
-	return sub2CheckoutDTO{OrderNo: v.OrderNo, OrderType: v.OrderType, Provider: v.Provider, Status: v.Status, ExternalCheckoutID: v.ExternalCheckoutID, CheckoutURL: v.CheckoutURL, BaseAmountCents: v.BaseAmountCents, BaseCurrency: v.BaseCurrency, PayAmountCents: v.PayAmountCents, PayCurrency: v.PayCurrency, FXRate: v.FXRate, CreditNanousd: v.CreditNanousd, CreditUSD: v.CreditUSD, ExpiredAt: v.ExpiredAt}
+	return sub2CheckoutDTO{OrderNo: v.OrderNo, OrderType: v.OrderType, Provider: v.Provider, Status: v.Status, ExternalCheckoutID: v.ExternalCheckoutID, CheckoutURL: v.CheckoutURL, QRCode: v.QRCode, BaseAmountCents: v.BaseAmountCents, BaseCurrency: v.BaseCurrency, PayAmountCents: v.PayAmountCents, PayCurrency: v.PayCurrency, FXRate: v.FXRate, CreditNanousd: v.CreditNanousd, CreditUSD: v.CreditUSD, ExpiredAt: v.ExpiredAt}
 }
 func toSub2RedemptionData(v app.RedeemResult) sub2RedemptionDataDTO {
 	return sub2RedemptionDataDTO{Redemption: sub2RedemptionDTO{ID: v.Redemption.ID, Type: v.Redemption.Type, Value: v.Redemption.Value}, Account: toSub2Account(v.Account), Overview: toSub2Overview(v.Overview), ObservedAt: v.ObservedAt}

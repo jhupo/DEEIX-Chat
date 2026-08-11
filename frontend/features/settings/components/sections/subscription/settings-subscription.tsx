@@ -32,6 +32,7 @@ import type {
   BillingUsageMonthlyDTO,
   BillingUsageSort,
   BillingUsageType,
+  CheckoutData,
 } from "@/shared/api/billing.types";
 import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
 import { SettingsPage, SettingsSectionHeader } from "@/shared/components/settings-layout";
@@ -48,7 +49,7 @@ import {
   normalizeBillingDisplayCurrency,
   type BillingDisplayOptions,
 } from "@/shared/lib/billing-display";
-import { RedemptionDialog, TopUpDialog } from "./subscription-billing-dialogs";
+import { PendingPaymentDialog, RedemptionDialog, TopUpDialog } from "./subscription-billing-dialogs";
 import { SubscriptionSummary } from "./subscription-summary";
 import { SubscriptionUsageLog } from "./subscription-usage-log";
 import type { UsageTrendView } from "./subscription-trend";
@@ -85,6 +86,7 @@ function SubscriptionTrendSkeleton() {
 
 type BillingRuntimeConfig = BillingConfigData["config"];
 type PaymentProvider = string;
+type PendingPayment = CheckoutData["checkout"] & { operationID: string };
 
 function paymentReturnURL(operationID: string, state: "success" | "cancel"): string {
   const url = new URL("/setting/subscription", window.location.origin);
@@ -125,6 +127,8 @@ export function SettingsSubscription() {
   const [redemptionDialogOpen, setRedemptionDialogOpen] = React.useState(false);
   const [redemptionCode, setRedemptionCode] = React.useState("");
   const [redemptionLoading, setRedemptionLoading] = React.useState(false);
+  const [pendingPayment, setPendingPayment] = React.useState<PendingPayment | null>(null);
+  const [paymentVerificationLoading, setPaymentVerificationLoading] = React.useState(false);
   const paymentVerificationRef = React.useRef("");
   const billingMode: BillingMode = billingConfig?.mode ?? "usage";
   const billingDisplay = React.useMemo<BillingDisplayOptions>(
@@ -211,6 +215,30 @@ export function SettingsSubscription() {
     }
   }, [accessToken, resolveErrorMessage, t]);
 
+  const verifyPayment = React.useCallback(async (operationID: string) => {
+    setPaymentVerificationLoading(true);
+    try {
+      const result = await verifyBillingOrder(accessToken, operationID);
+      const status = result.order.status.trim().toLowerCase();
+      if (!["completed", "paid", "success", "succeeded"].includes(status)) {
+        toast.info(t("payment.statusPending"));
+        return false;
+      }
+      await Promise.all([
+        loadBillingData(),
+        loadUsageLogs(1, 25, "", "", "newest"),
+      ]);
+      setPendingPayment(null);
+      toast.success(t("toasts.paymentVerified"));
+      return true;
+    } catch (error) {
+      toast.error(t("toasts.paymentVerifyFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
+      return false;
+    } finally {
+      setPaymentVerificationLoading(false);
+    }
+  }, [accessToken, loadBillingData, loadUsageLogs, resolveErrorMessage, t]);
+
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const state = params.get("payment");
@@ -224,24 +252,12 @@ export function SettingsSubscription() {
     if (paymentVerificationRef.current === operationID) return;
     paymentVerificationRef.current = operationID;
 
-    void verifyBillingOrder(accessToken, operationID)
-      .then(async () => {
-        const [overview, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
-          getBillingOverview(accessToken),
-          listBillingDailyUsage(accessToken),
-          listBillingMonthlyUsage(accessToken, 12),
-        ]);
-        setBillingOverview(overview.overview);
-        setDailyUsage(nextDailyUsage ?? []);
-        setMonthlyUsage(nextMonthlyUsage ?? []);
-        await loadUsageLogs(1, 25, "", "", "newest");
+    void verifyPayment(operationID).then((verified) => {
+      if (verified) {
         window.history.replaceState({}, "", window.location.pathname);
-        toast.success(t("toasts.paymentVerified"));
-      })
-      .catch((error) => {
-        toast.error(t("toasts.paymentVerifyFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
-      });
-  }, [accessToken, loadUsageLogs, resolveErrorMessage, t]);
+      }
+    });
+  }, [verifyPayment]);
 
   React.useEffect(() => {
     void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort);
@@ -267,11 +283,15 @@ export function SettingsSubscription() {
         successURL: paymentReturnURL(operationID, "success"),
         cancelURL: paymentReturnURL(operationID, "cancel"),
       }, operationID);
-      if (!data.checkout.checkoutURL) {
+      if (!data.checkout.checkoutURL && !data.checkout.qrCode) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
         return;
       }
-      window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
+      setPendingPayment({ ...data.checkout, operationID });
+      setPaymentDialogOpen(false);
+      if (data.checkout.checkoutURL && !data.checkout.qrCode) {
+        window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
+      }
     } catch (error) {
       toast.error(t("toasts.checkoutCreateFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
     } finally {
@@ -297,11 +317,15 @@ export function SettingsSubscription() {
         successURL: paymentReturnURL(operationID, "success"),
         cancelURL: paymentReturnURL(operationID, "cancel"),
       }, operationID);
-      if (!data.checkout.checkoutURL) {
+      if (!data.checkout.checkoutURL && !data.checkout.qrCode) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
         return;
       }
-      window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
+      setPendingPayment({ ...data.checkout, operationID });
+      setTopUpDialogOpen(false);
+      if (data.checkout.checkoutURL && !data.checkout.qrCode) {
+        window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
+      }
     } catch (error) {
       toast.error(t("toasts.checkoutCreateFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
     } finally {
@@ -527,6 +551,22 @@ export function SettingsSubscription() {
         redemptionLoading={redemptionLoading}
         onCodeChange={setRedemptionCode}
         onSubmit={() => void handleRedeemCode()}
+      />
+
+      <PendingPaymentDialog
+        open={pendingPayment !== null}
+        onOpenChange={(open) => {
+          if (!open && !paymentVerificationLoading) setPendingPayment(null);
+        }}
+        qrCode={pendingPayment?.qrCode ?? ""}
+        checkoutURL={pendingPayment?.checkoutURL ?? ""}
+        orderNo={pendingPayment?.orderNo ?? ""}
+        payAmountCents={pendingPayment?.payAmountCents ?? 0}
+        payCurrency={pendingPayment?.payCurrency ?? "CNY"}
+        verifying={paymentVerificationLoading}
+        onVerify={() => {
+          if (pendingPayment) void verifyPayment(pendingPayment.operationID);
+        }}
       />
     </SettingsPage>
   );

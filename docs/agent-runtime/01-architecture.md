@@ -1,6 +1,6 @@
 # 目标架构
 
-> 实现状态：当前已落地的用户可见链路是普通 `/chat` 的 Sub2 key selector。它列出当前登录 Sub2 账户的 key，默认 opaque binding ID 保存在 DEEIX 用户设置中，服务端加密保存 key material；选择 binding 后才加载模型。`/agent`/Work 不使用该控件。本文其余 Bridge、Work 与 Codex app-server 内容是目标架构，不应被解释为已实现的 Chat key selector 行为。
+> 实现状态：普通 `/chat` 已通过设置页选定的默认 Sub2 key binding 静默执行；对话页不展示 key selector。模型与展示分组只读取 DEEIX 管理员发布目录，不依赖 Sub2 `/v1/models`。`/agent`/Work 不使用 Chat binding。本文其余 Bridge、Work 与 Codex app-server 内容是目标架构。
 
 ## 1. 两个执行域
 

@@ -5,7 +5,6 @@ import "github.com/gin-gonic/gin"
 // RegisterRoutes 注册公告用户侧路由。
 func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.GET("/announcements", m.Handler.ListAnnouncements)
-	authRequired.POST("/announcements/:id/dismiss-today", m.Handler.DismissAnnouncementToday)
 	authRequired.POST("/announcements/:id/close", m.Handler.CloseAnnouncement)
 }
 

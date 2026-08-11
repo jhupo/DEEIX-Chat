@@ -181,10 +181,9 @@
   "chatPage": {
     "defaultKey": {
       "title": "默认 API 密钥",
-      "description": "新对话及其模型列表默认使用的 Sub2 API 密钥。",
+      "description": "发送普通对话时静默使用的 Sub2 API 密钥。模型与展示分组由管理员配置。",
       "empty": "暂无可用 API 密钥",
-      "loadFailed": "API 密钥加载失败",
-      "refresh": "刷新 API 密钥"
+      "loadFailed": "API 密钥加载失败"
     },
     "defaultModel": {
       "sectionTitle": "基础会话",
@@ -406,9 +405,17 @@
         "freeModelsNotIncluded": "免费模型不计入额度"
       }
     },
-    "payment": {
-      "title": "选择支付方式",
-      "renewTitle": "续费订阅",
+      "payment": {
+        "title": "选择支付方式",
+        "pendingTitle": "扫码支付",
+        "pendingDescription": "请支付 {amount}，完成后刷新支付状态。",
+        "qrCodeAlt": "支付二维码",
+        "qrCodeUnavailable": "支付渠道未返回可显示的二维码。",
+        "orderNo": "订单号：{orderNo}",
+        "openCheckout": "打开收银台",
+        "verifyStatus": "刷新状态",
+        "statusPending": "订单仍待支付，请完成付款后重试。",
+        "renewTitle": "续费订阅",
       "upgradeTitle": "升级订阅",
       "description": "确认支付方式后继续。",
       "renewDescription": "续费会追加当前方案的可用时间。",
@@ -447,7 +454,7 @@
       "subscriptionLoadFailed": "订阅信息加载失败",
       "usageLogLoadFailed": "调用日志加载失败",
       "checkoutCreateFailed": "支付创建失败",
-      "checkoutURLMissing": "支付渠道没有返回收银台地址。",
+        "checkoutURLMissing": "支付渠道没有返回二维码或收银台地址。",
       "paymentVerified": "支付状态已刷新",
       "paymentVerifyFailed": "支付状态校验失败",
       "planUpdated": "订阅方案已更新",

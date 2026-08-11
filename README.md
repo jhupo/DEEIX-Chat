@@ -206,7 +206,7 @@ Before v0.4 mutates schema, it rejects a populated legacy identity schema. Back 
 
 #### Configuration, Persistence, and Image
 
-Configuration priority is `environment variables > config.yaml > built-in defaults`. `config.yaml` is for static infrastructure and security configuration such as server URLs, database, cache, storage, GeoIP, tracing, JWT, and encryption keys. Runtime settings stored in the database cover DEEIX-owned application behavior; identity, balances, subscriptions, plans, usage, checkout, and redemption are read or changed only through the logged-in user's server-side Sub2 session.
+Configuration priority is `environment variables > config.yaml > built-in defaults`. `config.yaml` is for static infrastructure and security configuration such as server URLs, database, cache, storage, GeoIP, tracing, JWT, and encryption keys. Runtime settings stored in the database cover DEEIX-owned application behavior. Identity, user-visible announcements, balances, subscriptions, plans, usage, checkout, and redemption are read or changed only through the logged-in user's server-side Sub2 session. Chat models and display groups come from the administrator-published DEEIX catalog; the default Sub2 key is selected only in chat settings and is applied silently when sending.
 
 The canonical compose stack persists application data:
 
@@ -368,7 +368,7 @@ Static configuration environment variables:
 | OpenTelemetry | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP exporter protocol: `grpc`, `http`, or `http/protobuf`; defaults to `grpc`. |
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace sampling rate from `0` to `1`; `OTEL_TRACES_SAMPLER_ARG` takes priority. |
 
-DEEIX token lifetime, rate limits, the post-login path, conversation settings, model option policies, file processing, RAG, embedding, MCP, billing, payments, and announcements are runtime business settings. Sub2 controls login, registration, email verification, login factors, user roles, and account status; DEEIX does not duplicate those controls in its admin console.
+DEEIX token lifetime, rate limits, the post-login path, conversation settings, the administrator-published model catalog and groups, model option policies, file processing, RAG, embedding, and MCP are runtime business settings. Sub2 controls login, registration, email verification, login factors, user roles, account status, user-visible announcements, billing, and payments; DEEIX does not duplicate those authorities.
 
 When SSRF protection is enabled in production, administrator-saved model, MCP, and Embedding endpoints are authorized locally by exact origin (`scheme + host + port`) and do not require entries in the global allowlist. Public cross-origin redirects are allowed, while private cross-origin redirects must match `SSRF_ALLOWED_HOSTS` or `SSRF_ALLOWED_CIDRS`. Generated media is downloaded, validated, and stored by the backend: a private artifact URL inherits trust only when it has the same origin as the selected model endpoint; public cross-origin artifact URLs remain subject to the strict public-network policy, and private cross-origin artifact URLs are blocked. The configured `SUB2_BASE_URL` is validated separately as a canonical origin and redirects may not change that origin. Link-local, multicast, unspecified, and known metadata targets always remain blocked.
 

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
@@ -18,13 +19,75 @@ type TokenResolver interface {
 	Sub2AccessTokenForSession(context.Context, uint, string) (string, error)
 }
 type Service struct {
-	tokens TokenResolver
-	client *sub2api.Client
-	repo   repository.Sub2PaymentOperationRepository
+	tokens        TokenResolver
+	client        *sub2api.Client
+	repo          repository.Sub2PaymentOperationRepository
+	checkoutMu    sync.Mutex
+	checkoutCache map[string]checkoutCacheEntry
 }
 
+type checkoutCacheEntry struct {
+	info      sub2api.CheckoutInfo
+	expiresAt time.Time
+}
+
+const (
+	checkoutCacheTTL = time.Minute
+	checkoutCacheMax = 256
+)
+
 func NewService(tokens TokenResolver, client *sub2api.Client, repo repository.Sub2PaymentOperationRepository) *Service {
-	return &Service{tokens: tokens, client: client, repo: repo}
+	return &Service{tokens: tokens, client: client, repo: repo, checkoutCache: make(map[string]checkoutCacheEntry)}
+}
+
+func (s *Service) checkoutInfo(ctx context.Context, userID uint, sessionID, token string) (sub2api.CheckoutInfo, error) {
+	key := strconv.FormatUint(uint64(userID), 10) + ":" + strings.TrimSpace(sessionID)
+	now := time.Now()
+	s.checkoutMu.Lock()
+	s.pruneCheckoutCacheLocked(now, 0)
+	entry, found := s.checkoutCache[key]
+	if found {
+		s.checkoutMu.Unlock()
+		return entry.info, nil
+	}
+	s.checkoutMu.Unlock()
+
+	info, err := s.client.CheckoutInfo(ctx, token)
+	if err != nil {
+		return sub2api.CheckoutInfo{}, err
+	}
+	storedAt := time.Now()
+	s.checkoutMu.Lock()
+	reserve := 1
+	if _, exists := s.checkoutCache[key]; exists {
+		reserve = 0
+	}
+	s.pruneCheckoutCacheLocked(storedAt, reserve)
+	s.checkoutCache[key] = checkoutCacheEntry{info: info, expiresAt: storedAt.Add(checkoutCacheTTL)}
+	s.checkoutMu.Unlock()
+	return info, nil
+}
+
+func (s *Service) pruneCheckoutCacheLocked(now time.Time, reserve int) {
+	for key, entry := range s.checkoutCache {
+		if !now.Before(entry.expiresAt) {
+			delete(s.checkoutCache, key)
+		}
+	}
+	for len(s.checkoutCache)+reserve > checkoutCacheMax {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for key, entry := range s.checkoutCache {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey = key
+				oldestExpiry = entry.expiresAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.checkoutCache, oldestKey)
+	}
 }
 func (s *Service) Account(ctx context.Context, userID uint, sessionID string) (*AccountData, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
@@ -43,7 +106,7 @@ func (s *Service) Config(ctx context.Context, userID uint, sessionID string) (*C
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.client.CheckoutInfo(ctx, token)
+	info, err := s.checkoutInfo(ctx, userID, sessionID, token)
 	if err != nil {
 		return nil, err
 	}
@@ -57,14 +120,18 @@ func (s *Service) Config(ctx context.Context, userID uint, sessionID string) (*C
 		rate = 0
 	}
 	planCurrency := checkoutPlanCurrency(info.Methods)
-	return &ConfigData{Config: Config{Mode: "usage", PaymentMethods: methods, DisplayCurrency: planCurrency, USDToCNYRate: rate, BalanceDisabled: info.BalanceDisabled, BalanceRechargeMultiplier: nonNegative(info.BalanceRechargeMultiplier), RechargeFeeRate: nonNegative(info.RechargeFeeRate), GlobalDailyLimitUSD: info.GlobalDailyLimitUSD, GlobalWeeklyLimitUSD: info.GlobalWeeklyLimitUSD, GlobalMonthlyLimitUSD: info.GlobalMonthlyLimitUSD, Plans: plansFromRemote(info.Plans, planCurrency)}, ObservedAt: time.Now().UTC()}, nil
+	mode := "usage"
+	if len(info.Plans) > 0 {
+		mode = "period"
+	}
+	return &ConfigData{Config: Config{Mode: mode, PaymentMethods: methods, DisplayCurrency: planCurrency, USDToCNYRate: rate, BalanceDisabled: info.BalanceDisabled, BalanceRechargeMultiplier: nonNegative(info.BalanceRechargeMultiplier), RechargeFeeRate: nonNegative(info.RechargeFeeRate), GlobalDailyLimitUSD: info.GlobalDailyLimitUSD, GlobalWeeklyLimitUSD: info.GlobalWeeklyLimitUSD, GlobalMonthlyLimitUSD: info.GlobalMonthlyLimitUSD, Plans: plansFromRemote(info.Plans, planCurrency)}, ObservedAt: time.Now().UTC()}, nil
 }
 func (s *Service) Plans(ctx context.Context, userID uint, sessionID string) (*PlansData, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.client.CheckoutInfo(ctx, token)
+	info, err := s.checkoutInfo(ctx, userID, sessionID, token)
 	if err != nil {
 		return nil, err
 	}
@@ -83,34 +150,23 @@ func (s *Service) Overview(ctx context.Context, userID uint, sessionID string) (
 	if err != nil {
 		return nil, err
 	}
-	info, err := s.client.CheckoutInfo(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	plans := info.Plans
 	entitlements := make([]SubscriptionEntitlement, 0, len(subscriptions))
 	var current *SubscriptionEntitlement
 	now := time.Now().UTC()
 	for _, sub := range subscriptions {
-		var plan *sub2api.PaymentPlan
-		for i := range plans {
-			if plans[i].GroupID == sub.GroupID && plans[i].ForSale {
-				plan = &plans[i]
-				break
-			}
-		}
-		if plan == nil {
-			plan = &sub2api.PaymentPlan{ID: sub.GroupID, GroupID: sub.GroupID, Name: "Subscription", ForSale: true}
-		}
-		p := planFromRemote(*plan, checkoutPlanCurrency(info.Methods))
+		p := planFromSubscription(sub)
 		currentFlag := sub.StartsAt.Before(now) && sub.ExpiresAt.After(now)
-		entitlement := SubscriptionEntitlement{ID: sub.ID, UserID: userID, PlanID: plan.ID, PriceID: plan.ID, Status: sub.Status, StartAt: sub.StartsAt, CurrentPeriodStartAt: sub.StartsAt, CurrentPeriodEndAt: sub.ExpiresAt, Plan: p, IsCurrent: currentFlag}
+		entitlement := SubscriptionEntitlement{ID: sub.ID, UserID: userID, Status: sub.Status, StartAt: sub.StartsAt, CurrentPeriodStartAt: sub.StartsAt, CurrentPeriodEndAt: sub.ExpiresAt, Plan: p, IsCurrent: currentFlag}
 		entitlements = append(entitlements, entitlement)
 		if currentFlag && (current == nil || sub.StartsAt.After(current.StartAt)) {
 			current = &entitlements[len(entitlements)-1]
 		}
 	}
-	overview := Overview{Mode: "usage", Account: account.Account, SubscriptionEntitlements: entitlements}
+	mode := "usage"
+	if len(entitlements) > 0 {
+		mode = "period"
+	}
+	overview := Overview{Mode: mode, Account: account.Account, SubscriptionEntitlements: entitlements}
 	if current != nil {
 		overview.Plan = &current.Plan
 		overview.PeriodStartAt = &current.CurrentPeriodStartAt
@@ -118,12 +174,7 @@ func (s *Service) Overview(ctx context.Context, userID uint, sessionID string) (
 		for _, sub := range subscriptions {
 			if sub.ID == current.ID {
 				used := sub.MonthlyUsageUSD
-				limit := 0.0
-				for _, p := range plans {
-					if p.ID == current.PlanID && p.MonthlyLimitUSD != nil {
-						limit = *p.MonthlyLimitUSD
-					}
-				}
+				limit := current.Plan.PeriodCreditUSD
 				overview.PeriodCreditUSD = limit
 				overview.PeriodCreditNanousd = usdNanousd(limit)
 				overview.PeriodUsedUSD = used
@@ -136,6 +187,31 @@ func (s *Service) Overview(ctx context.Context, userID uint, sessionID string) (
 	}
 	return &OverviewData{Overview: overview, ObservedAt: now}, nil
 }
+
+func planFromSubscription(sub sub2api.Subscription) Plan {
+	plan := Plan{
+		Code:            "sub2_group_" + strconv.FormatInt(sub.GroupID, 10),
+		Name:            "Subscription",
+		FeatureJSON:     "[]",
+		ModelScopesJSON: "[]",
+		IsActive:        true,
+		Prices:          []PlanPrice{},
+	}
+	if sub.Group == nil {
+		return plan
+	}
+	plan.Name = firstNonEmpty(sub.Group.Name, plan.Name)
+	plan.Description = sub.Group.Description
+	plan.GroupPlatform = sub.Group.Platform
+	plan.RateMultiplier = sub.Group.RateMultiplier
+	plan.DailyLimitUSD = sub.Group.DailyLimitUSD
+	plan.WeeklyLimitUSD = sub.Group.WeeklyLimitUSD
+	plan.MonthlyLimitUSD = sub.Group.MonthlyLimitUSD
+	if sub.Group.MonthlyLimitUSD != nil {
+		plan.PeriodCreditUSD = *sub.Group.MonthlyLimitUSD
+	}
+	return plan
+}
 func plansFromRemote(plans []sub2api.PaymentPlan, currency string) []Plan {
 	out := make([]Plan, 0, len(plans))
 	for _, plan := range plans {
@@ -147,7 +223,7 @@ func plansFromRemote(plans []sub2api.PaymentPlan, currency string) []Plan {
 	return out
 }
 func planFromRemote(p sub2api.PaymentPlan, currency string) Plan {
-	active := p.ForSale && p.Price > 0
+	active := p.Price > 0
 	interval := "month"
 	if p.ValidityUnit == "year" {
 		interval = "year"
@@ -159,7 +235,11 @@ func planFromRemote(p sub2api.PaymentPlan, currency string) Plan {
 	if p.MonthlyLimitUSD != nil {
 		periodCreditUSD = *p.MonthlyLimitUSD
 	}
-	return Plan{ID: p.ID, Code: fmtID(p.ID), Name: p.Name, Description: p.Description, FeatureJSON: featureJSON(p.Features), GroupPlatform: p.GroupPlatform, RateMultiplier: p.RateMultiplier, ModelRateMultiplier: p.ModelRateMultiplier, DailyLimitUSD: p.DailyLimitUSD, WeeklyLimitUSD: p.WeeklyLimitUSD, MonthlyLimitUSD: p.MonthlyLimitUSD, PeriodCreditUSD: periodCreditUSD, ValidityDays: p.ValidityDays, OriginalPriceCents: cents(p.OriginalPrice), ModelScopesJSON: featureJSON(p.ModelScopes), SortOrder: p.SortOrder, IsActive: active, Prices: []PlanPrice{{ID: p.ID, PlanID: p.ID, Code: fmtID(p.ID), BillingInterval: interval, Currency: currency, AmountCents: cents(p.Price), IsActive: active, IsDefault: true}}}
+	planCurrency := strings.ToUpper(strings.TrimSpace(p.Currency))
+	if planCurrency == "" {
+		planCurrency = currency
+	}
+	return Plan{ID: p.ID, Code: fmtID(p.ID), Name: p.Name, Description: p.Description, FeatureJSON: featureJSON(p.Features), GroupPlatform: p.GroupPlatform, RateMultiplier: p.RateMultiplier, ModelRateMultiplier: p.ModelRateMultiplier, DailyLimitUSD: p.DailyLimitUSD, WeeklyLimitUSD: p.WeeklyLimitUSD, MonthlyLimitUSD: p.MonthlyLimitUSD, PeriodCreditUSD: periodCreditUSD, ValidityDays: p.ValidityDays, OriginalPriceCents: cents(p.OriginalPrice), ModelScopesJSON: featureJSON(p.ModelScopes), SortOrder: p.SortOrder, IsActive: active, Prices: []PlanPrice{{ID: p.ID, PlanID: p.ID, Code: fmtID(p.ID), BillingInterval: interval, Currency: planCurrency, AmountCents: cents(p.Price), IsActive: active, IsDefault: true}}}
 }
 
 func checkoutPlanCurrency(methods map[string]sub2api.PaymentMethod) string {

@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
-import { closeAnnouncement, dismissAnnouncementToday, listAnnouncements } from "@/shared/api/announcements";
+import { closeAnnouncement, listAnnouncements } from "@/shared/api/announcements";
 import type { AnnouncementDTO } from "@/shared/api/announcements.types";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { dispatchAnnouncementUnreadChanged, subscribeOpenAnnouncements } from "@/shared/events/announcement-events";
@@ -165,7 +165,7 @@ export function AnnouncementDialogHost() {
         const items = await listAnnouncements(accessToken);
         if (!cancelled && autoLoadRequestIDRef.current === requestID) {
           setAutoQueue(items);
-          setAutoOpen(items.some((item) => !isAnnouncementRead(item)));
+          setAutoOpen(items.some((item) => item.notifyMode === "popup" && !isAnnouncementRead(item)));
           setDialogMode((current) => (current === "manual" ? current : "auto"));
           setActiveIndex(0);
         }
@@ -200,7 +200,7 @@ export function AnnouncementDialogHost() {
       setActiveIndex(0);
       setSortMode("default");
 
-      void listAnnouncements(accessToken, { includeDismissed: true })
+      void listAnnouncements(accessToken)
         .then((items) => {
           if (!cancelled && manualLoadRequestIDRef.current === requestID) {
             setManualQueue(items);
@@ -226,7 +226,11 @@ export function AnnouncementDialogHost() {
     };
   }, [accessToken, pathname, t, userStatus]);
 
-  const queue = dialogMode === "manual" ? manualQueue : autoQueue;
+  const autoPopupQueue = React.useMemo(
+    () => autoQueue.filter((item) => item.notifyMode === "popup" && !isAnnouncementRead(item)),
+    [autoQueue],
+  );
+  const queue = dialogMode === "manual" ? manualQueue : autoPopupQueue;
   const sortedQueue = React.useMemo(() => {
     if (sortMode === "time") {
       return [...queue].sort((a, b) => compareReadState(a, b) || compareAnnouncementByTime(a, b));
@@ -259,7 +263,6 @@ export function AnnouncementDialogHost() {
     setAutoOpen(false);
     setManualOpen(false);
     setManualLoading(false);
-    dispatchAnnouncementUnreadChanged(false);
   }, []);
 
   const closeManualDialog = React.useCallback(() => {
@@ -290,28 +293,20 @@ export function AnnouncementDialogHost() {
     }
   }, []);
 
-  const dismissAllToday = React.useCallback(async () => {
-    if (!accessToken || stateSaving) {
-      return;
-    }
-    setStateSaving(true);
-    try {
-      await Promise.all(unreadQueue.map((item) => dismissAnnouncementToday(accessToken, item.id, item.updatedAt)));
-      closeDialog();
-    } catch {
-      toast.error(t("dismissFailed"));
-    } finally {
-      setStateSaving(false);
-    }
-  }, [accessToken, closeDialog, stateSaving, t, unreadQueue]);
-
   const closeAll = React.useCallback(async () => {
     if (!accessToken || stateSaving) {
       return;
     }
     setStateSaving(true);
     try {
-      await Promise.all(unreadQueue.map((item) => closeAnnouncement(accessToken, item.id, item.updatedAt)));
+      await Promise.all(unreadQueue.map((item) => closeAnnouncement(accessToken, item.id)));
+      const readIDs = new Set(unreadQueue.map((item) => item.id));
+      const closedAt = new Date().toISOString();
+      const markRead = (items: AnnouncementDTO[]) => items.map((item) => (
+        readIDs.has(item.id) ? { ...item, closedAt } : item
+      ));
+      setAutoQueue(markRead);
+      setManualQueue(markRead);
       closeDialog();
     } catch {
       toast.error(t("closeFailed"));
@@ -399,14 +394,9 @@ export function AnnouncementDialogHost() {
               {t("close")}
             </Button>
           ) : (
-            <>
-              <Button type="button" variant="ghost" onClick={() => void dismissAllToday()} disabled={stateSaving}>
-                {t("dismissAllToday")}
-              </Button>
-              <Button type="button" onClick={() => void closeAll()} disabled={stateSaving}>
-                {t("close")}
-              </Button>
-            </>
+            <Button type="button" onClick={() => void closeAll()} disabled={stateSaving}>
+              {t("close")}
+            </Button>
           )}
         </DialogFooter>
       </DialogContent>

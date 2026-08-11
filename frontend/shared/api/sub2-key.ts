@@ -1,5 +1,4 @@
 import { authedRequest } from "@/shared/api/authed-client";
-import type { PublicModelDTO } from "@/shared/api/model.types";
 
 export type Sub2RemoteKeyDTO = {
   remoteKeyID: number;
@@ -39,9 +38,4 @@ export function createSub2KeyBinding(accessToken: string, remoteKeyID: number, i
 
 export function deleteSub2KeyBinding(accessToken: string, publicID: string): Promise<void> {
   return authedRequest<void>(`/api/v1/me/sub2-key-bindings/${encodeURIComponent(publicID)}`, { method: "DELETE", accessToken }, true);
-}
-
-export function listChatModels(accessToken: string, keyBindingID: string): Promise<PublicModelDTO[]> {
-  const params = new URLSearchParams({ key_binding_id: keyBindingID });
-  return authedRequest<PublicModelDTO[]>(`/api/v1/chat/models?${params.toString()}`, { accessToken }, true);
 }

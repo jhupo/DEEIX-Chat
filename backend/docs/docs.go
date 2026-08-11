@@ -4856,14 +4856,6 @@ const docTemplate = `{
                     "announcements"
                 ],
                 "summary": "获取当前公告",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "是否包含今日不再显示的公告",
-                        "name": "include_dismissed",
-                        "in": "query"
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4905,15 +4897,6 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "公告版本",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementStateRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -4921,70 +4904,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/AnnouncementCloseResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/announcements/{id}/dismiss-today": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "登录用户对当前公告版本记录今日不再显示",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "announcements"
-                ],
-                "summary": "今日不再显示公告",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "公告ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "公告版本",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementStateRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/AnnouncementDismissResponseDoc"
                         }
                     },
                     "400": {
@@ -10215,32 +10134,6 @@ const docTemplate = `{
                 }
             }
         },
-        "AnnouncementDismissDataResponse": {
-            "type": "object",
-            "required": [
-                "dismissed"
-            ],
-            "properties": {
-                "dismissed": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "AnnouncementDismissResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/AnnouncementDismissDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "AnnouncementErrorDoc": {
             "type": "object",
             "required": [
@@ -10291,6 +10184,7 @@ const docTemplate = `{
                 "createdByUserID",
                 "expiresAt",
                 "id",
+                "notifyMode",
                 "pinned",
                 "priority",
                 "startsAt",
@@ -10321,6 +10215,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "notifyMode": {
+                    "type": "string"
                 },
                 "pinned": {
                     "type": "boolean"
@@ -10358,17 +10255,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/AnnouncementDataResponse"
                 },
                 "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "AnnouncementStateRequest": {
-            "type": "object",
-            "required": [
-                "updatedAt"
-            ],
-            "properties": {
-                "updatedAt": {
                     "type": "string"
                 }
             }
@@ -17771,6 +17657,7 @@ const docTemplate = `{
                 "payAmountCents",
                 "payCurrency",
                 "provider",
+                "qrCode",
                 "status"
             ],
             "properties": {
@@ -17811,6 +17698,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "provider": {
+                    "type": "string"
+                },
+                "qrCode": {
                     "type": "string"
                 },
                 "status": {
@@ -18621,7 +18511,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.0",
+	Version:          "0.4.1",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
