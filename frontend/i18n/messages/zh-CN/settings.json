@@ -341,6 +341,7 @@
       "name": "密钥名称",
       "group": "分组",
       "loading": "正在加载分组",
+      "groupPlaceholder": "请选择分组",
       "groupEmpty": "暂无可用分组",
       "cancel": "取消",
       "create": "创建",

@@ -41,7 +41,6 @@ export function SubscriptionAPIKeyDialog({
       .then((items) => {
         if (cancelled) return;
         setGroups(items);
-        setGroupID(String(items[0]?.id ?? ""));
       })
       .catch((error) => {
         if (!cancelled) toast.error(t("loadFailed"), { description: resolveErrorMessage(error) });
@@ -84,7 +83,9 @@ export function SubscriptionAPIKeyDialog({
             <div className="grid gap-1.5 text-xs font-medium">
               <label htmlFor="sub2-key-group">{t("group")}</label>
               <Select value={groupID} onValueChange={setGroupID} disabled={loading || creating || groups.length === 0}>
-                <SelectTrigger id="sub2-key-group" aria-label={t("group")}><SelectValue placeholder={loading ? t("loading") : t("groupEmpty")} /></SelectTrigger>
+                <SelectTrigger id="sub2-key-group" aria-label={t("group")}>
+                  <SelectValue placeholder={loading ? t("loading") : groups.length === 0 ? t("groupEmpty") : t("groupPlaceholder")} />
+                </SelectTrigger>
                 <SelectContent>
                   {groups.map((group) => (
                     <SelectItem key={group.id} value={String(group.id)}>
