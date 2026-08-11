@@ -25,6 +25,7 @@ import (
 
 const (
 	reasoningContentPassbackSettingKey = "chat.reasoning_content_passback"
+	defaultProtocolSettingKey          = "chat.default_protocol"
 	maxRequestRouteAttempts            = 3
 )
 
@@ -84,12 +85,16 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		}
 		return nil, nil, ErrKeyBindingUnavailable
 	}
+	configuredProtocol := ""
+	if s.repo != nil {
+		configuredProtocol, _ = s.getUserSettingCached(ctx, userID, defaultProtocolSettingKey)
+	}
 	return &channel.ResolvedRoute{
 		PlatformModelID:       chatModel.ID,
 		PlatformModelName:     chatModel.PlatformModelName,
 		UpstreamName:          "sub2",
 		BindingCode:           execution.BindingPublicID,
-		Protocol:              llm.AdapterOpenAIResponses,
+		Protocol:              resolveSub2ChatProtocol(execution.GroupPlatform, configuredProtocol),
 		BaseURL:               s.cfg.Snapshot().Sub2BaseURL,
 		APIKey:                execution.APIKey,
 		ModelVendor:           chatModel.Vendor,
@@ -98,6 +103,29 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		ModelSystemPrompt:     chatModel.SystemPrompt,
 		UpstreamModel:         chatModel.PlatformModelName,
 	}, execution, nil
+}
+
+func resolveSub2ChatProtocol(groupPlatform, configured string) string {
+	platform := strings.ToLower(strings.TrimSpace(groupPlatform))
+	if strings.TrimSpace(configured) == "" {
+		configured = llm.AdapterOpenAIChatCompletions
+	}
+	protocol := llm.NormalizeAdapter(configured)
+	switch platform {
+	case "anthropic":
+		return llm.AdapterAnthropicMessages
+	case "composite":
+		if protocol == llm.AdapterOpenAIChatCompletions || protocol == llm.AdapterOpenAIResponses || protocol == llm.AdapterAnthropicMessages {
+			return protocol
+		}
+	case "openai", "grok":
+		if protocol == llm.AdapterOpenAIChatCompletions || protocol == llm.AdapterOpenAIResponses {
+			return protocol
+		}
+	default:
+		return llm.AdapterOpenAIChatCompletions
+	}
+	return llm.AdapterOpenAIChatCompletions
 }
 
 func pinSub2ChatRouteToRun(run *model.Run, route *channel.ResolvedRoute, execution *appsub2key.Execution) {

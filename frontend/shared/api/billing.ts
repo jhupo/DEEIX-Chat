@@ -6,6 +6,7 @@ import type {
   BillingOverviewData,
   BillingOrderData,
   BillingUsageDailyDTO,
+  BillingUsageHourlyDTO,
   BillingUsageSort,
   BillingUsageType,
   BillingPlanDTO,
@@ -78,6 +79,16 @@ export async function listBillingDailyUsage(
   const query = params.toString();
   const data = await authedRequest<{ results: BillingUsageDailyDTO[] }>(
     `/api/v1/billing/usage/daily${query ? `?${query}` : ""}`,
+    { accessToken },
+    true,
+  );
+  return data.results;
+}
+
+export async function listBillingHourlyUsage(accessToken: string, days = 1): Promise<BillingUsageHourlyDTO[]> {
+  const params = new URLSearchParams({ days: String(days) });
+  const data = await authedRequest<{ results: BillingUsageHourlyDTO[] }>(
+    `/api/v1/billing/usage/hourly?${params.toString()}`,
     { accessToken },
     true,
   );

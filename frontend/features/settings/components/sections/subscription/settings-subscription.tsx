@@ -18,6 +18,7 @@ import {
   getBillingConfig,
   getBillingOverview,
   listBillingDailyUsage,
+  listBillingHourlyUsage,
   listBillingMonthlyUsage,
   listBillingUsage,
   redeemBillingCode,
@@ -28,6 +29,7 @@ import type {
   BillingMode,
   BillingOverviewData,
   BillingUsageDailyDTO,
+  BillingUsageHourlyDTO,
   BillingUsageLedgerDTO,
   BillingUsageMonthlyDTO,
   BillingUsageSort,
@@ -50,6 +52,7 @@ import {
 } from "@/shared/lib/billing-display";
 import { PendingPaymentDialog, RedemptionDialog, TopUpDialog } from "./subscription-billing-dialogs";
 import { SubscriptionSummary } from "./subscription-summary";
+import { SubscriptionAPIKeyDialog } from "./subscription-api-key-dialog";
 import { SubscriptionUsageLog } from "./subscription-usage-log";
 import type { UsageTrendView } from "./subscription-trend";
 
@@ -97,6 +100,7 @@ export function SettingsSubscription() {
   const [billingOverview, setBillingOverview] = React.useState<BillingOverviewData["overview"] | null>(null);
   const [usageLedgers, setUsageLedgers] = React.useState<BillingUsageLedgerDTO[]>([]);
   const [dailyUsage, setDailyUsage] = React.useState<BillingUsageDailyDTO[]>([]);
+  const [hourlyUsage, setHourlyUsage] = React.useState<BillingUsageHourlyDTO[]>([]);
   const [monthlyUsage, setMonthlyUsage] = React.useState<BillingUsageMonthlyDTO[]>([]);
   const [usageTotal, setUsageTotal] = React.useState(0);
   const [usagePage, setUsagePage] = React.useState(1);
@@ -117,6 +121,7 @@ export function SettingsSubscription() {
   const [selectedPaymentProvider, setSelectedPaymentProvider] = React.useState<PaymentProvider>("");
   const [topUpDialogOpen, setTopUpDialogOpen] = React.useState(false);
   const [redemptionDialogOpen, setRedemptionDialogOpen] = React.useState(false);
+  const [apiKeyDialogOpen, setAPIKeyDialogOpen] = React.useState(false);
   const [redemptionCode, setRedemptionCode] = React.useState("");
   const [redemptionLoading, setRedemptionLoading] = React.useState(false);
   const [pendingPayment, setPendingPayment] = React.useState<PendingPayment | null>(null);
@@ -160,15 +165,17 @@ export function SettingsSubscription() {
   const loadBillingData = React.useCallback(async () => {
     setBillingLoading(true);
     try {
-      const [configData, overviewData, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
+      const [configData, overviewData, nextHourlyUsage, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
         getBillingConfig(accessToken),
         getBillingOverview(accessToken),
+        listBillingHourlyUsage(accessToken),
         listBillingDailyUsage(accessToken),
         listBillingMonthlyUsage(accessToken, 12),
       ]);
       setBillingConfig(configData.config);
       setBillingPlans(configData.config.plans);
       setBillingOverview(overviewData.overview);
+      setHourlyUsage(nextHourlyUsage ?? []);
       setDailyUsage(nextDailyUsage ?? []);
       setMonthlyUsage(nextMonthlyUsage ?? []);
     } catch (error) {
@@ -421,6 +428,7 @@ export function SettingsSubscription() {
         billingDisplay={billingDisplay}
         onOpenRedemptionDialog={() => setRedemptionDialogOpen(true)}
         onOpenTopUpDialog={() => setTopUpDialogOpen(true)}
+        onOpenCreateKeyDialog={() => setAPIKeyDialogOpen(true)}
         onPricingDialogOpenChange={setPricingDialogOpen}
         onPaymentDialogOpenChange={setPaymentDialogOpen}
         onSelectPlan={(plan, price, isCurrent) => void handleSelectPlan(plan, price, isCurrent)}
@@ -431,6 +439,7 @@ export function SettingsSubscription() {
       <section className="space-y-6 px-0.5 md:space-y-7 xl:space-y-8 xl:px-1">
         <Separator />
         <SubscriptionTrend
+          hourlyUsage={hourlyUsage}
           dailyUsage={dailyUsage}
           monthlyUsage={monthlyUsage}
           loading={billingLoading}
@@ -498,6 +507,8 @@ export function SettingsSubscription() {
         onCodeChange={setRedemptionCode}
         onSubmit={() => void handleRedeemCode()}
       />
+
+      <SubscriptionAPIKeyDialog open={apiKeyDialogOpen} onOpenChange={setAPIKeyDialogOpen} />
 
       <PendingPaymentDialog
         open={pendingPayment !== null}

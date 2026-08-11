@@ -66,6 +66,23 @@ func TestDefaultSub2KeyBindingIDSettingIsAllowed(t *testing.T) {
 	}
 }
 
+func TestDefaultChatProtocolSettingIsAllowed(t *testing.T) {
+	t.Parallel()
+
+	const key = "chat.default_protocol"
+	if got := allowedKeys[key]; got != "openai_chat_completions" {
+		t.Fatalf("expected %s default to be openai_chat_completions, got %q", key, got)
+	}
+	for _, value := range []string{"openai_chat_completions", "openai_responses", "anthropic_messages"} {
+		if err := validateValue(key, value); err != nil {
+			t.Fatalf("expected %s=%s to be accepted, got %v", key, value, err)
+		}
+	}
+	if err := validateValue(key, "custom_protocol"); err == nil {
+		t.Fatal("expected unknown chat protocol to be rejected")
+	}
+}
+
 func TestContentWidthSettingIsAllowed(t *testing.T) {
 	t.Parallel()
 

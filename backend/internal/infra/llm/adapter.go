@@ -153,6 +153,8 @@ func DefaultEndpointForAdapter(adapter string) string {
 	switch NormalizeAdapter(adapter) {
 	case AdapterOpenAIChatCompletions, AdapterOpenRouterChat:
 		return EndpointChatCompletions
+	case AdapterAnthropicMessages:
+		return EndpointMessages
 	case AdapterOpenAIImageGenerations, AdapterGoogleImageGeneration, AdapterXAIImage:
 		return EndpointImageGenerations
 	case AdapterOpenAIImageEdits, AdapterXAIImageEdits:

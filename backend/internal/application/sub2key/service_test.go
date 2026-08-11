@@ -148,6 +148,53 @@ func TestRemoteKeyListUsesShortLivedCache(t *testing.T) {
 	}
 }
 
+func TestCreateRemoteValidatesGroupForwardsIdempotencyAndClearsCache(t *testing.T) {
+	const idempotencyKey = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+	createCalls := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/user/profile", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, map[string]any{"id": 7})
+	})
+	mux.HandleFunc("/api/v1/groups/available", func(w http.ResponseWriter, _ *http.Request) {
+		writeKeyEnvelope(w, []any{map[string]any{"id": 9, "name": "OpenAI", "platform": "openai"}})
+	})
+	mux.HandleFunc("/api/v1/keys", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeKeyEnvelope(w, map[string]any{"total": 0, "items": []any{}})
+			return
+		}
+		createCalls++
+		if got := r.Header.Get("Idempotency-Key"); got != idempotencyKey {
+			t.Fatalf("Idempotency-Key = %q", got)
+		}
+		var request sub2api.CreateAPIKeyInput
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Name != "DEEIX Chat" || request.GroupID != 9 {
+			t.Fatalf("create request = %#v, %v", request, err)
+		}
+		writeKeyEnvelope(w, map[string]any{
+			"id": 11, "user_id": 7, "name": request.Name, "key": "sk-created-secret", "group_id": 9,
+			"group": map[string]any{"name": "OpenAI", "platform": "openai"}, "status": "active",
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(keyTestRepo{}, keyTestTokens{}, client, "test-encryption-key")
+	item, err := service.CreateRemote(context.Background(), 1, "session", " DEEIX Chat ", 9, idempotencyKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createCalls != 1 || item.RemoteKeyID != 11 || item.GroupPlatform != "openai" || strings.Contains(item.MaskedKey, "secret") {
+		t.Fatalf("created key view = %#v, calls = %d", item, createCalls)
+	}
+	if len(service.remoteCache) != 0 {
+		t.Fatalf("remote key cache was not cleared: %#v", service.remoteCache)
+	}
+}
+
 func TestRemoteKeyCachePrunesExpiredEntriesAndStaysBounded(t *testing.T) {
 	now := time.Now()
 	service := &Service{remoteCache: make(map[string]remoteKeyCacheEntry)}

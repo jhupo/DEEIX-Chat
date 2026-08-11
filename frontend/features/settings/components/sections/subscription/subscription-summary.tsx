@@ -1,13 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { Banknote, Check, Ticket, WalletCards } from "lucide-react";
+import { Banknote, Check, KeyRound, Ticket, WalletCards } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { SpinnerLabel } from "@/components/ui/spinner";
 import { resolvePlanDiscountPercent } from "@/features/settings/model/plan-discount";
 import {
@@ -129,6 +128,7 @@ type SubscriptionSummaryProps = {
   billingDisplay: BillingDisplayOptions;
   onOpenRedemptionDialog: () => void;
   onOpenTopUpDialog: () => void;
+  onOpenCreateKeyDialog: () => void;
   onPricingDialogOpenChange: (open: boolean) => void;
   onPaymentDialogOpenChange: (open: boolean) => void;
   onSelectPlan: (plan: BillingPlanDTO, price: BillingPlanPriceDTO | null, isCurrent: boolean) => void;
@@ -164,6 +164,7 @@ export function SubscriptionSummary({
   billingDisplay,
   onOpenRedemptionDialog,
   onOpenTopUpDialog,
+  onOpenCreateKeyDialog,
   onPricingDialogOpenChange,
   onPaymentDialogOpenChange,
   onSelectPlan,
@@ -206,9 +207,33 @@ export function SubscriptionSummary({
     <>
       {billingMode !== "self" ? (
         <section className="space-y-6 px-0.5 md:space-y-7 xl:space-y-8 xl:px-1">
+          <ActionRow
+            title={t("usageBilling.title")}
+            value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
+            action={
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Button type="button" variant="outline" disabled={redemptionLoading} onClick={onOpenRedemptionDialog}>
+                  <Ticket data-icon="inline-start" />
+                  {t("redemption.open")}
+                </Button>
+                <Button type="button" variant="outline" disabled={topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
+                  <Banknote data-icon="inline-start" />
+                  {t("topUp.title")}
+                </Button>
+                <Button type="button" variant="outline" disabled={billingPlans.length === 0} onClick={() => onPricingDialogOpenChange(true)}>
+                  <WalletCards data-icon="inline-start" />
+                  {t("plans.actions.subscribe")}
+                </Button>
+                <Button type="button" variant="outline" onClick={onOpenCreateKeyDialog}>
+                  <KeyRound data-icon="inline-start" />
+                  {t("apiKey.open")}
+                </Button>
+              </div>
+            }
+          />
+
           {billingMode === "period" ? (
-            <>
-              <div className="space-y-3 rounded-md bg-muted/35 p-3 md:space-y-4">
+            <div className="space-y-3 rounded-md bg-muted/35 p-3 md:space-y-4">
                 <div className="flex items-start justify-between gap-3 md:gap-4">
                   <div className="space-y-1">
                     <p className="text-xs font-medium">{t("periodUsage.title")}</p>
@@ -229,31 +254,8 @@ export function SubscriptionSummary({
                     <div className="h-full rounded-full bg-foreground/70" style={{ width: `${periodPercent}%` }} />
                   </div>
                 </div>
-              </div>
-              <Separator />
-            </>
+            </div>
           ) : null}
-
-          <ActionRow
-            title={t("usageBilling.title")}
-            value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
-            action={
-              <div className="grid grid-cols-3 gap-2">
-                <Button type="button" variant="outline" disabled={redemptionLoading} onClick={onOpenRedemptionDialog}>
-                  <Ticket className="size-3.5" />
-                  {t("redemption.open")}
-                </Button>
-                <Button type="button" variant="outline" disabled={topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
-                  <Banknote className="size-3.5" />
-                  {t("topUp.title")}
-                </Button>
-                <Button type="button" variant="outline" disabled={billingPlans.length === 0} onClick={() => onPricingDialogOpenChange(true)}>
-                  <WalletCards className="size-3.5" />
-                  {t("plans.actions.subscribe")}
-                </Button>
-              </div>
-            }
-          />
         </section>
       ) : null}
 
@@ -264,12 +266,12 @@ export function SubscriptionSummary({
       ) : null}
 
       <Dialog open={pricingDialogOpen} onOpenChange={onPricingDialogOpenChange}>
-        <DialogContent className="sm:max-w-[680px] sm:p-6">
+        <DialogContent className="sm:max-w-[760px] sm:p-5">
           <DialogHeader>
             <DialogTitle>{t("plans.title")}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid max-h-[min(72vh,42rem)] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+          <div className="grid max-h-[min(72vh,42rem)] grid-cols-1 gap-2.5 overflow-y-auto pr-1 sm:grid-cols-2 md:grid-cols-3">
             {billingPlans.map((plan) => {
               const price = resolveDefaultPrice(plan);
               const isCurrent = isCurrentBillingPlan(plan, currentPlan);
@@ -288,7 +290,7 @@ export function SubscriptionSummary({
                 <article
                   key={plan.id}
                   className={[
-                    "flex min-h-60 flex-col rounded-lg border bg-background p-4 transition-colors",
+                    "flex min-h-52 flex-col rounded-lg border bg-background p-3 transition-colors",
                     isHighlighted ? "border-foreground ring-1 ring-foreground" : "border-border/70 hover:bg-muted/25",
                   ].join(" ")}
                 >
@@ -297,7 +299,7 @@ export function SubscriptionSummary({
                     {isCurrent ? <Badge variant="secondary">{t("plans.currentBadge")}</Badge> : null}
                   </div>
 
-                  <p className="mt-4 text-lg font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
+                  <p className="mt-3 text-base font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
                   <div className="mt-1 flex min-h-5 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {discountPercent ? (
                       <>
@@ -307,7 +309,7 @@ export function SubscriptionSummary({
                     ) : null}
                   </div>
 
-                  <div className="mt-4 space-y-2">
+                  <div className="mt-3 grid gap-1.5">
                     {features.map((feature) => (
                       <div key={feature} className="flex items-start gap-2 text-xs text-muted-foreground">
                         <Check className="mt-0.5 size-3 shrink-0 text-foreground" />

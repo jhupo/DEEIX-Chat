@@ -10,7 +10,7 @@ import type { ChartConfig } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
-import type { BillingUsageDailyDTO, BillingUsageMonthlyDTO } from "@/shared/api/billing.types";
+import type { BillingUsageDailyDTO, BillingUsageHourlyDTO, BillingUsageMonthlyDTO } from "@/shared/api/billing.types";
 import {
   formatDay,
   formatFormulaTokenCount,
@@ -38,7 +38,7 @@ type UsageTrendStats = {
   totalCalls: number;
 };
 
-export type UsageTrendView = "daily" | "monthly";
+export type UsageTrendView = "hourly" | "daily" | "monthly";
 
 const chartConfig = {
   totalTokens: {
@@ -153,6 +153,7 @@ function UsageChartSkeleton() {
 }
 
 export function SubscriptionTrend({
+  hourlyUsage,
   dailyUsage,
   monthlyUsage,
   loading,
@@ -160,6 +161,7 @@ export function SubscriptionTrend({
   billingDisplay,
   onViewChange,
 }: {
+  hourlyUsage: BillingUsageHourlyDTO[];
   dailyUsage: BillingUsageDailyDTO[];
   monthlyUsage: BillingUsageMonthlyDTO[];
   loading: boolean;
@@ -169,6 +171,22 @@ export function SubscriptionTrend({
 }) {
   const t = useTranslations("settings.subscriptionPage");
   const { locale } = useAppLocale();
+  const hourlyPoints = React.useMemo<UsagePoint[]>(
+    () => [...hourlyUsage]
+      .sort((left, right) => left.bucketStart.localeCompare(right.bucketStart))
+      .map((item) => {
+        const [date = item.bucketStart, time = ""] = item.bucketStart.split(" ");
+        return {
+          key: item.bucketStart,
+          label: time.slice(0, 5),
+          fullLabel: `${formatShortDate(date, locale)} ${time.slice(0, 5)}`.trim(),
+          actualCost: item.actualCost,
+          totalTokens: item.totalTokens,
+          callCount: item.callCount,
+        };
+      }),
+    [hourlyUsage, locale],
+  );
   const dailyPoints = React.useMemo<UsagePoint[]>(
     () => [...dailyUsage]
       .sort((left, right) => left.usageDate.localeCompare(right.usageDate))
@@ -195,15 +213,18 @@ export function SubscriptionTrend({
       })),
     [locale, monthlyUsage],
   );
-  const points = view === "daily" ? dailyPoints : monthlyPoints;
+  const points = view === "hourly" ? hourlyPoints : view === "daily" ? dailyPoints : monthlyPoints;
   const stats = React.useMemo(() => calculateStats(points), [points]);
+  const title = view === "hourly" ? t("usageTrend.hourlyTitle") : view === "daily" ? t("usageTrend.dailyTitle") : t("usageTrend.monthlyTitle");
+  const chartTitle = view === "hourly" ? t("usageTrend.hourlyUsage") : view === "daily" ? t("usageTrend.dailyUsage") : t("usageTrend.monthlyUsage");
 
   return (
     <div className="space-y-4 md:space-y-5">
       <div className="flex h-9 items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold">{view === "daily" ? t("usageTrend.dailyTitle") : t("usageTrend.monthlyTitle")}</h3>
+        <h3 className="text-sm font-semibold">{title}</h3>
         <Tabs value={view} onValueChange={(value) => onViewChange(value as UsageTrendView)}>
           <TabsList>
+            <TabsTrigger value="hourly">{t("usageTrend.hourly")}</TabsTrigger>
             <TabsTrigger value="daily">{t("usageTrend.daily")}</TabsTrigger>
             <TabsTrigger value="monthly">{t("usageTrend.monthly")}</TabsTrigger>
           </TabsList>
@@ -211,7 +232,7 @@ export function SubscriptionTrend({
       </div>
       <UsageMetrics stats={stats} billingDisplay={billingDisplay} />
       <UsageChart
-        title={view === "daily" ? t("usageTrend.dailyUsage") : t("usageTrend.monthlyUsage")}
+        title={chartTitle}
         items={points}
         loading={loading}
         billingDisplay={billingDisplay}

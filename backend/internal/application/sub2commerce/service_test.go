@@ -315,6 +315,32 @@ func TestUsageMapsAuthoritativeSub2CostAndTrend(t *testing.T) {
 	}
 }
 
+func TestTrendUsesSub2HourlyGranularity(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/usage/dashboard/trend", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("granularity"); got != "hour" {
+			t.Fatalf("granularity = %q", got)
+		}
+		writeKeyEnvelope(w, map[string]any{
+			"granularity": "hour",
+			"trend":       []any{map[string]any{"date": "2026-08-12 09:00", "requests": 1, "total_tokens": 12, "actual_cost": 0.1}},
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := sub2api.New(server.URL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewService(overviewTokenResolver{}, client, nil).Trend(context.Background(), 1, "s", "2026-08-12", "2026-08-12", "hour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Results) != 1 || result.Results[0].UsageDate != "2026-08-12 09:00" || result.Results[0].TotalTokens != 12 {
+		t.Fatalf("hourly trend = %#v", result.Results)
+	}
+}
+
 func TestOverviewMapsSub2Entitlement(t *testing.T) {
 	mux := http.NewServeMux()
 	write := func(w http.ResponseWriter, data any) {

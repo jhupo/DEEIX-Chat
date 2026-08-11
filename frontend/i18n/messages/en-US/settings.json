@@ -185,6 +185,16 @@
       "empty": "No available API key",
       "loadFailed": "Failed to load API keys"
     },
+    "defaultProtocol": {
+      "title": "Chat protocol",
+      "description": "This key belongs to {group}; only protocols supported by that group are shown.",
+      "noKey": "Select a default API key before choosing a protocol.",
+      "options": {
+        "openai_chat_completions": "Chat Completions",
+        "openai_responses": "Responses",
+        "anthropic_messages": "Claude Messages"
+      }
+    },
     "defaultModel": {
       "sectionTitle": "Conversation basics",
       "title": "Default model for new chats",
@@ -323,15 +333,34 @@
       "title": "Usage billing",
       "balance": "Account balance {value}"
     },
+    "apiKey": {
+      "open": "Create API key",
+      "title": "Create API key",
+      "description": "Choose a Sub2API group. The new key can then be selected as the default chat key.",
+      "defaultName": "DEEIX Chat",
+      "name": "Key name",
+      "group": "Group",
+      "loading": "Loading groups",
+      "groupEmpty": "No available groups",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating",
+      "created": "API key created",
+      "loadFailed": "Failed to load groups",
+      "createFailed": "Failed to create API key"
+    },
     "selfMode": {
       "title": "Billing mode",
       "value": "Self-use mode"
     },
     "usageTrend": {
+      "hourlyTitle": "Hourly usage trend",
       "dailyTitle": "Daily usage trend",
       "monthlyTitle": "Monthly usage trend",
+      "hourly": "Hourly",
       "daily": "Daily",
       "monthly": "Monthly",
+      "hourlyUsage": "Hourly usage",
       "dailyUsage": "Daily usage",
       "monthlyUsage": "Monthly usage",
       "empty": "No usage data.",

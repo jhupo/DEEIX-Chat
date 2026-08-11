@@ -1990,6 +1990,28 @@ export interface Sub2DailyRowDTO {
   usageDate: string;
 }
 
+export interface Sub2HourlyDataDTO {
+  observedAt: string;
+  results: Sub2HourlyRowDTO[];
+}
+
+export interface Sub2HourlyResponseDoc {
+  data: Sub2HourlyDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2HourlyRowDTO {
+  actualCost: string;
+  bucketStart: string;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  recordCount: number;
+  totalTokens: number;
+}
+
 export interface Sub2MonthlyDataDTO {
   observedAt: string;
   results: Sub2MonthlyRowDTO[];
@@ -5036,6 +5058,22 @@ export namespace Billing {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = Sub2DailyResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name UsageHourlyList
+   * @summary Get Sub2 hourly usage
+   * @request GET:/billing/usage/hourly
+   * @secure
+   */
+  export namespace UsageHourlyList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2HourlyResponseDoc;
   }
 
   /**

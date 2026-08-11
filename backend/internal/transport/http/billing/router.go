@@ -14,6 +14,7 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.GET("/billing/plans", m.Handler.Plans)
 	authRequired.GET("/billing/usage", m.Handler.Usage)
 	authRequired.GET("/billing/usage/daily", m.Handler.Daily)
+	authRequired.GET("/billing/usage/hourly", m.Handler.Hourly)
 	authRequired.GET("/billing/usage/monthly", m.Handler.Monthly)
 	authRequired.GET("/billing/orders", m.Handler.Orders)
 	authRequired.GET("/billing/orders/:id", m.Handler.Order)

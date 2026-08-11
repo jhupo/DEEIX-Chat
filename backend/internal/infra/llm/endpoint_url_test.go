@@ -123,6 +123,9 @@ func TestOpenRouterChatCompletionsAdapterUsesChatEndpoint(t *testing.T) {
 }
 
 func TestBuildAnthropicURLsRespectVersionedBasePath(t *testing.T) {
+	if got := DefaultEndpointForAdapter(AdapterAnthropicMessages); got != EndpointMessages {
+		t.Fatalf("expected Anthropic Messages endpoint, got %q", got)
+	}
 	messageCases := map[string]string{
 		"https://api.anthropic.com":              "https://api.anthropic.com/v1/messages",
 		"https://api.anthropic.com/v1":           "https://api.anthropic.com/v1/messages",

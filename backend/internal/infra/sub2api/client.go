@@ -64,6 +64,18 @@ type APIKeyGroup struct {
 	Platform string `json:"platform"`
 }
 
+type AvailableGroup struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Platform    string `json:"platform"`
+}
+
+type CreateAPIKeyInput struct {
+	Name    string `json:"name"`
+	GroupID int64  `json:"group_id"`
+}
+
 type APIKeyPage struct {
 	Items []APIKey `json:"items"`
 	Total int      `json:"total"`
@@ -406,6 +418,25 @@ func (c *Client) ListAPIKeys(ctx context.Context, accessToken string, page, page
 	return &result, nil
 }
 
+func (c *Client) AvailableGroups(ctx context.Context, accessToken string) ([]AvailableGroup, error) {
+	var result []AvailableGroup
+	return result, c.get(ctx, "/api/v1/groups/available", &result, accessToken)
+}
+
+func (c *Client) CreateAPIKey(ctx context.Context, accessToken string, input CreateAPIKeyInput, idempotencyKey string) (*APIKey, error) {
+	var result APIKey
+	body, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode Sub2API request: %w", err)
+	}
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/api/v1/keys", body, &result, accessToken, map[string]string{
+		"Idempotency-Key": idempotencyKey,
+	}); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (c *Client) Announcements(ctx context.Context, accessToken string) ([]Announcement, error) {
 	var result []Announcement
 	return result, c.get(ctx, "/api/v1/announcements", &result, accessToken)
@@ -567,11 +598,15 @@ func (c *Client) write(ctx context.Context, method string, path string, input an
 }
 
 func (c *Client) do(ctx context.Context, method string, path string, body []byte, output any, accessToken string) error {
+	return c.doWithHeaders(ctx, method, path, body, output, accessToken, nil)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method string, path string, body []byte, output any, accessToken string, headers map[string]string) error {
 	if c == nil || c.baseURL == nil || c.http == nil {
 		return errors.New("Sub2API client is not configured")
 	}
 	target := c.baseURL.ResolveReference(&url.URL{Path: path})
-	return c.doURL(ctx, method, target, body, output, accessToken, true)
+	return c.doURLWithHeaders(ctx, method, target, body, output, accessToken, true, headers)
 }
 
 func (c *Client) doRaw(ctx context.Context, method string, path string, body []byte, output any, apiKey string) error {
@@ -583,6 +618,10 @@ func (c *Client) doRaw(ctx context.Context, method string, path string, body []b
 }
 
 func (c *Client) doURL(ctx context.Context, method string, target *url.URL, body []byte, output any, token string, envelopeExpected bool) error {
+	return c.doURLWithHeaders(ctx, method, target, body, output, token, envelopeExpected, nil)
+}
+
+func (c *Client) doURLWithHeaders(ctx context.Context, method string, target *url.URL, body []byte, output any, token string, envelopeExpected bool, headers map[string]string) error {
 	if target == nil {
 		return errors.New("Sub2API target is not configured")
 	}
@@ -596,6 +635,11 @@ func (c *Client) doURL(ctx context.Context, method string, target *url.URL, body
 	}
 	if token := strings.TrimSpace(token); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			request.Header.Set(key, value)
+		}
 	}
 
 	response, err := c.http.Do(request)

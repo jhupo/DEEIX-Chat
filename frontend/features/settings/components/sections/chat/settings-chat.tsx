@@ -55,6 +55,11 @@ import { resolveModelOptionIconUrl, resolveModelOptionLabel } from "@/shared/lib
 import { parseKindsJSON } from "@/shared/model/llm-schema";
 import { platformModifierLabel, platformSendShortcut } from "@/shared/lib/platform-shortcuts";
 import type { SendShortcut } from "@/features/settings/types/settings";
+import {
+  chatProtocolsForGroupPlatform,
+  resolveChatProtocol,
+  type ChatProtocol,
+} from "@/shared/model/chat-protocol";
 import { ChatDisplayAppearance } from "./chat-display-appearance";
 
 type ModelOption = ModelSelectOption;
@@ -456,6 +461,23 @@ export function SettingsChat() {
     ],
     [modelGroups, t],
   );
+  const selectedRemoteKey = React.useMemo(() => {
+    const remoteKeyID = chatKeyBindings.bindings.find(
+      (binding) => binding.publicID === chatKeyBindings.selectedKeyBindingID,
+    )?.remoteKeyID;
+    return chatKeyBindings.remoteKeys.find((key) => key.remoteKeyID === remoteKeyID) ?? null;
+  }, [chatKeyBindings.bindings, chatKeyBindings.remoteKeys, chatKeyBindings.selectedKeyBindingID]);
+  const availableProtocols = React.useMemo(
+    () => chatProtocolsForGroupPlatform(selectedRemoteKey?.groupPlatform ?? ""),
+    [selectedRemoteKey?.groupPlatform],
+  );
+  const effectiveProtocol = resolveChatProtocol(selectedRemoteKey?.groupPlatform ?? "", settings.defaultProtocol);
+
+  React.useEffect(() => {
+    if (!loading && selectedRemoteKey && settings.defaultProtocol !== effectiveProtocol) {
+      handleEnum("chat.default_protocol", "defaultProtocol")(effectiveProtocol);
+    }
+  }, [effectiveProtocol, handleEnum, loading, selectedRemoteKey, settings.defaultProtocol]);
 
   React.useEffect(() => {
     setModifierLabel(platformModifierLabel());
@@ -517,6 +539,27 @@ export function SettingsChat() {
               )}
             </div>
           </SettingsFieldRow>
+          <div className="pt-4">
+            <SettingsFieldRow
+              title={t("defaultProtocol.title")}
+              description={selectedRemoteKey ? t("defaultProtocol.description", { group: selectedRemoteKey.groupName }) : t("defaultProtocol.noKey")}
+            >
+              <Select
+                value={effectiveProtocol}
+                onValueChange={(value) => handleEnum("chat.default_protocol", "defaultProtocol")(value as ChatProtocol)}
+                disabled={loading || !selectedRemoteKey || availableProtocols.length === 0}
+              >
+                <SelectTrigger size="sm" className="w-[min(260px,55vw)] text-left" aria-label={t("defaultProtocol.title")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {availableProtocols.map((protocol) => (
+                    <SelectItem key={protocol} value={protocol}>{t(`defaultProtocol.options.${protocol}`)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsFieldRow>
+          </div>
           <div className="pt-4">
           <SettingsFieldRow
             title={t("defaultModel.title")}

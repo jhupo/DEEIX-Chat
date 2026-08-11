@@ -5977,6 +5977,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/billing/usage/hourly": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get Sub2 hourly usage",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Sub2HourlyResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/billing/usage/monthly": {
             "get": {
                 "security": [
@@ -15919,6 +15955,21 @@ const docTemplate = `{
                 }
             }
         },
+        "Sub2HourlyResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2HourlyDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "Sub2MonthlyResponseDoc": {
             "type": "object",
             "required": [
@@ -17848,6 +17899,67 @@ const docTemplate = `{
                 }
             }
         },
+        "sub2HourlyDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "results"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2HourlyRowDTO"
+                    }
+                }
+            }
+        },
+        "sub2HourlyRowDTO": {
+            "type": "object",
+            "required": [
+                "actualCost",
+                "bucketStart",
+                "cacheReadTokens",
+                "cacheWriteTokens",
+                "callCount",
+                "inputTokens",
+                "outputTokens",
+                "recordCount",
+                "totalTokens"
+            ],
+            "properties": {
+                "actualCost": {
+                    "type": "string"
+                },
+                "bucketStart": {
+                    "type": "string"
+                },
+                "cacheReadTokens": {
+                    "type": "integer"
+                },
+                "cacheWriteTokens": {
+                    "type": "integer"
+                },
+                "callCount": {
+                    "type": "integer"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "recordCount": {
+                    "type": "integer"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "sub2MonthlyDataDTO": {
             "type": "object",
             "required": [
@@ -18503,7 +18615,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.6",
+	Version:          "0.4.7",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

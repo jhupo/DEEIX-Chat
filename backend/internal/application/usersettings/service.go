@@ -28,6 +28,7 @@ var allowedKeys = map[string]string{
 	"chat.show_latency":                         "true",
 	"chat.default_model":                        "",
 	"chat.default_sub2_key_binding_id":          "",
+	"chat.default_protocol":                     "openai_chat_completions",
 	"chat.auto_generate_title":                  "true",
 	"chat.auto_generate_labels":                 "true",
 	"chat.delete_conversation_files_by_default": "false",
@@ -60,10 +61,11 @@ var boolKeys = map[string]bool{
 
 // enumKeys 枚举 key 的合法值集合。
 var enumKeys = map[string]map[string]bool{
-	"chat.file_mode":     {"auto": true, "full_context": true, "rag": true},
-	"chat.send_on_enter": {"enter": true, "ctrl_enter": true, "meta_enter": true},
-	"chat.input_height":  {"compact": true, "standard": true, "loose": true},
-	"chat.content_width": {"compact": true, "standard": true, "wide": true},
+	"chat.file_mode":        {"auto": true, "full_context": true, "rag": true},
+	"chat.send_on_enter":    {"enter": true, "ctrl_enter": true, "meta_enter": true},
+	"chat.input_height":     {"compact": true, "standard": true, "loose": true},
+	"chat.content_width":    {"compact": true, "standard": true, "wide": true},
+	"chat.default_protocol": {"openai_chat_completions": true, "openai_responses": true, "anthropic_messages": true},
 }
 
 // validateValue 校验 key 对应 value 的合法性。

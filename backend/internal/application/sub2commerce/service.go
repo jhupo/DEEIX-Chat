@@ -297,7 +297,7 @@ func validUsageInput(in UsageInput) bool {
 var ErrInvalidQuery = errors.New("invalid query")
 
 func (s *Service) Trend(ctx context.Context, userID uint, sessionID, start, end, granularity string) (*DailyData, error) {
-	if granularity != "day" {
+	if granularity != "day" && granularity != "hour" {
 		return nil, ErrInvalidQuery
 	}
 	a, err := time.Parse("2006-01-02", start)

@@ -26,6 +26,8 @@ const (
 	EndpointResponses = "responses"
 	// EndpointChatCompletions 表示 OpenAI Chat Completions API 端点。
 	EndpointChatCompletions = "chat_completions"
+	// EndpointMessages 表示 Anthropic Messages API 端点。
+	EndpointMessages = "messages"
 	// EndpointImageGenerations 表示 OpenAI Images API 生成端点。
 	EndpointImageGenerations = "image_generations"
 	// EndpointImageEdits 表示 OpenAI Images API 编辑端点。

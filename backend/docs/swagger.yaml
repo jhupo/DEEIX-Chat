@@ -4365,6 +4365,16 @@ definitions:
     - data
     - errorMsg
     type: object
+  Sub2HourlyResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/sub2HourlyDataDTO'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   Sub2MonthlyResponseDoc:
     properties:
       data:
@@ -5718,6 +5728,49 @@ definitions:
     - totalTokens
     - usageDate
     type: object
+  sub2HourlyDataDTO:
+    properties:
+      observedAt:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/sub2HourlyRowDTO'
+        type: array
+    required:
+    - observedAt
+    - results
+    type: object
+  sub2HourlyRowDTO:
+    properties:
+      actualCost:
+        type: string
+      bucketStart:
+        type: string
+      cacheReadTokens:
+        type: integer
+      cacheWriteTokens:
+        type: integer
+      callCount:
+        type: integer
+      inputTokens:
+        type: integer
+      outputTokens:
+        type: integer
+      recordCount:
+        type: integer
+      totalTokens:
+        type: integer
+    required:
+    - actualCost
+    - bucketStart
+    - cacheReadTokens
+    - cacheWriteTokens
+    - callCount
+    - inputTokens
+    - outputTokens
+    - recordCount
+    - totalTokens
+    type: object
   sub2MonthlyDataDTO:
     properties:
       observedAt:
@@ -6180,7 +6233,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.6"
+  version: "0.4.7"
 paths:
   /admin/announcements:
     get:
@@ -9944,6 +9997,28 @@ paths:
       security:
       - BearerAuth: []
       summary: Get Sub2 daily usage
+      tags:
+      - billing
+  /billing/usage/hourly:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/Sub2HourlyResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/BillingErrorDoc'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/BillingErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: Get Sub2 hourly usage
       tags:
       - billing
   /billing/usage/monthly:

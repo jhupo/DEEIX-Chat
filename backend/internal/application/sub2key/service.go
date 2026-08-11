@@ -64,11 +64,18 @@ type RemoteKeyView struct {
 	Bound           bool
 	BindingPublicID *string
 }
+type GroupView struct {
+	ID          int64
+	Name        string
+	Description string
+	Platform    string
+}
 type Execution struct {
 	BindingPublicID string
 	BindingVersion  uint
 	RemoteKeyID     int64
 	APIKey          string
+	GroupPlatform   string
 }
 
 type Service struct {
@@ -125,6 +132,62 @@ func (s *Service) ListRemote(ctx context.Context, principalID uint, sessionID st
 		}
 	}
 	return out, nil
+}
+func (s *Service) ListGroups(ctx context.Context, principalID uint, sessionID string) ([]GroupView, error) {
+	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := s.client.AvailableGroups(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GroupView, 0, len(groups))
+	for _, group := range groups {
+		if group.ID <= 0 || strings.TrimSpace(group.Name) == "" || strings.TrimSpace(group.Platform) == "" {
+			return nil, ErrInvalidBinding
+		}
+		out = append(out, GroupView{ID: group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform})
+	}
+	return out, nil
+}
+func (s *Service) CreateRemote(ctx context.Context, principalID uint, sessionID, name string, groupID int64, idempotencyKey string) (*RemoteKeyView, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 100 || groupID <= 0 || !validIdempotencyKey(idempotencyKey) {
+		return nil, ErrInvalidBinding
+	}
+	profile, _, err := s.currentRemoteKeys(ctx, principalID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := s.client.AvailableGroups(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	groupAllowed := false
+	for _, group := range groups {
+		if group.ID == groupID {
+			groupAllowed = true
+			break
+		}
+	}
+	if !groupAllowed {
+		return nil, ErrInvalidBinding
+	}
+	created, err := s.client.CreateAPIKey(ctx, token, sub2api.CreateAPIKeyInput{Name: name, GroupID: groupID}, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	if created == nil || created.ID <= 0 || created.UserID != profile.ID || created.GroupID == nil || *created.GroupID != groupID || strings.TrimSpace(created.Key) == "" {
+		return nil, ErrInvalidBinding
+	}
+	s.invalidateRemoteCache(principalID, sessionID)
+	view := remoteView(*created, "")
+	return &view, nil
 }
 func (s *Service) Bind(ctx context.Context, principalID uint, sessionID string, remoteID int64, idempotencyKey string) (*BindingView, error) {
 	if remoteID <= 0 || !validIdempotencyKey(idempotencyKey) {
@@ -208,7 +271,14 @@ func (s *Service) ResolveBinding(ctx context.Context, principalID uint, publicID
 	if err != nil || strings.TrimSpace(key) == "" {
 		return nil, ErrBindingUnavailable
 	}
-	return &Execution{BindingPublicID: item.PublicID, BindingVersion: item.Version, RemoteKeyID: item.RemoteKeyID, APIKey: key}, nil
+	return &Execution{BindingPublicID: item.PublicID, BindingVersion: item.Version, RemoteKeyID: item.RemoteKeyID, APIKey: key, GroupPlatform: item.Platform}, nil
+}
+
+func (s *Service) invalidateRemoteCache(principalID uint, sessionID string) {
+	cacheKey := fmt.Sprintf("%d:%s", principalID, strings.TrimSpace(sessionID))
+	s.remoteCacheMu.Lock()
+	delete(s.remoteCache, cacheKey)
+	s.remoteCacheMu.Unlock()
 }
 func (s *Service) remoteKeys(ctx context.Context, token string, expectedUserID int64) ([]sub2api.APIKey, error) {
 	keys := make([]sub2api.APIKey, 0)

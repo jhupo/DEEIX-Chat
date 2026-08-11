@@ -79,6 +79,7 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 		BindingVersion:  3,
 		RemoteKeyID:     42,
 		APIKey:          "secret",
+		GroupPlatform:   "openai",
 	}}
 	service := &Service{
 		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
@@ -102,6 +103,25 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 	}
 	if run.PlatformModelName != "catalog-model" || run.RoutedBindingCode != binding.execution.BindingPublicID || run.KeyBindingVersion != 3 || run.RemoteKeyID != 42 {
 		t.Fatalf("run did not pin catalog route and binding: %#v", run)
+	}
+}
+
+func TestResolveSub2ChatProtocolFollowsKeyPlatform(t *testing.T) {
+	tests := []struct {
+		name, platform, configured, want string
+	}{
+		{name: "OpenAI defaults to chat completions", platform: "openai", want: llm.AdapterOpenAIChatCompletions},
+		{name: "OpenAI responses", platform: "openai", configured: llm.AdapterOpenAIResponses, want: llm.AdapterOpenAIResponses},
+		{name: "Anthropic forces messages", platform: "anthropic", configured: llm.AdapterOpenAIResponses, want: llm.AdapterAnthropicMessages},
+		{name: "Composite accepts messages", platform: "composite", configured: llm.AdapterAnthropicMessages, want: llm.AdapterAnthropicMessages},
+		{name: "Gemini uses compatible chat endpoint", platform: "gemini", configured: llm.AdapterOpenAIResponses, want: llm.AdapterOpenAIChatCompletions},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSub2ChatProtocol(tt.platform, tt.configured); got != tt.want {
+				t.Fatalf("resolveSub2ChatProtocol(%q, %q) = %q, want %q", tt.platform, tt.configured, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -136,6 +136,21 @@ type sub2DailyRowDTO struct {
 	TotalTokens      int64  `json:"totalTokens"`
 	ActualCost       string `json:"actualCost"`
 }
+type sub2HourlyDataDTO struct {
+	Results    []sub2HourlyRowDTO `json:"results"`
+	ObservedAt time.Time          `json:"observedAt"`
+}
+type sub2HourlyRowDTO struct {
+	BucketStart      string `json:"bucketStart"`
+	CallCount        int64  `json:"callCount"`
+	RecordCount      int64  `json:"recordCount"`
+	InputTokens      int64  `json:"inputTokens"`
+	OutputTokens     int64  `json:"outputTokens"`
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+	TotalTokens      int64  `json:"totalTokens"`
+	ActualCost       string `json:"actualCost"`
+}
 type sub2MonthlyDataDTO struct {
 	Results    []sub2MonthlyRowDTO `json:"results"`
 	ObservedAt time.Time           `json:"observedAt"`
@@ -286,6 +301,18 @@ func toSub2DailyData(v app.DailyData) sub2DailyDataDTO {
 		rows[i] = toSub2DailyRow(x)
 	}
 	return sub2DailyDataDTO{Results: rows, ObservedAt: v.ObservedAt}
+}
+func toSub2HourlyData(v app.DailyData) sub2HourlyDataDTO {
+	rows := make([]sub2HourlyRowDTO, len(v.Results))
+	for i, x := range v.Results {
+		rows[i] = sub2HourlyRowDTO{
+			BucketStart: x.UsageDate, CallCount: x.CallCount, RecordCount: x.RecordCount,
+			InputTokens: x.InputTokens, OutputTokens: x.OutputTokens,
+			CacheReadTokens: x.CacheReadTokens, CacheWriteTokens: x.CacheWriteTokens,
+			TotalTokens: x.TotalTokens, ActualCost: x.ActualCost,
+		}
+	}
+	return sub2HourlyDataDTO{Results: rows, ObservedAt: v.ObservedAt}
 }
 func toSub2MonthlyData(v app.MonthlyData) sub2MonthlyDataDTO {
 	rows := make([]sub2MonthlyRowDTO, len(v.Results))

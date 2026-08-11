@@ -123,6 +123,10 @@ export type BillingUsageDailyDTO = {
   actualCost: string;
 };
 
+export type BillingUsageHourlyDTO = Omit<BillingUsageDailyDTO, "usageDate"> & {
+  bucketStart: string;
+};
+
 export type BillingUsageMonthlyDTO = {
   monthStartAt: string;
   callCount: number;

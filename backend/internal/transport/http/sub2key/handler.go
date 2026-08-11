@@ -19,6 +19,11 @@ type bindRequest struct {
 	RemoteKeyID int64 `json:"remoteKeyID"`
 }
 
+type createRemoteKeyRequest struct {
+	Name    string `json:"name" binding:"required,max=100"`
+	GroupID int64  `json:"groupID" binding:"required,gt=0"`
+}
+
 type bindingResponse struct {
 	PublicID        string     `json:"publicID"`
 	RemoteKeyID     int64      `json:"remoteKeyID"`
@@ -50,6 +55,13 @@ type remoteKeyResponse struct {
 	BindingPublicID *string    `json:"bindingPublicID"`
 }
 
+type groupResponse struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Platform    string `json:"platform"`
+}
+
 func NewHandler(service *app.Service) *Handler { return &Handler{service: service} }
 func noStore(c *gin.Context)                   { c.Header("Cache-Control", "no-store") }
 func (h *Handler) ListRemote(c *gin.Context) {
@@ -60,6 +72,39 @@ func (h *Handler) ListRemote(c *gin.Context) {
 		return
 	}
 	response.Success(c, remoteKeyResponses(items))
+}
+func (h *Handler) ListGroups(c *gin.Context) {
+	noStore(c)
+	items, err := h.service.ListGroups(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	result := make([]groupResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, groupResponse{ID: item.ID, Name: item.Name, Description: item.Description, Platform: item.Platform})
+	}
+	response.Success(c, result)
+}
+func (h *Handler) CreateRemote(c *gin.Context) {
+	noStore(c)
+	var req createRemoteKeyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	parsed, err := uuid.Parse(idempotencyKey)
+	if err != nil || parsed.String() != strings.ToLower(idempotencyKey) {
+		response.Error(c, http.StatusBadRequest, "idempotency key must be a UUID")
+		return
+	}
+	item, err := h.service.CreateRemote(c, middleware.MustUserID(c), middleware.MustSessionID(c), req.Name, req.GroupID, idempotencyKey)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	response.Success(c, toRemoteKeyResponse(*item))
 }
 func (h *Handler) ListBindings(c *gin.Context) {
 	noStore(c)
@@ -127,7 +172,11 @@ func bindingResponses(items []app.BindingView) []bindingResponse {
 func remoteKeyResponses(items []app.RemoteKeyView) []remoteKeyResponse {
 	out := make([]remoteKeyResponse, 0, len(items))
 	for _, item := range items {
-		out = append(out, remoteKeyResponse{RemoteKeyID: item.RemoteKeyID, Label: item.Label, MaskedKey: item.MaskedKey, GroupID: item.GroupID, GroupName: item.GroupName, GroupPlatform: item.GroupPlatform, Status: item.Status, Quota: item.Quota, UsedQuota: item.UsedQuota, ExpiresAt: item.ExpiresAt, Bound: item.Bound, BindingPublicID: item.BindingPublicID})
+		out = append(out, toRemoteKeyResponse(item))
 	}
 	return out
+}
+
+func toRemoteKeyResponse(item app.RemoteKeyView) remoteKeyResponse {
+	return remoteKeyResponse{RemoteKeyID: item.RemoteKeyID, Label: item.Label, MaskedKey: item.MaskedKey, GroupID: item.GroupID, GroupName: item.GroupName, GroupPlatform: item.GroupPlatform, Status: item.Status, Quota: item.Quota, UsedQuota: item.UsedQuota, ExpiresAt: item.ExpiresAt, Bound: item.Bound, BindingPublicID: item.BindingPublicID}
 }

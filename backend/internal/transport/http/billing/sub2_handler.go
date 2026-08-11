@@ -43,6 +43,10 @@ type Sub2DailyResponseDoc struct {
 	ErrorMsg string           `json:"errorMsg"`
 	Data     sub2DailyDataDTO `json:"data"`
 }
+type Sub2HourlyResponseDoc struct {
+	ErrorMsg string            `json:"errorMsg"`
+	Data     sub2HourlyDataDTO `json:"data"`
+}
 type Sub2MonthlyResponseDoc struct {
 	ErrorMsg string             `json:"errorMsg"`
 	Data     sub2MonthlyDataDTO `json:"data"`
@@ -200,6 +204,31 @@ func (h *Sub2Handler) Daily(c *gin.Context) {
 			return nil, err
 		}
 		return toSub2DailyData(*data), nil
+	})
+}
+
+// Hourly godoc
+// @Summary Get Sub2 hourly usage
+// @Tags billing
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} Sub2HourlyResponseDoc
+// @Failure 400 {object} ErrorDoc
+// @Failure 502 {object} ErrorDoc
+// @Router /billing/usage/hourly [get]
+func (h *Sub2Handler) Hourly(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	start, end, err := trendRange(c)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid query")
+		return
+	}
+	h.write(c, func() (any, error) {
+		data, err := h.service.Trend(c, middleware.MustUserID(c), middleware.MustSessionID(c), start, end, "hour")
+		if err != nil {
+			return nil, err
+		}
+		return toSub2HourlyData(*data), nil
 	})
 }
 
