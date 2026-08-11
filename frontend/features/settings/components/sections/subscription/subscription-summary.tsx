@@ -269,7 +269,7 @@ export function SubscriptionSummary({
             <DialogTitle>{t("plans.title")}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid max-h-[min(72vh,42rem)] grid-cols-2 gap-3 overflow-y-auto pr-1">
+          <div className="grid max-h-[min(72vh,42rem)] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
             {billingPlans.map((plan) => {
               const price = resolveDefaultPrice(plan);
               const isCurrent = isCurrentBillingPlan(plan, currentPlan);
