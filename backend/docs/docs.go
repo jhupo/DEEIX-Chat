@@ -260,1101 +260,15 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员分页查看全量可追溯审计日志",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询审计日志",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索关键词",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "资源类型",
-                        "name": "resource",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "动作",
-                        "name": "action",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "操作人用户ID",
-                        "name": "actor_user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间起点(RFC3339)",
-                        "name": "created_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间终点(RFC3339)",
-                        "name": "created_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序方式",
-                        "name": "sort",
-                        "in": "query"
-                    }
-                ],
+                "summary": "List audit logs",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/AuditLogListResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/auth/provider-order": {
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员保存第三方身份源的展示顺序",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-auth"
-                ],
-                "summary": "调整第三方身份源顺序",
-                "parameters": [
-                    {
-                        "description": "身份源顺序",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/ReorderIdentityProvidersRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/IdentityProviderReorderResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/auth/providers": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员查看已配置的 OIDC 和 OAuth2 身份源",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-auth"
-                ],
-                "summary": "获取第三方身份源列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/IdentityProviderListResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员创建一个 OIDC 或 OAuth2 身份源",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-auth"
-                ],
-                "summary": "创建第三方身份源",
-                "parameters": [
-                    {
-                        "description": "身份源配置",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpsertIdentityProviderRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/IdentityProviderResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/auth/providers/{provider_id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员删除第三方身份源；force=true 时允许删除仍有关联用户的身份源",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-auth"
-                ],
-                "summary": "删除第三方身份源",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "身份源 ID",
-                        "name": "provider_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "boolean",
-                        "description": "是否强制删除",
-                        "name": "force",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/IdentityProviderDeleteResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            },
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员更新一个 OIDC 或 OAuth2 身份源",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-auth"
-                ],
-                "summary": "更新第三方身份源",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "身份源 ID",
-                        "name": "provider_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "身份源配置",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpsertIdentityProviderRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/IdentityProviderResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/accounts/{user_id}/balance": {
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "设置指定用户的按量计费余额，金额单位为美元",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员设置用户按量余额",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "余额",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpdateBillingAccountBalanceRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BillingAccountResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/config": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "查询当前全局计费模式",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员查询计费配置",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BillingConfigResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            },
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "更新当前全局计费模式",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员更新计费配置",
-                "parameters": [
-                    {
-                        "description": "计费配置",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/BillingConfigRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BillingConfigResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/model-prices": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "按平台模型名查询模型按量计费配置",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员查询模型按量单价",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "搜索关键词",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/ModelPricingListResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "按平台模型名创建或更新模型按量计费配置，金额单位为美元",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员保存模型按量单价",
-                "parameters": [
-                    {
-                        "description": "模型单价",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpsertModelPricingRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/ModelPricingDataResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/official-pricing/openrouter": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "从 storage 缓存读取 OpenRouter 模型定价；缓存不存在、过期或 refresh=true 时由后端刷新。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员获取 OpenRouter 官方模型定价",
-                "parameters": [
-                    {
-                        "type": "boolean",
-                        "description": "强制刷新缓存",
-                        "name": "refresh",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/OpenRouterOfficialPricingResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/plans/{id}": {
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "更新周期套餐基础配置与默认价格",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员更新周期套餐",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "套餐ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "套餐配置",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpdateBillingPlanRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BillingPlanResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/redemption-codes": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "分页查询计费兑换码配置",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员查询兑换码",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "计费模式：usage/period",
-                        "name": "mode",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "状态：active/inactive",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "可兑换性：available/expired/exhausted",
-                        "name": "availability",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索关键词",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RedemptionCodeListResponseDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "创建手动兑换码或随机兑换码，明文只在创建响应中返回",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员创建兑换码",
-                "parameters": [
-                    {
-                        "description": "兑换码配置",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/CreateRedemptionCodeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RedemptionCodeCreateResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/redemption-codes/batch-delete": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "批量软删除兑换码，历史兑换记录保留，删除后不可再兑换",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员批量删除兑换码",
-                "parameters": [
-                    {
-                        "description": "批量删除请求",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/BatchDeleteRedemptionCodeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/BatchDeleteRedemptionCodeResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/redemption-codes/{id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "软删除兑换码，历史兑换记录保留，删除后不可再兑换",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员删除兑换码",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "兑换码ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RedemptionCodeDeleteResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            },
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "更新兑换码状态、次数限制、过期时间和说明，不允许修改奖励本身",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员更新兑换码",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "兑换码ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "兑换码更新字段",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/PatchRedemptionCodeRequestDoc"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RedemptionCodeResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/billing/redemption-codes/{id}/code": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "解密单个兑换码明文用于复制；列表接口不会返回明文",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin-billing"
-                ],
-                "summary": "管理员按需复制兑换码明文",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "兑换码ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RedemptionCodeResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/call-logs": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员分页查看全量模型调用与计费用量账本",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员查询模型调用日志",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索模型、上游、绑定编码、协议",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "平台模型名筛选",
-                        "name": "platform_model_name",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "计费模式筛选：free/token/call/duration/tiered",
-                        "name": "billing_mode",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "调用人用户ID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间起点(RFC3339)",
-                        "name": "created_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间终点(RFC3339)",
-                        "name": "created_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序方式",
-                        "name": "sort",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/UsageLogListResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -1367,102 +281,15 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员分页查看对话运行轨迹、工具、MCP 与处理事件",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询对话事件",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索运行ID、事件、阶段、标题、工具名",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "事件范围(trace_block/trace_event/tool_call)",
-                        "name": "event_scope",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "事件类型",
-                        "name": "event_type",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "事件状态",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "会话ID",
-                        "name": "conversation_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间起点(RFC3339)",
-                        "name": "created_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间终点(RFC3339)",
-                        "name": "created_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序方式",
-                        "name": "sort",
-                        "in": "query"
-                    }
-                ],
+                "summary": "List conversation events",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ConversationEventListResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -1475,20 +302,13 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "物理删除指定运行的全部对话事件；保留消息、附件、调用与计费记录",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员按运行清理对话事件",
+                "summary": "Remove conversation event runs",
                 "parameters": [
                     {
-                        "description": "运行轨迹清理参数",
+                        "description": "Cleanup request",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -1503,18 +323,6 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/CleanupConversationRunsResponseDoc"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
                     }
                 }
             }
@@ -1526,21 +334,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员按事件 ID 查看单条对话运行事件详情；超大历史负载会被安全省略",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询对话事件详情",
+                "summary": "Get a conversation event",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "事件 ID",
+                        "description": "Event ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -1551,55 +352,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ConversationEventDetailResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/conversations/export": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "流式导出全量会话及消息为 NDJSON 文件，最后一行为 export_manifest 元数据",
-                "produces": [
-                    "application/x-ndjson"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员导出全量对话数据",
-                "responses": {
-                    "200": {
-                        "description": "NDJSON stream",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -4013,20 +2765,13 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "按日志类型物理删除指定时间点之前的日志；操作不可恢复",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员清理日志",
+                "summary": "Remove nonfinancial logs before a timestamp",
                 "parameters": [
                     {
-                        "description": "日志清理参数",
+                        "description": "Cleanup request",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -4040,18 +2785,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/CleanupLogsResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -4608,108 +3341,6 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/payment-orders": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员分页查看订阅和充值支付单",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员查询支付订单记录",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索订单号、支付渠道、外部支付ID",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "订单类型(subscription/topup)",
-                        "name": "order_type",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "支付渠道",
-                        "name": "provider",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "支付状态",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间起点(RFC3339)",
-                        "name": "created_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间终点(RFC3339)",
-                        "name": "created_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序方式",
-                        "name": "sort",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/PaymentOrderListResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/AdminErrorDoc"
                         }
@@ -6082,192 +4713,15 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员分页查看后台结构化系统事件",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询系统事件",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索关键词",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "级别",
-                        "name": "level",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "来源",
-                        "name": "source",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "事件",
-                        "name": "event",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间起点(RFC3339)",
-                        "name": "created_from",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "创建时间终点(RFC3339)",
-                        "name": "created_to",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序方式",
-                        "name": "sort",
-                        "in": "query"
-                    }
-                ],
+                "summary": "List system events",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/SystemEventListResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/usage-statistics": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员按日期、统计对象、平台模型和计费范围查看全局费用、Token、调用次数及排名；用户与权限组筛选互斥",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员查询全局用量统计",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "开始日期(YYYY-MM-DD)，默认近30天",
-                        "name": "start_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "结束日期(YYYY-MM-DD，包含当日)",
-                        "name": "end_date",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "权限组ID，与 user_id 互斥",
-                        "name": "permission_group_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "平台模型名",
-                        "name": "platform_model_name",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "计费范围：all/free/billable",
-                        "name": "billing_scope",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "返回范围：all/models/users",
-                        "name": "section",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "模型排名指标：cost/tokens/calls",
-                        "name": "model_rank_by",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "用户排名指标：cost/tokens/calls",
-                        "name": "user_rank_by",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/UsageStatisticsResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -6280,66 +4734,15 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员分页查询认证事件，支持 user_id/event_type/result 过滤",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询用户认证事件",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "用户ID过滤",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "事件类型过滤",
-                        "name": "event_type",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "结果过滤(success/failure/blocked)",
-                        "name": "result",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    }
-                ],
+                "summary": "List authentication events",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UserAuthEventListResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
+                            "$ref": "#/definitions/AuthEventListResponseDoc"
                         }
                     }
                 }
@@ -6352,264 +4755,41 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员分页查看所有用户，实现账户隔离管理",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员查询用户",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索用户名、昵称、邮箱或公开ID",
-                        "name": "q",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "订阅状态过滤(active/free)",
-                        "name": "subscription_status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "身份源 slug 过滤",
-                        "name": "identity_provider",
-                        "in": "query"
-                    }
-                ],
+                "summary": "List principals",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/UserListResponseDoc"
                         }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "创建普通用户账号；需要授予管理员权限时，可在账户编辑中调整角色",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员创建用户",
-                "parameters": [
-                    {
-                        "description": "用户参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/CreateUserRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/CreateUserResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/users/import/openwebui": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "从 OpenWebUI PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员导入 OpenWebUI 用户",
-                "parameters": [
-                    {
-                        "description": "OpenWebUI 导入参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/ImportOpenWebUIUsersRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/ImportOpenWebUIUsersResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
                     }
                 }
             }
         },
         "/admin/users/{id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员硬删除指定普通用户及其主要用户域数据",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员删除用户",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/DeleteUserResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            },
             "patch": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员统一维护角色、状态、时区等可编辑字段",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员更新用户可编辑字段",
+                "summary": "Patch a principal profile",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "用户ID",
+                        "description": "User ID",
                         "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "局部更新参数",
+                        "description": "Profile fields",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -6622,101 +4802,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UpdateUserStatusResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/users/{id}/reset-password": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员重置指定用户密码并吊销其全部会话",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员重置用户密码",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "重置密码参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/ResetUserPasswordRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/ResetUserPasswordResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
+                            "$ref": "#/definitions/UserDataResponseDoc"
                         }
                     }
                 }
@@ -6729,21 +4815,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员吊销指定用户全部活跃会话，用于安全治理和风险控制",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "admin"
                 ],
-                "summary": "管理员吊销用户全部会话",
+                "summary": "Revoke local sessions",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "用户ID",
+                        "description": "User ID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -6754,94 +4833,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/RevokeUserSessionsResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/admin/users/{id}/status": {
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "管理员维护用户状态（active/locked/suspended/deactivated），并联动会话治理",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "管理员更新用户状态",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "用户ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "状态变更参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/UpdateUserStatusRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/UpdateUserStatusResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AdminErrorDoc"
                         }
                     }
                 }
@@ -7019,7 +5010,7 @@ const docTemplate = `{
         },
         "/auth/login": {
             "post": {
-                "description": "登录后返回JWT访问令牌",
+                "description": "Authenticates an email/password with Sub2 and sets the DEEIX refresh cookie on success.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7029,10 +5020,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "用户登录",
+                "summary": "Log in with Sub2",
                 "parameters": [
                     {
-                        "description": "登录参数",
+                        "description": "Login request",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7060,8 +5051,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
                     },
-                    "429": {
-                        "description": "Too Many Requests",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -7071,14 +5062,14 @@ const docTemplate = `{
         },
         "/auth/login-options": {
             "get": {
-                "description": "获取用户名、邮箱、OAuth/OIDC 登录入口，以及邮箱注册 Turnstile 公共配置",
+                "description": "Returns current Sub2 email registration and Turnstile settings.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "获取登录入口配置",
+                "summary": "Get Sub2 login options",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -7086,8 +5077,60 @@ const docTemplate = `{
                             "$ref": "#/definitions/LoginOptionsResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/login/2fa": {
+            "post": {
+                "description": "Verifies the encrypted Sub2 login challenge and sets the DEEIX refresh cookie on success.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Complete Sub2 login 2FA",
+                "parameters": [
+                    {
+                        "description": "Sub2 login 2FA request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/TwoFactorVerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/LoginResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -7102,17 +5145,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "吊销当前 access token 对应会话",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Revokes the current DEEIX session and clears its refresh cookie.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "登出当前会话",
+                "summary": "Log out the current browser session",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -7142,17 +5182,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "吊销当前用户所有活跃会话",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Revokes all DEEIX sessions for the current Sub2 principal and clears the refresh cookie.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "登出全部会话",
+                "summary": "Log out all browser sessions",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -7175,176 +5212,16 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/password/reset/complete": {
+        "/auth/refresh": {
             "post": {
-                "description": "使用邮箱、验证码和新密码完成密码重置；失败时返回通用错误，避免暴露账号状态",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Rotates the DEEIX session using only the HttpOnly refresh cookie and returns no refresh token in JSON.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "完成密码重置",
-                "parameters": [
-                    {
-                        "description": "密码重置完成请求",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/PasswordResetCompleteRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/PasswordResetCompleteResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/password/reset/start": {
-            "post": {
-                "description": "SMTP 配置可用时，向已验证邮箱发送密码重置验证码；失败时返回通用错误，避免暴露账号状态",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "发送密码重置验证码",
-                "parameters": [
-                    {
-                        "description": "密码重置验证码请求",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/PasswordResetStartRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/PasswordResetStartResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/providers/{slug}/authorize": {
-            "post": {
-                "description": "为 Web、App 或桌面公共客户端创建 PKCE 保护的 OAuth 授权事务；外部身份源仅回调当前 DEEIX 实例",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "创建第三方登录授权桥事务",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "身份源 slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "授权桥参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/ProviderAuthBridgeStartRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/ProviderAuthBridgeStartResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/providers/{slug}/exchange": {
-            "post": {
-                "description": "使用客户端 PKCE verifier 原子兑换服务端回调签发的一次性授权码，并进入统一 2FA/会话流程",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "兑换第三方登录一次性授权码",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "身份源 slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "授权码兑换参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/ProviderAuthBridgeExchangeRequest"
-                        }
-                    }
-                ],
+                "summary": "Refresh the browser session",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -7352,46 +5229,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/LoginResponseDoc"
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/refresh": {
-            "post": {
-                "description": "使用 HttpOnly refresh cookie 轮换并签发新的 access token",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "刷新访问令牌",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/RefreshTokenResponseDoc"
-                        }
-                    },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "429": {
-                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -7401,13 +5240,19 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
                     }
                 }
             }
         },
         "/auth/register/email/complete": {
             "post": {
-                "description": "使用邮箱、密码和验证码完成注册；未开启邮箱验证码但启用 Turnstile 时需要提交 turnstileToken",
+                "description": "Registers with Sub2 and creates a DEEIX browser session with a refresh cookie.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7417,10 +5262,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "完成邮箱注册",
+                "summary": "Complete Sub2 email registration",
                 "parameters": [
                     {
-                        "description": "邮箱注册完成请求",
+                        "description": "Registration completion",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7441,13 +5286,19 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
                     }
                 }
             }
         },
         "/auth/register/email/start": {
             "post": {
-                "description": "邮箱验证码注册开启时发送验证码；启用 Turnstile 后需要提交 turnstileToken",
+                "description": "Requests a Sub2 registration code for an email address.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7457,10 +5308,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "发送邮箱注册验证码",
+                "summary": "Start Sub2 email registration",
                 "parameters": [
                     {
-                        "description": "邮箱注册验证码请求",
+                        "description": "Registration request",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7481,6 +5332,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/AuthErrorDoc"
+                        }
                     }
                 }
             }
@@ -7492,17 +5349,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前登录用户仍然有效的活跃会话列表",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Lists active DEEIX sessions for the current Sub2 principal.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "当前活跃会话",
+                "summary": "List active browser sessions",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -7532,7 +5386,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "用户授权后，用浏览器定位能力补充当前登录会话的精确位置",
+                "description": "Updates DEEIX session metadata for the authenticated browser session.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7542,10 +5396,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "更新当前会话精确位置",
+                "summary": "Update current session location",
                 "parameters": [
                     {
-                        "description": "精确位置参数",
+                        "description": "Current session location",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7558,7 +5412,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UpdateCurrentSessionLocationResponseDoc"
+                            "$ref": "#/definitions/ActiveSessionResponseDoc"
                         }
                     },
                     "400": {
@@ -7569,12 +5423,6 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -7589,21 +5437,18 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "吊销当前用户指定 session_id 对应的活跃会话",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Revokes the specified DEEIX browser session and clears its stored Sub2 credentials.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "登出指定会话",
+                "summary": "Revoke a browser session",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "会话ID",
+                        "description": "Session ID",
                         "name": "session_id",
                         "in": "path",
                         "required": true
@@ -7638,7 +5483,102 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前用户按量余额",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get Sub2 account balance",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Sub2AccountResponseDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/config": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get Sub2 commerce configuration",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Sub2ConfigResponseDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/orders": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "List current Sub2 payment orders",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Sub2OrdersResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/orders/verify": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "consumes": [
                     "application/json"
                 ],
@@ -7648,16 +5588,182 @@ const docTemplate = `{
                 "tags": [
                     "billing"
                 ],
-                "summary": "获取按量计费账户",
+                "summary": "Verify a Sub2 payment after returning from checkout",
+                "parameters": [
+                    {
+                        "description": "Payment operation",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Sub2VerifyOrderRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/BillingAccountResponseDoc"
+                            "$ref": "#/definitions/Sub2OrderResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/orders/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Get a current-user Sub2 payment order",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Order ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Sub2OrderResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/orders/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Cancel a pending Sub2 payment order",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Order ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/billing/orders/{id}/refund-request": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "billing"
+                ],
+                "summary": "Request a refund for a Sub2 payment order",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Order ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Refund request",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/Sub2RefundRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -7672,26 +5778,22 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前计费方式、周期额度或按量余额",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "billing"
                 ],
-                "summary": "获取当前用户计费概览",
+                "summary": "Get Sub2 subscription overview",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/BillingOverviewResponseDoc"
+                            "$ref": "#/definitions/Sub2OverviewResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -7706,7 +5808,6 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "为当前用户创建套餐支付单，并返回支付跳转地址",
                 "consumes": [
                     "application/json"
                 ],
@@ -7716,15 +5817,22 @@ const docTemplate = `{
                 "tags": [
                     "billing"
                 ],
-                "summary": "创建支付收银台",
+                "summary": "Create Sub2 payment order",
                 "parameters": [
                     {
-                        "description": "支付参数",
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Checkout request",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/CreateCheckoutRequest"
+                            "$ref": "#/definitions/Sub2CheckoutRequest"
                         }
                     }
                 ],
@@ -7732,7 +5840,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/CheckoutResponseDoc"
+                            "$ref": "#/definitions/Sub2CheckoutResponseDoc"
                         }
                     },
                     "400": {
@@ -7741,51 +5849,16 @@ const docTemplate = `{
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
-                    }
-                }
-            }
-        },
-        "/billing/payments/epay/notify": {
-            "post": {
-                "produces": [
-                    "text/plain"
-                ],
-                "tags": [
-                    "billing"
-                ],
-                "summary": "易支付异步通知",
-                "responses": {
-                    "200": {
-                        "description": "success",
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/billing/payments/stripe/webhook": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "billing"
-                ],
-                "summary": "Stripe 支付回调",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/BillingErrorDoc"
                         }
                     }
                 }
@@ -7798,26 +5871,22 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询所有启用的订阅套餐及价格",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "billing"
                 ],
-                "summary": "获取订阅套餐",
+                "summary": "List Sub2 commerce plans",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/PlanListResponseDoc"
+                            "$ref": "#/definitions/Sub2PlansResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -7826,15 +5895,11 @@ const docTemplate = `{
             }
         },
         "/billing/redemptions": {
-            "post": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
-                ],
-                "description": "当前用户兑换余额或订阅权益",
-                "consumes": [
-                    "application/json"
                 ],
                 "produces": [
                     "application/json"
@@ -7842,48 +5907,28 @@ const docTemplate = `{
                 "tags": [
                     "billing"
                 ],
-                "summary": "兑换计费权益码",
-                "parameters": [
-                    {
-                        "description": "兑换码",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/RedeemCodeRequest"
-                        }
-                    }
-                ],
+                "summary": "List current user's Sub2 redemption history",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/RedemptionApplyResponseDoc"
+                            "$ref": "#/definitions/Sub2RedemptionsResponseDoc"
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/BillingErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
                     }
                 }
-            }
-        },
-        "/billing/subscriptions": {
+            },
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "为当前用户创建或替换订阅",
                 "consumes": [
                     "application/json"
                 ],
@@ -7893,15 +5938,15 @@ const docTemplate = `{
                 "tags": [
                     "billing"
                 ],
-                "summary": "创建订阅",
+                "summary": "Redeem a Sub2 code",
                 "parameters": [
                     {
-                        "description": "订阅参数",
+                        "description": "Redeem request",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/SubscribeRequest"
+                            "$ref": "#/definitions/Sub2RedeemRequest"
                         }
                     }
                 ],
@@ -7909,7 +5954,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SubscribeResponseDoc"
+                            "$ref": "#/definitions/Sub2RedeemResponseDoc"
                         }
                     },
                     "400": {
@@ -7918,8 +5963,8 @@ const docTemplate = `{
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -7934,46 +5979,24 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前用户的每日用量与费用",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "billing"
                 ],
-                "summary": "查询用量账单",
+                "summary": "List Sub2 usage",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "页码",
+                        "description": "Page",
                         "name": "page",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "每页数量",
+                        "description": "Page size",
                         "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "搜索模型",
-                        "name": "query",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "状态筛选：free/billable",
-                        "name": "status",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "排序：newest/oldest/tokens_desc/cost_desc/latency_desc",
-                        "name": "sort",
                         "in": "query"
                     }
                 ],
@@ -7981,11 +6004,17 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UsageLedgerListResponseDoc"
+                            "$ref": "#/definitions/Sub2UsageResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -8000,34 +6029,28 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前用户按日期聚合的用量与费用",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "billing"
                 ],
-                "summary": "查询每日用量",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "天数",
-                        "name": "days",
-                        "in": "query"
-                    }
-                ],
+                "summary": "Get Sub2 daily usage",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UsageDailyListResponseDoc"
+                            "$ref": "#/definitions/Sub2DailyResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -8042,21 +6065,17 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前用户按月份聚合的用量与费用",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "billing"
                 ],
-                "summary": "查询月度用量",
+                "summary": "Get Sub2 monthly usage",
                 "parameters": [
                     {
                         "type": "integer",
-                        "description": "月份数量，默认近 12 个月",
+                        "description": "Months",
                         "name": "months",
                         "in": "query"
                     }
@@ -8065,11 +6084,17 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/UsageMonthlyListResponseDoc"
+                            "$ref": "#/definitions/Sub2MonthlyResponseDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/BillingErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/BillingErrorDoc"
                         }
@@ -10328,17 +8353,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "查询当前登录用户资料",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "Returns the revalidated Sub2 principal and DEEIX-owned preferences.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "auth"
                 ],
-                "summary": "当前用户信息",
+                "summary": "Get the current Sub2 principal projection",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -10357,58 +8379,9 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "删除当前登录用户账户及主要用户域数据",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "删除当前用户账户",
-                "parameters": [
-                    {
-                        "description": "删除账号验证",
-                        "name": "payload",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/DeleteAccountRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/DeleteAccountResponseDoc"
-                        }
                     },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -10421,7 +8394,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "更新当前登录用户的头像、昵称、时区、对话偏好",
+                "description": "Updates DEEIX-owned display, avatar, locale, timezone, and preference fields.",
                 "consumes": [
                     "application/json"
                 ],
@@ -10431,10 +8404,10 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "更新当前用户资料",
+                "summary": "Update local profile preferences",
                 "parameters": [
                     {
-                        "description": "用户资料更新参数",
+                        "description": "Profile update",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -10447,7 +8420,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/PatchMeResponseDoc"
+                            "$ref": "#/definitions/MeResponseDoc"
                         }
                     },
                     "400": {
@@ -10461,24 +8434,18 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
                     }
                 }
             }
         },
-        "/me/delete/start": {
-            "post": {
+        "/me/password": {
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
                     }
                 ],
-                "description": "发送删除当前账号前所需的邮箱验证码，或返回可用的两步验证方式",
+                "description": "Proxies the password change to Sub2, then revokes DEEIX browser sessions.",
                 "consumes": [
                     "application/json"
                 ],
@@ -10488,117 +8455,15 @@ const docTemplate = `{
                 "tags": [
                     "auth"
                 ],
-                "summary": "开始删除账号验证",
+                "summary": "Change the Sub2 password",
                 "parameters": [
                     {
-                        "description": "验证方式",
-                        "name": "payload",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/SecurityVerificationStartRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/EmailVerificationStartResponseDoc"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/me/onboarding/complete": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "标记当前用户已完成首次引导",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "完成首次引导",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/PatchMeResponseDoc"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/AuthErrorDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/me/username": {
-            "patch": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "当前用户仅可自主修改一次登录用户名",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "修改当前用户用户名",
-                "parameters": [
-                    {
-                        "description": "用户名更新参数",
+                        "description": "Password change",
                         "name": "body",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/PatchUsernameRequest"
+                            "$ref": "#/definitions/ChangePasswordRequest"
                         }
                     }
                 ],
@@ -10606,7 +8471,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/PatchMeResponseDoc"
+                            "$ref": "#/definitions/ChangePasswordResponseDoc"
                         }
                     },
                     "400": {
@@ -10621,14 +8486,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
                     },
-                    "409": {
-                        "description": "Conflict",
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "$ref": "#/definitions/AuthErrorDoc"
                         }
@@ -12070,6 +9935,21 @@ const docTemplate = `{
                 }
             }
         },
+        "ActiveSessionResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ActiveSessionResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "AdminAnnouncementListResponseDoc": {
             "type": "object",
             "required": [
@@ -12103,47 +9983,101 @@ const docTemplate = `{
         "AdminErrorDoc": {
             "type": "object",
             "required": [
-                "data",
-                "errorMsg"
+                "message"
             ],
             "properties": {
-                "data": {},
-                "details": {},
-                "errorCode": {
-                    "type": "string"
-                },
-                "errorMsg": {
-                    "type": "string"
-                },
-                "requestId": {
+                "message": {
                     "type": "string"
                 }
             }
         },
-        "AdminUserIdentityProviderSummaryResponse": {
+        "AdminPageData-internal_transport_http_admin_AuditLogResponse": {
             "type": "object",
             "required": [
-                "id",
-                "logoURL",
-                "name",
-                "slug",
-                "type"
+                "results",
+                "total"
             ],
             "properties": {
-                "id": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AuditLogResponse"
+                    }
+                },
+                "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "AdminPageData-internal_transport_http_admin_AuthEventResponse": {
+            "type": "object",
+            "required": [
+                "results",
+                "total"
+            ],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AuthEventResponse"
+                    }
                 },
-                "logoURL": {
-                    "type": "string"
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "AdminPageData-internal_transport_http_admin_ConversationEventResponse": {
+            "type": "object",
+            "required": [
+                "results",
+                "total"
+            ],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ConversationEventResponse"
+                    }
                 },
-                "name": {
-                    "type": "string"
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "AdminPageData-internal_transport_http_admin_SystemEventResponse": {
+            "type": "object",
+            "required": [
+                "results",
+                "total"
+            ],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/SystemEventResponse"
+                    }
                 },
-                "slug": {
-                    "type": "string"
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "AdminPageData-internal_transport_http_admin_UserResponse": {
+            "type": "object",
+            "required": [
+                "results",
+                "total"
+            ],
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AdminUserResponse"
+                    }
                 },
-                "type": {
-                    "type": "string"
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -12152,35 +10086,18 @@ const docTemplate = `{
             "required": [
                 "appearancePreferences",
                 "avatarURL",
-                "billingAccountCurrency",
-                "billingAccountStatus",
-                "billingBalanceNanousd",
-                "billingBalanceUSD",
                 "createdAt",
                 "displayName",
                 "email",
-                "emailVerifiedAt",
                 "id",
-                "identityProviders",
                 "lastActiveAt",
                 "lastLoginAt",
                 "locale",
-                "phone",
-                "phoneVerifiedAt",
                 "profilePreferences",
                 "publicID",
                 "role",
                 "status",
-                "subscriptionExpiresAt",
-                "subscriptionPlanID",
-                "subscriptionPlanName",
-                "subscriptionStatus",
-                "subscriptionTier",
                 "timezone",
-                "twoFactorAvailable",
-                "twoFactorEnabled",
-                "twoFactorRecoveryCount",
-                "twoFactorRequired",
                 "updatedAt",
                 "username"
             ],
@@ -12191,18 +10108,6 @@ const docTemplate = `{
                 "avatarURL": {
                     "type": "string"
                 },
-                "billingAccountCurrency": {
-                    "type": "string"
-                },
-                "billingAccountStatus": {
-                    "type": "string"
-                },
-                "billingBalanceNanousd": {
-                    "type": "integer"
-                },
-                "billingBalanceUSD": {
-                    "type": "number"
-                },
                 "createdAt": {
                     "type": "string"
                 },
@@ -12212,40 +10117,17 @@ const docTemplate = `{
                 "email": {
                     "type": "string"
                 },
-                "emailVerifiedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
                 "id": {
                     "type": "integer"
                 },
-                "identityProviders": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/AdminUserIdentityProviderSummaryResponse"
-                    }
-                },
                 "lastActiveAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
+                    "type": "string"
                 },
                 "lastLoginAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
+                    "type": "string"
                 },
                 "locale": {
                     "type": "string"
-                },
-                "phone": {
-                    "type": "string"
-                },
-                "phoneVerifiedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
                 },
                 "profilePreferences": {
                     "type": "string"
@@ -12259,39 +10141,8 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
-                "subscriptionExpiresAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "subscriptionPlanID": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "subscriptionPlanName": {
-                    "type": "string"
-                },
-                "subscriptionStatus": {
-                    "type": "string"
-                },
-                "subscriptionTier": {
-                    "type": "string"
-                },
                 "timezone": {
                     "type": "string"
-                },
-                "twoFactorAvailable": {
-                    "type": "boolean"
-                },
-                "twoFactorEnabled": {
-                    "type": "boolean"
-                },
-                "twoFactorRecoveryCount": {
-                    "type": "integer"
-                },
-                "twoFactorRequired": {
-                    "type": "boolean"
                 },
                 "updatedAt": {
                     "type": "string"
@@ -12530,22 +10381,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/AuditLogResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
+                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuditLogResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -12625,12 +10461,29 @@ const docTemplate = `{
                 "data": {},
                 "details": {},
                 "errorCode": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "invalid_request"
                 },
                 "errorMsg": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "invalid request"
                 },
                 "requestId": {
+                    "type": "string"
+                }
+            }
+        },
+        "AuthEventListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuthEventResponse"
+                },
+                "errorMsg": {
                     "type": "string"
                 }
             }
@@ -12702,33 +10555,6 @@ const docTemplate = `{
                 }
             }
         },
-        "AuthUserIdentityProviderSummaryResponse": {
-            "type": "object",
-            "required": [
-                "id",
-                "logoURL",
-                "name",
-                "slug",
-                "type"
-            ],
-            "properties": {
-                "id": {
-                    "type": "integer"
-                },
-                "logoURL": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "slug": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
         "AuthUserResponse": {
             "type": "object",
             "required": [
@@ -12737,40 +10563,17 @@ const docTemplate = `{
                 "createdAt",
                 "displayName",
                 "email",
-                "emailBootstrapUsedAt",
-                "emailSource",
-                "emailVerifiedAt",
                 "id",
-                "identityProviders",
-                "initialSecurityRequired",
-                "initialUsernameRequired",
                 "lastActiveAt",
                 "lastLoginAt",
                 "locale",
-                "mustResetPassword",
-                "onboardingCompletedAt",
-                "passwordEnabled",
-                "passwordOrigin",
-                "passwordSetAt",
-                "phone",
-                "phoneVerifiedAt",
                 "profilePreferences",
                 "publicID",
                 "role",
                 "status",
-                "subscriptionExpiresAt",
-                "subscriptionPlanID",
-                "subscriptionPlanName",
-                "subscriptionStatus",
-                "subscriptionTier",
                 "timezone",
-                "twoFactorAvailable",
-                "twoFactorEnabled",
-                "twoFactorRecoveryCount",
-                "twoFactorRequired",
                 "updatedAt",
-                "username",
-                "usernameChangedAt"
+                "username"
             ],
             "properties": {
                 "appearancePreferences": {
@@ -12788,33 +10591,8 @@ const docTemplate = `{
                 "email": {
                     "type": "string"
                 },
-                "emailBootstrapUsedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "emailSource": {
-                    "type": "string"
-                },
-                "emailVerifiedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
                 "id": {
                     "type": "integer"
-                },
-                "identityProviders": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/AuthUserIdentityProviderSummaryResponse"
-                    }
-                },
-                "initialSecurityRequired": {
-                    "type": "boolean"
-                },
-                "initialUsernameRequired": {
-                    "type": "boolean"
                 },
                 "lastActiveAt": {
                     "type": "string",
@@ -12829,33 +10607,6 @@ const docTemplate = `{
                 "locale": {
                     "type": "string"
                 },
-                "mustResetPassword": {
-                    "type": "boolean"
-                },
-                "onboardingCompletedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "passwordEnabled": {
-                    "type": "boolean"
-                },
-                "passwordOrigin": {
-                    "type": "string"
-                },
-                "passwordSetAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "phone": {
-                    "type": "string"
-                },
-                "phoneVerifiedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
                 "profilePreferences": {
                     "type": "string"
                 },
@@ -12868,127 +10619,13 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
-                "subscriptionExpiresAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "subscriptionPlanID": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "subscriptionPlanName": {
-                    "type": "string"
-                },
-                "subscriptionStatus": {
-                    "type": "string"
-                },
-                "subscriptionTier": {
-                    "type": "string"
-                },
                 "timezone": {
                     "type": "string"
-                },
-                "twoFactorAvailable": {
-                    "type": "boolean"
-                },
-                "twoFactorEnabled": {
-                    "type": "boolean"
-                },
-                "twoFactorRecoveryCount": {
-                    "type": "integer"
-                },
-                "twoFactorRequired": {
-                    "type": "boolean"
                 },
                 "updatedAt": {
                     "type": "string"
                 },
                 "username": {
-                    "type": "string"
-                },
-                "usernameChangedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                }
-            }
-        },
-        "BatchDeleteRedemptionCodeDataResponse": {
-            "type": "object",
-            "required": [
-                "failedCount",
-                "notFoundCount",
-                "results",
-                "successCount",
-                "total"
-            ],
-            "properties": {
-                "failedCount": {
-                    "type": "integer"
-                },
-                "notFoundCount": {
-                    "type": "integer"
-                },
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/BatchDeleteRedemptionCodeResultResponse"
-                    }
-                },
-                "successCount": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "BatchDeleteRedemptionCodeRequest": {
-            "type": "object",
-            "required": [
-                "ids"
-            ],
-            "properties": {
-                "ids": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "BatchDeleteRedemptionCodeResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/BatchDeleteRedemptionCodeDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "BatchDeleteRedemptionCodeResultResponse": {
-            "type": "object",
-            "required": [
-                "id",
-                "status"
-            ],
-            "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "status": {
                     "type": "string"
                 }
             }
@@ -13116,418 +10753,14 @@ const docTemplate = `{
                 }
             }
         },
-        "BillingAccountDataResponse": {
-            "type": "object",
-            "required": [
-                "account"
-            ],
-            "properties": {
-                "account": {
-                    "$ref": "#/definitions/BillingAccountResponse"
-                }
-            }
-        },
-        "BillingAccountResponse": {
-            "type": "object",
-            "required": [
-                "balanceNanousd",
-                "balanceUSD",
-                "currency",
-                "status",
-                "updatedAt",
-                "userID"
-            ],
-            "properties": {
-                "balanceNanousd": {
-                    "type": "integer"
-                },
-                "balanceUSD": {
-                    "type": "number"
-                },
-                "currency": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
-                }
-            }
-        },
-        "BillingAccountResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/BillingAccountDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "BillingConfigDataResponse": {
-            "type": "object",
-            "required": [
-                "config"
-            ],
-            "properties": {
-                "config": {
-                    "$ref": "#/definitions/BillingConfigResponse"
-                }
-            }
-        },
-        "BillingConfigRequest": {
-            "type": "object",
-            "required": [
-                "mode"
-            ],
-            "properties": {
-                "displayCurrency": {
-                    "type": "string",
-                    "enum": [
-                        "USD",
-                        "CNY"
-                    ]
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": [
-                        "self",
-                        "period",
-                        "usage"
-                    ]
-                },
-                "nativeToolBillingEnabled": {
-                    "type": "boolean"
-                },
-                "nativeToolPricing": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/NativeToolPricingRequest"
-                    }
-                },
-                "prepaidAmountUSD": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "usdToCNYRate": {
-                    "type": "number"
-                }
-            }
-        },
-        "BillingConfigResponse": {
-            "type": "object",
-            "required": [
-                "displayCurrency",
-                "epayTypes",
-                "mode",
-                "nativeToolBillingEnabled",
-                "nativeToolPricing",
-                "paymentProviders",
-                "prepaidAmountNanousd",
-                "prepaidAmountUSD",
-                "usdToCNYRate"
-            ],
-            "properties": {
-                "displayCurrency": {
-                    "type": "string"
-                },
-                "epayTypes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/PaymentTypeResponse"
-                    }
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "nativeToolBillingEnabled": {
-                    "type": "boolean"
-                },
-                "nativeToolPricing": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/NativeToolPricingResponse"
-                    }
-                },
-                "paymentProviders": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "prepaidAmountNanousd": {
-                    "type": "integer"
-                },
-                "prepaidAmountUSD": {
-                    "type": "number"
-                },
-                "usdToCNYRate": {
-                    "type": "number"
-                }
-            }
-        },
-        "BillingConfigResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/BillingConfigDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "BillingErrorDoc": {
             "type": "object",
             "required": [
-                "data",
                 "errorMsg"
             ],
             "properties": {
-                "data": {},
-                "details": {},
-                "errorCode": {
-                    "type": "string"
-                },
                 "errorMsg": {
                     "type": "string"
-                },
-                "requestId": {
-                    "type": "string"
-                }
-            }
-        },
-        "BillingOverviewDataResponse": {
-            "type": "object",
-            "required": [
-                "overview"
-            ],
-            "properties": {
-                "overview": {
-                    "$ref": "#/definitions/BillingOverviewResponse"
-                }
-            }
-        },
-        "BillingOverviewResponse": {
-            "type": "object",
-            "required": [
-                "account",
-                "mode",
-                "periodCreditNanousd",
-                "periodCreditUSD",
-                "periodEndAt",
-                "periodRemainingNanousd",
-                "periodRemainingUSD",
-                "periodStartAt",
-                "periodUsedNanousd",
-                "periodUsedUSD",
-                "plan",
-                "subscriptionEntitlements"
-            ],
-            "properties": {
-                "account": {
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/BillingAccountResponse"
-                        }
-                    ],
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "periodCreditNanousd": {
-                    "type": "integer"
-                },
-                "periodCreditUSD": {
-                    "type": "number"
-                },
-                "periodEndAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "periodRemainingNanousd": {
-                    "type": "integer"
-                },
-                "periodRemainingUSD": {
-                    "type": "number"
-                },
-                "periodStartAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "periodUsedNanousd": {
-                    "type": "integer"
-                },
-                "periodUsedUSD": {
-                    "type": "number"
-                },
-                "plan": {
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/BillingPlanResponse"
-                        }
-                    ],
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "subscriptionEntitlements": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/SubscriptionEntitlementResponse"
-                    }
-                }
-            }
-        },
-        "BillingOverviewResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/BillingOverviewDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "BillingPlanDataResponse": {
-            "type": "object",
-            "required": [
-                "plan"
-            ],
-            "properties": {
-                "plan": {
-                    "$ref": "#/definitions/BillingPlanResponse"
-                }
-            }
-        },
-        "BillingPlanResponse": {
-            "type": "object",
-            "required": [
-                "code",
-                "description",
-                "discountPercent",
-                "featureJSON",
-                "id",
-                "isActive",
-                "name",
-                "periodCreditNanousd",
-                "periodCreditUSD",
-                "permissionGroupID",
-                "prices",
-                "sortOrder"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "discountPercent": {
-                    "type": "integer"
-                },
-                "featureJSON": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "isActive": {
-                    "type": "boolean"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "periodCreditNanousd": {
-                    "type": "integer"
-                },
-                "periodCreditUSD": {
-                    "type": "number"
-                },
-                "permissionGroupID": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "prices": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/BillingPriceResponse"
-                    }
-                },
-                "sortOrder": {
-                    "type": "integer"
-                }
-            }
-        },
-        "BillingPlanResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/BillingPlanDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "BillingPriceResponse": {
-            "type": "object",
-            "required": [
-                "amountCents",
-                "billingInterval",
-                "code",
-                "currency",
-                "id",
-                "isDefault",
-                "planID"
-            ],
-            "properties": {
-                "amountCents": {
-                    "type": "integer"
-                },
-                "billingInterval": {
-                    "type": "string"
-                },
-                "code": {
-                    "type": "string"
-                },
-                "currency": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "isDefault": {
-                    "type": "boolean"
-                },
-                "planID": {
-                    "type": "integer"
                 }
             }
         },
@@ -13717,6 +10950,50 @@ const docTemplate = `{
                 }
             }
         },
+        "ChangePasswordRequest": {
+            "type": "object",
+            "required": [
+                "currentPassword",
+                "newPassword"
+            ],
+            "properties": {
+                "currentPassword": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "newPassword": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 8
+                }
+            }
+        },
+        "ChangePasswordResponse": {
+            "type": "object",
+            "required": [
+                "changed"
+            ],
+            "properties": {
+                "changed": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ChangePasswordResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ChangePasswordResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "ChannelErrorDoc": {
             "type": "object",
             "required": [
@@ -13733,97 +11010,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "requestId": {
-                    "type": "string"
-                }
-            }
-        },
-        "CheckoutDataResponse": {
-            "type": "object",
-            "required": [
-                "checkout"
-            ],
-            "properties": {
-                "checkout": {
-                    "$ref": "#/definitions/CheckoutResponse"
-                }
-            }
-        },
-        "CheckoutResponse": {
-            "type": "object",
-            "required": [
-                "baseAmountCents",
-                "baseCurrency",
-                "checkoutURL",
-                "creditNanousd",
-                "creditUSD",
-                "expiredAt",
-                "externalCheckoutID",
-                "fxRate",
-                "orderNo",
-                "orderType",
-                "payAmountCents",
-                "payCurrency",
-                "provider",
-                "status"
-            ],
-            "properties": {
-                "baseAmountCents": {
-                    "type": "integer"
-                },
-                "baseCurrency": {
-                    "type": "string"
-                },
-                "checkoutURL": {
-                    "type": "string"
-                },
-                "creditNanousd": {
-                    "type": "integer"
-                },
-                "creditUSD": {
-                    "type": "number"
-                },
-                "expiredAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "externalCheckoutID": {
-                    "type": "string"
-                },
-                "fxRate": {
-                    "type": "string"
-                },
-                "orderNo": {
-                    "type": "string"
-                },
-                "orderType": {
-                    "type": "string"
-                },
-                "payAmountCents": {
-                    "type": "integer"
-                },
-                "payCurrency": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                }
-            }
-        },
-        "CheckoutResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/CheckoutDataResponse"
-                },
-                "errorMsg": {
                     "type": "string"
                 }
             }
@@ -14133,22 +11319,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/ConversationEventResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
+                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_ConversationEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -14162,24 +11333,15 @@ const docTemplate = `{
                 "conversationID",
                 "createdAt",
                 "endedAt",
-                "errorJSON",
                 "eventID",
                 "eventScope",
                 "eventType",
                 "id",
-                "inputJSON",
                 "latencyMS",
                 "messageID",
-                "outputJSON",
-                "parentEventID",
                 "payloadJSON",
                 "payloadOmitted",
-                "payloadSizeBytes",
                 "phase",
-                "platformModelName",
-                "providerProtocol",
-                "roundID",
-                "routedBindingCode",
                 "runID",
                 "seq",
                 "stage",
@@ -14187,11 +11349,8 @@ const docTemplate = `{
                 "status",
                 "summary",
                 "title",
-                "toolCallID",
                 "toolName",
                 "updatedAt",
-                "upstreamModelName",
-                "upstreamName",
                 "userDisplayName",
                 "userID",
                 "userLabel",
@@ -14208,11 +11367,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "endedAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "errorJSON": {
                     "type": "string"
                 },
                 "eventID": {
@@ -14227,20 +11381,11 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
-                "inputJSON": {
-                    "type": "string"
-                },
                 "latencyMS": {
                     "type": "integer"
                 },
                 "messageID": {
                     "type": "integer"
-                },
-                "outputJSON": {
-                    "type": "string"
-                },
-                "parentEventID": {
-                    "type": "string"
                 },
                 "payloadJSON": {
                     "type": "string"
@@ -14248,22 +11393,7 @@ const docTemplate = `{
                 "payloadOmitted": {
                     "type": "boolean"
                 },
-                "payloadSizeBytes": {
-                    "type": "integer"
-                },
                 "phase": {
-                    "type": "string"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "providerProtocol": {
-                    "type": "string"
-                },
-                "roundID": {
-                    "type": "string"
-                },
-                "routedBindingCode": {
                     "type": "string"
                 },
                 "runID": {
@@ -14287,19 +11417,10 @@ const docTemplate = `{
                 "title": {
                     "type": "string"
                 },
-                "toolCallID": {
-                    "type": "string"
-                },
                 "toolName": {
                     "type": "string"
                 },
                 "updatedAt": {
-                    "type": "string"
-                },
-                "upstreamModelName": {
-                    "type": "string"
-                },
-                "upstreamName": {
                     "type": "string"
                 },
                 "userDisplayName": {
@@ -14911,50 +12032,6 @@ const docTemplate = `{
                 }
             }
         },
-        "CreateCheckoutRequest": {
-            "type": "object",
-            "properties": {
-                "amountMinorUnits": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "cancelURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "cycles": {
-                    "type": "integer",
-                    "maximum": 120,
-                    "minimum": 1
-                },
-                "epayType": {
-                    "type": "string",
-                    "maxLength": 32
-                },
-                "orderType": {
-                    "type": "string",
-                    "enum": [
-                        "subscription",
-                        "topup"
-                    ]
-                },
-                "paymentProvider": {
-                    "type": "string",
-                    "enum": [
-                        "stripe",
-                        "epay"
-                    ]
-                },
-                "priceID": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "successURL": {
-                    "type": "string",
-                    "maxLength": 512
-                }
-            }
-        },
         "CreateConversationProjectRequest": {
             "type": "object",
             "required": [
@@ -15172,72 +12249,11 @@ const docTemplate = `{
             ],
             "properties": {
                 "description": {
-                    "type": "string",
-                    "maxLength": 512
+                    "type": "string"
                 },
                 "name": {
                     "type": "string",
-                    "maxLength": 128
-                },
-                "rateMultiplierPercent": {
-                    "type": "integer",
-                    "maximum": 10000,
-                    "minimum": 0
-                }
-            }
-        },
-        "CreateRedemptionCodeRequest": {
-            "type": "object",
-            "required": [
-                "mode"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "minLength": 3
-                },
-                "creditUSD": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "description": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "durationDays": {
-                    "type": "integer",
-                    "maximum": 3660,
-                    "minimum": 0
-                },
-                "expiresAt": {
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "maxRedemptions": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": [
-                        "usage",
-                        "period"
-                    ]
-                },
-                "perUserLimit": {
-                    "type": "integer",
-                    "maximum": 100,
-                    "minimum": 1
-                },
-                "planID": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "quantity": {
-                    "type": "integer",
-                    "maximum": 100,
-                    "minimum": 1
+                    "maxLength": 64
                 }
             }
         },
@@ -15358,119 +12374,6 @@ const docTemplate = `{
                 }
             }
         },
-        "CreateUserRequest": {
-            "type": "object",
-            "required": [
-                "password",
-                "username"
-            ],
-            "properties": {
-                "avatarURL": {
-                    "type": "string",
-                    "maxLength": 2048
-                },
-                "displayName": {
-                    "type": "string",
-                    "maxLength": 16,
-                    "minLength": 3
-                },
-                "email": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "locale": {
-                    "type": "string",
-                    "maxLength": 16
-                },
-                "password": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 8
-                },
-                "phone": {
-                    "type": "string",
-                    "maxLength": 32
-                },
-                "subscriptionExpiresAt": {
-                    "type": "string"
-                },
-                "subscriptionTier": {
-                    "type": "string",
-                    "maxLength": 32
-                },
-                "timezone": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "username": {
-                    "type": "string",
-                    "maxLength": 16,
-                    "minLength": 3
-                }
-            }
-        },
-        "CreateUserResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/UserDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "DeleteAccountRequest": {
-            "type": "object",
-            "required": [
-                "code",
-                "verificationMethod"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "maxLength": 32,
-                    "minLength": 6
-                },
-                "verificationMethod": {
-                    "type": "string",
-                    "enum": [
-                        "two_factor",
-                        "email"
-                    ]
-                }
-            }
-        },
-        "DeleteAccountResponse": {
-            "type": "object",
-            "required": [
-                "deleted"
-            ],
-            "properties": {
-                "deleted": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "DeleteAccountResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/DeleteAccountResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "DeleteFileResponse": {
             "type": "object",
             "required": [
@@ -15505,7 +12408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "DeletePermissionGroupResponse": {
+        "DeletePermissionGroupResponseDoc": {
             "type": "object",
             "required": [
                 "deleted",
@@ -15517,21 +12420,6 @@ const docTemplate = `{
                 },
                 "summary": {
                     "$ref": "#/definitions/PermissionGroupDeleteSummaryResponse"
-                }
-            }
-        },
-        "DeletePermissionGroupResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/DeletePermissionGroupResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
                 }
             }
         },
@@ -15555,32 +12443,6 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/DeleteServerResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "DeleteUserResponse": {
-            "type": "object",
-            "required": [
-                "deleted"
-            ],
-            "properties": {
-                "deleted": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "DeleteUserResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/DeleteUserResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -15652,47 +12514,6 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/EmailRegistrationStartResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "EmailVerificationStartResponse": {
-            "type": "object",
-            "required": [
-                "availableMethods",
-                "expiresAt",
-                "sent",
-                "verificationMethod"
-            ],
-            "properties": {
-                "availableMethods": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "expiresAt": {
-                    "type": "string"
-                },
-                "sent": {
-                    "type": "boolean"
-                },
-                "verificationMethod": {
-                    "type": "string"
-                }
-            }
-        },
-        "EmailVerificationStartResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/EmailVerificationStartResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -15889,7 +12710,7 @@ const docTemplate = `{
                 }
             }
         },
-        "GroupModelsResponse": {
+        "GroupModelsResponseDoc": {
             "type": "object",
             "required": [
                 "modelIDs",
@@ -15910,22 +12731,7 @@ const docTemplate = `{
                 }
             }
         },
-        "GroupModelsResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/GroupModelsResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "GroupUsersResponse": {
+        "GroupUsersResponseDoc": {
             "type": "object",
             "required": [
                 "userIDs"
@@ -15936,299 +12742,6 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
-                }
-            }
-        },
-        "GroupUsersResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/GroupUsersResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "IdentityProviderDeleteResponse": {
-            "type": "object",
-            "required": [
-                "deleted"
-            ],
-            "properties": {
-                "deleted": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "IdentityProviderDeleteResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/IdentityProviderDeleteResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "IdentityProviderListResponse": {
-            "type": "object",
-            "required": [
-                "results",
-                "total"
-            ],
-            "properties": {
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/IdentityProviderResponse"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "IdentityProviderListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/IdentityProviderListResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "IdentityProviderReorderResponse": {
-            "type": "object",
-            "required": [
-                "updated"
-            ],
-            "properties": {
-                "updated": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "IdentityProviderReorderResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/IdentityProviderReorderResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "IdentityProviderResponse": {
-            "type": "object",
-            "required": [
-                "avatarField",
-                "createdAt",
-                "defaultRole",
-                "emailField",
-                "emailVerifiedField",
-                "loginEnabled",
-                "logoURL",
-                "name",
-                "nameField",
-                "publicID",
-                "registrationEnabled",
-                "scopes",
-                "slug",
-                "subjectField",
-                "type",
-                "updatedAt"
-            ],
-            "properties": {
-                "authURL": {
-                    "type": "string"
-                },
-                "avatarField": {
-                    "type": "string"
-                },
-                "clientID": {
-                    "type": "string"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "defaultRole": {
-                    "type": "string",
-                    "enum": [
-                        "user",
-                        "admin",
-                        "superadmin"
-                    ]
-                },
-                "discoveryURL": {
-                    "type": "string"
-                },
-                "emailField": {
-                    "type": "string"
-                },
-                "emailVerifiedField": {
-                    "type": "string"
-                },
-                "issuerURL": {
-                    "type": "string"
-                },
-                "jwksURL": {
-                    "type": "string"
-                },
-                "loginEnabled": {
-                    "type": "boolean"
-                },
-                "logoURL": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "nameField": {
-                    "type": "string"
-                },
-                "publicID": {
-                    "type": "string"
-                },
-                "registrationEnabled": {
-                    "type": "boolean"
-                },
-                "scopes": {
-                    "type": "string"
-                },
-                "slug": {
-                    "type": "string"
-                },
-                "subjectField": {
-                    "type": "string"
-                },
-                "tokenURL": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string",
-                    "enum": [
-                        "oidc",
-                        "oauth2"
-                    ]
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "userinfoURL": {
-                    "type": "string"
-                }
-            }
-        },
-        "IdentityProviderResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/IdentityProviderResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "ImportOpenWebUIUsersRequest": {
-            "type": "object",
-            "required": [
-                "creditMultiplier",
-                "dsn"
-            ],
-            "properties": {
-                "creditMultiplier": {
-                    "type": "number"
-                },
-                "dryRun": {
-                    "type": "boolean"
-                },
-                "dsn": {
-                    "type": "string",
-                    "maxLength": 2048
-                }
-            }
-        },
-        "ImportOpenWebUIUsersResponse": {
-            "type": "object",
-            "required": [
-                "dedupeField",
-                "dedupeRule",
-                "imported",
-                "scanned",
-                "skippedDuplicateSourceEmail",
-                "skippedExistingEmail",
-                "skippedInvalidEmail",
-                "skippedInvalidRow",
-                "source"
-            ],
-            "properties": {
-                "dedupeField": {
-                    "type": "string"
-                },
-                "dedupeRule": {
-                    "type": "string"
-                },
-                "imported": {
-                    "type": "integer"
-                },
-                "scanned": {
-                    "type": "integer"
-                },
-                "skippedDuplicateSourceEmail": {
-                    "type": "integer"
-                },
-                "skippedExistingEmail": {
-                    "type": "integer"
-                },
-                "skippedInvalidEmail": {
-                    "type": "integer"
-                },
-                "skippedInvalidRow": {
-                    "type": "integer"
-                },
-                "source": {
-                    "type": "string"
-                }
-            }
-        },
-        "ImportOpenWebUIUsersResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ImportOpenWebUIUsersResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
                 }
             }
         },
@@ -16401,46 +12914,23 @@ const docTemplate = `{
         "LoginOptionsResponse": {
             "type": "object",
             "required": [
-                "emailEnabled",
                 "emailRegistrationEnabled",
                 "emailVerificationEnabled",
-                "passwordResetEnabled",
-                "providerAuthBridge",
-                "providers",
-                "turnstileRegistrationEnabled",
-                "turnstileSiteKey",
-                "usernameEnabled"
+                "turnstileEnabled",
+                "turnstileSiteKey"
             ],
             "properties": {
-                "emailEnabled": {
-                    "type": "boolean"
-                },
                 "emailRegistrationEnabled": {
                     "type": "boolean"
                 },
                 "emailVerificationEnabled": {
                     "type": "boolean"
                 },
-                "passwordResetEnabled": {
-                    "type": "boolean"
-                },
-                "providerAuthBridge": {
-                    "$ref": "#/definitions/ProviderAuthBridgeResponse"
-                },
-                "providers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/IdentityProviderResponse"
-                    }
-                },
-                "turnstileRegistrationEnabled": {
+                "turnstileEnabled": {
                     "type": "boolean"
                 },
                 "turnstileSiteKey": {
                     "type": "string"
-                },
-                "usernameEnabled": {
-                    "type": "boolean"
                 }
             }
         },
@@ -16462,41 +12952,41 @@ const docTemplate = `{
         "LoginRequest": {
             "type": "object",
             "required": [
-                "password",
-                "username"
+                "email",
+                "password"
             ],
             "properties": {
+                "email": {
+                    "type": "string",
+                    "maxLength": 128
+                },
                 "password": {
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 6
                 },
-                "username": {
+                "turnstileToken": {
                     "type": "string",
-                    "maxLength": 128,
-                    "minLength": 3
+                    "maxLength": 2048
                 }
             }
         },
         "LoginResponse": {
             "type": "object",
             "required": [
-                "accessToken",
-                "expiresAt",
-                "refreshExpiresAt",
-                "sessionID",
-                "twoFactorRequired",
-                "user"
+                "twoFactorRequired"
             ],
             "properties": {
                 "accessToken": {
                     "type": "string"
                 },
                 "expiresAt": {
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "refreshExpiresAt": {
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "sessionID": {
                     "type": "string"
@@ -16506,15 +12996,6 @@ const docTemplate = `{
                 },
                 "twoFactorRequired": {
                     "type": "boolean"
-                },
-                "user": {
-                    "$ref": "#/definitions/AuthUserResponse"
-                },
-                "verificationMethods": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         },
@@ -16612,33 +13093,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "requestId": {
-                    "type": "string"
-                }
-            }
-        },
-        "MessageBillingCostResponse": {
-            "type": "object",
-            "required": [
-                "billedCurrency",
-                "billedNanousd",
-                "billedUSD",
-                "billingMode",
-                "pricingSnapshotJSON"
-            ],
-            "properties": {
-                "billedCurrency": {
-                    "type": "string"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "billingMode": {
-                    "type": "string"
-                },
-                "pricingSnapshotJSON": {
                     "type": "string"
                 }
             }
@@ -16898,9 +13352,6 @@ const docTemplate = `{
             "properties": {
                 "attachments": {
                     "type": "string"
-                },
-                "billingCost": {
-                    "$ref": "#/definitions/MessageBillingCostResponse"
                 },
                 "branchReason": {
                     "type": "string"
@@ -17256,7 +13707,7 @@ const docTemplate = `{
                 }
             }
         },
-        "ModelPermissionGroupsResponse": {
+        "ModelPermissionGroupsResponseDoc": {
             "type": "object",
             "required": [
                 "effectiveGroupIDs",
@@ -17285,157 +13736,6 @@ const docTemplate = `{
                 },
                 "unassigned": {
                     "type": "boolean"
-                }
-            }
-        },
-        "ModelPermissionGroupsResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ModelPermissionGroupsResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "ModelPricingDataResponse": {
-            "type": "object",
-            "required": [
-                "modelPricing"
-            ],
-            "properties": {
-                "modelPricing": {
-                    "$ref": "#/definitions/ModelPricingResponse"
-                }
-            }
-        },
-        "ModelPricingListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/ModelPricingResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "ModelPricingResponse": {
-            "type": "object",
-            "required": [
-                "cacheReadNanousdPerMTokens",
-                "cacheReadUSDPerMTokens",
-                "cacheWriteNanousdPerMTokens",
-                "cacheWriteUSDPerMTokens",
-                "callNanousdPerCall",
-                "callUSDPerCall",
-                "createdAt",
-                "currency",
-                "durationNanousdPerSecond",
-                "durationUSDPerSecond",
-                "id",
-                "inputNanousdPerMTokens",
-                "inputUSDPerMTokens",
-                "isFree",
-                "modelIcon",
-                "modelVendor",
-                "outputNanousdPerMTokens",
-                "outputUSDPerMTokens",
-                "platformModelName",
-                "pricingMode",
-                "tieredPricingJSON",
-                "updatedAt"
-            ],
-            "properties": {
-                "cacheReadNanousdPerMTokens": {
-                    "type": "integer"
-                },
-                "cacheReadUSDPerMTokens": {
-                    "type": "number"
-                },
-                "cacheWriteNanousdPerMTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteUSDPerMTokens": {
-                    "type": "number"
-                },
-                "callNanousdPerCall": {
-                    "type": "integer"
-                },
-                "callUSDPerCall": {
-                    "type": "number"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "currency": {
-                    "type": "string"
-                },
-                "durationNanousdPerSecond": {
-                    "type": "integer"
-                },
-                "durationUSDPerSecond": {
-                    "type": "number"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "inputNanousdPerMTokens": {
-                    "type": "integer"
-                },
-                "inputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "isFree": {
-                    "type": "boolean"
-                },
-                "modelIcon": {
-                    "type": "string"
-                },
-                "modelVendor": {
-                    "type": "string"
-                },
-                "outputNanousdPerMTokens": {
-                    "type": "integer"
-                },
-                "outputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "pricingMode": {
-                    "type": "string"
-                },
-                "tieredPricingJSON": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
                 }
             }
         },
@@ -18005,246 +14305,6 @@ const docTemplate = `{
                 }
             }
         },
-        "NativeToolPricingRequest": {
-            "type": "object",
-            "properties": {
-                "billable": {
-                    "type": "boolean"
-                },
-                "priceLabel": {
-                    "type": "string"
-                },
-                "priceNanousd": {
-                    "type": "integer"
-                },
-                "toolKey": {
-                    "type": "string"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "NativeToolPricingResponse": {
-            "type": "object",
-            "required": [
-                "billable",
-                "description",
-                "label",
-                "priceLabel",
-                "priceNanousd",
-                "provider",
-                "toolKey",
-                "type",
-                "unit"
-            ],
-            "properties": {
-                "billable": {
-                    "type": "boolean"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "label": {
-                    "type": "string"
-                },
-                "priceLabel": {
-                    "type": "string"
-                },
-                "priceNanousd": {
-                    "type": "integer"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "toolKey": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "unit": {
-                    "type": "string"
-                }
-            }
-        },
-        "OpenRouterOfficialPricingDataResponse": {
-            "type": "object",
-            "required": [
-                "cached",
-                "fetchedAt",
-                "items",
-                "stale"
-            ],
-            "properties": {
-                "cached": {
-                    "type": "boolean"
-                },
-                "fetchedAt": {
-                    "type": "string"
-                },
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/OpenRouterOfficialPricingItemResponse"
-                    }
-                },
-                "stale": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "OpenRouterOfficialPricingItemResponse": {
-            "type": "object",
-            "required": [
-                "canonicalSlug",
-                "id",
-                "name",
-                "pricing"
-            ],
-            "properties": {
-                "canonicalSlug": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "pricing": {
-                    "$ref": "#/definitions/OpenRouterOfficialPricingUnitPricingResponse"
-                }
-            }
-        },
-        "OpenRouterOfficialPricingResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/OpenRouterOfficialPricingDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "OpenRouterOfficialPricingUnitPricingResponse": {
-            "type": "object",
-            "required": [
-                "completion",
-                "inputCacheRead",
-                "inputCacheWrite",
-                "prompt"
-            ],
-            "properties": {
-                "completion": {
-                    "type": "string"
-                },
-                "inputCacheRead": {
-                    "type": "string"
-                },
-                "inputCacheWrite": {
-                    "type": "string"
-                },
-                "prompt": {
-                    "type": "string"
-                }
-            }
-        },
-        "PasswordResetCompleteRequest": {
-            "type": "object",
-            "required": [
-                "code",
-                "email",
-                "newPassword"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "newPassword": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 8
-                }
-            }
-        },
-        "PasswordResetCompleteResponse": {
-            "type": "object",
-            "required": [
-                "changed"
-            ],
-            "properties": {
-                "changed": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "PasswordResetCompleteResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/PasswordResetCompleteResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "PasswordResetStartRequest": {
-            "type": "object",
-            "required": [
-                "email"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string",
-                    "maxLength": 128
-                }
-            }
-        },
-        "PasswordResetStartResponse": {
-            "type": "object",
-            "required": [
-                "expiresAt",
-                "sent"
-            ],
-            "properties": {
-                "expiresAt": {
-                    "type": "string"
-                },
-                "sent": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "PasswordResetStartResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/PasswordResetStartResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "PatchAnnouncementRequestDoc": {
             "type": "object",
             "properties": {
@@ -18315,7 +14375,7 @@ const docTemplate = `{
             "properties": {
                 "appearancePreferences": {
                     "type": "string",
-                    "maxLength": 2048
+                    "maxLength": 65536
                 },
                 "avatarURL": {
                     "type": "string",
@@ -18323,35 +14383,19 @@ const docTemplate = `{
                 },
                 "displayName": {
                     "type": "string",
-                    "maxLength": 16,
-                    "minLength": 3
+                    "maxLength": 128
                 },
                 "locale": {
                     "type": "string",
-                    "maxLength": 16
+                    "maxLength": 32
                 },
                 "profilePreferences": {
                     "type": "string",
-                    "maxLength": 1024
+                    "maxLength": 65536
                 },
                 "timezone": {
                     "type": "string",
                     "maxLength": 64
-                }
-            }
-        },
-        "PatchMeResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/MeResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
                 }
             }
         },
@@ -18379,35 +14423,6 @@ const docTemplate = `{
                 "trigger": {
                     "type": "string",
                     "maxLength": 64
-                }
-            }
-        },
-        "PatchRedemptionCodeRequestDoc": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "expiresAt": {
-                    "type": "string",
-                    "x-nullable": true
-                },
-                "maxRedemptions": {
-                    "type": "integer",
-                    "x-nullable": true
-                },
-                "perUserLimit": {
-                    "type": "integer",
-                    "maximum": 100,
-                    "minimum": 1
-                },
-                "status": {
-                    "type": "string",
-                    "enum": [
-                        "active",
-                        "inactive"
-                    ]
                 }
             }
         },
@@ -18442,233 +14457,26 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "avatarURL": {
-                    "type": "string",
-                    "maxLength": 2048
+                    "type": "string"
                 },
                 "displayName": {
-                    "type": "string",
-                    "maxLength": 16,
-                    "minLength": 3
-                },
-                "email": {
-                    "type": "string",
-                    "maxLength": 128
+                    "type": "string"
                 },
                 "locale": {
-                    "type": "string",
-                    "maxLength": 16
-                },
-                "phone": {
-                    "type": "string",
-                    "maxLength": 32
+                    "type": "string"
                 },
                 "profilePreferences": {
-                    "type": "string",
-                    "maxLength": 1024
+                    "type": "string"
                 },
                 "reason": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "role": {
-                    "type": "string",
-                    "maxLength": 32
-                },
-                "status": {
-                    "type": "string",
-                    "maxLength": 32
-                },
-                "subscriptionExpiresAt": {
                     "type": "string"
-                },
-                "subscriptionTier": {
-                    "type": "string",
-                    "maxLength": 32
                 },
                 "timezone": {
-                    "type": "string",
-                    "maxLength": 64
-                }
-            }
-        },
-        "PatchUsernameRequest": {
-            "type": "object",
-            "required": [
-                "username"
-            ],
-            "properties": {
-                "username": {
-                    "type": "string",
-                    "maxLength": 16,
-                    "minLength": 3
-                }
-            }
-        },
-        "PaymentOrderListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/PaymentOrderResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "errorMsg": {
                     "type": "string"
                 }
             }
         },
-        "PaymentOrderResponse": {
-            "type": "object",
-            "required": [
-                "baseAmountCents",
-                "baseCurrency",
-                "billingInterval",
-                "createdAt",
-                "creditNanousd",
-                "creditUSD",
-                "cycles",
-                "expiredAt",
-                "externalCheckoutID",
-                "externalPaymentID",
-                "fxRate",
-                "id",
-                "orderNo",
-                "orderType",
-                "paidAt",
-                "payAmountCents",
-                "payCurrency",
-                "planID",
-                "priceID",
-                "provider",
-                "snapshotJSON",
-                "status",
-                "updatedAt",
-                "userDisplayName",
-                "userID",
-                "userLabel",
-                "username"
-            ],
-            "properties": {
-                "baseAmountCents": {
-                    "type": "integer"
-                },
-                "baseCurrency": {
-                    "type": "string"
-                },
-                "billingInterval": {
-                    "type": "string"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "creditNanousd": {
-                    "type": "integer"
-                },
-                "creditUSD": {
-                    "type": "number"
-                },
-                "cycles": {
-                    "type": "integer"
-                },
-                "expiredAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "externalCheckoutID": {
-                    "type": "string"
-                },
-                "externalPaymentID": {
-                    "type": "string"
-                },
-                "fxRate": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "orderNo": {
-                    "type": "string"
-                },
-                "orderType": {
-                    "type": "string"
-                },
-                "paidAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "payAmountCents": {
-                    "type": "integer"
-                },
-                "payCurrency": {
-                    "type": "string"
-                },
-                "planID": {
-                    "type": "integer"
-                },
-                "priceID": {
-                    "type": "integer"
-                },
-                "provider": {
-                    "type": "string"
-                },
-                "snapshotJSON": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "userDisplayName": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
-                },
-                "userLabel": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "PaymentTypeResponse": {
-            "type": "object",
-            "required": [
-                "name",
-                "type"
-            ],
-            "properties": {
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "PermissionGroupDataResponse": {
+        "PermissionGroupDataResponseDoc": {
             "type": "object",
             "required": [
                 "group"
@@ -18679,45 +14487,22 @@ const docTemplate = `{
                 }
             }
         },
-        "PermissionGroupDataResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/PermissionGroupDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "PermissionGroupDeleteSummaryResponse": {
             "type": "object",
             "required": [
-                "manualModelCount",
-                "manualUserCount",
-                "planCount",
-                "ruleCount"
+                "modelAccessCount",
+                "userAccessCount"
             ],
             "properties": {
-                "manualModelCount": {
+                "modelAccessCount": {
                     "type": "integer"
                 },
-                "manualUserCount": {
-                    "type": "integer"
-                },
-                "planCount": {
-                    "type": "integer"
-                },
-                "ruleCount": {
+                "userAccessCount": {
                     "type": "integer"
                 }
             }
         },
-        "PermissionGroupListResponse": {
+        "PermissionGroupListResponseDoc": {
             "type": "object",
             "required": [
                 "results"
@@ -18731,45 +14516,29 @@ const docTemplate = `{
                 }
             }
         },
-        "PermissionGroupListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/PermissionGroupListResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "PermissionGroupModelRuleRequest": {
             "type": "object",
             "required": [
-                "type"
+                "ruleType",
+                "value"
             ],
             "properties": {
-                "type": {
-                    "type": "string",
-                    "maxLength": 32
+                "ruleType": {
+                    "type": "string"
                 },
                 "value": {
-                    "type": "string",
-                    "maxLength": 128
+                    "type": "string"
                 }
             }
         },
         "PermissionGroupModelRuleResponse": {
             "type": "object",
             "required": [
-                "type",
+                "ruleType",
                 "value"
             ],
             "properties": {
-                "type": {
+                "ruleType": {
                     "type": "string"
                 },
                 "value": {
@@ -18788,9 +14557,7 @@ const docTemplate = `{
                 "manualUserCount",
                 "modelCount",
                 "name",
-                "rateMultiplierPercent",
                 "ruleModelCount",
-                "subscriptionUserCount",
                 "updatedAt",
                 "userCount"
             ],
@@ -18819,13 +14586,7 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
-                "rateMultiplierPercent": {
-                    "type": "integer"
-                },
                 "ruleModelCount": {
-                    "type": "integer"
-                },
-                "subscriptionUserCount": {
                     "type": "integer"
                 },
                 "updatedAt": {
@@ -18833,24 +14594,6 @@ const docTemplate = `{
                 },
                 "userCount": {
                     "type": "integer"
-                }
-            }
-        },
-        "PlanListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/BillingPlanResponse"
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
                 }
             }
         },
@@ -19002,119 +14745,6 @@ const docTemplate = `{
                 }
             }
         },
-        "ProviderAuthBridgeExchangeRequest": {
-            "type": "object",
-            "required": [
-                "clientID",
-                "codeVerifier",
-                "grant"
-            ],
-            "properties": {
-                "clientID": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "codeVerifier": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 43
-                },
-                "grant": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 43
-                }
-            }
-        },
-        "ProviderAuthBridgeResponse": {
-            "type": "object",
-            "required": [
-                "callbackBaseURL",
-                "enabled",
-                "protocolVersion"
-            ],
-            "properties": {
-                "callbackBaseURL": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "protocolVersion": {
-                    "type": "integer"
-                }
-            }
-        },
-        "ProviderAuthBridgeStartRequest": {
-            "type": "object",
-            "required": [
-                "clientID",
-                "clientState",
-                "codeChallenge",
-                "redirectURI"
-            ],
-            "properties": {
-                "clientID": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "clientState": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 43
-                },
-                "codeChallenge": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 43
-                },
-                "intent": {
-                    "type": "string",
-                    "enum": [
-                        "login",
-                        "register"
-                    ]
-                },
-                "next": {
-                    "type": "string",
-                    "maxLength": 2048
-                },
-                "redirectURI": {
-                    "type": "string",
-                    "maxLength": 2048
-                }
-            }
-        },
-        "ProviderAuthBridgeStartResponse": {
-            "type": "object",
-            "required": [
-                "authorizationURL",
-                "expiresAt"
-            ],
-            "properties": {
-                "authorizationURL": {
-                    "type": "string"
-                },
-                "expiresAt": {
-                    "type": "string"
-                }
-            }
-        },
-        "ProviderAuthBridgeStartResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ProviderAuthBridgeStartResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "PublicModelListResponseDoc": {
             "type": "object",
             "required": [
@@ -19133,89 +14763,6 @@ const docTemplate = `{
                 }
             }
         },
-        "PublicModelPricingResponse": {
-            "type": "object",
-            "required": [
-                "cacheReadUSDPerMTokens",
-                "cacheWriteUSDPerMTokens",
-                "callUSDPerCall",
-                "currency",
-                "durationUSDPerSecond",
-                "inputUSDPerMTokens",
-                "isFree",
-                "mode",
-                "outputUSDPerMTokens",
-                "tiers"
-            ],
-            "properties": {
-                "cacheReadUSDPerMTokens": {
-                    "type": "number"
-                },
-                "cacheWriteUSDPerMTokens": {
-                    "type": "number"
-                },
-                "callUSDPerCall": {
-                    "type": "number"
-                },
-                "currency": {
-                    "type": "string"
-                },
-                "durationUSDPerSecond": {
-                    "type": "number"
-                },
-                "inputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "isFree": {
-                    "type": "boolean"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "outputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "tiers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/PublicModelPricingTierResponse"
-                    }
-                }
-            }
-        },
-        "PublicModelPricingTierResponse": {
-            "type": "object",
-            "required": [
-                "cacheReadUSDPerMTokens",
-                "cacheWriteUSDPerMTokens",
-                "fromTokens",
-                "inputUSDPerMTokens",
-                "outputUSDPerMTokens",
-                "upToTokens"
-            ],
-            "properties": {
-                "cacheReadUSDPerMTokens": {
-                    "type": "number"
-                },
-                "cacheWriteUSDPerMTokens": {
-                    "type": "number"
-                },
-                "fromTokens": {
-                    "type": "integer"
-                },
-                "inputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "outputUSDPerMTokens": {
-                    "type": "number"
-                },
-                "upToTokens": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                }
-            }
-        },
         "PublicModelResponse": {
             "type": "object",
             "required": [
@@ -19227,7 +14774,6 @@ const docTemplate = `{
                 "icon",
                 "kindsJSON",
                 "platformModelName",
-                "pricing",
                 "protocolsJSON",
                 "sortOrder",
                 "vendor",
@@ -19260,15 +14806,6 @@ const docTemplate = `{
                 },
                 "platformModelName": {
                     "type": "string"
-                },
-                "pricing": {
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/PublicModelPricingResponse"
-                        }
-                    ],
-                    "x-nullable": true,
-                    "x-omitempty": false
                 },
                 "protocolsJSON": {
                     "type": "string"
@@ -19461,323 +14998,6 @@ const docTemplate = `{
                 }
             }
         },
-        "RedeemCodeRequest": {
-            "type": "object",
-            "required": [
-                "code"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "minLength": 3
-                }
-            }
-        },
-        "RedemptionApplyDataResponse": {
-            "type": "object",
-            "required": [
-                "overview",
-                "redemption"
-            ],
-            "properties": {
-                "account": {
-                    "$ref": "#/definitions/BillingAccountResponse"
-                },
-                "overview": {
-                    "$ref": "#/definitions/BillingOverviewResponse"
-                },
-                "redemption": {
-                    "$ref": "#/definitions/RedemptionResponse"
-                },
-                "subscription": {
-                    "$ref": "#/definitions/SubscriptionResponse"
-                }
-            }
-        },
-        "RedemptionApplyResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/RedemptionApplyDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionCodeCreateDataResponse": {
-            "type": "object",
-            "required": [
-                "results"
-            ],
-            "properties": {
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/RedemptionCodeResponse"
-                    }
-                }
-            }
-        },
-        "RedemptionCodeCreateResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/RedemptionCodeCreateDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionCodeDataResponse": {
-            "type": "object",
-            "required": [
-                "code"
-            ],
-            "properties": {
-                "code": {
-                    "$ref": "#/definitions/RedemptionCodeResponse"
-                }
-            }
-        },
-        "RedemptionCodeDeleteDataResponse": {
-            "type": "object",
-            "required": [
-                "deleted"
-            ],
-            "properties": {
-                "deleted": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "RedemptionCodeDeleteResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/RedemptionCodeDeleteDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionCodeListDataResponse": {
-            "type": "object",
-            "required": [
-                "results",
-                "total"
-            ],
-            "properties": {
-                "results": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/RedemptionCodeResponse"
-                    }
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "RedemptionCodeListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/RedemptionCodeListDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionCodeResponse": {
-            "type": "object",
-            "required": [
-                "codeHint",
-                "createdAt",
-                "createdByUserID",
-                "creditNanousd",
-                "creditUSD",
-                "description",
-                "durationDays",
-                "expiresAt",
-                "id",
-                "maxRedemptions",
-                "mode",
-                "perUserLimit",
-                "planID",
-                "redeemedCount",
-                "remainingRedemptions",
-                "rewardType",
-                "status",
-                "updatedAt"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "codeHint": {
-                    "type": "string"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "createdByUserID": {
-                    "type": "integer"
-                },
-                "creditNanousd": {
-                    "type": "integer"
-                },
-                "creditUSD": {
-                    "type": "number"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "durationDays": {
-                    "type": "integer"
-                },
-                "expiresAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "maxRedemptions": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "perUserLimit": {
-                    "type": "integer"
-                },
-                "planID": {
-                    "type": "integer"
-                },
-                "redeemedCount": {
-                    "type": "integer"
-                },
-                "remainingRedemptions": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "rewardType": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionCodeResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/RedemptionCodeDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "RedemptionResponse": {
-            "type": "object",
-            "required": [
-                "balanceTransactionID",
-                "codeID",
-                "createdAt",
-                "creditNanousd",
-                "creditUSD",
-                "id",
-                "mode",
-                "planID",
-                "rewardType",
-                "subscriptionID",
-                "userID"
-            ],
-            "properties": {
-                "balanceTransactionID": {
-                    "type": "integer"
-                },
-                "codeID": {
-                    "type": "integer"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "creditNanousd": {
-                    "type": "integer"
-                },
-                "creditUSD": {
-                    "type": "number"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "planID": {
-                    "type": "integer"
-                },
-                "rewardType": {
-                    "type": "string"
-                },
-                "subscriptionID": {
-                    "type": "integer"
-                },
-                "userID": {
-                    "type": "integer"
-                }
-            }
-        },
-        "RefreshTokenResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/LoginResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "RenameConversationRequest": {
             "type": "object",
             "required": [
@@ -19799,20 +15019,6 @@ const docTemplate = `{
                 "projectIDs": {
                     "type": "array",
                     "maxItems": 200,
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "ReorderIdentityProvidersRequest": {
-            "type": "object",
-            "required": [
-                "providerIDs"
-            ],
-            "properties": {
-                "providerIDs": {
-                    "type": "array",
                     "items": {
                         "type": "string"
                     }
@@ -19875,48 +15081,6 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/CircuitResetResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "ResetUserPasswordRequest": {
-            "type": "object",
-            "required": [
-                "newPassword"
-            ],
-            "properties": {
-                "mustResetPassword": {
-                    "type": "boolean"
-                },
-                "newPassword": {
-                    "type": "string",
-                    "maxLength": 128,
-                    "minLength": 8
-                }
-            }
-        },
-        "ResetUserPasswordResponse": {
-            "type": "object",
-            "required": [
-                "reset"
-            ],
-            "properties": {
-                "reset": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "ResetUserPasswordResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ResetUserPasswordResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -20124,24 +15288,12 @@ const docTemplate = `{
                 }
             }
         },
-        "SecurityVerificationStartRequest": {
-            "type": "object",
-            "properties": {
-                "verificationMethod": {
-                    "type": "string",
-                    "enum": [
-                        "none",
-                        "two_factor",
-                        "email"
-                    ]
-                }
-            }
-        },
         "SendMessageRequest": {
             "type": "object",
             "required": [
                 "content",
-                "contentType"
+                "contentType",
+                "keyBindingID"
             ],
             "properties": {
                 "branchReason": {
@@ -20178,6 +15330,10 @@ const docTemplate = `{
                 },
                 "htmlVisualPrompt": {
                     "type": "boolean"
+                },
+                "keyBindingID": {
+                    "type": "string",
+                    "maxLength": 64
                 },
                 "model": {
                     "type": "string",
@@ -20440,6 +15596,10 @@ const docTemplate = `{
         },
         "SetGroupModelsRequest": {
             "type": "object",
+            "required": [
+                "modelIDs",
+                "rules"
+            ],
             "properties": {
                 "modelIDs": {
                     "type": "array",
@@ -20457,6 +15617,9 @@ const docTemplate = `{
         },
         "SetGroupUsersRequest": {
             "type": "object",
+            "required": [
+                "userIDs"
+            ],
             "properties": {
                 "userIDs": {
                     "type": "array",
@@ -20480,6 +15643,9 @@ const docTemplate = `{
         },
         "SetModelPermissionGroupsRequest": {
             "type": "object",
+            "required": [
+                "groupIDs"
+            ],
             "properties": {
                 "groupIDs": {
                     "type": "array",
@@ -20780,24 +15946,7 @@ const docTemplate = `{
                 }
             }
         },
-        "SubscribeRequest": {
-            "type": "object",
-            "required": [
-                "priceID"
-            ],
-            "properties": {
-                "cycles": {
-                    "type": "integer",
-                    "maximum": 120,
-                    "minimum": 1
-                },
-                "priceID": {
-                    "type": "integer",
-                    "minimum": 1
-                }
-            }
-        },
-        "SubscribeResponseDoc": {
+        "Sub2AccountResponseDoc": {
             "type": "object",
             "required": [
                 "data",
@@ -20805,127 +15954,243 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/SubscriptionDataResponse"
+                    "$ref": "#/definitions/sub2AccountDataDTO"
                 },
                 "errorMsg": {
                     "type": "string"
                 }
             }
         },
-        "SubscriptionDataResponse": {
+        "Sub2CheckoutRequest": {
             "type": "object",
             "required": [
-                "subscription"
-            ],
-            "properties": {
-                "subscription": {
-                    "$ref": "#/definitions/SubscriptionResponse"
-                }
-            }
-        },
-        "SubscriptionEntitlementResponse": {
-            "type": "object",
-            "required": [
-                "autoRenew",
-                "cancelAtPeriodEnd",
-                "currentPeriodEndAt",
-                "currentPeriodStartAt",
-                "id",
-                "isCurrent",
-                "plan",
-                "planID",
+                "amountMinorUnits",
+                "cancelURL",
+                "cycles",
+                "orderType",
+                "paymentProvider",
                 "priceID",
-                "startAt",
-                "status",
-                "userID"
+                "successURL"
             ],
             "properties": {
-                "autoRenew": {
-                    "type": "boolean"
+                "amountMinorUnits": {
+                    "type": "integer"
                 },
-                "cancelAtPeriodEnd": {
-                    "type": "boolean"
-                },
-                "currentPeriodEndAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "currentPeriodStartAt": {
+                "cancelURL": {
                     "type": "string"
                 },
-                "id": {
+                "cycles": {
                     "type": "integer"
                 },
-                "isCurrent": {
-                    "type": "boolean"
+                "orderType": {
+                    "type": "string"
                 },
-                "plan": {
-                    "$ref": "#/definitions/BillingPlanResponse"
-                },
-                "planID": {
-                    "type": "integer"
+                "paymentProvider": {
+                    "type": "string"
                 },
                 "priceID": {
                     "type": "integer"
                 },
-                "startAt": {
+                "successURL": {
                     "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
                 }
             }
         },
-        "SubscriptionResponse": {
+        "Sub2CheckoutResponseDoc": {
             "type": "object",
             "required": [
-                "autoRenew",
-                "cancelAtPeriodEnd",
-                "currentPeriodEndAt",
-                "currentPeriodStartAt",
-                "id",
-                "planID",
-                "priceID",
-                "startAt",
-                "status",
-                "userID"
+                "data",
+                "errorMsg"
             ],
             "properties": {
-                "autoRenew": {
-                    "type": "boolean"
+                "data": {
+                    "$ref": "#/definitions/sub2CheckoutDataDTO"
                 },
-                "cancelAtPeriodEnd": {
-                    "type": "boolean"
-                },
-                "currentPeriodEndAt": {
-                    "type": "string",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "currentPeriodStartAt": {
+                "errorMsg": {
                     "type": "string"
+                }
+            }
+        },
+        "Sub2ConfigResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2ConfigDataDTO"
                 },
-                "id": {
-                    "type": "integer"
-                },
-                "planID": {
-                    "type": "integer"
-                },
-                "priceID": {
-                    "type": "integer"
-                },
-                "startAt": {
+                "errorMsg": {
                     "type": "string"
+                }
+            }
+        },
+        "Sub2DailyResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2DailyDataDTO"
                 },
-                "status": {
+                "errorMsg": {
                     "type": "string"
+                }
+            }
+        },
+        "Sub2MonthlyResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2MonthlyDataDTO"
                 },
-                "userID": {
-                    "type": "integer"
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2OrderResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2OrderDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2OrdersResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2OrdersDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2OverviewResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2OverviewDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2PlansResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2PlansDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2RedeemRequest": {
+            "type": "object",
+            "required": [
+                "code"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2RedeemResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2RedemptionDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2RedemptionsResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2RedemptionsDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2RefundRequest": {
+            "type": "object",
+            "required": [
+                "reason"
+            ],
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2UsageResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/sub2UsageDataDTO"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "Sub2VerifyOrderRequest": {
+            "type": "object",
+            "required": [
+                "operationID"
+            ],
+            "properties": {
+                "operationID": {
+                    "type": "string"
                 }
             }
         },
@@ -21009,22 +16274,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/SystemEventResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
+                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_SystemEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -21206,70 +16456,22 @@ const docTemplate = `{
                 }
             }
         },
-        "UpdateBillingAccountBalanceRequest": {
+        "TwoFactorVerifyRequest": {
             "type": "object",
             "required": [
-                "balanceUSD"
+                "challengeToken",
+                "code"
             ],
             "properties": {
-                "balanceUSD": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "description": {
+                "challengeToken": {
                     "type": "string",
-                    "maxLength": 255
-                }
-            }
-        },
-        "UpdateBillingPlanRequest": {
-            "type": "object",
-            "required": [
-                "amountUSD",
-                "billingInterval",
-                "description",
-                "discountPercent",
-                "name",
-                "periodCreditUSD"
-            ],
-            "properties": {
-                "amountUSD": {
-                    "type": "number",
-                    "minimum": 0
+                    "maxLength": 4096,
+                    "minLength": 20
                 },
-                "billingInterval": {
+                "code": {
                     "type": "string",
-                    "enum": [
-                        "month",
-                        "year",
-                        "lifetime"
-                    ]
-                },
-                "currency": {
-                    "type": "string",
-                    "maxLength": 16
-                },
-                "description": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "discountPercent": {
-                    "type": "integer",
-                    "maximum": 100,
-                    "minimum": 0
-                },
-                "name": {
-                    "type": "string",
-                    "maxLength": 64,
-                    "minLength": 1
-                },
-                "periodCreditUSD": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "permissionGroupID": {
-                    "type": "integer",
-                    "x-nullable": true
+                    "maxLength": 32,
+                    "minLength": 6
                 }
             }
         },
@@ -21351,33 +16553,22 @@ const docTemplate = `{
             "properties": {
                 "accuracyMeters": {
                     "type": "number",
-                    "maximum": 1000000,
+                    "maximum": 100000,
                     "minimum": 0
                 },
                 "latitude": {
-                    "type": "number"
+                    "type": "number",
+                    "maximum": 90,
+                    "minimum": -90
                 },
                 "longitude": {
-                    "type": "number"
+                    "type": "number",
+                    "maximum": 180,
+                    "minimum": -180
                 },
                 "timezone": {
                     "type": "string",
                     "maxLength": 64
-                }
-            }
-        },
-        "UpdateCurrentSessionLocationResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/ActiveSessionResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
                 }
             }
         },
@@ -21577,17 +16768,11 @@ const docTemplate = `{
             ],
             "properties": {
                 "description": {
-                    "type": "string",
-                    "maxLength": 512
+                    "type": "string"
                 },
                 "name": {
                     "type": "string",
-                    "maxLength": 128
-                },
-                "rateMultiplierPercent": {
-                    "type": "integer",
-                    "maximum": 10000,
-                    "minimum": 0
+                    "maxLength": 64
                 }
             }
         },
@@ -21742,37 +16927,6 @@ const docTemplate = `{
                 }
             }
         },
-        "UpdateUserStatusRequest": {
-            "type": "object",
-            "required": [
-                "status"
-            ],
-            "properties": {
-                "reason": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "status": {
-                    "type": "string",
-                    "maxLength": 32
-                }
-            }
-        },
-        "UpdateUserStatusResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/UserDataResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "UploadFileResponseDoc": {
             "type": "object",
             "required": [
@@ -21788,105 +16942,6 @@ const docTemplate = `{
                 }
             }
         },
-        "UpsertIdentityProviderRequest": {
-            "type": "object",
-            "required": [
-                "clientID",
-                "name",
-                "type"
-            ],
-            "properties": {
-                "authURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "avatarField": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "clientID": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "clientSecret": {
-                    "type": "string",
-                    "maxLength": 4096
-                },
-                "defaultRole": {
-                    "type": "string",
-                    "enum": [
-                        "user",
-                        "admin",
-                        "superadmin"
-                    ]
-                },
-                "discoveryURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "emailField": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "emailVerifiedField": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "issuerURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "jwksURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "loginEnabled": {
-                    "type": "boolean"
-                },
-                "logoURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "name": {
-                    "type": "string",
-                    "maxLength": 80
-                },
-                "nameField": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "registrationEnabled": {
-                    "type": "boolean"
-                },
-                "scopes": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "slug": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "subjectField": {
-                    "type": "string",
-                    "maxLength": 64
-                },
-                "tokenURL": {
-                    "type": "string",
-                    "maxLength": 512
-                },
-                "type": {
-                    "type": "string",
-                    "enum": [
-                        "oidc",
-                        "oauth2"
-                    ]
-                },
-                "userinfoURL": {
-                    "type": "string",
-                    "maxLength": 512
-                }
-            }
-        },
         "UpsertMemoryResponse": {
             "type": "object",
             "required": [
@@ -21895,70 +16950,6 @@ const docTemplate = `{
             "properties": {
                 "saved": {
                     "type": "boolean"
-                }
-            }
-        },
-        "UpsertModelPricingRequest": {
-            "type": "object",
-            "required": [
-                "cacheReadUSDPerMTokens",
-                "cacheWriteUSDPerMTokens",
-                "callUSDPerCall",
-                "durationUSDPerSecond",
-                "inputUSDPerMTokens",
-                "isFree",
-                "outputUSDPerMTokens",
-                "platformModelName",
-                "pricingMode"
-            ],
-            "properties": {
-                "cacheReadUSDPerMTokens": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "cacheWriteUSDPerMTokens": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "callUSDPerCall": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "currency": {
-                    "type": "string",
-                    "maxLength": 16
-                },
-                "durationUSDPerSecond": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "inputUSDPerMTokens": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "isFree": {
-                    "type": "boolean"
-                },
-                "outputUSDPerMTokens": {
-                    "type": "number",
-                    "minimum": 0
-                },
-                "platformModelName": {
-                    "type": "string",
-                    "maxLength": 128
-                },
-                "pricingMode": {
-                    "type": "string",
-                    "enum": [
-                        "token",
-                        "call",
-                        "duration",
-                        "tiered"
-                    ]
-                },
-                "tieredPricingJSON": {
-                    "type": "string",
-                    "maxLength": 20000
                 }
             }
         },
@@ -22525,915 +17516,6 @@ const docTemplate = `{
                 }
             }
         },
-        "UsageDailyListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageDailyResponse"
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageDailyModelResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "durationSeconds",
-                "inputTokens",
-                "outputTokens",
-                "platformModelName",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "durationSeconds": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                }
-            }
-        },
-        "UsageDailyResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "durationSeconds",
-                "inputTokens",
-                "models",
-                "outputTokens",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens",
-                "usageDate"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "durationSeconds": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "models": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageDailyModelResponse"
-                    }
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                },
-                "usageDate": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageLedgerListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/UsageLedgerResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageLedgerResponse": {
-            "type": "object",
-            "required": [
-                "balanceAfterNanousd",
-                "balanceAfterUSD",
-                "billedCurrency",
-                "billedNanousd",
-                "billedUSD",
-                "billingAt",
-                "cacheReadTokens",
-                "cacheWrite1hTokens",
-                "cacheWrite5mTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "conversationID",
-                "createdAt",
-                "durationSeconds",
-                "id",
-                "inputTokens",
-                "isFreeModel",
-                "latencyMS",
-                "modelIcon",
-                "modelVendor",
-                "outputTokens",
-                "platformModelName",
-                "pricingSnapshotJSON",
-                "providerProtocol",
-                "reasoningTokens",
-                "routedBindingCode",
-                "serviceTier",
-                "updatedAt",
-                "upstreamModelName",
-                "usageDate",
-                "usageSpeed",
-                "userID"
-            ],
-            "properties": {
-                "balanceAfterNanousd": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "balanceAfterUSD": {
-                    "type": "number",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "billedCurrency": {
-                    "type": "string"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "billingAt": {
-                    "type": "string"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWrite1hTokens": {
-                    "type": "integer"
-                },
-                "cacheWrite5mTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "conversationID": {
-                    "type": "integer"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "durationSeconds": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "isFreeModel": {
-                    "type": "boolean"
-                },
-                "latencyMS": {
-                    "type": "integer"
-                },
-                "modelIcon": {
-                    "type": "string"
-                },
-                "modelVendor": {
-                    "type": "string"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "pricingSnapshotJSON": {
-                    "type": "string"
-                },
-                "providerProtocol": {
-                    "type": "string"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "routedBindingCode": {
-                    "type": "string"
-                },
-                "serviceTier": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "upstreamModelName": {
-                    "type": "string"
-                },
-                "usageDate": {
-                    "type": "string"
-                },
-                "usageSpeed": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
-                }
-            }
-        },
-        "UsageLogListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/UsageLogResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageLogResponse": {
-            "type": "object",
-            "required": [
-                "balanceAfterNanousd",
-                "balanceAfterUSD",
-                "billedCurrency",
-                "billedNanousd",
-                "billedUSD",
-                "billingAt",
-                "cacheReadTokens",
-                "cacheWrite1hTokens",
-                "cacheWrite5mTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "conversationID",
-                "createdAt",
-                "durationSeconds",
-                "id",
-                "inputTokens",
-                "isFreeModel",
-                "latencyMS",
-                "outputTokens",
-                "platformModelName",
-                "pricingSnapshotJSON",
-                "providerProtocol",
-                "reasoningTokens",
-                "routedBindingCode",
-                "serviceTier",
-                "updatedAt",
-                "upstreamModelName",
-                "upstreamName",
-                "usageDate",
-                "usageSpeed",
-                "userDisplayName",
-                "userID",
-                "userLabel",
-                "username"
-            ],
-            "properties": {
-                "balanceAfterNanousd": {
-                    "type": "integer",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "balanceAfterUSD": {
-                    "type": "number",
-                    "x-nullable": true,
-                    "x-omitempty": false
-                },
-                "billedCurrency": {
-                    "type": "string"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "billingAt": {
-                    "type": "string"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWrite1hTokens": {
-                    "type": "integer"
-                },
-                "cacheWrite5mTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "conversationID": {
-                    "type": "integer"
-                },
-                "createdAt": {
-                    "type": "string"
-                },
-                "durationSeconds": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "isFreeModel": {
-                    "type": "boolean"
-                },
-                "latencyMS": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "pricingSnapshotJSON": {
-                    "type": "string"
-                },
-                "providerProtocol": {
-                    "type": "string"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "routedBindingCode": {
-                    "type": "string"
-                },
-                "serviceTier": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                },
-                "upstreamModelName": {
-                    "type": "string"
-                },
-                "upstreamName": {
-                    "type": "string"
-                },
-                "usageDate": {
-                    "type": "string"
-                },
-                "usageSpeed": {
-                    "type": "string"
-                },
-                "userDisplayName": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
-                },
-                "userLabel": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageMonthlyListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageMonthlyResponse"
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageMonthlyResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "durationSeconds",
-                "inputTokens",
-                "monthStartAt",
-                "outputTokens",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "durationSeconds": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "monthStartAt": {
-                    "type": "string"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                }
-            }
-        },
-        "UsageStatisticsMetricsResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "inputTokens",
-                "outputTokens",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                }
-            }
-        },
-        "UsageStatisticsModelRankResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "inputTokens",
-                "outputTokens",
-                "platformModelName",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens",
-                "trend"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "platformModelName": {
-                    "type": "string"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                },
-                "trend": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageStatisticsTrendResponse"
-                    }
-                }
-            }
-        },
-        "UsageStatisticsResponse": {
-            "type": "object",
-            "required": [
-                "range",
-                "section",
-                "topModels",
-                "topUsers",
-                "totals",
-                "trend"
-            ],
-            "properties": {
-                "range": {
-                    "type": "object",
-                    "required": [
-                        "endDate",
-                        "granularity",
-                        "startDate"
-                    ],
-                    "properties": {
-                        "endDate": {
-                            "type": "string"
-                        },
-                        "granularity": {
-                            "type": "string"
-                        },
-                        "startDate": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "section": {
-                    "type": "string"
-                },
-                "topModels": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageStatisticsModelRankResponse"
-                    }
-                },
-                "topUsers": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageStatisticsUserRankResponse"
-                    }
-                },
-                "totals": {
-                    "$ref": "#/definitions/UsageStatisticsMetricsResponse"
-                },
-                "trend": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageStatisticsTrendResponse"
-                    }
-                }
-            }
-        },
-        "UsageStatisticsResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/UsageStatisticsResponse"
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "UsageStatisticsTrendResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "inputTokens",
-                "outputTokens",
-                "periodStart",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "periodStart": {
-                    "type": "string"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                }
-            }
-        },
-        "UsageStatisticsUserRankResponse": {
-            "type": "object",
-            "required": [
-                "avgLatencyMS",
-                "billedNanousd",
-                "billedUSD",
-                "cacheReadTokens",
-                "cacheWriteTokens",
-                "callCount",
-                "inputTokens",
-                "outputTokens",
-                "reasoningTokens",
-                "recordCount",
-                "totalTokens",
-                "trend",
-                "userDisplayName",
-                "userID",
-                "userLabel",
-                "username"
-            ],
-            "properties": {
-                "avgLatencyMS": {
-                    "type": "integer"
-                },
-                "billedNanousd": {
-                    "type": "integer"
-                },
-                "billedUSD": {
-                    "type": "number"
-                },
-                "cacheReadTokens": {
-                    "type": "integer"
-                },
-                "cacheWriteTokens": {
-                    "type": "integer"
-                },
-                "callCount": {
-                    "type": "integer"
-                },
-                "inputTokens": {
-                    "type": "integer"
-                },
-                "outputTokens": {
-                    "type": "integer"
-                },
-                "reasoningTokens": {
-                    "type": "integer"
-                },
-                "recordCount": {
-                    "type": "integer"
-                },
-                "totalTokens": {
-                    "type": "integer"
-                },
-                "trend": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/UsageStatisticsTrendResponse"
-                    }
-                },
-                "userDisplayName": {
-                    "type": "string"
-                },
-                "userID": {
-                    "type": "integer"
-                },
-                "userLabel": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "UserAuthEventListResponseDoc": {
-            "type": "object",
-            "required": [
-                "data",
-                "errorMsg"
-            ],
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/AuthEventResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
         "UserDataResponse": {
             "type": "object",
             "required": [
@@ -23445,6 +17527,21 @@ const docTemplate = `{
                 }
             }
         },
+        "UserDataResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/UserDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "UserListResponseDoc": {
             "type": "object",
             "required": [
@@ -23453,22 +17550,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "type": "object",
-                    "required": [
-                        "results",
-                        "total"
-                    ],
-                    "properties": {
-                        "results": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/AdminUserResponse"
-                            }
-                        },
-                        "total": {
-                            "type": "integer"
-                        }
-                    }
+                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_UserResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -23638,6 +17720,894 @@ const docTemplate = `{
                     "maxLength": 64
                 }
             }
+        },
+        "sub2AccountDTO": {
+            "type": "object",
+            "required": [
+                "balance",
+                "frozenBalance",
+                "status"
+            ],
+            "properties": {
+                "balance": {
+                    "type": "number"
+                },
+                "frozenBalance": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2AccountDataDTO": {
+            "type": "object",
+            "required": [
+                "account",
+                "observedAt"
+            ],
+            "properties": {
+                "account": {
+                    "$ref": "#/definitions/sub2AccountDTO"
+                },
+                "observedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2CheckoutDTO": {
+            "type": "object",
+            "required": [
+                "baseAmountCents",
+                "baseCurrency",
+                "checkoutURL",
+                "creditNanousd",
+                "creditUSD",
+                "expiredAt",
+                "externalCheckoutID",
+                "fxRate",
+                "orderNo",
+                "orderType",
+                "payAmountCents",
+                "payCurrency",
+                "provider",
+                "status"
+            ],
+            "properties": {
+                "baseAmountCents": {
+                    "type": "integer"
+                },
+                "baseCurrency": {
+                    "type": "string"
+                },
+                "checkoutURL": {
+                    "type": "string"
+                },
+                "creditNanousd": {
+                    "type": "integer"
+                },
+                "creditUSD": {
+                    "type": "number"
+                },
+                "expiredAt": {
+                    "type": "string"
+                },
+                "externalCheckoutID": {
+                    "type": "string"
+                },
+                "fxRate": {
+                    "type": "string"
+                },
+                "orderNo": {
+                    "type": "string"
+                },
+                "orderType": {
+                    "type": "string"
+                },
+                "payAmountCents": {
+                    "type": "integer"
+                },
+                "payCurrency": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2CheckoutDataDTO": {
+            "type": "object",
+            "required": [
+                "checkout",
+                "observedAt"
+            ],
+            "properties": {
+                "checkout": {
+                    "$ref": "#/definitions/sub2CheckoutDTO"
+                },
+                "observedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2ConfigDTO": {
+            "type": "object",
+            "required": [
+                "balanceDisabled",
+                "balanceRechargeMultiplier",
+                "displayCurrency",
+                "globalDailyLimitUSD",
+                "globalMonthlyLimitUSD",
+                "globalWeeklyLimitUSD",
+                "mode",
+                "paymentMethods",
+                "plans",
+                "rechargeFeeRate",
+                "usdToCNYRate"
+            ],
+            "properties": {
+                "balanceDisabled": {
+                    "type": "boolean"
+                },
+                "balanceRechargeMultiplier": {
+                    "type": "number"
+                },
+                "displayCurrency": {
+                    "type": "string"
+                },
+                "globalDailyLimitUSD": {
+                    "type": "number"
+                },
+                "globalMonthlyLimitUSD": {
+                    "type": "number"
+                },
+                "globalWeeklyLimitUSD": {
+                    "type": "number"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "paymentMethods": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2PaymentMethodDTO"
+                    }
+                },
+                "plans": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2PlanDTO"
+                    }
+                },
+                "rechargeFeeRate": {
+                    "type": "number"
+                },
+                "usdToCNYRate": {
+                    "type": "number"
+                }
+            }
+        },
+        "sub2ConfigDataDTO": {
+            "type": "object",
+            "required": [
+                "config",
+                "observedAt"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/sub2ConfigDTO"
+                },
+                "observedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2DailyDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "results"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2DailyRowDTO"
+                    }
+                }
+            }
+        },
+        "sub2DailyRowDTO": {
+            "type": "object",
+            "required": [
+                "actualCost",
+                "cacheReadTokens",
+                "cacheWriteTokens",
+                "callCount",
+                "inputTokens",
+                "outputTokens",
+                "recordCount",
+                "totalTokens",
+                "usageDate"
+            ],
+            "properties": {
+                "actualCost": {
+                    "type": "string"
+                },
+                "cacheReadTokens": {
+                    "type": "integer"
+                },
+                "cacheWriteTokens": {
+                    "type": "integer"
+                },
+                "callCount": {
+                    "type": "integer"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "recordCount": {
+                    "type": "integer"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                },
+                "usageDate": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2MonthlyDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "results"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2MonthlyRowDTO"
+                    }
+                }
+            }
+        },
+        "sub2MonthlyRowDTO": {
+            "type": "object",
+            "required": [
+                "actualCost",
+                "cacheReadTokens",
+                "cacheWriteTokens",
+                "callCount",
+                "inputTokens",
+                "monthStartAt",
+                "outputTokens",
+                "recordCount",
+                "totalTokens"
+            ],
+            "properties": {
+                "actualCost": {
+                    "type": "string"
+                },
+                "cacheReadTokens": {
+                    "type": "integer"
+                },
+                "cacheWriteTokens": {
+                    "type": "integer"
+                },
+                "callCount": {
+                    "type": "integer"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "monthStartAt": {
+                    "type": "string"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "recordCount": {
+                    "type": "integer"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "sub2OrderDTO": {
+            "type": "object",
+            "required": [
+                "amountUSD",
+                "completedAt",
+                "createdAt",
+                "currency",
+                "expiresAt",
+                "feeRate",
+                "id",
+                "orderNo",
+                "orderType",
+                "paidAt",
+                "payAmount",
+                "paymentType",
+                "planID",
+                "refundAmount",
+                "refundReason",
+                "refundRequestReason",
+                "refundRequestedAt",
+                "status"
+            ],
+            "properties": {
+                "amountUSD": {
+                    "type": "number"
+                },
+                "completedAt": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "feeRate": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "orderNo": {
+                    "type": "string"
+                },
+                "orderType": {
+                    "type": "string"
+                },
+                "paidAt": {
+                    "type": "string"
+                },
+                "payAmount": {
+                    "type": "number"
+                },
+                "paymentType": {
+                    "type": "string"
+                },
+                "planID": {
+                    "type": "integer"
+                },
+                "refundAmount": {
+                    "type": "number"
+                },
+                "refundReason": {
+                    "type": "string"
+                },
+                "refundRequestReason": {
+                    "type": "string"
+                },
+                "refundRequestedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "sub2OrderDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "order"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "order": {
+                    "$ref": "#/definitions/sub2OrderDTO"
+                }
+            }
+        },
+        "sub2OrdersDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "page",
+                "pageSize",
+                "results",
+                "total"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "pageSize": {
+                    "type": "integer"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2OrderDTO"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "sub2OverviewDTO": {
+            "type": "object",
+            "required": [
+                "account",
+                "mode",
+                "periodCreditNanousd",
+                "periodCreditUSD",
+                "periodEndAt",
+                "periodRemainingNanousd",
+                "periodRemainingUSD",
+                "periodStartAt",
+                "periodUsedNanousd",
+                "periodUsedUSD",
+                "plan",
+                "subscriptionEntitlements"
+            ],
+            "properties": {
+                "account": {
+                    "$ref": "#/definitions/sub2AccountDTO"
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "periodCreditNanousd": {
+                    "type": "integer"
+                },
+                "periodCreditUSD": {
+                    "type": "number"
+                },
+                "periodEndAt": {
+                    "type": "string"
+                },
+                "periodRemainingNanousd": {
+                    "type": "integer"
+                },
+                "periodRemainingUSD": {
+                    "type": "number"
+                },
+                "periodStartAt": {
+                    "type": "string"
+                },
+                "periodUsedNanousd": {
+                    "type": "integer"
+                },
+                "periodUsedUSD": {
+                    "type": "number"
+                },
+                "plan": {
+                    "$ref": "#/definitions/sub2PlanDTO"
+                },
+                "subscriptionEntitlements": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2SubscriptionEntitlementDTO"
+                    }
+                }
+            }
+        },
+        "sub2OverviewDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "overview"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "overview": {
+                    "$ref": "#/definitions/sub2OverviewDTO"
+                }
+            }
+        },
+        "sub2PaymentMethodDTO": {
+            "type": "object",
+            "required": [
+                "currency",
+                "id",
+                "max",
+                "min"
+            ],
+            "properties": {
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "max": {
+                    "type": "number"
+                },
+                "min": {
+                    "type": "number"
+                }
+            }
+        },
+        "sub2PlanDTO": {
+            "type": "object",
+            "required": [
+                "code",
+                "dailyLimitUSD",
+                "description",
+                "featureJSON",
+                "groupPlatform",
+                "id",
+                "isActive",
+                "modelRateMultiplier",
+                "modelScopesJSON",
+                "monthlyLimitUSD",
+                "name",
+                "originalPriceCents",
+                "periodCreditUSD",
+                "prices",
+                "rateMultiplier",
+                "sortOrder",
+                "validityDays",
+                "weeklyLimitUSD"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "dailyLimitUSD": {
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "featureJSON": {
+                    "type": "string"
+                },
+                "groupPlatform": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "modelRateMultiplier": {
+                    "type": "number"
+                },
+                "modelScopesJSON": {
+                    "type": "string"
+                },
+                "monthlyLimitUSD": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "originalPriceCents": {
+                    "type": "integer"
+                },
+                "periodCreditUSD": {
+                    "type": "number"
+                },
+                "prices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2PlanPriceDTO"
+                    }
+                },
+                "rateMultiplier": {
+                    "type": "number"
+                },
+                "sortOrder": {
+                    "type": "integer"
+                },
+                "validityDays": {
+                    "type": "integer"
+                },
+                "weeklyLimitUSD": {
+                    "type": "number"
+                }
+            }
+        },
+        "sub2PlanPriceDTO": {
+            "type": "object",
+            "required": [
+                "amountCents",
+                "billingInterval",
+                "code",
+                "currency",
+                "id",
+                "isActive",
+                "isDefault",
+                "planID"
+            ],
+            "properties": {
+                "amountCents": {
+                    "type": "integer"
+                },
+                "billingInterval": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isActive": {
+                    "type": "boolean"
+                },
+                "isDefault": {
+                    "type": "boolean"
+                },
+                "planID": {
+                    "type": "integer"
+                }
+            }
+        },
+        "sub2PlansDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "plans"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "plans": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2PlanDTO"
+                    }
+                }
+            }
+        },
+        "sub2RedemptionDTO": {
+            "type": "object",
+            "required": [
+                "id",
+                "type",
+                "value"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
+        "sub2RedemptionDataDTO": {
+            "type": "object",
+            "required": [
+                "account",
+                "observedAt",
+                "overview",
+                "redemption"
+            ],
+            "properties": {
+                "account": {
+                    "$ref": "#/definitions/sub2AccountDTO"
+                },
+                "observedAt": {
+                    "type": "string"
+                },
+                "overview": {
+                    "$ref": "#/definitions/sub2OverviewDTO"
+                },
+                "redemption": {
+                    "$ref": "#/definitions/sub2RedemptionDTO"
+                }
+            }
+        },
+        "sub2RedemptionHistoryDTO": {
+            "type": "object",
+            "required": [
+                "code",
+                "createdAt",
+                "expiresAt",
+                "groupID",
+                "id",
+                "status",
+                "type",
+                "usedAt",
+                "validityDays",
+                "value"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "groupID": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "usedAt": {
+                    "type": "string"
+                },
+                "validityDays": {
+                    "type": "integer"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
+        "sub2RedemptionsDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "results"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2RedemptionHistoryDTO"
+                    }
+                }
+            }
+        },
+        "sub2SubscriptionEntitlementDTO": {
+            "type": "object",
+            "required": [
+                "autoRenew",
+                "cancelAtPeriodEnd",
+                "currentPeriodEndAt",
+                "currentPeriodStartAt",
+                "id",
+                "isCurrent",
+                "plan",
+                "planID",
+                "priceID",
+                "startAt",
+                "status",
+                "userID"
+            ],
+            "properties": {
+                "autoRenew": {
+                    "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                    "type": "boolean"
+                },
+                "currentPeriodEndAt": {
+                    "type": "string"
+                },
+                "currentPeriodStartAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "isCurrent": {
+                    "type": "boolean"
+                },
+                "plan": {
+                    "$ref": "#/definitions/sub2PlanDTO"
+                },
+                "planID": {
+                    "type": "integer"
+                },
+                "priceID": {
+                    "type": "integer"
+                },
+                "startAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "userID": {
+                    "type": "integer"
+                }
+            }
+        },
+        "sub2UsageDataDTO": {
+            "type": "object",
+            "required": [
+                "observedAt",
+                "results",
+                "total"
+            ],
+            "properties": {
+                "observedAt": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/sub2UsageRowDTO"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "sub2UsageRowDTO": {
+            "type": "object",
+            "required": [
+                "actualCost",
+                "createdAt",
+                "durationMS",
+                "id",
+                "inputTokens",
+                "model",
+                "outputTokens",
+                "totalTokens"
+            ],
+            "properties": {
+                "actualCost": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "durationMS": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
         }
     },
     "securityDefinitions": {
@@ -23651,7 +18621,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.3.9",
+	Version:          "0.4.0",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

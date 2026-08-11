@@ -195,6 +195,7 @@ type QueuedChatSubmission = BranchScope & {
   content: string;
   attachments: PendingAttachment[];
   platformModelName: string;
+  keyBindingID: string;
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
@@ -445,6 +446,7 @@ export function useChatMessageSubmit({
   conversationScopeKey,
   activeConversation,
   selectedPlatformModelName,
+  selectedKeyBindingID,
   modelOptions,
   selectedToolIDs,
   selectedSkills,
@@ -489,6 +491,7 @@ export function useChatMessageSubmit({
   conversationScopeKey: string;
   activeConversation: ConversationDTO | null;
   selectedPlatformModelName: string;
+  selectedKeyBindingID: string;
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
@@ -722,6 +725,7 @@ export function useChatMessageSubmit({
     }) => {
       const payloadContent = content || t("attachmentOnlyContent");
       const requestPlatformModelName = (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim();
+      const requestKeyBindingID = (queuedSubmission?.keyBindingID ?? selectedKeyBindingID).trim();
       const requestOptions = queuedSubmission?.options ?? options;
       const requestSelectedToolIDs = queuedSubmission?.selectedToolIDs ?? selectedToolIDs;
       const requestSelectedSkills = queuedSubmission?.selectedSkills ?? selectedSkills;
@@ -801,6 +805,9 @@ export function useChatMessageSubmit({
         return false;
       }
       const submitTask = submitDecision.task;
+      if (submitTask === "chat" && !requestKeyBindingID) {
+        return false;
+      }
       if (!requestPlatformModelName) {
         toast.error(t("noModel"), { description: t("selectModelFirst") });
         return false;
@@ -1125,6 +1132,7 @@ export function useChatMessageSubmit({
             ...commonStreamPayload,
             contentType: effectiveAttachments.length > 0 ? "mixed" : "text",
             content: payloadContent,
+            keyBindingID: requestKeyBindingID,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
             htmlVisualPrompt: requestHTMLVisualPromptEnabled || undefined,
@@ -1472,6 +1480,7 @@ export function useChatMessageSubmit({
       updatePendingExchange,
       visibleMessageCount,
       combinedMessages,
+      selectedKeyBindingID,
     ],
   );
 
@@ -1549,6 +1558,7 @@ export function useChatMessageSubmit({
           content,
           attachments: currentAttachments,
           platformModelName: selectedPlatformModelName,
+          keyBindingID: selectedKeyBindingID,
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
@@ -1570,6 +1580,7 @@ export function useChatMessageSubmit({
     htmlVisualPromptEnabled,
     options,
     selectedPlatformModelName,
+    selectedKeyBindingID,
     selectedSkills,
     selectedToolIDs,
     setAttachments,

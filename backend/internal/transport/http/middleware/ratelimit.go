@@ -48,7 +48,7 @@ func RateLimit(limiter RateLimiter, runtime *config.Runtime) gin.HandlerFunc {
 			return
 		}
 		role, hasRole := c.Get(ContextKeyUserRole)
-		if roleStr, ok := role.(string); hasRole && ok && domainuser.IsAdminRole(roleStr) {
+		if roleStr, ok := role.(string); hasRole && ok && roleStr == domainuser.RoleSuperAdmin {
 			c.Next()
 			return
 		}

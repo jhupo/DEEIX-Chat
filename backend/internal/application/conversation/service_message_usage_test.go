@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
@@ -318,42 +317,6 @@ func TestTrimToolFollowUpHistoryRemovesOldCompleteTurns(t *testing.T) {
 	if tokens := estimateToolFollowUpInputTokens(llm.GenerateInput{}, trimmed); tokens >
 		int64(llm.EffectiveContextBudgetFromCapabilities("custom-model", capabilities)) {
 		t.Fatalf("expected trimmed follow-up within effective model budget, got %d tokens", tokens)
-	}
-}
-
-func TestSendMessageBillingDurationSeconds(t *testing.T) {
-	videoResult := &SendMessageResult{
-		AssistantMessage: model.Message{ContentType: "video", Status: "success"},
-		DurationSeconds:  5,
-		UpstreamProtocol: llm.AdapterXAIVideo,
-		Billable:         true,
-	}
-	if got := sendMessageBillingDurationSeconds(videoResult); got != 5 {
-		t.Fatalf("expected explicit duration seconds to win, got %d", got)
-	}
-	textResult := &SendMessageResult{
-		AssistantMessage: model.Message{ContentType: "video", Status: "success"},
-		DurationSeconds:  5,
-		UpstreamProtocol: llm.AdapterXAIResponses,
-		Billable:         true,
-	}
-	if got := sendMessageBillingDurationSeconds(textResult); got != 0 {
-		t.Fatalf("expected non-video protocol duration to be ignored, got %d", got)
-	}
-	if got := sendMessageBillingDurationSeconds(&SendMessageResult{
-		AssistantMessage: model.Message{ContentType: "video", Status: "success"},
-		UpstreamProtocol: llm.AdapterXAIVideo,
-		Billable:         true,
-	}); got != 0 {
-		t.Fatalf("expected missing video duration to remain zero, got %d", got)
-	}
-	if got := sendMessageBillingDurationSeconds(&SendMessageResult{
-		AssistantMessage: model.Message{ContentType: "video", Status: "error"},
-		DurationSeconds:  6,
-		UpstreamProtocol: llm.AdapterXAIVideo,
-		Billable:         true,
-	}); got != 0 {
-		t.Fatalf("expected failed video duration to remain zero, got %d", got)
 	}
 }
 

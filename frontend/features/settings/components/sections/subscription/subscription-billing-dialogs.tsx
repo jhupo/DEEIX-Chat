@@ -10,22 +10,20 @@ import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import {
   billingDisplayAmountToUSD,
   billingDisplayInputSymbol,
-  formatProviderPaymentAmountFromUSD,
 } from "@/features/settings/model/subscription-format";
 import type { BillingDisplayOptions } from "@/shared/lib/billing-display";
+import { formatBillingDisplayAmountFromUSD } from "@/shared/lib/billing-display";
+import { calculateTopUpPreview } from "./top-up-preview";
 
-type PaymentProvider = "stripe" | "epay";
+type PaymentProvider = string;
 
-type EPayTypeOption = {
-  name: string;
-  type: string;
-};
-
-function resolveEPayTypeLabel(type: string, labels: { alipay: string; wxpay: string; qqpay: string; custom: (type: string) => string }): string {
-  if (type === "alipay") return labels.alipay;
-  if (type === "wxpay") return labels.wxpay;
-  if (type === "qqpay") return labels.qqpay;
-  return labels.custom(type);
+function paymentMethodLabel(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === "alipay") return "Alipay";
+  if (normalized === "wxpay") return "WeChat Pay";
+  if (normalized === "stripe") return "Stripe";
+  if (normalized === "airwallex") return "Airwallex";
+  return provider;
 }
 
 type TopUpDialogProps = {
@@ -37,19 +35,13 @@ type TopUpDialogProps = {
   topUpLoading: boolean;
   paymentDisabled: boolean;
   paymentProviders: string[];
+  paymentMethods: { id: string; currency: string }[];
   selectedPaymentProvider: PaymentProvider;
-  selectedEPayType: string;
-  epayTypes: EPayTypeOption[];
   billingDisplay: BillingDisplayOptions;
-  epayLabels: {
-    alipay: string;
-    wxpay: string;
-    qqpay: string;
-    custom: (type: string) => string;
-  };
+  balanceRechargeMultiplier: number;
+  rechargeFeeRate: number;
   onAmountChange: (value: string) => void;
   onPaymentProviderChange: (provider: PaymentProvider) => void;
-  onEPayTypeChange: (type: string) => void;
   onSubmit: () => void;
 };
 
@@ -62,21 +54,23 @@ export function TopUpDialog({
   topUpLoading,
   paymentDisabled,
   paymentProviders,
+  paymentMethods,
   selectedPaymentProvider,
-  selectedEPayType,
-  epayTypes,
   billingDisplay,
-  epayLabels,
+  balanceRechargeMultiplier,
+  rechargeFeeRate,
   onAmountChange,
   onPaymentProviderChange,
-  onEPayTypeChange,
   onSubmit,
 }: TopUpDialogProps) {
   const t = useTranslations("settings.subscriptionPage");
   const displayAmount = Number(amount);
   const paymentAmountUSD = billingDisplayAmountToUSD(displayAmount, billingDisplay);
-  const stripePaymentAmount = formatProviderPaymentAmountFromUSD(paymentAmountUSD, "stripe", billingDisplay);
-  const epayPaymentAmount = formatProviderPaymentAmountFromUSD(paymentAmountUSD, "epay", billingDisplay);
+  const selectedMethod = paymentMethods.find((method) => method.id === selectedPaymentProvider);
+  const paymentCurrency = selectedMethod?.currency.trim().toUpperCase() || "USD";
+  const preview = calculateTopUpPreview(paymentAmountUSD, paymentCurrency, billingDisplay.usdToCnyRate, balanceRechargeMultiplier, rechargeFeeRate);
+  const paymentAmount = new Intl.NumberFormat(undefined, { style: "currency", currency: paymentCurrency }).format(preview.paymentAmount);
+  const creditedAmount = formatBillingDisplayAmountFromUSD(preview.creditedUSD, billingDisplay, { maximumFractionDigits: 2 });
   const inputSymbol = billingDisplayInputSymbol(billingDisplay);
 
   return (
@@ -113,44 +107,34 @@ export function TopUpDialog({
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">{t("payment.method")}</p>
             <div className="grid grid-cols-2 gap-2">
-              {paymentProviders.includes("stripe") ? (
+              {paymentProviders.map((provider) => (
                 <button
+                  key={provider}
                   type="button"
                   className={`flex min-h-9 flex-col items-center justify-center rounded-md border px-2 py-1 text-xs ${
-                    selectedPaymentProvider === "stripe" ? "border-foreground bg-muted/25 font-medium" : "border-border bg-transparent text-muted-foreground"
+                    selectedPaymentProvider === provider ? "border-foreground bg-muted/25 font-medium" : "border-border bg-transparent text-muted-foreground"
                   }`}
                   disabled={billingLoading || topUpLoading || paymentDisabled}
-                  onClick={() => onPaymentProviderChange("stripe")}
+                  onClick={() => onPaymentProviderChange(provider)}
                 >
-                  <span>Stripe</span>
-                  <span className="text-[11px] font-normal tabular-nums opacity-80">{stripePaymentAmount}</span>
+                  <span>{paymentMethodLabel(provider)}</span>
+                  <span className="text-[11px] font-normal tabular-nums opacity-80">{provider === selectedPaymentProvider ? paymentAmount : ""}</span>
                 </button>
-              ) : null}
-              {paymentProviders.includes("epay")
-                ? epayTypes.map((item) => {
-                  const selected = selectedPaymentProvider === "epay" && selectedEPayType === item.type;
-                  return (
-                    <button
-                      key={item.type}
-                      type="button"
-                      className={`flex min-h-9 flex-col items-center justify-center rounded-md border px-2 py-1 text-xs ${
-                        selected ? "border-foreground bg-muted/25 font-medium" : "border-border bg-transparent text-muted-foreground"
-                      }`}
-                      disabled={billingLoading || topUpLoading || paymentDisabled}
-                      onClick={() => {
-                        onPaymentProviderChange("epay");
-                        onEPayTypeChange(item.type);
-                      }}
-                    >
-                      <span>{item.name || resolveEPayTypeLabel(item.type, epayLabels)}</span>
-                      <span className="text-[11px] font-normal tabular-nums opacity-80">{epayPaymentAmount}</span>
-                    </button>
-                  );
-                })
-                : null}
+              ))}
             </div>
           </div>
         ) : null}
+
+        <div className="grid grid-cols-2 gap-3 border-y py-3 text-xs">
+          <div>
+            <p className="text-muted-foreground">{t("topUp.paymentAmount")}</p>
+            <p className="mt-1 font-medium tabular-nums">{paymentAmount}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">{t("topUp.creditedBalance")}</p>
+            <p className="mt-1 font-medium tabular-nums">{creditedAmount}</p>
+          </div>
+        </div>
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={topUpLoading}>

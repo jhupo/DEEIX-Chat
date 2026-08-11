@@ -1,4 +1,4 @@
-import type { ActiveSessionDTO, UserDTO } from "@/shared/api/auth.types";
+import type { ActiveSessionDTO } from "@/shared/api/auth.types";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -37,28 +37,4 @@ export function resolveSessionLocation(session: ActiveSessionDTO, t?: Translate)
 
 export function resolveSessionIP(session: ActiveSessionDTO, t?: Translate) {
   return session.clientIP.trim() || t?.("session.unknownIP") || "Unknown IP";
-}
-
-export function shouldUseEmailBootstrap(viewer: UserDTO | null): boolean {
-  if (!viewer) {
-    return false;
-  }
-  if (!viewer.email.trim()) {
-    return true;
-  }
-  return viewer.emailSource === "provider_unverified" && !viewer.emailVerifiedAt && !viewer.emailBootstrapUsedAt;
-}
-
-export function resolveEmailTitle(viewer: UserDTO | null, t?: Translate): string {
-  if (!viewer?.email) {
-    return t?.("email.label") || "Email";
-  }
-  return t?.("email.withAddress", { email: viewer.email }) || `Email (${viewer.email})`;
-}
-
-export function resolveEmailValue(viewer: UserDTO | null, emailVerificationEnabled: boolean, t?: Translate): string | undefined {
-  if (!viewer?.email || !emailVerificationEnabled) {
-    return undefined;
-  }
-  return viewer.emailVerifiedAt ? t?.("email.verified") || "Verified" : t?.("email.unverified") || "Unverified";
 }

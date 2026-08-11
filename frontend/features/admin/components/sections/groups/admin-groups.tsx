@@ -53,14 +53,12 @@ import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
 import { invalidateAdminReferenceDataCache } from "@/features/admin/api/reference-data";
 import { listAllAdminPages } from "@/features/admin/api/shared";
-import { listAdminIdentityProviders } from "@/features/admin/api/auth";
 import { listAdminLLMModels, listAdminLLMUpstreams } from "@/features/admin/api/llm";
 import { listAdminUsers } from "@/features/admin/api/accounts";
 import { resolveProtocolLabel, sortProtocolsForDisplay } from "@/features/admin/utils/llm-display";
 import { ADAPTER_LABELS } from "@/features/admin/types/llm";
 import type { AdminLLMModelDTO, AdminLLMUpstreamView } from "@/features/admin/api/llm.types";
 import type { AdminUserDTO } from "@/features/admin/api/admin.types";
-import type { IdentityProviderDTO } from "@/shared/api/auth.types";
 import { cn } from "@/lib/utils";
 import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 import { GroupAccessPickerDialog } from "@/features/admin/components/sections/groups/group-access-picker-dialog";
@@ -98,57 +96,6 @@ function parseStringArrayJSON(raw: string): string[] {
   } catch {
     return [];
   }
-}
-
-function useSubscriptionStatusLabel() {
-  const t = useTranslations("adminUsers.subscriptionStatus");
-  return React.useCallback(
-    (value: string | null | undefined) => {
-      switch (value?.trim()) {
-        case "active":
-          return t("active");
-        case "trialing":
-          return t("trialing");
-        case "past_due":
-          return t("pastDue");
-        case "canceled":
-          return t("canceled");
-        case "unpaid":
-          return t("unpaid");
-        case "incomplete":
-          return t("incomplete");
-        case "incomplete_expired":
-          return t("incompleteExpired");
-        case "paused":
-          return t("paused");
-        case "free":
-          return "";
-        default:
-          return value?.trim() || "";
-      }
-    },
-    [t],
-  );
-}
-
-function resolveUserSubscriptionLabel(
-  user: AdminUserDTO,
-  resolveSubscriptionStatusLabel: (value: string | null | undefined) => string,
-): string {
-  const planName = user.subscriptionPlanName.trim();
-  const tier = user.subscriptionTier.trim();
-  const status = resolveSubscriptionStatusLabel(user.subscriptionStatus);
-  let planLabel = "";
-  if (planName && planName !== "free") {
-    planLabel = planName;
-  } else if (tier && tier !== "free") {
-    planLabel = tier;
-  }
-
-  if (planLabel && status) {
-    return `${planLabel} · ${status}`;
-  }
-  return planLabel || status || "-";
 }
 
 export function AdminGroupsPage() {
@@ -254,9 +201,8 @@ export function AdminGroupsPage() {
       const token = await resolveAccessToken();
       const result = await deletePermissionGroup(token, deletedGroupID);
       toast.success(t("deletedWithSummary", {
-        models: result.summary.manualModelCount ?? 0,
-        rules: result.summary.ruleCount ?? 0,
-        users: result.summary.manualUserCount ?? 0,
+        models: result.summary.modelAccessCount ?? 0,
+        users: result.summary.userAccessCount ?? 0,
       }));
       invalidateAdminReferenceDataCache();
       setGroups((current) => current.filter((group) => group.id !== deletedGroupID));
@@ -302,16 +248,15 @@ export function AdminGroupsPage() {
           <TableRow className="hover:bg-transparent">
             <TableHead>{t("name")}</TableHead>
             <TableHead>{t("descriptionField")}</TableHead>
-            <TableHead className="text-right">{t("rateMultiplier")}</TableHead>
             <TableHead className="text-right">{t("modelCount")}</TableHead>
             <TableHead className="text-right">{t("coverageCount")}</TableHead>
             <TableHead className="w-16" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading ? <TableLoadingRow colSpan={6} /> : null}
+          {loading ? <TableLoadingRow colSpan={5} /> : null}
           {!loading && pagedGroups.length === 0 ? (
-            <TableEmptyRow colSpan={6}>{t("noGroups")}</TableEmptyRow>
+            <TableEmptyRow colSpan={5}>{t("noGroups")}</TableEmptyRow>
           ) : null}
           {!loading
             ? pagedGroups.map((group) => (
@@ -332,9 +277,6 @@ export function AdminGroupsPage() {
                     {group.description}
                   </TableCell>
                   <TableCell className="py-1.5 text-right whitespace-nowrap">
-                    {(group.rateMultiplierPercent || 100) / 100}
-                  </TableCell>
-                  <TableCell className="py-1.5 text-right whitespace-nowrap">
                     <div className="space-y-0.5">
                       <div>{group.modelCount ?? 0}</div>
                       <div className="text-[11px] text-muted-foreground">
@@ -346,17 +288,7 @@ export function AdminGroupsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="py-1.5 text-right whitespace-nowrap">
-                    <div className="space-y-0.5">
-                      <div>{group.userCount ?? 0}</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        {group.isDefault
-                          ? t("defaultCoverage")
-                          : t("groupCoverageBreakdown", {
-                              manual: group.manualUserCount ?? 0,
-                              subscription: group.subscriptionUserCount ?? 0,
-                            })}
-                      </div>
-                    </div>
+                    {group.userCount ?? 0}
                   </TableCell>
                   <TableCell className="py-1.5 text-right whitespace-nowrap">
                     <Button
@@ -449,14 +381,12 @@ function CreateGroupDialog({
   const t = useTranslations("adminGroups");
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [rateMultiplier, setRateMultiplier] = React.useState("1");
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setName("");
       setDescription("");
-      setRateMultiplier("1");
     }
   }, [open]);
 
@@ -465,10 +395,7 @@ function CreateGroupDialog({
     setSaving(true);
     try {
       const token = await resolveAccessToken();
-      const parsed = parseFloat(rateMultiplier);
-      const rateMultiplierPercent =
-        Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) : 100;
-      await createPermissionGroup(token, { name, description, rateMultiplierPercent });
+      await createPermissionGroup(token, { name, description });
       toast.success(t("created"));
       onOpenChange(false);
       await onCreated();
@@ -477,7 +404,7 @@ function CreateGroupDialog({
     } finally {
       setSaving(false);
     }
-  }, [description, name, rateMultiplier, onCreated, onOpenChange, t]);
+  }, [description, name, onCreated, onOpenChange, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -514,21 +441,6 @@ function CreateGroupDialog({
               />
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-normal text-muted-foreground" htmlFor="group-rate">
-                {t("rateMultiplier")}
-              </Label>
-              <Input
-                id="group-rate"
-                type="number"
-                min="0"
-                step="0.01"
-                value={rateMultiplier}
-                onChange={(event) => setRateMultiplier(event.target.value)}
-                disabled={saving}
-              />
-              <p className="text-xs text-muted-foreground">{t("rateMultiplierHint")}</p>
-            </div>
           </div>
 
           <DialogFooter className="shrink-0 px-4 py-3">
@@ -555,11 +467,9 @@ function GroupEditSheet({
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("adminGroups");
-  const resolveSubscriptionStatusLabel = useSubscriptionStatusLabel();
   const modelPresentation = useAdminModelPresentation();
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [rateMultiplier, setRateMultiplier] = React.useState("1");
   const [modelIDs, setModelIDs] = React.useState<Set<number>>(new Set());
   const [modelRules, setModelRules] = React.useState<PermissionGroupModelRule[]>([]);
   const [userIDs, setUserIDs] = React.useState<Set<number>>(new Set());
@@ -582,9 +492,6 @@ function GroupEditSheet({
   const [userPage, setUserPage] = React.useState(1);
   const [userPageSize, setUserPageSizeState] = React.useState(GROUP_PICKER_PAGE_SIZE_DEFAULT);
   const [userQuery, setUserQuery] = React.useState("");
-  const [userSubscriptionFilter, setUserSubscriptionFilter] = React.useState("");
-  const [userIdentityFilter, setUserIdentityFilter] = React.useState("");
-  const [userIdentityProviderOptions, setUserIdentityProviderOptions] = React.useState<IdentityProviderDTO[]>([]);
   const [userReloadKey, setUserReloadKey] = React.useState(0);
   const [userLoading, setUserLoading] = React.useState(false);
   const [userBulkLoading, setUserBulkLoading] = React.useState(false);
@@ -604,7 +511,6 @@ function GroupEditSheet({
     }
     setName(group.name);
     setDescription(group.description);
-    setRateMultiplier(String((group.rateMultiplierPercent || 100) / 100));
     setSelectionLoading(true);
     setSelectionLoaded(false);
     setModelRules([]);
@@ -623,15 +529,12 @@ function GroupEditSheet({
     setUserPage(1);
     setUserPageSizeState(GROUP_PICKER_PAGE_SIZE_DEFAULT);
     setUserQuery("");
-    setUserSubscriptionFilter("");
-    setUserIdentityFilter("");
-    setUserIdentityProviderOptions([]);
     setUserReloadKey(0);
     let cancelled = false;
     (async () => {
       try {
         const token = await resolveAccessToken();
-        const [selectedModels, selectedUsers, upstreams, identityProviderPage] = await Promise.all([
+        const [selectedModels, selectedUsers, upstreams] = await Promise.all([
           listGroupModels(token, group.id),
           group.isDefault ? Promise.resolve([]) : listGroupUsers(token, group.id),
           listAllAdminPages((options) =>
@@ -641,14 +544,12 @@ function GroupEditSheet({
               sort: "name_asc",
             }),
           ),
-          listAdminIdentityProviders(token),
         ]);
         if (!cancelled) {
           setModelIDs(new Set(selectedModels.modelIDs));
           setModelRules(selectedModels.rules);
           setUserIDs(new Set(selectedUsers));
           setModelUpstreamOptions(upstreams);
-          setUserIdentityProviderOptions(identityProviderPage.results);
           setSelectionLoaded(true);
         }
       } catch (error) {
@@ -731,8 +632,6 @@ function GroupEditSheet({
           page: userPage,
           pageSize: userPageSize,
           query: userQuery.trim(),
-          subscriptionStatus: userSubscriptionFilter,
-          identityProvider: userIdentityFilter,
         });
         if (!cancelled) {
           setUserRows(page.results);
@@ -751,7 +650,7 @@ function GroupEditSheet({
     return () => {
       cancelled = true;
     };
-  }, [group, t, userIdentityFilter, userPage, userPageSize, userQuery, userReloadKey, userSubscriptionFilter]);
+  }, [group, t, userPage, userPageSize, userQuery, userReloadKey]);
 
   const handleModelQueryChange = React.useCallback((value: string) => {
     setModelQuery(value);
@@ -775,16 +674,6 @@ function GroupEditSheet({
 
   const handleUserQueryChange = React.useCallback((value: string) => {
     setUserQuery(value);
-    setUserPage(1);
-  }, []);
-
-  const handleUserSubscriptionFilterChange = React.useCallback((value: string) => {
-    setUserSubscriptionFilter(value);
-    setUserPage(1);
-  }, []);
-
-  const handleUserIdentityFilterChange = React.useCallback((value: string) => {
-    setUserIdentityFilter(value);
     setUserPage(1);
   }, []);
 
@@ -841,8 +730,6 @@ function GroupEditSheet({
         listAdminUsers(token, {
           ...options,
           query: userQuery.trim(),
-          subscriptionStatus: userSubscriptionFilter,
-          identityProvider: userIdentityFilter,
         }),
       );
       setUserIDs((current) => {
@@ -857,7 +744,7 @@ function GroupEditSheet({
     } finally {
       setUserBulkLoading(false);
     }
-  }, [t, userIdentityFilter, userQuery, userSubscriptionFilter]);
+  }, [t, userQuery]);
 
   const clearModelSelection = React.useCallback(() => {
     setModelIDs(new Set());
@@ -876,10 +763,7 @@ function GroupEditSheet({
     let shouldInvalidateReferenceData = false;
     try {
       const token = await resolveAccessToken();
-      const parsed = parseFloat(rateMultiplier);
-      const rateMultiplierPercent =
-        Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed * 100) : 100;
-      await updatePermissionGroup(token, group.id, { name, description, rateMultiplierPercent });
+      await updatePermissionGroup(token, group.id, { name, description });
       shouldRefreshGroups = true;
       await setGroupModels(token, group.id, Array.from(modelIDs), modelRules);
       shouldInvalidateReferenceData = true;
@@ -901,7 +785,7 @@ function GroupEditSheet({
     } finally {
       setSaving(false);
     }
-  }, [description, group, modelIDs, modelRules, name, rateMultiplier, onOpenChange, onSaved, t, userIDs]);
+  }, [description, group, modelIDs, modelRules, name, onOpenChange, onSaved, t, userIDs]);
 
   const modelItems = React.useMemo(
     () =>
@@ -932,10 +816,8 @@ function GroupEditSheet({
         label: user.username || user.publicID,
         nickname: user.displayName || "-",
         email: user.email || "-",
-        subscriptionStatus: resolveUserSubscriptionLabel(user, resolveSubscriptionStatusLabel),
-        identityProviders: user.identityProviders ?? [],
       })),
-    [resolveSubscriptionStatusLabel, userRows],
+    [userRows],
   );
 
   const modelFilters = React.useMemo<TableToolbarFilter[]>(
@@ -987,46 +869,8 @@ function GroupEditSheet({
     ],
   );
 
-  const userFilters = React.useMemo<TableToolbarFilter[]>(
-    () => [
-      {
-        key: "subscriptionStatus",
-        label: t("subscriptionStatus"),
-        value: userSubscriptionFilter,
-        onValueChange: handleUserSubscriptionFilterChange,
-        options: [
-          { label: t("allSubscriptions"), value: "" },
-          { label: t("activeSubscription"), value: "active" },
-          { label: t("freeSubscription"), value: "free" },
-        ],
-      },
-      {
-        key: "identityProvider",
-        label: t("identitySource"),
-        value: userIdentityFilter,
-        onValueChange: handleUserIdentityFilterChange,
-        options: [
-          { label: t("allIdentitySources"), value: "" },
-          ...userIdentityProviderOptions.map((provider) => ({
-            label: provider.name || provider.slug,
-            value: provider.slug,
-          })),
-        ],
-      },
-    ],
-    [
-      handleUserIdentityFilterChange,
-      handleUserSubscriptionFilterChange,
-      t,
-      userIdentityFilter,
-      userIdentityProviderOptions,
-      userSubscriptionFilter,
-    ],
-  );
-
   const isDefaultGroup = stableGroup?.isDefault ?? false;
   const groupUserCount = stableGroup?.userCount ?? 0;
-  const subscriptionUserCount = stableGroup?.subscriptionUserCount ?? 0;
 
   return (
     <>
@@ -1057,20 +901,6 @@ function GroupEditSheet({
                     className="min-h-20 resize-none"
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs font-normal text-muted-foreground" htmlFor="edit-rate">
-                    {t("rateMultiplier")}
-                  </Label>
-                  <Input
-                    id="edit-rate"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={rateMultiplier}
-                    onChange={(event) => setRateMultiplier(event.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">{t("rateMultiplierHint")}</p>
-                </div>
               </div>
             </GroupSheetSection>
 
@@ -1092,10 +922,7 @@ function GroupEditSheet({
                   countLabel={
                     isDefaultGroup
                       ? t("defaultGroupAllUsers", { count: groupUserCount })
-                      : t("groupUserAccessEditingSummary", {
-                          manual: userIDs.size,
-                          subscription: subscriptionUserCount,
-                        })
+                      : t("accessSelected", { count: userIDs.size })
                   }
                   loading={selectionLoading}
                   onConfigure={isDefaultGroup ? undefined : () => setAccessDialog("users")}
@@ -1170,7 +997,6 @@ function GroupEditSheet({
         setSelectedIDs={setUserIDs}
         query={userQuery}
         onQueryChange={handleUserQueryChange}
-        filters={userFilters}
         page={userPage}
         pageSize={userPageSize}
         total={userTotal}
@@ -1185,8 +1011,6 @@ function GroupEditSheet({
         itemTitle={t("username")}
         nicknameTitle={t("nickname")}
         emailTitle={t("email")}
-        subscriptionTitle={t("subscriptionStatus")}
-        identityTitle={t("identitySource")}
         contentClassName="sm:max-w-[820px]"
         tableViewportClassName="max-h-[420px]"
         emptyText={t("noUsers")}

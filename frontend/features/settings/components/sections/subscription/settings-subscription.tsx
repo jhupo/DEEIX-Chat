@@ -4,21 +4,24 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+import { RefreshCw } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
+import { createIdempotencyKey } from "@/shared/lib/idempotency-key";
 import {
   createBillingCheckout,
   getBillingConfig,
   getBillingOverview,
   listBillingDailyUsage,
   listBillingMonthlyUsage,
-  listBillingPlans,
   listBillingUsage,
   redeemBillingCode,
-  subscribeBillingPlan,
+  verifyBillingOrder,
 } from "@/shared/api/billing";
 import type {
   BillingConfigData,
@@ -27,9 +30,10 @@ import type {
   BillingUsageDailyDTO,
   BillingUsageLedgerDTO,
   BillingUsageMonthlyDTO,
+  BillingUsageSort,
+  BillingUsageType,
 } from "@/shared/api/billing.types";
 import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
-import type { UserDTO } from "@/shared/api/auth.types";
 import { SettingsPage, SettingsSectionHeader } from "@/shared/components/settings-layout";
 import {
   formatAccountBalance,
@@ -38,6 +42,7 @@ import {
   resolveDefaultPrice,
   resolvePlanActionKind,
   billingDisplayAmountToMinorUnits,
+  billingDisplayAmountToUSD,
 } from "@/features/settings/model/subscription-format";
 import {
   normalizeBillingDisplayCurrency,
@@ -79,14 +84,20 @@ function SubscriptionTrendSkeleton() {
 }
 
 type BillingRuntimeConfig = BillingConfigData["config"];
-type PaymentProvider = "stripe" | "epay";
+type PaymentProvider = string;
+
+function paymentReturnURL(operationID: string, state: "success" | "cancel"): string {
+  const url = new URL("/setting/subscription", window.location.origin);
+  url.searchParams.set("payment", state);
+  url.searchParams.set("operation", operationID);
+  return url.toString();
+}
 
 export function SettingsSubscription() {
   const t = useTranslations("settings.subscriptionPage");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const { locale } = useAppLocale();
-  const { accessToken, user } = useAuthSession();
-  const [viewer, setViewer] = React.useState<UserDTO | null>(null);
+  const { accessToken } = useAuthSession();
   const [billingPlans, setBillingPlans] = React.useState<BillingPlanDTO[]>([]);
   const [billingConfig, setBillingConfig] = React.useState<BillingRuntimeConfig | null>(null);
   const [billingOverview, setBillingOverview] = React.useState<BillingOverviewData["overview"] | null>(null);
@@ -97,8 +108,8 @@ export function SettingsSubscription() {
   const [usagePage, setUsagePage] = React.useState(1);
   const [usagePageSize, setUsagePageSize] = React.useState(25);
   const [usageQuery, setUsageQuery] = React.useState("");
-  const [usageStatus, setUsageStatus] = React.useState("");
-  const [usageSort, setUsageSort] = React.useState("newest");
+  const [usageBillingType, setUsageBillingType] = React.useState<BillingUsageType | "">("");
+  const [usageSort, setUsageSort] = React.useState<BillingUsageSort>("newest");
   const [usageView, setUsageView] = React.useState<UsageTrendView>("daily");
   const [billingLoading, setBillingLoading] = React.useState(true);
   const [usageLoading, setUsageLoading] = React.useState(true);
@@ -109,13 +120,13 @@ export function SettingsSubscription() {
   const [paymentDialogOpen, setPaymentDialogOpen] = React.useState(false);
   const [selectedPlan, setSelectedPlan] = React.useState<BillingPlanDTO | null>(null);
   const [selectedPrice, setSelectedPrice] = React.useState<BillingPlanPriceDTO | null>(null);
-  const [selectedPaymentProvider, setSelectedPaymentProvider] = React.useState<PaymentProvider>("stripe");
-  const [selectedEPayType, setSelectedEPayType] = React.useState("alipay");
+  const [selectedPaymentProvider, setSelectedPaymentProvider] = React.useState<PaymentProvider>("");
   const [topUpDialogOpen, setTopUpDialogOpen] = React.useState(false);
   const [redemptionDialogOpen, setRedemptionDialogOpen] = React.useState(false);
   const [redemptionCode, setRedemptionCode] = React.useState("");
   const [redemptionLoading, setRedemptionLoading] = React.useState(false);
-  const billingMode: BillingMode = billingConfig?.mode ?? "self";
+  const paymentVerificationRef = React.useRef("");
+  const billingMode: BillingMode = billingConfig?.mode ?? "usage";
   const billingDisplay = React.useMemo<BillingDisplayOptions>(
     () => ({
       currency: normalizeBillingDisplayCurrency(billingConfig?.displayCurrency),
@@ -162,58 +173,35 @@ export function SettingsSubscription() {
     }),
     [t],
   );
-  const epayLabels = React.useMemo(
-    () => ({
-      alipay: t("payment.epay.alipay"),
-      wxpay: t("payment.epay.wxpay"),
-      qqpay: t("payment.epay.qqpay"),
-      custom: (type: string) => t("payment.epay.custom", { type }),
-    }),
-    [t],
-  );
+  const loadBillingData = React.useCallback(async () => {
+    setBillingLoading(true);
+    try {
+      const [configData, overviewData, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
+        getBillingConfig(accessToken),
+        getBillingOverview(accessToken),
+        listBillingDailyUsage(accessToken),
+        listBillingMonthlyUsage(accessToken, 12),
+      ]);
+      setBillingConfig(configData.config);
+      setBillingPlans(configData.config.plans);
+      setBillingOverview(overviewData.overview);
+      setDailyUsage(nextDailyUsage ?? []);
+      setMonthlyUsage(nextMonthlyUsage ?? []);
+    } catch (error) {
+      toast.error(t("toasts.subscriptionLoadFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
+    } finally {
+      setBillingLoading(false);
+    }
+  }, [accessToken, resolveErrorMessage, t]);
 
   React.useEffect(() => {
-    let mounted = true;
-    setBillingLoading(true);
-    void Promise.all([
-      getBillingConfig(accessToken),
-      listBillingPlans(accessToken),
-      getBillingOverview(accessToken),
-      listBillingDailyUsage(accessToken),
-      listBillingMonthlyUsage(accessToken, 12),
-    ])
-      .then(([configData, plans, overviewData, dailyUsageData, monthlyUsageData]) => ({
-        viewer: user,
-        config: configData.config,
-        plans,
-        overview: overviewData.overview,
-        dailyUsage: dailyUsageData,
-        monthlyUsage: monthlyUsageData,
-      }))
-      .then(({ viewer: nextViewer, config, plans, overview, dailyUsage: nextDailyUsage, monthlyUsage: nextMonthlyUsage }) => {
-        if (!mounted) return;
-        setViewer(nextViewer);
-        setBillingConfig(config);
-        setBillingPlans(plans);
-        setBillingOverview(overview);
-        setDailyUsage(nextDailyUsage ?? []);
-        setMonthlyUsage(nextMonthlyUsage ?? []);
-      })
-      .catch((error) => {
-        if (mounted) toast.error(t("toasts.subscriptionLoadFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
-      })
-      .finally(() => {
-        if (mounted) setBillingLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [accessToken, resolveErrorMessage, t, user]);
+    void loadBillingData();
+  }, [loadBillingData]);
 
-  const loadUsageLogs = React.useCallback(async (page: number, pageSize: number, query: string, status: string, sort: string) => {
+  const loadUsageLogs = React.useCallback(async (page: number, pageSize: number, query: string, billingType: BillingUsageType | "", sort: BillingUsageSort) => {
     setUsageLoading(true);
     try {
-      const usage = await listBillingUsage(accessToken, { page, pageSize, query, status, sort });
+      const usage = await listBillingUsage(accessToken, { page, pageSize, query, billingType: billingType || undefined, sort });
       setUsageLedgers(usage.results ?? []);
       setUsageTotal(usage.total ?? 0);
     } catch (error) {
@@ -224,40 +212,61 @@ export function SettingsSubscription() {
   }, [accessToken, resolveErrorMessage, t]);
 
   React.useEffect(() => {
-    void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageStatus, usageSort);
-  }, [loadUsageLogs, usagePage, usagePageSize, usageQuery, usageStatus, usageSort]);
+    const params = new URLSearchParams(window.location.search);
+    const state = params.get("payment");
+    const operationID = params.get("operation") ?? "";
+    if ((state !== "success" && state !== "cancel") || !/^[0-9a-f-]{36}$/.test(operationID)) return;
 
-  const epayTypes = React.useMemo(() => {
-    const values = billingConfig?.epayTypes?.filter((item) => item.type.trim()) ?? [];
-    return values.length > 0 ? values : [{ name: epayLabels.alipay, type: "alipay" }, { name: epayLabels.wxpay, type: "wxpay" }];
-  }, [billingConfig?.epayTypes, epayLabels.alipay, epayLabels.wxpay]);
-  const paymentProviders = React.useMemo(() => billingConfig?.paymentProviders?.filter((item) => item === "stripe" || item === "epay") ?? [], [billingConfig?.paymentProviders]);
+    if (state === "cancel") {
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
+    if (paymentVerificationRef.current === operationID) return;
+    paymentVerificationRef.current = operationID;
+
+    void verifyBillingOrder(accessToken, operationID)
+      .then(async () => {
+        const [overview, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
+          getBillingOverview(accessToken),
+          listBillingDailyUsage(accessToken),
+          listBillingMonthlyUsage(accessToken, 12),
+        ]);
+        setBillingOverview(overview.overview);
+        setDailyUsage(nextDailyUsage ?? []);
+        setMonthlyUsage(nextMonthlyUsage ?? []);
+        await loadUsageLogs(1, 25, "", "", "newest");
+        window.history.replaceState({}, "", window.location.pathname);
+        toast.success(t("toasts.paymentVerified"));
+      })
+      .catch((error) => {
+        toast.error(t("toasts.paymentVerifyFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
+      });
+  }, [accessToken, loadUsageLogs, resolveErrorMessage, t]);
+
+  React.useEffect(() => {
+    void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort);
+  }, [loadUsageLogs, usageBillingType, usagePage, usagePageSize, usageQuery, usageSort]);
+
+  const paymentProviders = React.useMemo(() => billingConfig?.paymentMethods.map((item) => item.id).filter((item) => item.trim()) ?? [], [billingConfig?.paymentMethods]);
 
   React.useEffect(() => {
     if (paymentProviders.length > 0 && !paymentProviders.includes(selectedPaymentProvider)) {
-      setSelectedPaymentProvider(paymentProviders[0] ?? "stripe");
+      setSelectedPaymentProvider(paymentProviders[0] ?? "");
     }
   }, [paymentProviders, selectedPaymentProvider]);
 
-  React.useEffect(() => {
-    if (selectedPaymentProvider !== "epay") return;
-    if (!epayTypes.some((item) => item.type === selectedEPayType)) {
-      setSelectedEPayType(epayTypes[0]?.type ?? "alipay");
-    }
-  }, [epayTypes, selectedEPayType, selectedPaymentProvider]);
-
-  const handleCheckout = React.useCallback(async (price: BillingPlanPriceDTO, paymentProvider: PaymentProvider, epayType?: string) => {
+  const handleCheckout = React.useCallback(async (price: BillingPlanPriceDTO, paymentProvider: PaymentProvider) => {
     setCheckoutPriceID(price.id);
     try {
+      const operationID = createIdempotencyKey();
       const data = await createBillingCheckout(accessToken, {
         orderType: "subscription",
         priceID: price.id,
         cycles: 1,
         paymentProvider,
-        epayType: paymentProvider === "epay" ? epayType : undefined,
-        successURL: `${window.location.origin}/setting/subscription?payment=success`,
-        cancelURL: `${window.location.origin}/setting/subscription?payment=cancel`,
-      });
+        successURL: paymentReturnURL(operationID, "success"),
+        cancelURL: paymentReturnURL(operationID, "cancel"),
+      }, operationID);
       if (!data.checkout.checkoutURL) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
         return;
@@ -270,37 +279,24 @@ export function SettingsSubscription() {
     }
   }, [accessToken, resolveErrorMessage, t]);
 
-  const handleSubscribeFreePlan = React.useCallback(async (price: BillingPlanPriceDTO) => {
-    setCheckoutPriceID(price.id);
-    try {
-      await subscribeBillingPlan(accessToken, price.id);
-      toast.success(t("toasts.planUpdated"));
-      window.location.reload();
-    } catch (error) {
-      toast.error(t("toasts.subscribeFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
-    } finally {
-      setCheckoutPriceID(null);
-    }
-  }, [accessToken, resolveErrorMessage, t]);
-
   const handleTopUp = React.useCallback(async () => {
     const displayAmount = Number(topUpAmount);
-    const amountMinorUnits = billingDisplayAmountToMinorUnits(displayAmount);
+    const amountMinorUnits = billingDisplayAmountToMinorUnits(billingDisplayAmountToUSD(displayAmount, billingDisplay));
     if (!Number.isFinite(displayAmount) || displayAmount <= 0 || amountMinorUnits <= 0) {
       toast.error(t("toasts.invalidTopUpAmount"), { description: t("toasts.invalidTopUpAmountDescription") });
       return;
     }
     setTopUpLoading(true);
     try {
+      const operationID = createIdempotencyKey();
       const data = await createBillingCheckout(accessToken, {
         orderType: "topup",
         amountMinorUnits,
         cycles: 1,
         paymentProvider: selectedPaymentProvider,
-        epayType: selectedPaymentProvider === "epay" ? selectedEPayType : undefined,
-        successURL: `${window.location.origin}/setting/subscription?payment=success`,
-        cancelURL: `${window.location.origin}/setting/subscription?payment=cancel`,
-      });
+        successURL: paymentReturnURL(operationID, "success"),
+        cancelURL: paymentReturnURL(operationID, "cancel"),
+      }, operationID);
       if (!data.checkout.checkoutURL) {
         toast.error(t("toasts.checkoutCreateFailed"), { description: t("toasts.checkoutURLMissing") });
         return;
@@ -311,7 +307,7 @@ export function SettingsSubscription() {
     } finally {
       setTopUpLoading(false);
     }
-  }, [accessToken, resolveErrorMessage, selectedEPayType, selectedPaymentProvider, t, topUpAmount]);
+  }, [accessToken, billingDisplay, resolveErrorMessage, selectedPaymentProvider, t, topUpAmount]);
 
   const handleRedeemCode = React.useCallback(async () => {
     const code = redemptionCode.trim();
@@ -338,10 +334,7 @@ export function SettingsSubscription() {
     [billingOverview?.subscriptionEntitlements],
   );
   const paymentDisabled = paymentProviders.length === 0;
-  const currentPlan = React.useMemo(() => {
-    if (billingOverview?.plan) return billingOverview.plan;
-    return billingPlans.find((plan) => viewer?.subscriptionPlanID === plan.id || viewer?.subscriptionTier === plan.code) ?? null;
-  }, [billingOverview?.plan, billingPlans, viewer?.subscriptionPlanID, viewer?.subscriptionTier]);
+  const currentPlan = billingOverview?.plan ?? null;
   const currentPrice = React.useMemo(() => resolveDefaultPrice(currentPlan), [currentPlan]);
   const protectedPaidPlanRank = React.useMemo(
     () => Math.max(
@@ -382,9 +375,9 @@ export function SettingsSubscription() {
         setPaymentDialogOpen(true);
         return;
       }
-      await handleSubscribeFreePlan(price);
+      toast.error(t("toasts.planUnavailable"), { description: t("toasts.planUnavailableDescription") });
     },
-    [currentPlan, handleSubscribeFreePlan, paymentDisabled, protectedPaidPlanRank, t],
+    [currentPlan, paymentDisabled, protectedPaidPlanRank, t],
   );
 
   const handleConfirmPayment = React.useCallback(async () => {
@@ -392,17 +385,40 @@ export function SettingsSubscription() {
       toast.error(t("toasts.noPlanSelected"), { description: t("toasts.noPlanSelectedDescription") });
       return;
     }
-    await handleCheckout(selectedPrice, selectedPaymentProvider, selectedEPayType);
-  }, [handleCheckout, selectedEPayType, selectedPaymentProvider, selectedPrice, t]);
+    await handleCheckout(selectedPrice, selectedPaymentProvider);
+  }, [handleCheckout, selectedPaymentProvider, selectedPrice, t]);
 
-  const periodCredit = billingOverview?.periodCreditUSD ?? currentPlan?.periodCreditUSD ?? 0;
+  const periodCredit = billingOverview?.periodCreditUSD ?? currentPlan?.monthlyLimitUSD ?? 0;
   const periodUsed = billingOverview?.periodUsedUSD ?? 0;
   const periodPercent = periodCredit > 0 ? Math.min(100, Math.max(0, (periodUsed / periodCredit) * 100)) : 0;
   const billingAccount = billingOverview?.account ?? null;
 
   return (
     <SettingsPage className="space-y-6">
-      <SettingsSectionHeader title={t("title")} className="px-1" />
+      <SettingsSectionHeader
+        title={t("title")}
+        className="px-1"
+        actions={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={billingLoading || usageLoading}
+                onClick={() => void Promise.all([
+                  loadBillingData(),
+                  loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort),
+                ])}
+                aria-label={t("refresh")}
+              >
+                <RefreshCw className={billingLoading || usageLoading ? "animate-spin" : ""} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("refresh")}</TooltipContent>
+          </Tooltip>
+        )}
+      />
 
       <SubscriptionSummary
         billingMode={billingMode}
@@ -414,7 +430,6 @@ export function SettingsSubscription() {
         billingOverview={billingOverview}
         currentPlan={currentPlan}
         currentPrice={currentPrice}
-        viewer={viewer}
         billingAccount={billingAccount}
         subscriptionEntitlements={subscriptionEntitlements}
         locale={locale}
@@ -422,13 +437,10 @@ export function SettingsSubscription() {
         entitlementLabels={entitlementLabels}
         planActionLabels={planActionLabels}
         planFeatureLabels={planFeatureLabels}
-        epayLabels={epayLabels}
-        epayTypes={epayTypes}
         paymentProviders={paymentProviders}
         selectedPlan={selectedPlan}
         selectedPrice={selectedPrice}
         selectedPaymentProvider={selectedPaymentProvider}
-        selectedEPayType={selectedEPayType}
         checkoutPriceID={checkoutPriceID}
         pricingDialogOpen={pricingDialogOpen}
         paymentDialogOpen={paymentDialogOpen}
@@ -443,7 +455,6 @@ export function SettingsSubscription() {
         onPaymentDialogOpenChange={setPaymentDialogOpen}
         onSelectPlan={(plan, price, isCurrent) => void handleSelectPlan(plan, price, isCurrent)}
         onPaymentProviderChange={setSelectedPaymentProvider}
-        onEPayTypeChange={setSelectedEPayType}
         onConfirmPayment={() => void handleConfirmPayment()}
       />
 
@@ -465,22 +476,22 @@ export function SettingsSubscription() {
           page={usagePage}
           pageSize={usagePageSize}
           query={usageQuery}
-          status={usageStatus}
+          billingType={usageBillingType}
           sort={usageSort}
           billingDisplay={billingDisplay}
           onQueryChange={(value) => {
             setUsageQuery(value);
             setUsagePage(1);
           }}
-          onStatusChange={(value) => {
-            setUsageStatus(value);
+          onBillingTypeChange={(value) => {
+            setUsageBillingType(value);
             setUsagePage(1);
           }}
           onSortChange={(value) => {
             setUsageSort(value);
             setUsagePage(1);
           }}
-          onRefresh={() => void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageStatus, usageSort)}
+          onRefresh={() => void loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort)}
           onPageChange={setUsagePage}
           onPageSizeChange={(nextPageSize) => {
             setUsagePageSize(nextPageSize);
@@ -493,19 +504,18 @@ export function SettingsSubscription() {
         open={topUpDialogOpen}
         onOpenChange={setTopUpDialogOpen}
         amount={topUpAmount}
-        currentBalance={formatAccountBalance(billingAccount?.balanceUSD ?? 0, billingDisplay)}
+        currentBalance={formatAccountBalance(billingAccount?.balance ?? 0)}
         billingLoading={billingLoading}
         topUpLoading={topUpLoading}
         paymentDisabled={paymentDisabled}
         paymentProviders={paymentProviders}
+        paymentMethods={billingConfig?.paymentMethods ?? []}
         selectedPaymentProvider={selectedPaymentProvider}
-        selectedEPayType={selectedEPayType}
-        epayTypes={epayTypes}
         billingDisplay={billingDisplay}
-        epayLabels={epayLabels}
+        balanceRechargeMultiplier={billingConfig?.balanceRechargeMultiplier ?? 1}
+        rechargeFeeRate={billingConfig?.rechargeFeeRate ?? 0}
         onAmountChange={setTopUpAmount}
         onPaymentProviderChange={setSelectedPaymentProvider}
-        onEPayTypeChange={setSelectedEPayType}
         onSubmit={() => void handleTopUp()}
       />
 

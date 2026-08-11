@@ -5,7 +5,6 @@ import type {
   ChatMessageProcessTrace,
 } from "@/features/chat/types/messages";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
-import type { PublicModelPricingDTO } from "@/shared/api/model.types";
 import type { ModelNativeToolConfig } from "@/shared/lib/model-option-policy";
 
 export type ViewerProfile = {
@@ -29,7 +28,6 @@ export type ChatModelOption = {
   lockedOptionPaths: string[];
   nativeToolKeys: string[];
   nativeTools: ModelNativeToolConfig[];
-  pricing: PublicModelPricingDTO | null;
 };
 
 export type ModelOptionControlType = "boolean" | "number" | "select" | "text";

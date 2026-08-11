@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/gin-gonic/gin"
 )
@@ -104,8 +105,26 @@ func TestPublicRateLimitUsesRiskSpecificBuckets(t *testing.T) {
 	assertFixedCall(t, limiter.fixed[2], "public_auth", 30)
 }
 
-func TestRateLimitSkipsAdminUsers(t *testing.T) {
+func TestRateLimitSkipsSuperAdminUsers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	limiter := &recordingRateLimiter{allow: false}
+	router := gin.New()
+	group := router.Group("/api/v1")
+	group.Use(testUserContext(domainuser.RoleSuperAdmin))
+	group.Use(RateLimit(limiter, config.NewRuntime(config.Config{RateLimitEnabled: true, RateLimitRPM: 60})))
+	group.GET("/models", okHandler)
+
+	response := performRequest(router, http.MethodGet, "/api/v1/models")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected superadmin request to pass, got %d", response.Code)
+	}
+	if len(limiter.sliding) != 0 {
+		t.Fatalf("expected no limiter call for superadmin, got %d", len(limiter.sliding))
+	}
+}
+
+func TestRateLimitDoesNotSkipLegacyAdminRole(t *testing.T) {
 	limiter := &recordingRateLimiter{allow: false}
 	router := gin.New()
 	group := router.Group("/api/v1")
@@ -114,12 +133,11 @@ func TestRateLimitSkipsAdminUsers(t *testing.T) {
 	group.GET("/models", okHandler)
 
 	response := performRequest(router, http.MethodGet, "/api/v1/models")
-
-	if response.Code != http.StatusOK {
-		t.Fatalf("expected admin request to pass, got %d", response.Code)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected legacy admin role to be rate limited, got %d", response.Code)
 	}
-	if len(limiter.sliding) != 0 {
-		t.Fatalf("expected no limiter call for admin, got %d", len(limiter.sliding))
+	if len(limiter.sliding) != 1 {
+		t.Fatalf("expected one limiter call for legacy admin role, got %d", len(limiter.sliding))
 	}
 }
 

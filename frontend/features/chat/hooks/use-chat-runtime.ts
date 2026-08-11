@@ -92,6 +92,7 @@ export function useChatRuntime({
   messages,
   activeConversation,
   selectedPlatformModelName,
+  selectedKeyBindingID,
   modelOptions,
   selectedToolIDs,
   selectedSkills,
@@ -120,6 +121,7 @@ export function useChatRuntime({
   messages: MessageDTO[];
   activeConversation: ConversationDTO | null;
   selectedPlatformModelName: string;
+  selectedKeyBindingID: string;
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
@@ -184,6 +186,7 @@ export function useChatRuntime({
     conversationScopeKey,
     activeConversation,
     selectedPlatformModelName,
+    selectedKeyBindingID,
     modelOptions,
     selectedToolIDs,
     selectedSkills,

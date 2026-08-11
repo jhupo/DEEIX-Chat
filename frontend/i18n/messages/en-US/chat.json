@@ -307,40 +307,15 @@
     "cacheWriteTokens": "Cache write tokens",
     "generationDuration": "Generation duration",
     "totalDuration": "Total duration",
-    "model": "Model",
-    "billingCost": "Call cost",
-    "billing": {
-      "cacheWrite": "Cache write",
-      "cacheWrite5m": "Cache write 5m",
-      "cacheWrite1h": "Cache write 1h",
-      "cacheWrite5m1h": "Cache write 5m/1h",
-      "cacheWritePricingLabel": "Cache write 5m",
-      "cacheWritePricingNote": "Claude cache read uses configured pricing; cache write 5m uses 1.25x, 1h uses 2x, and Fast Mode applies another 6x on top.",
-      "claudeCacheWriteMixedNote": "Claude cache write uses configured pricing at {multiplier}.",
-      "claudeCacheWriteNote": "Claude {timeout} cache write uses configured pricing at {multiplier}.",
-      "claudeFastModeNote": "Claude Fast Mode bills input, output, and cache usage at {multiplier}.",
-      "openaiServiceTierNote": "OpenAI service_tier={tier} bills at {multiplier}.",
-      "input": "Input",
-      "output": "Output",
-      "cacheRead": "Cache read",
-      "rateNote": "Multiplier",
-      "cacheNote": "Cache",
-      "total": "Total",
-      "freeModelNoBilling": "free model, not billed",
-      "perCall": "Per call",
-      "perSecond": "Per second",
-      "callUnit": "call",
-      "secondUnit": "second",
-      "tieredRangeBounded": "Original input range {from}-{upTo}",
-      "tieredRangeOpen": "Original input range {from}+",
-      "table": {
-        "item": "Billing item",
-        "usage": "Usage",
-        "unitPrice": "Unit price",
-        "amount": "Amount",
-        "total": "Total"
-      }
-    }
+    "model": "Model"
+  },
+  "keyPicker": {
+    "title": "API key",
+    "select": "Select API key",
+    "refresh": "Refresh keys",
+    "delete": "Delete binding",
+    "empty": "No API keys available",
+    "loadFailed": "Could not load API keys"
   },
   "composer": {
     "uploadFile": "Upload file",
@@ -490,31 +465,7 @@
   "modelPicker": {
     "selectModel": "Select model",
     "empty": "No models",
-    "group": "Group",
-    "viewPricing": "View pricing",
-    "freeModel": "Free model",
-    "freeModelDescription": "No usage balance will be deducted",
-    "tieredPricing": "Tiered pricing",
-    "callPricing": "Per-call pricing",
-    "durationPricing": "Per-second pricing",
-    "tokenPricing": "Usage pricing",
-    "input": "Input",
-    "output": "Output",
-    "cacheRead": "Cache read",
-    "cacheWrite": "Cache write",
-    "cacheWrite5m": "Cache write 5m",
-    "cacheWrite1h": "Cache write 1h",
-    "cacheWrite5m1h": "Cache write 5m/1h",
-    "cacheWritePricingLabel": "Cache write 5m",
-    "cacheWritePricingNote": "Claude cache read uses configured pricing; cache write 5m uses 1.25x, 1h uses 2x, and Fast Mode applies another 6x on top.",
-    "claudeCacheWriteMixedNote": "Claude cache write uses configured pricing at {multiplier}.",
-    "claudeCacheWriteNote": "Claude {timeout} cache write uses configured pricing at {multiplier}.",
-    "claudeFastModeNote": "Claude Fast Mode bills input, output, and cache usage at {multiplier}.",
-    "openaiServiceTierNote": "OpenAI service_tier={tier} bills at {multiplier}.",
-    "perCall": "Per call",
-    "perSecond": "Per second",
-    "callUnit": "call",
-    "secondUnit": "second"
+    "group": "Group"
   },
   "processTrace": {
     "fileBadges": {

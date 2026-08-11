@@ -26,8 +26,8 @@ var allowedKeys = map[string]string{
 	"chat.show_token_usage":                     "true",
 	"chat.show_model_info":                      "true",
 	"chat.show_latency":                         "true",
-	"chat.show_billing_cost":                    "true",
 	"chat.default_model":                        "",
+	"chat.default_sub2_key_binding_id":          "",
 	"chat.auto_generate_title":                  "true",
 	"chat.auto_generate_labels":                 "true",
 	"chat.delete_conversation_files_by_default": "false",
@@ -47,7 +47,6 @@ var boolKeys = map[string]bool{
 	"chat.show_token_usage":                     true,
 	"chat.show_model_info":                      true,
 	"chat.show_latency":                         true,
-	"chat.show_billing_cost":                    true,
 	"chat.auto_generate_title":                  true,
 	"chat.auto_generate_labels":                 true,
 	"chat.delete_conversation_files_by_default": true,
@@ -72,6 +71,9 @@ func validateValue(key, value string) error {
 	if key == "chat.default_mcp_tool_ids" {
 		return validateDefaultMCPToolIDs(value, key)
 	}
+	if key == "chat.default_sub2_key_binding_id" {
+		return validateDefaultSub2KeyBindingID(value, key)
+	}
 	if boolKeys[key] {
 		if value != "true" && value != "false" {
 			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be 'true' or 'false'", key)}
@@ -84,6 +86,21 @@ func validateValue(key, value string) error {
 				valid = append(valid, "'"+v+"'")
 			}
 			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be one of %s", key, strings.Join(valid, ", "))}
+		}
+	}
+	return nil
+}
+
+func validateDefaultSub2KeyBindingID(value string, key string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) != len("sub2_")+32 || !strings.HasPrefix(value, "sub2_") {
+		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be an empty value or a Sub2 key binding ID", key)}
+	}
+	for _, ch := range value[len("sub2_"):] {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be an empty value or a Sub2 key binding ID", key)}
 		}
 	}
 	return nil

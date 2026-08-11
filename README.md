@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  An integrated AI platform for enterprise model routing, chat, files, tools, billing, identity, and operations.
+  An integrated AI platform for enterprise model routing, chat, files, tools, Sub2 commerce, identity, and operations.
 </p>
 
 <p align="center">
@@ -42,9 +42,9 @@ The system is designed around simple deployment, efficient static delivery, and 
 | Files and retrieval | File upload, preview, extraction, OCR, storage quota, full-context injection, chunking, embeddings, and semantic retrieval so file content can naturally enter the conversation context. |
 | Tool ecosystem | MCP servers and provider-native official tools with discovery, enablement, user selection, execution limits, result rendering, and tool-call traceability. |
 | Context and memory | Message windows, token budgets, summary compression, conversation memory, long-term memory, and RAG evidence records for controlled-cost continuity. |
-| Billing and payments | Model pricing, per-call tool pricing, subscriptions, top-ups, balances, usage ledgers, billing snapshots, Stripe Checkout, EPay, and webhook validation. |
-| Identity and security | Local accounts, session management, HttpOnly refresh cookies, 2FA/TOTP, trusted devices, SSO/OIDC/OAuth, contact verification, and encrypted sensitive data. |
-| Administration and audit | Centralized management for users, roles, upstreams, models, routes, pricing, subscriptions, balances, usage logs, audit logs, auth events, and system events. |
+| Sub2 commerce | The subscription page reads balance, subscriptions, plans, usage, checkout, and redemption state through the logged-in user's server-side Sub2 session. DEEIX has no local ledger, settlement, pricing, or payment-provider authority. |
+| Identity and security | Sub2-backed login, registration, password change, and login-time TOTP challenge; role is refreshed from Sub2, while DEEIX keeps resource-owner projections, per-browser sessions, HttpOnly refresh cookies, and encrypted upstream tokens. |
+| Administration and audit | Read-only Sub2 user projections, DEEIX session revocation, upstreams, models, routes, usage logs, audit logs, auth events, and system events. |
 | Deployment and operations | Single-runtime frontend/API serving, Docker deployment with PostgreSQL + pgvector and Redis, S3-compatible storage, Swagger, structured logs, version endpoint, GeoIP, and OpenTelemetry. |
 
 <p align="center">
@@ -73,7 +73,7 @@ flowchart TB
   subgraph Backend["Go Single Runtime"]
     Static["Static Asset Serving"]
     HTTP["Gin HTTP API"]
-    App["Application<br/>Auth / Routing / Files / Billing / Audit"]
+    App["Application<br/>Auth / Routing / Files / Sub2 BFF / Audit"]
     Infra["Infra Adapters<br/>Protocols / Data / Cache / Storage"]
   end
 
@@ -112,7 +112,7 @@ flowchart TB
 | Tool protocol | MCP tool integration and provider-native official tools | MCP Streamable HTTP JSON-RPC, provider-native tools |
 | Deployment runtime | Canonical application, PostgreSQL + pgvector, and Redis deployment | Docker, Docker Compose, PostgreSQL/Redis |
 
-The backend keeps clear internal boundaries: `cmd/internal/cli` handles entrypoints, `internal/app` assembles the application, `transport/http` owns the HTTP boundary, `application` coordinates use cases and transactions, `domain` expresses business semantics, and `infra` contains database, cache, storage, and external protocol implementations. The data layer uses domain-prefixed tables, while financial records, audit trails, system events, and high-growth vector data remain separate sources of truth.
+The backend keeps clear internal boundaries: `cmd/internal/cli` handles entrypoints, `internal/app` assembles the application, `transport/http` owns the HTTP boundary, `application` coordinates use cases and transactions, `domain` expresses business semantics, and `infra` contains database, cache, storage, and external protocol implementations. The data layer uses domain-prefixed tables, while DEEIX operational records, audit trails, system events, and high-growth vector data remain separate sources of truth. Sub2 remains authoritative for identity and commerce.
 
 ## Quick Start
 
@@ -195,11 +195,18 @@ To publish the application at a fixed remote listener without editing Compose, c
 ```dotenv
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
+SUB2_BASE_URL=https://api.ovload.com
 ```
+
+`SUB2_BASE_URL` is the sole Sub2 deployment setting. It defaults to `https://api.ovload.com`; override it only when this DEEIX deployment is paired with another compatible Sub2 instance. The backend derives the instance identity from this canonical origin and never accepts an upstream URL from the browser.
+
+#### v0.4 Upgrade Boundary
+
+Before v0.4 mutates schema, it rejects a populated legacy identity schema. Back up the current PostgreSQL instance and deploy v0.4 with a fresh PostgreSQL database or volume. This clean-slate cutover has no migration or compatibility layer and does not preserve old login or chat-history continuity. See [Full deployment and online update](docs/agent-runtime/06-full-deployment-and-online-update.md).
 
 #### Configuration, Persistence, and Image
 
-Configuration priority is `environment variables > config.yaml > built-in defaults`. `config.yaml` is for static infrastructure and security configuration such as server URLs, database, cache, storage, GeoIP, tracing, JWT, and encryption keys. Runtime business settings are stored in the database and managed in the admin console.
+Configuration priority is `environment variables > config.yaml > built-in defaults`. `config.yaml` is for static infrastructure and security configuration such as server URLs, database, cache, storage, GeoIP, tracing, JWT, and encryption keys. Runtime settings stored in the database cover DEEIX-owned application behavior; identity, balances, subscriptions, plans, usage, checkout, and redemption are read or changed only through the logged-in user's server-side Sub2 session.
 
 The canonical compose stack persists application data:
 
@@ -243,9 +250,9 @@ Default local endpoints:
 
 `docker/rapidocr` currently provides a Dockerfile and app entrypoint, but no compose file. Add a compose file or run it manually if you choose RapidOCR.
 
-### Separated Deployment
+### Separate-Origin Source Development (Not a Deployment Profile)
 
-Use this mode when the frontend and backend are served from different public origins, for example `https://chat.example.com` and `https://api.example.com`.
+The Full Compose bundle is the only supported deployment profile. The following source-development notes describe testing static assets against a separately served API; they are not an alternate v0.4 deployment topology or updater target.
 
 1. Configure public URLs.
 
@@ -290,22 +297,13 @@ docker compose -f compose.yaml exec app ls -l /app/config.yaml
 docker compose -f compose.yaml logs app
 ```
 
-If the database does not contain a superadmin account, the backend creates the initial administrator on first startup and prints the initial password only once.
-
-| Item | Description |
-| --- | --- |
-| Initial username | `admin` |
-| Initial password | Inspect backend startup logs, search for `bootstrap superadmin created`, and read the `password` field. |
-| First login | The system requires changing the username and password. |
-| Later changes | Use the account flow or admin console; credentials are not managed through `config.yaml`. |
-
-If a superadmin already exists, the service does not regenerate or print the initial password again.
+Sign in with a user from the configured Sub2 instance. DEEIX verifies every successful login with Sub2 `/api/v1/auth/me`: Sub2 `admin` becomes DEEIX `superadmin`, and Sub2 `user` becomes DEEIX `user`. DEEIX does not create or print a local bootstrap password.
 
 ## Configuration
 
 > Full configuration guide: [Configuration](https://deeix.com/docs/deeix-chat/configuration).
 
-Backend configuration is split into static runtime configuration and runtime business settings. Static runtime configuration describes branding and the infrastructure, security, and storage parameters required to start the service, and is provided through `config.yaml` and environment variables. Runtime business settings cover product capabilities such as authentication, conversations, models, files, and billing; they are stored in `system_settings` and maintained from the admin console. Environment variables override matching config-file values, which is useful for containerized deployments, separated deployments, and secret injection.
+Backend configuration is split into static runtime configuration and DEEIX-owned runtime settings. Static runtime configuration describes branding and the infrastructure, security, and storage parameters required to start the service, and is provided through `config.yaml` and environment variables. DEEIX-owned settings cover application behavior such as conversations, models, and files; they are stored in `system_settings` and maintained from the admin console. Sub2 identity and commerce are not DEEIX runtime business settings: the BFF uses the current server-side Sub2 session, and the browser never receives a Sub2 bearer token. Environment variables override matching config-file values, which is useful for containers, source development, and secret injection.
 
 At startup, the backend resolves the default config file from the working directory: starting from the repository root reads `config.yaml`, while starting from `backend/` reads `../config.yaml`. Docker deployments usually mount host `./config.yaml` as read-only `/app/config.yaml` inside the container. If the config file is stored elsewhere, set `CONFIG_FILE` to a path accessible from the running process or container.
 
@@ -319,6 +317,7 @@ Static configuration environment variables:
 | Config file | `CONFIG_FILE` | Optional config file path; Docker values should use the container path. |
 | Application | `APP_NAME` | Application name. |
 | Application | `APP_ENV` | Runtime environment: `dev`/`development` or `prod`/`production`; omitted values default to `prod`. |
+| Sub2 | `SUB2_BASE_URL` | Canonical Sub2 origin; defaults to `https://api.ovload.com` and must use HTTPS in production. |
 | HTTP service | `HTTP_PORT` | API/runtime port. |
 | HTTP service | `CORS_ALLOW_ORIGIN` | Allowed CORS origins, comma-separated. |
 | HTTP service | `TRUSTED_PROXIES` | Trusted proxy CIDR list. |
@@ -330,11 +329,10 @@ Static configuration environment variables:
 | HTTP service | `HTTP_IDLE_TIMEOUT_SECONDS` | HTTP keep-alive idle timeout. |
 | HTTP service | `HTTP_MAX_HEADER_BYTES` | Maximum HTTP request header size. |
 | Security | `JWT_SECRET` | JWT signing secret. |
-| Security | `DATA_ENCRYPTION_KEY` | Key material for upstream API keys, SSO secrets, MCP tokens, sensitive settings, and TOTP secrets. |
+| Security | `DATA_ENCRYPTION_KEY` | Key material for Sub2 session tokens, upstream API keys, MCP tokens, and sensitive settings. |
 | Security | `SSRF_PROTECTION_ENABLED` | Enables outbound SSRF protection. |
 | Security | `SSRF_ALLOWED_HOSTS` | Exact hostnames for deployment-level integrations or trusted private redirect targets, comma-separated. |
 | Security | `SSRF_ALLOWED_CIDRS` | Trusted deployment-level integration or private redirect CIDRs, comma-separated. |
-| Security | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify endpoint. |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN. |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | Maximum open connections. |
 | PostgreSQL | `POSTGRES_MAX_IDLE_CONNS` | Maximum idle connections. |
@@ -370,19 +368,9 @@ Static configuration environment variables:
 | OpenTelemetry | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP exporter protocol: `grpc`, `http`, or `http/protobuf`; defaults to `grpc`. |
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace sampling rate from `0` to `1`; `OTEL_TRACES_SAMPLER_ARG` takes priority. |
 
-Authentication, registration, conversation settings, model option policies, file processing, RAG, embedding, MCP, billing, payments, and announcements are runtime business settings, not static YAML configuration. Their defaults are seeded by the backend and maintained in the admin console.
+DEEIX token lifetime, rate limits, the post-login path, conversation settings, model option policies, file processing, RAG, embedding, MCP, billing, payments, and announcements are runtime business settings. Sub2 controls login, registration, email verification, login factors, user roles, and account status; DEEIX does not duplicate those controls in its admin console.
 
-When SSRF protection is enabled in production, administrator-saved model, MCP, Embedding, OIDC/OAuth2, and custom Turnstile endpoints are authorized locally by exact origin (`scheme + host + port`) and do not require entries in the global allowlist. Model, MCP, and Embedding redirects retain standard compatibility: public cross-origin targets are allowed, while private cross-origin targets must match `SSRF_ALLOWED_HOSTS` or `SSRF_ALLOWED_CIDRS`; OIDC/OAuth2 and Turnstile keep their stricter identity boundary. Generated media is downloaded, validated, and stored by the backend: a private artifact URL inherits trust only when it has the same origin as the selected model endpoint; public cross-origin artifact URLs remain subject to the strict public-network policy, and private cross-origin artifact URLs are blocked. The global allowlist also remains available for deployment-level integrations that cannot be tied to an administrator-saved endpoint, such as selected GeoIP or extraction deployments. Link-local, multicast, unspecified, and known metadata targets always remain blocked. Invalid allowlist entries stop backend startup, and global allowlist changes require a restart.
-
-### OAuth callbacks for Web, App, and Desktop (multi-platform clients not yet released)
-
-Set `PUBLIC_API_BASE_URL` to the externally reachable API origin before enabling the provider auth bridge. For every OIDC/OAuth2 provider, register the server callback shown in the admin provider dialog:
-
-```text
-<PUBLIC_API_BASE_URL>/api/v1/auth/providers/<provider-slug>/callback
-```
-
-Web, App, and Desktop clients then reuse that instance callback automatically. The external provider authorization code and client secret remain on the self-hosted server; public clients receive only a short-lived, one-time DEEIX grant bound to their PKCE verifier. Keep the legacy Web callback shown by the admin dialog registered when account identity binding or older Web clients are still in use.
+When SSRF protection is enabled in production, administrator-saved model, MCP, and Embedding endpoints are authorized locally by exact origin (`scheme + host + port`) and do not require entries in the global allowlist. Public cross-origin redirects are allowed, while private cross-origin redirects must match `SSRF_ALLOWED_HOSTS` or `SSRF_ALLOWED_CIDRS`. Generated media is downloaded, validated, and stored by the backend: a private artifact URL inherits trust only when it has the same origin as the selected model endpoint; public cross-origin artifact URLs remain subject to the strict public-network policy, and private cross-origin artifact URLs are blocked. The configured `SUB2_BASE_URL` is validated separately as a canonical origin and redirects may not change that origin. Link-local, multicast, unspecified, and known metadata targets always remain blocked.
 
 ## Feature Guides
 
@@ -392,11 +380,10 @@ Web, App, and Desktop clients then reuse that instance callback automatically. T
 
 ## Security Notes
 
-- User passwords are hashed with bcrypt.
+- Passwords, registration factors, and login TOTP are processed by Sub2 and are not persisted by DEEIX.
 - Production mode rejects unsafe default secrets, weak encryption keys, wildcard CORS, and non-HTTPS public URLs.
-- Refresh tokens and recovery-style secrets are stored as hashes.
-- Upstream API keys, SSO client secrets, MCP auth tokens, sensitive settings, and TOTP secrets are encrypted with AES-GCM using `DATA_ENCRYPTION_KEY`.
-- Access tokens are short-lived and held client-side in memory; refresh tokens are issued through HttpOnly cookies.
+- DEEIX refresh tokens are stored as hashes; each browser session's Sub2 access and refresh tokens are encrypted with AES-GCM using `DATA_ENCRYPTION_KEY`.
+- DEEIX access tokens are short-lived and held client-side in memory; DEEIX refresh tokens are issued through HttpOnly cookies. Sub2 bearer tokens never enter the browser.
 - User-supplied model options are filtered before provider requests. System-generated fields such as model, messages, tools, system prompts, headers, and previous-response identifiers are not user-overridable.
 
 ## Documentation

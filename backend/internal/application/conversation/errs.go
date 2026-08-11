@@ -3,6 +3,8 @@ package conversation
 import "errors"
 
 var (
+	ErrInvalidKeyBinding     = errors.New("invalid key binding")
+	ErrKeyBindingUnavailable = errors.New("key binding unavailable")
 	// ErrConversationNotFound 会话不存在或无权限。
 	ErrConversationNotFound = errors.New("conversation not found")
 	// ErrConversationEventNotFound 对话事件日志不存在。

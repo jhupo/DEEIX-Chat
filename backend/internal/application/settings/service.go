@@ -265,7 +265,6 @@ func csvSet(raw string) map[string]struct{} {
 // validNamespaces 合法的 namespace 集合。
 var validNamespaces = map[string]bool{
 	"auth":    true,
-	"billing": true,
 	"chat":    true,
 	"storage": true,
 	"file":    true,
@@ -308,9 +307,6 @@ func (s *Service) BatchUpdate(ctx context.Context, patches []PatchItem) (map[str
 	if err := s.validateEmbeddingDependentSettings(ctx, patches); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
 	}
-	if err := s.validateBillingPaymentSettings(ctx, patches); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
-	}
 	items, err := s.preparePatchItemsForStorage(patches)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSetting, err)
@@ -346,47 +342,6 @@ func validatePatchItem(item PatchItem) error {
 	}
 	value := strings.TrimSpace(item.Value)
 	switch key {
-	case "billing:mode":
-		switch value {
-		case "self", "period", "usage":
-			return nil
-		default:
-			return fmt.Errorf("%s must be one of: self, period, usage", key)
-		}
-	case "billing:payment_providers":
-		for _, provider := range normalizePaymentProvidersSetting(value) {
-			switch provider {
-			case "stripe", "epay":
-			default:
-				return fmt.Errorf("%s must contain only: stripe, epay", key)
-			}
-		}
-		return nil
-	case "billing:usd_to_cny_rate":
-		return validateFloatMinMax(value, 0.000001, 1000, key)
-	case "billing:display_currency":
-		switch value {
-		case "USD", "CNY":
-			return nil
-		default:
-			return fmt.Errorf("%s must be one of: USD, CNY", key)
-		}
-	case "billing:prepaid_amount_usd":
-		return validateFloatMinMax(value, 0, 1000000, key)
-	case "billing:stripe_publishable_key", "billing:stripe_secret_key", "billing:stripe_webhook_secret", "billing:epay_pid", "billing:epay_key":
-		return validateStringMax(value, 512, key)
-	case "billing:epay_types":
-		if err := validateStringMax(value, 4000, key); err != nil {
-			return err
-		}
-		return validateEPayTypesJSON(value, key)
-	case "billing:native_tool_pricing_json":
-		return validateNativeToolPricingJSON(value, key)
-	case "billing:epay_gateway_url":
-		if err := validateStringMax(value, 512, key); err != nil {
-			return err
-		}
-		return validateOptionalHTTPURL(value, key)
 	case "chat:model_option_policy_mode":
 		switch value {
 		case "allowlist", "denylist", "disabled":
@@ -528,7 +483,7 @@ func validatePatchItem(item PatchItem) error {
 		return validateStringMax(value, 255, key)
 	case "extract:tencent_ocr_secret_id", "extract:tencent_ocr_secret_key", "extract:aliyun_ocr_access_key_id", "extract:aliyun_ocr_access_key_secret":
 		return validateStringMax(value, 512, key)
-	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "billing:native_tool_billing_enabled", "chat:rag_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
+	case "auth:username_login_enabled", "auth:email_login_enabled", "auth:third_party_login_enabled", "auth:email_registration_enabled", "auth:email_verification_enabled", "auth:password_reset_enabled", "auth:email_registration_block_plus_alias", "auth:auto_link_verified_email", "auth:turnstile_registration_enabled", "auth:rate_limit_enabled", "chat:rag_enabled", "chat:message_embedding_enabled", "chat:semantic_context_enabled", "file:full_context_limit_enabled", "file:embedding_enabled", "file:embed_trigger_on_upload", "file:embedding_normalize", "extract:image_ocr_enabled", "extract:pdf_ocr_fallback_enabled", "mcp:mcp_enable":
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("%s must be bool", key)
 		}
@@ -880,122 +835,6 @@ func (s *Service) validateEmbeddingDependentSettings(ctx context.Context, patche
 		}
 	}
 	return nil
-}
-
-func (s *Service) validateBillingPaymentSettings(ctx context.Context, patches []PatchItem) error {
-	hasBillingPatch := false
-	for _, item := range patches {
-		if item.Namespace == "billing" {
-			hasBillingPatch = true
-			break
-		}
-	}
-	if !hasBillingPatch {
-		return nil
-	}
-
-	next, err := s.loadEffectiveSettings(ctx, "billing")
-	if err != nil {
-		return err
-	}
-	applyPatchesToEffectiveSettings(next, patches, "billing")
-
-	providers := normalizePaymentProvidersSetting(next["billing:payment_providers"])
-	if len(providers) == 0 {
-		return nil
-	}
-	for _, provider := range providers {
-		switch provider {
-		case "stripe":
-			if err := requireSettingFields(next, []requiredSettingField{
-				{key: "billing:stripe_secret_key", label: "Stripe Secret Key"},
-				{key: "billing:stripe_webhook_secret", label: "Stripe Webhook Secret"},
-			}); err != nil {
-				return err
-			}
-		case "epay":
-			if err := validateFloatMinMax(next["billing:usd_to_cny_rate"], 0.000001, 1000, "billing:usd_to_cny_rate"); err != nil {
-				return err
-			}
-			if err := requireSettingFields(next, []requiredSettingField{
-				{key: "billing:epay_gateway_url", label: "billing:epay_gateway_url"},
-				{key: "billing:epay_types", label: "billing:epay_types"},
-				{key: "billing:epay_pid", label: "billing:epay_pid"},
-				{key: "billing:epay_key", label: "billing:epay_key"},
-			}); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("billing:payment_providers must contain only: stripe, epay")
-		}
-	}
-	return nil
-}
-
-func normalizePaymentProvidersSetting(raw string) []string {
-	parts := strings.Split(raw, ",")
-	results := make([]string, 0, len(parts))
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		provider := strings.ToLower(strings.TrimSpace(part))
-		if provider == "" || provider == "disabled" {
-			continue
-		}
-		if _, ok := seen[provider]; ok {
-			continue
-		}
-		seen[provider] = struct{}{}
-		results = append(results, provider)
-	}
-	return results
-}
-
-type epayTypeSetting struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-
-func validateEPayTypesJSON(value string, key string) error {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fmt.Errorf("%s is required", key)
-	}
-	var items []epayTypeSetting
-	if err := json.Unmarshal([]byte(value), &items); err != nil {
-		return fmt.Errorf("%s must be a JSON array", key)
-	}
-	if len(items) == 0 || len(items) > 10 {
-		return fmt.Errorf("%s must contain 1-10 payment types", key)
-	}
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		name := strings.TrimSpace(item.Name)
-		paymentType := strings.TrimSpace(item.Type)
-		if name == "" || paymentType == "" {
-			return fmt.Errorf("%s items require name and type", key)
-		}
-		if len(name) > 64 || len(paymentType) > 32 {
-			return fmt.Errorf("%s item is too long", key)
-		}
-		if !validPaymentSettingToken(paymentType) {
-			return fmt.Errorf("%s type contains invalid characters", key)
-		}
-		if _, ok := seen[paymentType]; ok {
-			return fmt.Errorf("%s type must be unique", key)
-		}
-		seen[paymentType] = struct{}{}
-	}
-	return nil
-}
-
-func validPaymentSettingToken(value string) bool {
-	for _, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
-			continue
-		}
-		return false
-	}
-	return true
 }
 
 type requiredSettingField struct {

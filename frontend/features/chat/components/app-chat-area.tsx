@@ -21,6 +21,7 @@ import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-st
 import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
+import { useChatKeyBindings } from "@/features/chat/hooks/use-chat-key-bindings";
 import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
@@ -306,6 +307,7 @@ export function AppChatArea() {
     (platformModelName?: string) => prependNewConversation(platformModelName, newConversationProjectID || undefined),
     [newConversationProjectID, prependNewConversation],
   );
+  const chatKeyBindings = useChatKeyBindings();
 
   const {
     modelOptions,
@@ -322,9 +324,6 @@ export function AppChatArea() {
     showModelInfo,
     showLatency,
     showTokenUsage,
-    showBillingCost,
-    billingDisplayCurrency,
-    billingDisplayUsdToCnyRate,
     modelOptionPolicy,
     mcpMaxSelectedTools,
     selectedPlatformModelName,
@@ -332,6 +331,7 @@ export function AppChatArea() {
   } = useChatModelOptions({
     conversationPublicID: conversationID,
     conversationModel: currentConversation?.model ?? null,
+    keyBindingID: chatKeyBindings.selectedKeyBindingID,
     resetToken: newConversationRevision,
   });
   const {
@@ -621,6 +621,7 @@ export function AppChatArea() {
     messages,
     activeConversation: currentConversation,
     selectedPlatformModelName,
+    selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
     modelOptions,
     selectedToolIDs,
     selectedSkills,
@@ -1145,8 +1146,11 @@ export function AppChatArea() {
     attachments,
     uploadingAttachments,
     modelOptions,
-    billingDisplayCurrency,
-    billingDisplayUsdToCnyRate,
+    remoteKeys: chatKeyBindings.remoteKeys,
+    keyBindings: chatKeyBindings.bindings,
+    selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
+    keyBindingsLoading: chatKeyBindings.loading,
+    keyBindingsError: chatKeyBindings.error,
     selectedPlatformModelName,
     availableTools,
     selectedToolIDs,
@@ -1160,10 +1164,14 @@ export function AppChatArea() {
     defaultOptions: selectedModelDefaultOptions,
     modelOptionPolicy,
     modelLoading: modelsLoading,
+    modelDisabled: !chatKeyBindings.selectedKeyBindingID,
     dropActive: fileDragActive,
     onDraftChange: setDraft,
     onModelChange: setSelectedPlatformModelName,
     onModelCatalogRefresh: refreshModelCatalogForComposer,
+    onKeyBindingsRefresh: chatKeyBindings.refresh,
+    onKeyBindingSelect: chatKeyBindings.select,
+    onKeyBindingDelete: chatKeyBindings.remove,
     onSelectedToolsChange,
     maxSelectedSkills: mcpMaxSelectedTools,
     onSelectedSkillsChange,
@@ -1266,9 +1274,6 @@ export function AppChatArea() {
                   showModelInfo={showModelInfo}
                   showLatency={showLatency}
                   showTokenUsage={showTokenUsage}
-                  showBillingCost={showBillingCost}
-                  billingDisplayCurrency={billingDisplayCurrency}
-                  billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
                   splitRightInset={hasInlineArtifact}
                   contentWidthClassName={chatContentWidthClassName}
                   onScreenshotFull={screenshot.captureFullConversation}

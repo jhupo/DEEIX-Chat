@@ -307,40 +307,7 @@
     "cacheWriteTokens": "缓存(写) tokens",
     "generationDuration": "生成用时",
     "totalDuration": "总用时",
-    "model": "模型",
-    "billingCost": "本次调用费用",
-    "billing": {
-      "cacheWrite": "缓存(写)",
-      "cacheWrite5m": "缓存(写 5m)",
-      "cacheWrite1h": "缓存(写 1h)",
-      "cacheWrite5m1h": "缓存(写 5m/1h)",
-      "cacheWritePricingLabel": "缓存(写 5m)",
-      "cacheWritePricingNote": "Claude 缓存读按后台配置；缓存写 5m 按后台配置价 1.25x，1h 按 2x；Fast Mode 会基于此再 6x。",
-      "claudeCacheWriteMixedNote": "Claude 缓存写按后台配置价 {multiplier} 计费。",
-      "claudeCacheWriteNote": "Claude {timeout} 缓存写按后台配置价 {multiplier} 计费。",
-      "claudeFastModeNote": "Claude Fast Mode：输入、输出和缓存费用按 {multiplier} 计费。",
-      "openaiServiceTierNote": "OpenAI service_tier={tier}：按 {multiplier} 计费。",
-      "input": "输入",
-      "output": "输出",
-      "cacheRead": "缓存(读)",
-      "rateNote": "倍率说明",
-      "cacheNote": "缓存说明",
-      "total": "总计",
-      "freeModelNoBilling": "免费模型，不计费",
-      "perCall": "每次",
-      "perSecond": "每秒",
-      "callUnit": "次",
-      "secondUnit": "秒",
-      "tieredRangeBounded": "原始输入区间 {from}-{upTo}",
-      "tieredRangeOpen": "原始输入区间 {from}+",
-      "table": {
-        "item": "计费项目",
-        "usage": "用量",
-        "unitPrice": "单价",
-        "amount": "金额",
-        "total": "总计"
-      }
-    }
+    "model": "模型"
   },
   "composer": {
     "uploadFile": "上传文件",
@@ -490,31 +457,7 @@
   "modelPicker": {
     "selectModel": "选择模型",
     "empty": "暂无模型",
-    "group": "分组",
-    "viewPricing": "查看价格",
-    "freeModel": "免费模型",
-    "freeModelDescription": "不会扣除按量余额",
-    "tieredPricing": "阶梯计费",
-    "callPricing": "按次计费",
-    "durationPricing": "按秒计费",
-    "tokenPricing": "按量计费",
-    "input": "输入",
-    "output": "输出",
-    "cacheRead": "缓存(读)",
-    "cacheWrite": "缓存(写)",
-    "cacheWrite5m": "缓存(写 5m)",
-    "cacheWrite1h": "缓存(写 1h)",
-    "cacheWrite5m1h": "缓存(写 5m/1h)",
-    "cacheWritePricingLabel": "缓存(写 5m)",
-    "cacheWritePricingNote": "Claude 缓存读按后台配置；缓存写 5m 按后台配置价 1.25x，1h 按 2x；Fast Mode 会基于此再 6x。",
-    "claudeCacheWriteMixedNote": "Claude 缓存写按后台配置价 {multiplier} 计费。",
-    "claudeCacheWriteNote": "Claude {timeout} 缓存写按后台配置价 {multiplier} 计费。",
-    "claudeFastModeNote": "Claude Fast Mode：输入、输出和缓存费用按 {multiplier} 计费。",
-    "openaiServiceTierNote": "OpenAI service_tier={tier}：按 {multiplier} 计费。",
-    "perCall": "每次",
-    "perSecond": "每秒",
-    "callUnit": "次",
-    "secondUnit": "秒"
+    "group": "分组"
   },
   "processTrace": {
     "fileBadges": {
@@ -895,5 +838,13 @@
     "advisor": "Advisor",
     "toolSearchRegex": "工具搜索（Regex）",
     "toolSearchBm25": "工具搜索（BM25）"
+  },
+  "keyPicker": {
+    "title": "API 密钥",
+    "select": "选择 API 密钥",
+    "refresh": "刷新密钥",
+    "delete": "删除绑定",
+    "empty": "没有可用 API 密钥",
+    "loadFailed": "无法加载 API 密钥"
   }
 }

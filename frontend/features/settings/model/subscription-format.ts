@@ -1,7 +1,5 @@
-import type { UserDTO } from "@/shared/api/auth.types";
 import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
 import {
-  formatBillingDisplayBalanceFromUSD,
   formatBillingDisplayAmountFromUSD,
   formatBillingDisplayCompactAmountFromUSD,
   formatBillingDisplayPreciseAmountFromUSD,
@@ -10,7 +8,6 @@ import {
 import type { BillingDisplayOptions } from "@/shared/lib/billing-display";
 
 const DEFAULT_BILLING_DISPLAY: BillingDisplayOptions = { currency: "USD" };
-type PaymentProvider = "stripe" | "epay";
 
 export function resolveDefaultPrice(plan: BillingPlanDTO | null | undefined): BillingPlanPriceDTO | null {
   const prices = plan?.prices ?? [];
@@ -26,31 +23,16 @@ export function formatPlanPrice(
   billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY,
 ): string {
   if (!price) return "-";
-  const currency = (price.currency || "USD").toUpperCase();
+  const currency = price.currency.trim().toUpperCase();
   const amount = currency === "USD"
     ? formatBillingDisplayAmountFromUSD((price.amountCents || 0) / 100, billingDisplay, { maximumFractionDigits: 2 })
-    : new Intl.NumberFormat("en-US", {
+    : currency ? new Intl.NumberFormat("en-US", {
       style: "currency",
       currency,
-    }).format((price.amountCents || 0) / 100);
+    }).format((price.amountCents || 0) / 100) : ((price.amountCents || 0) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
   if (price.billingInterval === "lifetime") return `${amount} / ${intervalLabels.lifetime}`;
   if (price.billingInterval === "year") return `${amount} / ${intervalLabels.year}`;
   return `${amount} / ${intervalLabels.month}`;
-}
-
-function effectivePaymentCurrency(provider: PaymentProvider, billingDisplay: BillingDisplayOptions): "USD" | "CNY" {
-  if (provider === "epay") {
-    return "CNY";
-  }
-  const rate = Number(billingDisplay.usdToCnyRate);
-  return billingDisplay.currency === "CNY" && Number.isFinite(rate) && rate > 0 ? "CNY" : "USD";
-}
-
-function formatCurrencyAmount(amount: number, currency: "USD" | "CNY"): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-  }).format(Math.max(0, amount));
 }
 
 export function billingDisplayInputCurrency(billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): "USD" | "CNY" {
@@ -79,26 +61,12 @@ export function billingDisplayAmountToMinorUnits(amount: number): number {
   return Math.round(amount * 100);
 }
 
-export function formatProviderPaymentAmountFromUSD(
-  amountUSD: number,
-  provider: PaymentProvider,
-  billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY,
-): string {
-  const currency = effectivePaymentCurrency(provider, billingDisplay);
-  if (currency === "USD") {
-    return formatCurrencyAmount(amountUSD, "USD");
-  }
-  const rate = Number(billingDisplay.usdToCnyRate);
-  const amount = Number.isFinite(rate) && rate > 0 ? amountUSD * rate : amountUSD * 7.2;
-  return formatCurrencyAmount(amount, "CNY");
-}
-
 export function formatPlanCredit(value: number, billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): string {
   return formatBillingDisplayAmountFromUSD(value, billingDisplay, { maximumFractionDigits: 2 });
 }
 
-export function formatAccountBalance(value: number, billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): string {
-  return formatBillingDisplayBalanceFromUSD(value, billingDisplay);
+export function formatAccountBalance(value: number): string {
+  return Number.isFinite(value) ? value.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "0";
 }
 
 export function formatUsageCost(value: number, billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): string {
@@ -111,11 +79,6 @@ export function formatTooltipUsageCost(value: number, billingDisplay: BillingDis
 
 export function formatTooltipUnitPrice(value: number, billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): string {
   return formatBillingDisplayUnitPriceFromUSD(value, billingDisplay);
-}
-
-export function nanousdToUSD(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value / 1_000_000_000;
 }
 
 export function formatUsageSummaryCost(value: number, billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): string {
@@ -220,10 +183,6 @@ export function formatUsageLogTime(value: string | null | undefined, locale: str
   }).format(date);
 }
 
-export function modelDisplayLabel(model: { platformModelName?: string }): string {
-  return model.platformModelName?.trim() || "-";
-}
-
 export function isFreePlan(plan: BillingPlanDTO | null | undefined): boolean {
   return plan?.code?.trim() === "free";
 }
@@ -231,9 +190,8 @@ export function isFreePlan(plan: BillingPlanDTO | null | undefined): boolean {
 export function isCurrentBillingPlan(
   plan: BillingPlanDTO,
   currentPlan: BillingPlanDTO | null,
-  viewer: UserDTO | null,
 ): boolean {
-  return currentPlan?.id === plan.id || viewer?.subscriptionPlanID === plan.id || viewer?.subscriptionTier === plan.code;
+  return currentPlan?.id === plan.id;
 }
 
 export function planRank(plan: BillingPlanDTO | null | undefined): number {
@@ -291,19 +249,6 @@ export function resolvePlanButtonVariant(action: PlanActionKind): "default" | "o
   if (action === "current") return "secondary";
   if (action === "freeBlocked" || action === "unavailable" || action === "switch") return "outline";
   return "default";
-}
-
-export function resolvePaymentProviderLabel(provider: string | undefined, fallback: string): string {
-  if (provider === "stripe") return "Stripe";
-  if (provider === "epay") return "EPay";
-  return fallback;
-}
-
-export function resolveEPayTypeLabel(type: string, labels: { alipay: string; wxpay: string; qqpay: string; custom: (type: string) => string }): string {
-  if (type === "alipay") return labels.alipay;
-  if (type === "wxpay") return labels.wxpay;
-  if (type === "qqpay") return labels.qqpay;
-  return labels.custom(type);
 }
 
 export function resolvePlanFeatures(

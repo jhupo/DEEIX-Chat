@@ -1369,21 +1369,6 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 	}))
 }
 
-// UpdateMessageBilling 回填消息计费金额与计费快照。
-func (r *Repo) UpdateMessageBilling(ctx context.Context, messageID uint, billedCurrency string, billedNanousd int64, pricingSnapshot string) error {
-	if billedNanousd < 0 {
-		billedNanousd = 0
-	}
-	return translateError(r.db.WithContext(ctx).
-		Model(&models.Message{}).
-		Where("id = ?", messageID).
-		Updates(map[string]interface{}{
-			"billed_currency":  billedCurrency,
-			"billed_nanousd":   billedNanousd,
-			"pricing_snapshot": pricingSnapshot,
-		}).
-		Error)
-}
 
 // SumMessageTokens 统计会话 token 消耗总量。
 func (r *Repo) SumMessageTokens(ctx context.Context, conversationID uint) (int64, error) {
@@ -3392,15 +3377,12 @@ func toUserDomain(item models.User) domainuser.User {
 		DisplayName:           item.DisplayName,
 		AvatarURL:             item.AvatarURL,
 		Email:                 item.Email,
-		Phone:                 item.Phone,
 		Role:                  item.Role,
 		Status:                item.Status,
 		Timezone:              item.Timezone,
 		Locale:                item.Locale,
 		ProfilePreferences:    item.ProfilePreferences,
 		AppearancePreferences: item.AppearancePreferences,
-		EmailVerifiedAt:       item.EmailVerifiedAt,
-		PhoneVerifiedAt:       item.PhoneVerifiedAt,
 		LastLoginAt:           item.LastLoginAt,
 		CreatedAt:             item.CreatedAt,
 		UpdatedAt:             item.UpdatedAt,
@@ -3428,9 +3410,6 @@ func toMessageDomain(item models.Message) domainconversation.Message {
 		CacheWriteTokens: item.CacheWriteTokens,
 		ReasoningTokens:  item.ReasoningTokens,
 		LatencyMS:        item.LatencyMS,
-		BilledCurrency:   item.BilledCurrency,
-		BilledNanousd:    item.BilledNanousd,
-		PricingSnapshot:  item.PricingSnapshot,
 		Status:           item.Status,
 		ErrorCode:        item.ErrorCode,
 		ErrorMessage:     item.ErrorMessage,
@@ -3477,9 +3456,6 @@ func toMessageModel(item *domainconversation.Message) models.Message {
 		CacheWriteTokens: item.CacheWriteTokens,
 		ReasoningTokens:  item.ReasoningTokens,
 		LatencyMS:        item.LatencyMS,
-		BilledCurrency:   item.BilledCurrency,
-		BilledNanousd:    item.BilledNanousd,
-		PricingSnapshot:  item.PricingSnapshot,
 		Status:           item.Status,
 		ErrorCode:        item.ErrorCode,
 		ErrorMessage:     item.ErrorMessage,

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
@@ -70,46 +69,11 @@ func (s *Service) ListActiveModels(ctx context.Context, userID uint) ([]ModelVie
 }
 
 func (s *Service) listActiveModelViews(ctx context.Context) ([]ModelView, error) {
-	now := time.Now()
-	if s.modelPricingFilter == nil {
-		items, err := s.listAllActiveModelRows(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return filterPublicRoutableModels(items), nil
-	}
-	mode, err := s.modelPricingFilter.GetBillingMode(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if mode == "self" {
-		items, err := s.listAllActiveModelRows(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return filterPublicRoutableModels(items), nil
-	}
-
-	s.modelCatalogMu.RLock()
-	if s.modelCatalog != nil && now.Before(s.modelCatalogValidUntil) {
-		result := cloneModelViews(s.modelCatalog)
-		s.modelCatalogMu.RUnlock()
-		return result, nil
-	}
-	s.modelCatalogMu.RUnlock()
-
 	items, err := s.listAllActiveModelRows(ctx)
 	if err != nil {
 		return nil, err
 	}
-	views := filterPublicRoutableModels(items)
-	pricingByPlatformModelName, err := s.modelPricingFilter.ListPublicModelPricing(ctx)
-	if err != nil {
-		return nil, err
-	}
-	views = filterPricedModelViews(views, pricingByPlatformModelName)
-	s.storeModelCatalog(now, views)
-	return cloneModelViews(views), nil
+	return filterPublicRoutableModels(items), nil
 }
 
 // filterModelsByPermission 按权限组过滤用户可访问的模型。
@@ -212,13 +176,6 @@ func cloneModelViews(items []ModelView) []ModelView {
 			displayGroupID := *item.DisplayGroupID
 			item.DisplayGroupID = &displayGroupID
 		}
-		if item.Pricing != nil {
-			pricing := *item.Pricing
-			if len(pricing.Tiers) > 0 {
-				pricing.Tiers = append([]appbilling.PublicModelPricingTier(nil), pricing.Tiers...)
-			}
-			item.Pricing = &pricing
-		}
 		results = append(results, item)
 	}
 	return results
@@ -235,19 +192,6 @@ func filterPublicRoutableModels(items []repository.ChannelModelListRow) []ModelV
 			continue
 		}
 		results = append(results, toModelView(item))
-	}
-	return results
-}
-
-func filterPricedModelViews(items []ModelView, pricingByPlatformModelName map[string]appbilling.PublicModelPricing) []ModelView {
-	results := make([]ModelView, 0, len(items))
-	for _, item := range items {
-		pricing, ok := pricingByPlatformModelName[strings.TrimSpace(item.PlatformModelName)]
-		if !ok {
-			continue
-		}
-		item.Pricing = &pricing
-		results = append(results, item)
 	}
 	return results
 }
@@ -283,24 +227,6 @@ func modelSourceAvailable(view ModelUpstreamSourceView) bool {
 		view.UpstreamStatus == "active" &&
 		view.UpstreamModelStatus == "active" &&
 		!view.CircuitOpen
-}
-
-// ResolvePlatformModelIdentity 将平台模型名解析为统一平台身份。
-func (s *Service) ResolvePlatformModelIdentity(ctx context.Context, platformModelName string) (appbilling.PlatformModelIdentity, error) {
-	name, err := normalizePlatformModelName(platformModelName)
-	if err != nil {
-		return appbilling.PlatformModelIdentity{}, ErrModelNotFound
-	}
-	item, err := s.repo.GetModelByName(ctx, name)
-	if err != nil {
-		return appbilling.PlatformModelIdentity{}, err
-	}
-	return appbilling.PlatformModelIdentity{
-		PlatformModelID:   item.ID,
-		PlatformModelName: item.PlatformModelName,
-		ModelVendor:       strings.TrimSpace(item.Vendor),
-		ModelIcon:         strings.TrimSpace(item.Icon),
-	}, nil
 }
 
 // ListActivePlatformModelNames 返回当前真实可路由的平台模型名集合。

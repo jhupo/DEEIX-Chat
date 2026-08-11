@@ -36,6 +36,7 @@ import {
 import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
+import { ChatKeyPicker } from "@/features/chat/components/sections/chat-key-picker";
 import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
 import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
@@ -75,7 +76,7 @@ import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import type { SendShortcut } from "@/features/settings/types/settings";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
-import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
+import type { Sub2KeyBindingDTO, Sub2RemoteKeyDTO } from "@/shared/api/sub2-key";
 
 const FilePreviewDialog = dynamic(
   () => import("@/shared/components/file-preview/preview-dialog").then((module) => module.FilePreviewDialog),
@@ -101,8 +102,11 @@ type ChatInputProps = {
   attachments: PendingAttachment[];
   uploadingAttachments: UploadingAttachment[];
   modelOptions: ChatModelOption[];
-  billingDisplayCurrency: BillingDisplayCurrency;
-  billingDisplayUsdToCnyRate: number | null;
+  remoteKeys: Sub2RemoteKeyDTO[];
+  keyBindings: Sub2KeyBindingDTO[];
+  selectedKeyBindingID: string;
+  keyBindingsLoading: boolean;
+  keyBindingsError: string;
   selectedPlatformModelName: string;
   availableTools: MCPToolDTO[];
   selectedToolIDs: number[];
@@ -122,6 +126,9 @@ type ChatInputProps = {
   onDraftChange: (value: string) => void;
   onModelChange: (platformModelName: string) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
+  onKeyBindingsRefresh: () => void | Promise<void>;
+  onKeyBindingSelect: (remoteKeyID: number) => void | Promise<void>;
+  onKeyBindingDelete: (publicID: string) => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
@@ -241,8 +248,11 @@ function ChatInputComponent({
   attachments,
   uploadingAttachments,
   modelOptions,
-  billingDisplayCurrency,
-  billingDisplayUsdToCnyRate,
+  remoteKeys,
+  keyBindings,
+  selectedKeyBindingID,
+  keyBindingsLoading,
+  keyBindingsError,
   selectedPlatformModelName,
   availableTools,
   selectedToolIDs,
@@ -262,6 +272,9 @@ function ChatInputComponent({
   onDraftChange,
   onModelChange,
   onModelCatalogRefresh,
+  onKeyBindingsRefresh,
+  onKeyBindingSelect,
+  onKeyBindingDelete,
   onSelectedToolsChange,
   onSelectedSkillsChange,
   onDefaultToolsChange,
@@ -318,7 +331,6 @@ function ChatInputComponent({
   const [inputGroupHeight, setInputGroupHeight] = React.useState<number | null>(null);
   const hasDraftText = draft.trim().length > 0;
   const hasSubmitContent = hasDraftText || attachments.length > 0;
-  const canSend = hasSubmitContent && !loading && !uploading;
   const showMarkdownPreview = markdownPreview && hasDraftText;
   const inputHeightClassName =
     inputHeight === "compact" ? "max-h-32" : inputHeight === "loose" ? "max-h-64" : "max-h-44";
@@ -395,6 +407,8 @@ function ChatInputComponent({
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
+	const requiresKeyBinding = submitTask === "chat";
+	const canSend = hasSubmitContent && !loading && !uploading && (!requiresKeyBinding || Boolean(selectedKeyBindingID));
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
@@ -1034,13 +1048,21 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
+			  {requiresKeyBinding ? <ChatKeyPicker
+                remoteKeys={remoteKeys}
+                bindings={keyBindings}
+                selectedKeyBindingID={selectedKeyBindingID}
+                loading={keyBindingsLoading}
+                error={keyBindingsError}
+                onRefresh={onKeyBindingsRefresh}
+                onSelect={onKeyBindingSelect}
+                onDelete={onKeyBindingDelete}
+			  /> : null}
               <ChatModelPicker
                 modelOptions={modelOptions}
-                billingDisplayCurrency={billingDisplayCurrency}
-                billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
                 selectedPlatformModelName={selectedPlatformModelName}
                 loading={modelLoading}
-                disabled={modelDisabled}
+			  disabled={modelDisabled || (requiresKeyBinding && !selectedKeyBindingID)}
                 onModelCatalogRefresh={onModelCatalogRefresh}
                 onModelChange={onModelChange}
               />
@@ -1050,7 +1072,7 @@ function ChatInputComponent({
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || (!sending && !hasSubmitContent && !speechInput.supported)}
+			  disabled={loading || uploading || (requiresKeyBinding && !selectedKeyBindingID) || (!sending && !hasSubmitContent && !speechInput.supported)}
                 onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}

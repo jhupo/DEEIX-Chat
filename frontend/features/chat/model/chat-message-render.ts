@@ -133,21 +133,6 @@ function areCompactDoneEqual(
   );
 }
 
-function areBillingCostsEqual(
-  previous: ChatAreaMessage["billingCost"],
-  next: ChatAreaMessage["billingCost"],
-) {
-  if (previous === next) return true;
-  if (!previous || !next) return false;
-  return (
-    previous.billingMode === next.billingMode &&
-    previous.billedCurrency === next.billedCurrency &&
-    previous.billedNanousd === next.billedNanousd &&
-    previous.billedUSD === next.billedUSD &&
-    previous.pricingSnapshotJSON === next.pricingSnapshotJSON
-  );
-}
-
 export function areChatAreaMessagesRenderEqual(
   previous: ChatAreaMessage,
   next: ChatAreaMessage,
@@ -180,7 +165,6 @@ export function areChatAreaMessagesRenderEqual(
     previous.cacheWriteTokens === next.cacheWriteTokens &&
     previous.reasoningTokens === next.reasoningTokens &&
     previous.latencyMS === next.latencyMS &&
-    areBillingCostsEqual(previous.billingCost, next.billingCost) &&
     areBranchNavigatorsEqual(previous.branchNavigator, next.branchNavigator) &&
     areAttachmentsEqual(previous.attachments, next.attachments) &&
     areProcessTracesEqual(previous.processTrace, next.processTrace) &&

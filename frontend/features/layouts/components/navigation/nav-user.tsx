@@ -59,7 +59,7 @@ export function NavUser({
   const [savingLocale, setSavingLocale] = React.useState<AppLocale | null>(null);
   const [hasUnreadAnnouncement, setHasUnreadAnnouncement] = React.useState(() => getAnnouncementUnread());
   const skipTriggerFocusRef = React.useRef(false);
-  const isAdmin = user.role === "admin" || user.role === "superadmin";
+  const isAdmin = user.role === "superadmin";
 
   React.useEffect(() => subscribeAnnouncementUnreadChanged(setHasUnreadAnnouncement), []);
 

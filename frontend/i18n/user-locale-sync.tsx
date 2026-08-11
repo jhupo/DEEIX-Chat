@@ -12,7 +12,7 @@ export function UserLocaleSync() {
   const syncedUserLocaleRef = React.useRef("");
 
   React.useEffect(() => {
-    if (userStatus !== "ready" || !user?.locale || user.initialSecurityRequired) {
+    if (userStatus !== "ready" || !user?.locale) {
       syncedUserLocaleRef.current = "";
       return;
     }
@@ -23,7 +23,7 @@ export function UserLocaleSync() {
     }
     syncedUserLocaleRef.current = syncKey;
     void setLocale(nextLocale);
-  }, [setLocale, user?.initialSecurityRequired, user?.locale, user?.publicID, userStatus]);
+  }, [setLocale, user?.locale, user?.publicID, userStatus]);
 
   return null;
 }

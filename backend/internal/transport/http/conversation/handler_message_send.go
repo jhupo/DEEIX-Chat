@@ -10,9 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
-	domainbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/billing"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -89,6 +87,7 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 		UserID:                  userID,
 		ConversationID:          conversation.ID,
 		RequestID:               middleware.MustRequestID(c),
+		KeyBindingID:            req.KeyBindingID,
 		ContentType:             req.ContentType,
 		Content:                 req.Content,
 		PlatformModelName:       req.Model,
@@ -104,118 +103,6 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 	}
 
 	return input, conversation, &req, nil
-}
-
-func sendMessageBillingInput(
-	userID uint,
-	conversation *model.Conversation,
-	req *SendMessageRequest,
-	result *appconversation.SendMessageResult,
-) appconversation.SendMessageBillingInput {
-	input := appconversation.SendMessageBillingInput{
-		UserID:            userID,
-		PlatformModelName: strings.TrimSpace(req.Model),
-		ClientRunID:       strings.TrimSpace(req.ClientRunID),
-		Result:            result,
-	}
-	if conversation != nil {
-		input.ConversationID = conversation.ID
-		input.ConversationModel = conversation.Model
-		input.Conversation = conversation
-	}
-	return input
-}
-
-func (h *Handler) reserveUsage(c *gin.Context, input appconversation.SendMessageBillingInput) (*domainbilling.UsageAuthorization, error) {
-	return h.service.AuthorizeSendMessageUsage(
-		c.Request.Context(),
-		input,
-	)
-}
-
-// authorizeUsage 在写入流式响应头前完成请求级计费授权。
-func (h *Handler) authorizeUsage(c *gin.Context, input appconversation.SendMessageBillingInput) (*domainbilling.UsageAuthorization, error) {
-	authorization, err := h.reserveUsage(c, input)
-	if err != nil {
-		handleUsageAuthorizationError(c, err)
-		return nil, err
-	}
-	return authorization, nil
-}
-
-// authorizeMessageUsage 将终态拒绝的持久化委托给应用层，再把授权结果转换为 HTTP 响应。
-func (h *Handler) authorizeMessageUsage(
-	c *gin.Context,
-	input appconversation.SendMessageInput,
-	billingInput appconversation.SendMessageBillingInput,
-) (*domainbilling.UsageAuthorization, error) {
-	authorization, err := h.reserveUsage(c, billingInput)
-	if err == nil {
-		return authorization, nil
-	}
-	if persistErr := h.service.PersistMessageUsageRejection(c.Request.Context(), input, err); persistErr != nil {
-		handleSendMessageError(c, persistErr)
-		return nil, persistErr
-	}
-	handleUsageAuthorizationError(c, err)
-	return nil, err
-}
-
-// releaseSendMessageUsageAuthorization 使用独立短上下文释放未消费的预算。
-func (h *Handler) releaseSendMessageUsageAuthorization(authorization *domainbilling.UsageAuthorization) error {
-	if authorization == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return h.service.ReleaseSendMessageUsageAuthorization(ctx, authorization)
-}
-
-// startUsageAuthorizationRenewal 为长时间运行的调用持续刷新预算租约。
-func (h *Handler) startUsageAuthorizationRenewal(authorization *domainbilling.UsageAuthorization) func() {
-	if authorization == nil || authorization.Reservation == nil {
-		return func() {}
-	}
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(usageAuthorizationRenewalInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				err := h.service.RenewSendMessageUsageAuthorization(ctx, authorization)
-				cancel()
-				if err != nil {
-					continue
-				}
-			case <-stop:
-				return
-			}
-		}
-	}()
-	return func() { close(stop) }
-}
-
-// recordAndApplySendMessageBilling 统一记录账单并把快照回填到当前响应消息，避免流式和非流式口径分叉。
-func (h *Handler) recordAndApplySendMessageBilling(
-	ctx context.Context,
-	userID uint,
-	conversation *model.Conversation,
-	req *SendMessageRequest,
-	result *appconversation.SendMessageResult,
-	authorization *domainbilling.UsageAuthorization,
-) error {
-	usageLedger, err := h.service.RecordSendMessageBilling(
-		ctx,
-		sendMessageBillingInput(userID, conversation, req, result),
-		authorization,
-	)
-	if err != nil {
-		return err
-	}
-	appconversation.ApplyUsageBilling(&result.AssistantMessage, usageLedger)
-	return nil
 }
 
 // recordSendMessageAudit 记录审计日志（同步，供非流式路径使用）。
@@ -261,96 +148,23 @@ func (h *Handler) recordSendMessageAuditCtx(
 	result *appconversation.SendMessageResult,
 	action string,
 ) {
-	h.service.RecordSendMessageAudit(
-		ctx,
-		appconversation.SendMessageAuditInput{
-			UserID:         userID,
-			RequestID:      requestID,
-			ClientIP:       clientIP,
-			UserAgent:      userAgent,
-			Action:         action,
-			ContentType:    req.ContentType,
-			ConversationID: conversation.ID,
-			FileIDs:        req.FileIDs,
-			Result:         result,
+	if conversation == nil || req == nil || result == nil {
+		return
+	}
+	h.service.RecordAudit(ctx, appconversation.AuditInput{
+		UserID:     userID,
+		RequestID:  requestID,
+		Action:     action,
+		Resource:   "conversation",
+		ResourceID: conversation.PublicID,
+		ClientIP:   clientIP,
+		UserAgent:  userAgent,
+		Detail: map[string]interface{}{
+			"message_id": result.AssistantMessage.PublicID,
+			"model":      req.Model,
+			"status":     result.AssistantMessage.Status,
 		},
-	)
-}
-
-func handleSendMessageBillingError(c *gin.Context, err error) {
-	if errors.Is(err, billing.ErrUsageConcurrencyLimitExceeded) {
-		response.Error(c, http.StatusTooManyRequests, "usage concurrency limit exceeded")
-		return
-	}
-	if errors.Is(err, billing.ErrUsageReservationConflict) {
-		response.Error(c, http.StatusConflict, "usage reservation already exists")
-		return
-	}
-	if errors.Is(err, billing.ErrUsageBalanceInsufficient) {
-		response.Error(c, http.StatusPaymentRequired, "usage balance is insufficient")
-		return
-	}
-	if errors.Is(err, billing.ErrModelPricingRequired) {
-		response.Error(c, http.StatusPaymentRequired, "model pricing is required")
-		return
-	}
-	response.Error(c, http.StatusInternalServerError, "record billing failed")
-}
-
-func handleUsageAuthorizationError(c *gin.Context, err error) {
-	if errors.Is(err, billing.ErrUsageConcurrencyLimitExceeded) {
-		response.Error(c, http.StatusTooManyRequests, "usage concurrency limit exceeded")
-		return
-	}
-	if errors.Is(err, billing.ErrUsageReservationConflict) {
-		response.Error(c, http.StatusConflict, "usage reservation already exists")
-		return
-	}
-	if errors.Is(err, billing.ErrUsageBalanceInsufficient) {
-		response.Error(c, http.StatusPaymentRequired, "usage balance is insufficient")
-		return
-	}
-	if errors.Is(err, billing.ErrModelPricingRequired) {
-		response.Error(c, http.StatusPaymentRequired, "model pricing is required")
-		return
-	}
-	response.Error(c, http.StatusInternalServerError, "usage balance reservation failed")
-}
-
-func mapBillingStreamError(err error) streamError {
-	status := http.StatusInternalServerError
-	message := "record billing failed"
-	if errors.Is(err, billing.ErrUsageConcurrencyLimitExceeded) {
-		status = http.StatusTooManyRequests
-		message = "usage concurrency limit exceeded"
-	}
-	if errors.Is(err, billing.ErrUsageReservationConflict) {
-		status = http.StatusConflict
-		message = "usage reservation already exists"
-	}
-	if errors.Is(err, billing.ErrUsageBalanceInsufficient) {
-		status = http.StatusPaymentRequired
-		message = "usage balance is insufficient"
-	}
-	if errors.Is(err, billing.ErrModelPricingRequired) {
-		status = http.StatusPaymentRequired
-		message = "model pricing is required"
-	}
-	code := response.InferErrorCode(status, message)
-	return streamError{
-		Status:  status,
-		Code:    code,
-		Message: response.PublicErrorMessage(status, code, message),
-	}
-}
-
-func billingStreamErrorPayload(err error) map[string]interface{} {
-	mapped := mapBillingStreamError(err)
-	return map[string]interface{}{
-		"type":      "error",
-		"message":   mapped.Message,
-		"errorCode": mapped.Code,
-	}
+	})
 }
 
 // handleSendMessageError 处理发送消息错误的公共方法。
@@ -388,6 +202,10 @@ func handleSendMessageError(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadRequest, "embedding unavailable for current file capability")
 	case errors.Is(err, appconversation.ErrModelRouteNotConfigured):
 		response.Error(c, http.StatusServiceUnavailable, "model route not configured")
+	case errors.Is(err, appconversation.ErrInvalidKeyBinding):
+		response.Error(c, http.StatusBadRequest, "invalid key binding")
+	case errors.Is(err, appconversation.ErrKeyBindingUnavailable):
+		response.Error(c, http.StatusBadGateway, "key binding unavailable")
 	case errors.Is(err, appconversation.ErrGeneratedMediaArtifactUnavailable):
 		response.ErrorWithCode(c, http.StatusBadGateway, appconversation.MessageErrorCode(err), "generated media artifact is temporarily unavailable")
 	case errors.Is(err, appconversation.ErrUpstreamEmptyResponse):
@@ -423,42 +241,14 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	authorization, err := h.authorizeMessageUsage(c, input, sendMessageBillingInput(middleware.MustUserID(c), conversation, req, nil))
-	if err != nil {
-		return
-	}
-	stopAuthorizationRenewal := h.startUsageAuthorizationRenewal(authorization)
-	defer stopAuthorizationRenewal()
-
 	result, err := h.service.SendMessage(c.Request.Context(), input)
 	if err != nil {
 		if result != nil {
-			if !result.Billable {
-				if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
-					handleSendMessageBillingError(c, releaseErr)
-					return
-				}
-				handleSendMessageError(c, err)
-				return
-			}
-			if billingErr := h.recordAndApplySendMessageBilling(c.Request.Context(), middleware.MustUserID(c), conversation, req, result, authorization); billingErr != nil {
-				handleSendMessageBillingError(c, billingErr)
-				return
-			}
 			h.recordSendMessageAudit(c, conversation, req, result, "send_message")
 			response.Success(c, toSendMessageResponse(result))
 			return
 		}
-		if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
-			handleSendMessageBillingError(c, releaseErr)
-			return
-		}
 		handleSendMessageError(c, err)
-		return
-	}
-
-	if err := h.recordAndApplySendMessageBilling(c.Request.Context(), middleware.MustUserID(c), conversation, req, result, authorization); err != nil {
-		handleSendMessageBillingError(c, err)
 		return
 	}
 	h.recordSendMessageAudit(c, conversation, req, result, "send_message")
@@ -484,13 +274,6 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	authorization, err := h.authorizeMessageUsage(c, input, sendMessageBillingInput(middleware.MustUserID(c), conversation, req, nil))
-	if err != nil {
-		return
-	}
-	stopAuthorizationRenewal := h.startUsageAuthorizationRenewal(authorization)
-	defer stopAuthorizationRenewal()
-
 	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
 	c.Header("Cache-Control", "no-cache, no-transform")
 	c.Header("Connection", "keep-alive")
@@ -538,32 +321,6 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 	})
 	if err != nil {
 		if result != nil {
-			if !result.Billable {
-				if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
-					_ = flushStreamEvent(billingStreamErrorPayload(releaseErr))
-					h.service.FinishMessageGeneration(input.ClientRunID)
-					return
-				}
-				payload := streamErrorPayload(err)
-				payload["data"] = toSendMessageResponse(result)
-				if debug := appconversation.MessageErrorDebug(err); debug != nil {
-					payload["debug"] = debug
-				}
-				_ = flushStreamEvent(payload)
-				h.service.FinishMessageGeneration(input.ClientRunID)
-				h.recordStreamSendMessageAuditAsync(c, conversation, req, result, "stream_message")
-				return
-			}
-			billingCtx, billingCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			billingErr := h.recordAndApplySendMessageBilling(billingCtx, middleware.MustUserID(c), conversation, req, result, authorization)
-			billingCancel()
-			if billingErr != nil {
-				payload := billingStreamErrorPayload(billingErr)
-				payload["data"] = toSendMessageResponse(result)
-				_ = flushStreamEvent(payload)
-				h.service.FinishMessageGeneration(input.ClientRunID)
-				return
-			}
 			payload := streamErrorPayload(err)
 			payload["data"] = toSendMessageResponse(result)
 			if debug := appconversation.MessageErrorDebug(err); debug != nil {
@@ -574,25 +331,11 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 			h.recordStreamSendMessageAuditAsync(c, conversation, req, result, "stream_message")
 			return
 		}
-		if releaseErr := h.releaseSendMessageUsageAuthorization(authorization); releaseErr != nil {
-			_ = flushStreamEvent(billingStreamErrorPayload(releaseErr))
-			h.service.FinishMessageGeneration(input.ClientRunID)
-			return
-		}
 		payload := streamErrorPayload(err)
 		if debug := appconversation.MessageErrorDebug(err); debug != nil {
 			payload["debug"] = debug
 		}
 		_ = flushStreamEvent(payload)
-		h.service.FinishMessageGeneration(input.ClientRunID)
-		return
-	}
-
-	billingCtx, billingCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	billingErr := h.recordAndApplySendMessageBilling(billingCtx, middleware.MustUserID(c), conversation, req, result, authorization)
-	billingCancel()
-	if billingErr != nil {
-		_ = flushStreamEvent(billingStreamErrorPayload(billingErr))
 		h.service.FinishMessageGeneration(input.ClientRunID)
 		return
 	}

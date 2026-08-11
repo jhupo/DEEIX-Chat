@@ -4,19 +4,17 @@ import "time"
 
 // PermissionGroup 定义模型访问权限组。
 type PermissionGroup struct {
-	ID                    uint
-	Name                  string
-	Description           string
-	IsDefault             bool
-	RateMultiplierPercent int
-	ModelCount            int64
-	ManualModelCount      int64
-	RuleModelCount        int64
-	UserCount             int64
-	ManualUserCount       int64
-	SubscriptionUserCount int64
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID               uint
+	Name             string
+	Description      string
+	IsDefault        bool
+	ModelCount       int64
+	ManualModelCount int64
+	RuleModelCount   int64
+	UserCount        int64
+	ManualUserCount  int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // PermissionGroupModelAccess 关联权限组与平台模型。
@@ -50,5 +48,4 @@ type PermissionGroupDeleteSummary struct {
 	ManualModelCount int64
 	RuleCount        int64
 	ManualUserCount  int64
-	PlanCount        int64
 }

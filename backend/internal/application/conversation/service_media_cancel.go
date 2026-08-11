@@ -26,7 +26,6 @@ type canceledMediaGenerationInput struct {
 	GenerateInput       llm.GenerateInput
 	StartedAt           time.Time
 	DurationSeconds     int64
-	Billable            bool
 	MetadataRefreshHint string
 }
 
@@ -40,7 +39,6 @@ type failedMediaBillingResultInput struct {
 	StartedAt        time.Time
 	DurationSeconds  int64
 	Failure          error
-	Billable         bool
 }
 
 // buildFailedMediaBillingResult 保留上游成功后发生本地处理错误时的真实用量上下文。
@@ -77,7 +75,6 @@ func buildFailedMediaBillingResult(input failedMediaBillingResultInput) *SendMes
 	return &SendMessageResult{
 		UserMessage:        userMessage,
 		AssistantMessage:   assistantMessage,
-		Billable:           input.Billable,
 		UpstreamID:         input.Route.UpstreamID,
 		UpstreamName:       input.Route.UpstreamName,
 		PlatformModelName:  input.Route.PlatformModelName,
@@ -163,7 +160,6 @@ func (s *Service) completeCanceledMediaGeneration(input canceledMediaGenerationI
 		UserMessage:         *input.UserMessage,
 		AssistantMessage:    *input.AssistantMessage,
 		MetadataRefreshHint: input.MetadataRefreshHint,
-		Billable:            input.Billable,
 		UpstreamID:          input.Route.UpstreamID,
 		UpstreamName:        input.Route.UpstreamName,
 		PlatformModelName:   input.Route.PlatformModelName,
@@ -188,9 +184,14 @@ func applyMediaRunUsage(run *model.Run, result *SendMessageResult) {
 	if run == nil || result == nil {
 		return
 	}
-	run.InputTokens = sendMessageBillingInputTokens(result)
-	run.CacheReadTokens = sendMessageBillingCacheReadTokens(result)
-	run.CacheWriteTokens = sendMessageBillingCacheWriteTokens(result)
+	run.InputTokens = result.UserMessage.InputTokens
+	run.CacheReadTokens = result.UserMessage.CacheReadTokens
+	run.CacheWriteTokens = result.UserMessage.CacheWriteTokens
+	if result.AssistantMessage.SourceMessageID != nil {
+		run.InputTokens = result.AssistantMessage.InputTokens
+		run.CacheReadTokens = result.AssistantMessage.CacheReadTokens
+		run.CacheWriteTokens = result.AssistantMessage.CacheWriteTokens
+	}
 	run.OutputTokens = result.AssistantMessage.OutputTokens
 	run.ReasoningTokens = result.AssistantMessage.ReasoningTokens
 }

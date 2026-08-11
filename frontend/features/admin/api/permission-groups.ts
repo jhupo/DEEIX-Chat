@@ -1,12 +1,11 @@
 import type {
   CreatePermissionGroupRequest as ContractCreatePermissionGroupRequest,
-  DeletePermissionGroupResponse,
-  GroupModelsResponse,
-  GroupUsersResponse,
-  ModelPermissionGroupsResponse,
-  PermissionGroupDataResponse,
-  PermissionGroupDeleteSummaryResponse,
-  PermissionGroupListResponse,
+  DeletePermissionGroupResponseDoc,
+  GroupModelsResponseDoc,
+  GroupUsersResponseDoc,
+  ModelPermissionGroupsResponseDoc,
+  PermissionGroupDataResponseDoc,
+  PermissionGroupListResponseDoc,
   PermissionGroupModelRuleResponse,
   PermissionGroupResponse,
   UpdatePermissionGroupRequest as ContractUpdatePermissionGroupRequest,
@@ -18,31 +17,40 @@ export type PermissionGroup = PermissionGroupResponse;
 
 export type PermissionGroupModelRuleType = "all" | "vendor" | "protocol" | "upstream";
 
-export type PermissionGroupModelRule = Omit<PermissionGroupModelRuleResponse, "type"> & {
+export type PermissionGroupModelRule = {
   type: PermissionGroupModelRuleType;
+  value: string;
 };
 
 export type CreatePermissionGroupRequest = ContractCreatePermissionGroupRequest;
 
 export type UpdatePermissionGroupRequest = ContractUpdatePermissionGroupRequest;
 
-type PermissionGroupListData = Omit<PermissionGroupListResponse, "results"> & {
-  results: PermissionGroup[];
-};
+type PermissionGroupListData = PermissionGroupListResponseDoc;
 
-type PermissionGroupData = Omit<PermissionGroupDataResponse, "group"> & {
-  group: PermissionGroup;
-};
+type PermissionGroupData = PermissionGroupDataResponseDoc;
 
-type GroupModelsData = Omit<GroupModelsResponse, "rules"> & { rules: PermissionGroupModelRule[] };
+type GroupModelsData = GroupModelsResponseDoc;
 
-type GroupUsersData = GroupUsersResponse;
+type GroupUsersData = GroupUsersResponseDoc;
 
-type ModelPermissionGroupsData = ModelPermissionGroupsResponse;
+type ModelPermissionGroupsData = ModelPermissionGroupsResponseDoc;
 
-export type DeletePermissionGroupResult = Omit<DeletePermissionGroupResponse, "summary"> & {
-  summary: PermissionGroupDeleteSummaryResponse;
-};
+export type DeletePermissionGroupResult = DeletePermissionGroupResponseDoc;
+
+function toPermissionGroupModelRule(
+  rule: PermissionGroupModelRuleResponse,
+): PermissionGroupModelRule | null {
+  switch (rule.ruleType) {
+    case "all":
+    case "vendor":
+    case "protocol":
+    case "upstream":
+      return { type: rule.ruleType, value: rule.value };
+    default:
+      return null;
+  }
+}
 
 export async function listPermissionGroups(accessToken: string): Promise<PermissionGroup[]> {
   const data = await authedRequest<PermissionGroupListData>(
@@ -97,7 +105,10 @@ export async function listGroupModels(
   );
   return {
     modelIDs: data.modelIDs ?? [],
-    rules: data.rules ?? [],
+    rules: (data.rules ?? []).flatMap((rule) => {
+      const mapped = toPermissionGroupModelRule(rule);
+      return mapped ? [mapped] : [];
+    }),
   };
 }
 
@@ -109,7 +120,7 @@ export async function setGroupModels(
 ): Promise<void> {
   await authedRequest<GroupModelsData>(
     `/api/v1/admin/permission-groups/${pathParam(groupID)}/models`,
-    { method: "PUT", accessToken, body: { modelIDs, rules } },
+    { method: "PUT", accessToken, body: { modelIDs, rules: rules.map((rule) => ({ ruleType: rule.type, value: rule.value })) } },
     true,
   );
 }

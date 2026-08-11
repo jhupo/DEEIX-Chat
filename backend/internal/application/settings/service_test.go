@@ -171,74 +171,6 @@ func TestRuntimeSettingsNormalizeConfigDisablesEmbeddingDependentFeatures(t *tes
 	}
 }
 
-func TestValidateTurnstileRegistrationSettings(t *testing.T) {
-	repo := &testSettingsRepo{byNamespace: map[string][]domainsettings.SystemSetting{
-		"auth": {
-			{Namespace: "auth", Key: "email_login_enabled", Value: "true"},
-			{Namespace: "auth", Key: "email_registration_enabled", Value: "true"},
-			{Namespace: "auth", Key: "turnstile_registration_enabled", Value: "false"},
-			{Namespace: "auth", Key: "turnstile_site_key", Value: ""},
-			{Namespace: "auth", Key: "turnstile_secret_key", Value: ""},
-		},
-	}}
-	service := NewService(repo, "test-data-encryption-key")
-
-	if _, err := service.applyAuthSettingDependencies(context.Background(), []PatchItem{
-		{Namespace: "auth", Key: "turnstile_registration_enabled", Value: "true"},
-	}); err == nil {
-		t.Fatal("expected missing turnstile keys to fail")
-	}
-
-	if _, err := service.applyAuthSettingDependencies(context.Background(), []PatchItem{
-		{Namespace: "auth", Key: "turnstile_registration_enabled", Value: "true"},
-		{Namespace: "auth", Key: "turnstile_site_key", Value: "site-key"},
-		{Namespace: "auth", Key: "turnstile_secret_key", Value: "secret-key"},
-	}); err != nil {
-		t.Fatalf("expected complete turnstile settings to pass, got %v", err)
-	}
-}
-
-func TestValidateTurnstileRegistrationEnabledRequiresBool(t *testing.T) {
-	if err := validatePatchItem(PatchItem{Namespace: "auth", Key: "turnstile_registration_enabled", Value: "enabled"}); err == nil {
-		t.Fatal("expected turnstile registration switch to reject non-bool value")
-	}
-}
-
-func TestValidatePasswordResetRequiresEmailVerification(t *testing.T) {
-	repo := &testSettingsRepo{byNamespace: map[string][]domainsettings.SystemSetting{
-		"auth": {
-			{Namespace: "auth", Key: "username_login_enabled", Value: "true"},
-			{Namespace: "auth", Key: "email_login_enabled", Value: "true"},
-			{Namespace: "auth", Key: "third_party_login_enabled", Value: "true"},
-			{Namespace: "auth", Key: "email_verification_enabled", Value: "false"},
-			{Namespace: "auth", Key: "password_reset_enabled", Value: "false"},
-		},
-	}}
-	service := NewService(repo, "test-data-encryption-key")
-
-	if _, err := service.applyAuthSettingDependencies(context.Background(), []PatchItem{
-		{Namespace: "auth", Key: "password_reset_enabled", Value: "true"},
-	}); err == nil {
-		t.Fatal("expected password reset to require email verification")
-	}
-}
-
-func TestRuntimeSettingsNormalizeConfigDisablesPasswordReset(t *testing.T) {
-	runtimeSettings := NewRuntimeSettings(nil, nil, "test-data-encryption-key")
-	cfg := config.Config{
-		UsernameLoginEnabled:     true,
-		EmailLoginEnabled:        true,
-		EmailVerificationEnabled: false,
-		PasswordResetEnabled:     true,
-	}
-
-	runtimeSettings.normalizeConfig(&cfg)
-
-	if cfg.PasswordResetEnabled {
-		t.Fatal("expected password reset disabled when email verification is disabled")
-	}
-}
-
 func TestValidateModelOptionPolicySettings(t *testing.T) {
 	if err := validatePatchItem(PatchItem{Namespace: "chat", Key: "model_option_policy_mode", Value: "allowlist"}); err != nil {
 		t.Fatalf("expected allowlist mode to pass, got %v", err)
@@ -252,22 +184,8 @@ func TestValidateModelOptionPolicySettings(t *testing.T) {
 	if err := validatePatchItem(PatchItem{Namespace: "chat", Key: "model_option_allowed_paths", Value: `{"default":["bad path"]}`}); err == nil {
 		t.Fatal("expected whitespace path to fail")
 	}
-	if err := validatePatchItem(PatchItem{Namespace: "billing", Key: "native_tool_pricing_json", Value: `{"xai.web_search":{"priceNanousd":1000000,"unit":"call","priceLabel":"","billable":true}}`}); err != nil {
-		t.Fatalf("expected native tool pricing JSON to pass, got %v", err)
-	}
 	if err := validatePatchItem(PatchItem{Namespace: "billing", Key: "native_tool_pricing_json", Value: `{"unknownTool":{"priceNanousd":1000000,"unit":"call","priceLabel":"","billable":true}}`}); err == nil {
 		t.Fatal("expected unsupported native tool pricing key to fail")
-	}
-}
-
-func TestValidateBillingDisplayCurrencySetting(t *testing.T) {
-	for _, currency := range []string{"USD", "CNY"} {
-		if err := validatePatchItem(PatchItem{Namespace: "billing", Key: "display_currency", Value: currency}); err != nil {
-			t.Fatalf("expected %s to pass, got %v", currency, err)
-		}
-	}
-	if err := validatePatchItem(PatchItem{Namespace: "billing", Key: "display_currency", Value: "EUR"}); err == nil {
-		t.Fatal("expected unsupported display currency to fail")
 	}
 }
 

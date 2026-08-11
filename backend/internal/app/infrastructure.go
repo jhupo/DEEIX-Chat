@@ -38,10 +38,6 @@ func buildRateLimiter(redisClient *redis.Client) middleware.RateLimiter {
 	return rediscache.NewRateLimiter(redisClient)
 }
 
-func buildProviderAuthBridge(redisClient *redis.Client) repository.ProviderAuthBridgeRepository {
-	return rediscache.NewProviderAuthBridge(redisClient)
-}
-
 type healthChecker struct {
 	db    *gorm.DB
 	redis *redis.Client

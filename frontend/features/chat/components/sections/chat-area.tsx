@@ -23,7 +23,6 @@ import { ConversationShareExportIconDropdown } from "@/shared/components/convers
 import { ChatScreenshotSelectionBar } from "@/features/chat/components/sections/chat-screenshot-selection-bar";
 import { useCopyAction } from "@/shared/components/copy-action";
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
-import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 import type { FileContentResult } from "@/shared/api/file";
 import type { PreviewDialogFile } from "@/shared/components/file-preview/preview-dialog";
 import {
@@ -136,9 +135,6 @@ type ChatAreaProps = {
   showModelInfo?: boolean;
   showLatency?: boolean;
   showTokenUsage?: boolean;
-  showBillingCost?: boolean;
-  billingDisplayCurrency?: BillingDisplayCurrency;
-  billingDisplayUsdToCnyRate?: number | null;
   splitRightInset?: boolean;
   contentWidthClassName?: string;
   onScreenshotFull?: () => void;
@@ -290,9 +286,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   showModelInfo,
   showLatency,
   showTokenUsage,
-  showBillingCost,
-  billingDisplayCurrency,
-  billingDisplayUsdToCnyRate,
   contentWidthClassName,
   screenshotMetaAlign,
   screenshotMetaModelName,
@@ -319,9 +312,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   showModelInfo: boolean;
   showLatency: boolean;
   showTokenUsage: boolean;
-  showBillingCost: boolean;
-  billingDisplayCurrency: BillingDisplayCurrency;
-  billingDisplayUsdToCnyRate: number | null;
   contentWidthClassName: string;
   screenshotMetaAlign: "start" | "end";
   screenshotMetaModelName: string;
@@ -399,9 +389,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         showModelInfo={showModelInfo}
         showLatency={showLatency}
         showTokenUsage={showTokenUsage}
-        showBillingCost={showBillingCost}
-        billingDisplayCurrency={billingDisplayCurrency}
-        billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
         contentWidthClassName={contentWidthClassName}
         screenshotMeta={screenshotMeta}
       />
@@ -428,9 +415,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   previous.showModelInfo === next.showModelInfo &&
   previous.showLatency === next.showLatency &&
   previous.showTokenUsage === next.showTokenUsage &&
-  previous.showBillingCost === next.showBillingCost &&
-  previous.billingDisplayCurrency === next.billingDisplayCurrency &&
-  previous.billingDisplayUsdToCnyRate === next.billingDisplayUsdToCnyRate &&
   previous.contentWidthClassName === next.contentWidthClassName &&
   previous.screenshotMetaAlign === next.screenshotMetaAlign &&
   previous.screenshotMetaModelName === next.screenshotMetaModelName &&
@@ -480,9 +464,6 @@ export function ChatArea({
   showModelInfo = true,
   showLatency = true,
   showTokenUsage = true,
-  showBillingCost = false,
-  billingDisplayCurrency = "USD",
-  billingDisplayUsdToCnyRate = null,
   splitRightInset = false,
   contentWidthClassName = "max-w-[1080px]",
   onScreenshotFull,
@@ -659,9 +640,6 @@ export function ChatArea({
                       showModelInfo={showModelInfo}
                       showLatency={showLatency}
                       showTokenUsage={showTokenUsage}
-                      showBillingCost={showBillingCost}
-                      billingDisplayCurrency={billingDisplayCurrency}
-                      billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
                       contentWidthClassName={contentWidthClassName}
                       screenshotMetaAlign={item.role === "user" ? "end" : "start"}
                       screenshotMetaModelName={item.role === "assistant" ? item.platformModelName?.trim() || "" : ""}

@@ -4,7 +4,10 @@ import type {
   BillingAccountData,
   BillingConfigData,
   BillingOverviewData,
+  BillingOrderData,
   BillingUsageDailyDTO,
+  BillingUsageSort,
+  BillingUsageType,
   BillingPlanDTO,
   BillingUsageLedgerDTO,
   BillingUsageMonthlyDTO,
@@ -12,7 +15,6 @@ import type {
   CreateCheckoutRequest,
   RedeemBillingCodeData,
   RedeemBillingCodeRequest,
-  SubscribeData,
 } from "@/shared/api/billing.types";
 
 export async function getBillingConfig(accessToken: string): Promise<BillingConfigData> {
@@ -33,7 +35,7 @@ export async function getBillingOverview(accessToken: string): Promise<BillingOv
 
 export async function listBillingUsage(
   accessToken: string,
-  options: { page?: number; pageSize?: number; query?: string; status?: string; sort?: string } = {},
+  options: { page?: number; pageSize?: number; query?: string; billingType?: BillingUsageType; sort?: BillingUsageSort } = {},
 ): Promise<PagePayload<BillingUsageLedgerDTO>> {
   const page = options.page && options.page > 0 ? options.page : 1;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 10;
@@ -42,8 +44,9 @@ export async function listBillingUsage(
     page_size: String(pageSize),
   });
   if (options.query?.trim()) params.set("query", options.query.trim());
-  if (options.status?.trim()) params.set("status", options.status.trim());
-  if (options.sort?.trim()) params.set("sort", options.sort.trim());
+  if (options.billingType) params.set("billing_type", options.billingType);
+  params.set("sort_by", "created_at");
+  params.set("sort_order", options.sort === "oldest" ? "asc" : "desc");
   return authedRequest<PagePayload<BillingUsageLedgerDTO>>(
     `/api/v1/billing/usage?${params.toString()}`,
     { accessToken },
@@ -53,11 +56,12 @@ export async function listBillingUsage(
 
 export async function listBillingMonthlyUsage(accessToken: string, months = 12): Promise<BillingUsageMonthlyDTO[]> {
   const params = new URLSearchParams({ months: String(months) });
-  return authedRequest<BillingUsageMonthlyDTO[]>(
+  const data = await authedRequest<{ results: BillingUsageMonthlyDTO[] }>(
     `/api/v1/billing/usage/monthly?${params.toString()}`,
     { accessToken },
     true,
   );
+  return data.results;
 }
 
 export async function listBillingDailyUsage(
@@ -72,17 +76,18 @@ export async function listBillingDailyUsage(
     params.set("days", String(options.days && options.days > 0 ? options.days : 30));
   }
   const query = params.toString();
-  return authedRequest<BillingUsageDailyDTO[]>(
+  const data = await authedRequest<{ results: BillingUsageDailyDTO[] }>(
     `/api/v1/billing/usage/daily${query ? `?${query}` : ""}`,
     { accessToken },
     true,
   );
+  return data.results;
 }
 
-export async function createBillingCheckout(accessToken: string, payload: CreateCheckoutRequest): Promise<CheckoutData> {
+export async function createBillingCheckout(accessToken: string, payload: CreateCheckoutRequest, idempotencyKey: string): Promise<CheckoutData> {
   return authedRequest<CheckoutData>(
     "/api/v1/billing/payments/checkout",
-    { method: "POST", accessToken, body: payload },
+    { method: "POST", accessToken, body: payload, headers: { "Idempotency-Key": idempotencyKey } },
     true,
   );
 }
@@ -95,10 +100,10 @@ export async function redeemBillingCode(accessToken: string, payload: RedeemBill
   );
 }
 
-export async function subscribeBillingPlan(accessToken: string, priceID: number): Promise<SubscribeData> {
-  return authedRequest<SubscribeData>(
-    "/api/v1/billing/subscriptions",
-    { method: "POST", accessToken, body: { priceID: priceID, cycles: 1 } },
+export async function verifyBillingOrder(accessToken: string, operationID: string): Promise<BillingOrderData> {
+  return authedRequest<BillingOrderData>(
+    "/api/v1/billing/orders/verify",
+    { method: "POST", accessToken, body: { operationID } },
     true,
   );
 }

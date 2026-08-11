@@ -129,7 +129,6 @@ function mapPublicSharedMessage(item: PublicSharedMessageDTO, fallbackModel: str
     ...message,
     content: rewriteSharedFileContentURLs(message.content, shareID),
     platformModelName,
-    billingCost: undefined,
     branchNavigator: undefined,
   };
 }
@@ -190,7 +189,6 @@ function PublicSharedMessage({
         showModelInfo
         showLatency
         showTokenUsage
-        showBillingCost={false}
         readOnly
         attachmentContentLoader={loadContent}
         showBranchNavigator

@@ -40,11 +40,8 @@ async function requestAccessTokenRefresh(): Promise<string> {
     const data = await apiRequest<LoginData>("/api/v1/auth/refresh", {
       method: "POST",
     });
-    if (!data.accessToken) {
-      if (readSessionRevision() === startedRevision) {
-        clearSessionSnapshot({ syncPeers: false });
-      }
-      return "";
+    if (!data.accessToken || !data.sessionID) {
+      throw new ApiError("invalid refresh response", 401, undefined, "auth.invalid_refresh_token");
     }
 
     writeSessionSnapshot({

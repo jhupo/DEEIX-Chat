@@ -255,7 +255,6 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 			StartedAt:        startedAt,
 			DurationSeconds:  durationSeconds,
 			Failure:          failure,
-			Billable:         false,
 		})
 		applyMediaRunUsage(run, result)
 		return result
@@ -293,7 +292,6 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 				GenerateInput:    generateInput,
 				StartedAt:        startedAt,
 				DurationSeconds:  durationSeconds,
-				Billable:         false,
 			})
 			if cancelErr != nil {
 				retErr = cancelErr
@@ -436,7 +434,6 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 		UserMessage:         *userMessage,
 		AssistantMessage:    *assistantMessage,
 		MetadataRefreshHint: s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
-		Billable:            true,
 		UpstreamID:          route.UpstreamID,
 		UpstreamName:        route.UpstreamName,
 		PlatformModelName:   route.PlatformModelName,

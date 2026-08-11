@@ -91,6 +91,7 @@ type UpdateFileRequest struct {
 
 // SendMessageRequest 发送消息请求。
 type SendMessageRequest struct {
+	KeyBindingID            string                 `json:"keyBindingID" binding:"required,max=64"`
 	ContentType             string                 `json:"contentType" binding:"required,oneof=text markdown image file mixed"`
 	Content                 string                 `json:"content" binding:"required"`
 	Model                   string                 `json:"model,omitempty" binding:"omitempty,max=128"`

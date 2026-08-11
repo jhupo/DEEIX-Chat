@@ -13,7 +13,6 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/announcement"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/audit"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/auth"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
@@ -29,25 +28,21 @@ import (
 	appruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/runtime"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
+	appsub2commerce "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2commerce"
+	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	appsystemevent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/identityprovider"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mediaartifact"
-	openrouterpricing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/modelpricing/openrouter"
 	platformlogger "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/logger"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/openwebui"
-	stripepayment "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/payment/stripe"
-	filecache "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/filecache"
 	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
 	auditrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/audit"
-	billingrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/billing"
 	channelrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/channel"
 	conversationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/conversation"
 	logcleanuprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/logcleanup"
@@ -56,10 +51,13 @@ import (
 	promptpresetrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/promptpreset"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
+	sub2commercerepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/sub2commerce"
+	sub2keyrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/sub2key"
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
 	userrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/user"
 	usersettingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/usersettings"
 	platformruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/runtime"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
@@ -73,6 +71,7 @@ import (
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
+	sub2keyhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/sub2key"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/update"
@@ -84,33 +83,17 @@ import (
 
 // App 维护应用运行依赖。
 type App struct {
-	cfg                    config.Config
-	engine                 *gin.Engine
-	logger                 *zap.Logger
-	db                     *gorm.DB
-	redis                  *redis.Client
-	geoResolver            *geoip.Client
-	identityProviderClient *identityprovider.Client
-	llmClient              *llm.Client
-	mcpClient              *mcp.Client
-	embeddingClient        *embedding.Client
-	mediaArtifactClient    *mediaartifact.Client
-	backgroundCancel       context.CancelFunc
-}
-
-type subscriptionGroupAdapter struct {
-	billing *billing.Service
-}
-
-func (a *subscriptionGroupAdapter) GetUserSubscriptionGroupID(ctx context.Context, userID uint) (*uint, error) {
-	snap, err := a.billing.GetCurrentSubscriptionSnapshot(ctx, userID, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	if snap == nil {
-		return nil, nil
-	}
-	return snap.PermissionGroupID, nil
+	cfg                 config.Config
+	engine              *gin.Engine
+	logger              *zap.Logger
+	db                  *gorm.DB
+	redis               *redis.Client
+	geoResolver         *geoip.Client
+	llmClient           *llm.Client
+	mcpClient           *mcp.Client
+	embeddingClient     *embedding.Client
+	mediaArtifactClient *mediaartifact.Client
+	backgroundCancel    context.CancelFunc
 }
 
 type avatarContentOpener struct {
@@ -202,38 +185,30 @@ func NewApp() (*App, error) {
 
 	userRepo := userrepo.NewRepo(db)
 	userService := user.NewService(userRepo)
-	billingRepo := billingrepo.NewRepo(db)
-	billingService := billing.NewService(billingRepo)
-	billingService.SetAuditWriter(auditService)
-	billingService.SetRedemptionCodeSecret(cfg.DataEncryptionKey)
-	officialPricingService := billing.NewOfficialPricingService(
-		openrouterpricing.New(cfg.StrictOutboundPolicy()),
-		filecache.NewOpenRouterPricingCache(runtimeCfg.Snapshot().StorageRootDir),
-	)
-	paymentCheckoutService := billing.NewPaymentCheckoutService(stripepayment.New(cfg.StrictOutboundPolicy()))
-	billingHandler := billinghttp.NewHandler(billingService, settingsService, runtimeCfg, officialPricingService, paymentCheckoutService)
-	billingModule := billinghttp.NewModule(billingHandler)
+	var billingModule *billinghttp.Module
 	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
-	identityProviderClient := identityprovider.New(cfg.StrictOutboundPolicy())
-	authService := auth.NewServiceWithRuntime(
+	sub2Client, err := sub2api.New(cfg.Sub2BaseURL, cfg.StrictOutboundPolicy())
+	if err != nil {
+		return nil, fmt.Errorf("init Sub2API client: %w", err)
+	}
+	authService, err := auth.NewServiceWithRuntime(
 		runtimeCfg,
 		userRepo,
 		geoResolver,
-		identityProviderClient,
+		sub2Client,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("init auth service: %w", err)
+	}
 	authService.SetLogger(log)
-	authService.SetProviderAuthBridge(buildProviderAuthBridge(redisClient))
 	authService.SetObjectStoreProvider(objectStoreProvider)
 	authService.SetAuditWriter(auditService)
-	settingsService.SetAuthSafetyService(authService)
-	authService.SetSubscriptionResolver(billingService)
-	bootstrapSuperAdmin, err := authService.EnsureBootstrapSuperAdmin(context.Background())
-	if err != nil {
-		return nil, err
-	}
 	authHandler := authhttp.NewHandler(authService)
 	authModule := authhttp.NewModule(authHandler)
+	billingModule = billinghttp.NewSub2Module(billinghttp.NewSub2Handler(appsub2commerce.NewService(authService, sub2Client, sub2commercerepo.NewRepo(db))))
+	sub2KeyService := appsub2key.NewService(sub2keyrepo.NewRepo(db), authService, sub2Client, cfg.DataEncryptionKey)
+	sub2KeyModule := sub2keyhttp.NewModule(sub2keyhttp.NewHandler(sub2KeyService))
 	memoryRepo := memoryrepo.NewRepo(db)
 	memoryService := memory.NewService(memoryRepo)
 	memoryService.SetAuditWriter(auditService)
@@ -248,15 +223,7 @@ func NewApp() (*App, error) {
 	mediaArtifactClient := mediaartifact.New(strictOutboundPolicy)
 	channelService := channel.NewServiceWithRuntime(runtimeCfg, channelRepo, channelRepo, channelCache, llmClient)
 	channelService.SetLogger(log)
-	channelService.SetBillingModelPricingFilter(billingService)
 	channelService.SetPermissionGroupRepo(channelRepo)
-	channelService.SetSubscriptionGroupResolver(&subscriptionGroupAdapter{billing: billingService})
-	billingService.SetGroupRateMultiplierResolver(channelRepo)
-	billingService.SetPermissionGroupLookup(channelRepo)
-	billingService.SetModelPricingInvalidator(channelService.InvalidateModelCatalog)
-	billingService.SetPlatformModelIdentityResolver(channelService)
-	billingService.SetModelPricingCatalogProvider(channelService)
-	billingService.SetNativeToolCatalogProvider(channelService)
 	settingsHandler.SetNativeToolCatalogProvider(channelService)
 	channelHandler := channelhttp.NewHandler(channelService)
 	channelModule := channelhttp.NewModule(channelHandler)
@@ -291,12 +258,11 @@ func NewApp() (*App, error) {
 		ragService,
 		log,
 	)
-	conversationService.SetBillingService(billingService)
+	conversationService.SetSub2ExecutionResolver(sub2KeyService)
 	conversationService.SetAuditWriter(auditService)
 	conversationService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetMCPRepository(mcpRepo)
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
-	userService.SetAvatarFileValidator(conversationService)
 	authService.SetAvatarFileValidator(conversationService)
 	memoryService.SetCacheInvalidator(conversationService.InvalidateMemoryCache)
 	conversationHandler := conversationhttp.NewHandler(conversationService, runtimeCfg)
@@ -308,18 +274,11 @@ func NewApp() (*App, error) {
 	mcpHandler := mcphttp.NewHandler(mcpService)
 	mcpModule := mcphttp.NewModule(mcpHandler)
 	adminService := admin.NewService(userService, auditService)
-	adminService.SetAuthSecurityService(authService)
 	adminService.SetSystemEventService(systemEventService)
-	adminService.SetUsageLogService(billingService)
-	adminService.SetUsageStatisticsService(billingService)
-	adminService.SetOrderLogService(billingService)
 	adminService.SetConversationEventService(conversationService)
 	adminService.SetLogCleanupService(logCleanupService)
-	adminService.SetSubscriptionResolver(billingService)
-	adminService.SetOpenWebUIRowLoader(openwebui.NewRowLoader())
 	adminService.SetPermissionGroupRepo(channelRepo)
 	adminService.SetPermissionGroupModelLookup(channelRepo)
-	adminService.SetPermissionGroupBillingPlanReferenceChecker(billingService)
 	adminHandler := adminhttp.NewHandler(adminService)
 	applicationUpdater, err := update.NewUpdater(update.Config{
 		Repository:      cfg.UpdateRepository,
@@ -366,6 +325,7 @@ func NewApp() (*App, error) {
 		MCP:          mcpModule,
 		Memory:       memoryModule,
 		Billing:      billingModule,
+		Sub2Key:      sub2KeyModule,
 		Admin:        adminModule,
 		Announcement: announcementModule,
 		PromptPreset: promptPresetModule,
@@ -373,15 +333,6 @@ func NewApp() (*App, error) {
 		Settings:     settingsModule,
 		UserSettings: userSettingsModule,
 		User:         userModule,
-		StartupLog: func(log *zap.Logger) {
-			if log == nil || bootstrapSuperAdmin == nil {
-				return
-			}
-			log.Info("bootstrap superadmin created",
-				zap.String("username", bootstrapSuperAdmin.Username),
-				zap.String("password", bootstrapSuperAdmin.Password),
-			)
-		},
 	}, hc, rateLimiter)
 	if err != nil {
 		return nil, err
@@ -391,18 +342,17 @@ func NewApp() (*App, error) {
 	conversationService.StartBackgroundWorkers(backgroundCtx)
 
 	return &App{
-		cfg:                    runtimeCfg.Snapshot(),
-		engine:                 engine,
-		logger:                 log,
-		db:                     db,
-		redis:                  redisClient,
-		geoResolver:            geoResolver,
-		identityProviderClient: identityProviderClient,
-		llmClient:              llmClient,
-		mcpClient:              mcpClient,
-		embeddingClient:        embedClient,
-		mediaArtifactClient:    mediaArtifactClient,
-		backgroundCancel:       backgroundCancel,
+		cfg:                 runtimeCfg.Snapshot(),
+		engine:              engine,
+		logger:              log,
+		db:                  db,
+		redis:               redisClient,
+		geoResolver:         geoResolver,
+		llmClient:           llmClient,
+		mcpClient:           mcpClient,
+		embeddingClient:     embedClient,
+		mediaArtifactClient: mediaArtifactClient,
+		backgroundCancel:    backgroundCancel,
 	}, nil
 }
 
@@ -474,9 +424,6 @@ func (a *App) Close() {
 	}
 	if a.geoResolver != nil {
 		a.geoResolver.Close()
-	}
-	if a.identityProviderClient != nil {
-		a.identityProviderClient.CloseIdleConnections()
 	}
 	if a.llmClient != nil {
 		a.llmClient.CloseIdleConnections()

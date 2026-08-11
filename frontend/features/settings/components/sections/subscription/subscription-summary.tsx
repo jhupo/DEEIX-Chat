@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { SpinnerLabel } from "@/components/ui/spinner";
-import type { UserDTO } from "@/shared/api/auth.types";
 import type { BillingOverviewData, BillingSubscriptionEntitlementDTO } from "@/shared/api/billing.types";
 import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
 import {
@@ -16,22 +15,20 @@ import {
   formatMediumDate,
   formatPlanCredit,
   formatPlanPrice,
-  formatProviderPaymentAmountFromUSD,
   formatShortDate,
   isCurrentBillingPlan,
   planRank,
   resolveDefaultPrice,
-  resolveEPayTypeLabel,
-  resolvePaymentProviderLabel,
   resolvePlanActionKind,
   resolvePlanActionLabel,
   resolvePlanButtonVariant,
   resolvePlanFeatures,
 } from "@/features/settings/model/subscription-format";
 import type { BillingDisplayOptions } from "@/shared/lib/billing-display";
+import { formatBillingDisplayAmountFromUSD } from "@/shared/lib/billing-display";
 
 type BillingMode = "period" | "usage" | "self";
-type PaymentProvider = "stripe" | "epay";
+type PaymentProvider = string;
 type BillingAccount = NonNullable<BillingOverviewData["overview"]>["account"];
 
 type SubscriptionIntervalLabels = {
@@ -54,13 +51,6 @@ type PlanFeatureLabels = {
   freeModelsNotIncluded: string;
 };
 
-type PaymentLabels = {
-  alipay: string;
-  wxpay: string;
-  qqpay: string;
-  custom: (type: string) => string;
-};
-
 type PlanActionLabels = {
   current: string;
   unavailable: string;
@@ -71,10 +61,14 @@ type PlanActionLabels = {
   freeBlocked: string;
 };
 
-type EPayTypeOption = {
-  name: string;
-  type: string;
-};
+function paymentMethodLabel(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  if (normalized === "alipay") return "Alipay";
+  if (normalized === "wxpay") return "WeChat Pay";
+  if (normalized === "stripe") return "Stripe";
+  if (normalized === "airwallex") return "Airwallex";
+  return provider;
+}
 
 function ActionRow({
   title,
@@ -180,7 +174,6 @@ type SubscriptionSummaryProps = {
   billingOverview: BillingOverviewData["overview"] | null;
   currentPlan: BillingPlanDTO | null;
   currentPrice: BillingPlanPriceDTO | null;
-  viewer: UserDTO | null;
   billingAccount: BillingAccount | null;
   subscriptionEntitlements: BillingSubscriptionEntitlementDTO[];
   locale: string;
@@ -188,13 +181,10 @@ type SubscriptionSummaryProps = {
   entitlementLabels: SubscriptionEntitlementQueueLabels;
   planActionLabels: PlanActionLabels;
   planFeatureLabels: PlanFeatureLabels;
-  epayLabels: PaymentLabels;
-  epayTypes: EPayTypeOption[];
   paymentProviders: string[];
   selectedPlan: BillingPlanDTO | null;
   selectedPrice: BillingPlanPriceDTO | null;
   selectedPaymentProvider: PaymentProvider;
-  selectedEPayType: string;
   checkoutPriceID: number | null;
   pricingDialogOpen: boolean;
   paymentDialogOpen: boolean;
@@ -209,7 +199,6 @@ type SubscriptionSummaryProps = {
   onPaymentDialogOpenChange: (open: boolean) => void;
   onSelectPlan: (plan: BillingPlanDTO, price: BillingPlanPriceDTO | null, isCurrent: boolean) => void;
   onPaymentProviderChange: (provider: PaymentProvider) => void;
-  onEPayTypeChange: (type: string) => void;
   onConfirmPayment: () => void;
 };
 
@@ -223,7 +212,6 @@ export function SubscriptionSummary({
   billingOverview,
   currentPlan,
   currentPrice,
-  viewer,
   billingAccount,
   subscriptionEntitlements,
   locale,
@@ -231,13 +219,10 @@ export function SubscriptionSummary({
   entitlementLabels,
   planActionLabels,
   planFeatureLabels,
-  epayLabels,
-  epayTypes,
   paymentProviders,
   selectedPlan,
   selectedPrice,
   selectedPaymentProvider,
-  selectedEPayType,
   checkoutPriceID,
   pricingDialogOpen,
   paymentDialogOpen,
@@ -252,7 +237,6 @@ export function SubscriptionSummary({
   onPaymentDialogOpenChange,
   onSelectPlan,
   onPaymentProviderChange,
-  onEPayTypeChange,
   onConfirmPayment,
 }: SubscriptionSummaryProps) {
   const t = useTranslations("settings.subscriptionPage");
@@ -260,7 +244,7 @@ export function SubscriptionSummary({
     ? resolvePlanActionKind(
       selectedPlan,
       selectedPrice,
-      isCurrentBillingPlan(selectedPlan, currentPlan, viewer),
+      isCurrentBillingPlan(selectedPlan, currentPlan),
       currentPlan,
       protectedPaidPlanRank,
     )
@@ -283,8 +267,9 @@ export function SubscriptionSummary({
       ? t("payment.upgradeDescription")
       : null;
   const selectedPaymentAmountUSD = selectedPrice ? (selectedPrice.amountCents || 0) / 100 : 0;
-  const stripePaymentAmount = selectedPrice ? formatProviderPaymentAmountFromUSD(selectedPaymentAmountUSD, "stripe", billingDisplay) : "";
-  const epayPaymentAmount = selectedPrice ? formatProviderPaymentAmountFromUSD(selectedPaymentAmountUSD, "epay", billingDisplay) : "";
+  const paymentAmount = selectedPrice
+    ? formatBillingDisplayAmountFromUSD(selectedPaymentAmountUSD, billingDisplay, { maximumFractionDigits: 2 })
+    : "";
 
   return (
     <>
@@ -346,7 +331,7 @@ export function SubscriptionSummary({
 
           <ActionRow
             title={t("periodOverage.title")}
-            value={t("periodOverage.balance", { value: formatAccountBalance(billingAccount?.balanceUSD ?? 0, billingDisplay) })}
+            value={t("periodOverage.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
             action={
               <Button type="button" variant="outline" disabled={billingLoading || topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
                 <Banknote className="size-3.5" />
@@ -361,7 +346,7 @@ export function SubscriptionSummary({
         <section className="space-y-6 px-0.5 md:space-y-7 xl:space-y-8 xl:px-1">
           <ActionRow
             title={t("usageBilling.title")}
-            value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balanceUSD ?? 0, billingDisplay) })}
+            value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
             action={
               <div className="flex items-center gap-2">
                 <Button type="button" variant="outline" disabled={billingLoading || redemptionLoading} onClick={onOpenRedemptionDialog}>
@@ -393,7 +378,7 @@ export function SubscriptionSummary({
           <div className="space-y-2 xl:hidden">
             {billingPlans.map((plan) => {
               const price = resolveDefaultPrice(plan);
-              const isCurrent = isCurrentBillingPlan(plan, currentPlan, viewer);
+              const isCurrent = isCurrentBillingPlan(plan, currentPlan);
               const actionKind = resolvePlanActionKind(plan, price, isCurrent, currentPlan, protectedPaidPlanRank);
               const actionLabel = resolvePlanActionLabel(actionKind, planActionLabels);
               const disabled = billingLoading || actionKind === "current" || actionKind === "freeBlocked" || actionKind === "unavailable" || checkoutPriceID === price?.id;
@@ -435,7 +420,7 @@ export function SubscriptionSummary({
           <div className="hidden gap-4 pt-4 xl:grid xl:grid-cols-4">
             {billingPlans.map((plan) => {
               const price = resolveDefaultPrice(plan);
-              const isCurrent = isCurrentBillingPlan(plan, currentPlan, viewer);
+              const isCurrent = isCurrentBillingPlan(plan, currentPlan);
               const actionKind = resolvePlanActionKind(plan, price, isCurrent, currentPlan, protectedPaidPlanRank);
               const actionLabel = resolvePlanActionLabel(actionKind, planActionLabels);
               const disabled = billingLoading || actionKind === "current" || actionKind === "freeBlocked" || actionKind === "unavailable" || checkoutPriceID === price?.id;
@@ -502,47 +487,23 @@ export function SubscriptionSummary({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            {paymentProviders.includes("stripe") ? (
+            {paymentProviders.map((provider) => (
               <button
+                key={provider}
                 type="button"
                 className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left ${
-                  selectedPaymentProvider === "stripe" ? "border-foreground bg-muted/25" : "border-border bg-transparent"
+                  selectedPaymentProvider === provider ? "border-foreground bg-muted/25" : "border-border bg-transparent"
                 }`}
                 disabled={paymentDisabled}
-                onClick={() => onPaymentProviderChange("stripe")}
+                onClick={() => onPaymentProviderChange(provider)}
               >
                 <span className="space-y-1">
-                  <span className="block text-xs font-medium">Stripe</span>
-                  <span className="block text-xs text-muted-foreground">{stripePaymentAmount || t("payment.card")}</span>
+                  <span className="block text-xs font-medium">{paymentMethodLabel(provider)}</span>
+                  <span className="block text-xs text-muted-foreground">{paymentAmount || t("payment.card")}</span>
                 </span>
-                {selectedPaymentProvider === "stripe" ? <Check className="size-4" /> : null}
+                {selectedPaymentProvider === provider ? <Check className="size-4" /> : null}
               </button>
-            ) : null}
-            {paymentProviders.includes("epay")
-              ? epayTypes.map((item) => {
-                const selected = selectedPaymentProvider === "epay" && selectedEPayType === item.type;
-                return (
-                  <button
-                    key={item.type}
-                    type="button"
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-3 text-left ${
-                      selected ? "border-foreground bg-muted/25" : "border-border bg-transparent"
-                    }`}
-                    disabled={paymentDisabled}
-                    onClick={() => {
-                      onPaymentProviderChange("epay");
-                      onEPayTypeChange(item.type);
-                    }}
-                  >
-                    <span className="space-y-1">
-                      <span className="block text-xs font-medium">{item.name || resolveEPayTypeLabel(item.type, epayLabels)}</span>
-                      <span className="block text-xs text-muted-foreground">{epayPaymentAmount || resolvePaymentProviderLabel("epay", t("payment.disabled"))}</span>
-                    </span>
-                    {selected ? <Check className="size-4" /> : null}
-                  </button>
-                );
-              })
-              : null}
+            ))}
           </div>
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onPaymentDialogOpenChange(false)} disabled={checkoutPriceID === selectedPrice?.id}>

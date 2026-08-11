@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
@@ -15,6 +14,7 @@ import (
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
+	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
@@ -37,6 +37,11 @@ type routeResolver interface {
 	ResolveRoute(ctx context.Context, input channel.ResolveRouteInput) (*channel.ResolvedRoute, error)
 	MarkRouteFailure(ctx context.Context, route *channel.ResolvedRoute, cause error)
 	MarkRouteSuccess(ctx context.Context, route *channel.ResolvedRoute)
+}
+
+type sub2ExecutionResolver interface {
+	ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error)
+	ValidateModel(context.Context, *appsub2key.Execution, string) (*appsub2key.Execution, error)
 }
 
 // defaultRouteResolver 表示按任务类型解析默认路由的可选能力。
@@ -84,13 +89,6 @@ func isMediaArtifactResponseTooLarge(err error) bool {
 	return errors.As(err, &target)
 }
 
-type basicServiceBillingContextKey struct{}
-
-type basicServiceBillingContext struct {
-	UserID         uint
-	ConversationID uint
-}
-
 // Service 封装会话业务能力。
 type Service struct {
 	cfg               *config.Runtime
@@ -109,7 +107,7 @@ type Service struct {
 	extractSvc        *extraction.Service
 	ragSvc            *apprag.Service
 	skillResolver     skillResolver
-	billingSvc        *appbilling.Service
+	sub2Resolver      sub2ExecutionResolver
 	auditWriter       auditWriter
 	storeProvider     appstorage.Provider
 	logger            *zap.Logger
@@ -163,6 +161,7 @@ type SendMessageInput struct {
 	UserID                  uint
 	ConversationID          uint
 	RequestID               string
+	KeyBindingID            string
 	ContentType             string
 	Content                 string
 	PlatformModelName       string
@@ -187,28 +186,27 @@ func (s *Service) SetSkillResolver(resolver skillResolver) {
 
 // SendMessageResult 返回用户消息与 AI 消息。
 type SendMessageResult struct {
-	UserMessage           model.Message
-	AssistantMessage      model.Message
-	MetadataRefreshHint   string
-	Billable              bool
-	UpstreamID            uint
-	UpstreamName          string
-	PlatformModelName     string
-	RoutedBindingCode     string
-	UpstreamModelName     string
-	UpstreamProtocol      string
-	EffectiveOptions      map[string]interface{}
-	UsageSpeed            string
-	UsageServiceTier      string
-	UsageSource           string
-	RawUsageJSON          string
-	CacheWrite5mTokens    int64
-	CacheWrite1hTokens    int64
-	ServerSideToolUsage   map[string]int64
-	LatencyMS             int64
-	DurationSeconds       int64
-	StartedAt             time.Time
-	postBillingCompaction *postBillingCompactionTask
+	UserMessage         model.Message
+	AssistantMessage    model.Message
+	MetadataRefreshHint string
+	UpstreamID          uint
+	UpstreamName        string
+	PlatformModelName   string
+	RoutedBindingCode   string
+	UpstreamModelName   string
+	UpstreamProtocol    string
+	EffectiveOptions    map[string]interface{}
+	UsageSpeed          string
+	UsageServiceTier    string
+	UsageSource         string
+	RawUsageJSON        string
+	CacheWrite5mTokens  int64
+	CacheWrite1hTokens  int64
+	ServerSideToolUsage map[string]int64
+	LatencyMS           int64
+	DurationSeconds     int64
+	StartedAt           time.Time
+	postSendCompaction  *postSendCompactionTask
 }
 
 // MessageFeedbackResult 返回反馈后的当前状态（内部传输，不携带序列化标记）。
@@ -336,9 +334,9 @@ func (s *Service) InvalidateMemoryCache(userID uint) {
 	s.userMemCache.Delete(userID)
 }
 
-// SetBillingService 注入计费服务，用于记录标题、标签、上下文压缩等基础 LLM 服务用量。
-func (s *Service) SetBillingService(billingSvc *appbilling.Service) {
-	s.billingSvc = billingSvc
+// SetSub2ExecutionResolver injects the authenticated user's selected key resolver.
+func (s *Service) SetSub2ExecutionResolver(resolver sub2ExecutionResolver) {
+	s.sub2Resolver = resolver
 }
 
 // SetAuditWriter 注入会话域审计写入器。

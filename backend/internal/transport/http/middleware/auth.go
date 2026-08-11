@@ -2,10 +2,12 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	appauth "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/auth"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/token"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
@@ -21,7 +23,7 @@ type SessionValidator interface {
 		sessionID string,
 		accessIssuedAt time.Time,
 		auditCtx requestmeta.SessionAuditContext,
-	) error
+	) (*domainuser.User, error)
 }
 
 // AuthMiddleware 校验 JWT 并写入用户上下文。
@@ -58,21 +60,34 @@ func AuthMiddleware(jwtSecret string, validator SessionValidator) gin.HandlerFun
 			return
 		}
 		auditCtx := ResolveSessionAuditContext(c)
+		var principal *domainuser.User
 		if validator != nil {
 			var issuedAt time.Time
 			if claims.IssuedAt != nil {
 				issuedAt = claims.IssuedAt.Time
 			}
-			if err = validator.ValidateAccessSession(c.Request.Context(), claims.UserID, claims.SessionID, issuedAt, auditCtx); err != nil {
-				response.Error(c, http.StatusUnauthorized, "session invalid")
+			if principal, err = validator.ValidateAccessSession(c.Request.Context(), claims.UserID, claims.SessionID, issuedAt, auditCtx); err != nil {
+				if errors.Is(err, appauth.ErrSessionRevoked) || errors.Is(err, appauth.ErrInvalidRefreshToken) || errors.Is(err, appauth.ErrInvalidCredentials) {
+					response.Error(c, http.StatusUnauthorized, "session invalid")
+				} else if errors.Is(err, appauth.ErrSub2Unavailable) {
+					response.Error(c, http.StatusBadGateway, "identity service unavailable")
+				} else {
+					response.Error(c, http.StatusInternalServerError, "session validation failed")
+				}
 				c.Abort()
 				return
 			}
 		}
 
 		c.Set(ContextKeyUserID, claims.UserID)
-		c.Set(ContextKeyUsername, claims.Username)
-		c.Set(ContextKeyUserRole, claims.Role)
+		username := claims.Username
+		role := claims.Role
+		if principal != nil {
+			username = principal.Username
+			role = principal.Role
+		}
+		c.Set(ContextKeyUsername, username)
+		c.Set(ContextKeyUserRole, role)
 		c.Set(ContextKeySessionID, claims.SessionID)
 		c.Next()
 	}
@@ -89,7 +104,7 @@ func AdminOnly() gin.HandlerFunc {
 		}
 
 		roleStr, roleOK := role.(string)
-		if !roleOK || !domainuser.IsAdminRole(roleStr) {
+		if !roleOK || roleStr != domainuser.RoleSuperAdmin {
 			response.Error(c, http.StatusForbidden, "admin permission required")
 			c.Abort()
 			return

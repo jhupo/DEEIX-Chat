@@ -49,6 +49,11 @@ export interface ActiveSessionResponse {
   updatedAt: string;
 }
 
+export interface ActiveSessionResponseDoc {
+  data: ActiveSessionResponse;
+  errorMsg: string;
+}
+
 export interface AdminAnnouncementListResponseDoc {
   data: {
     results: AnnouncementResponse[];
@@ -58,53 +63,49 @@ export interface AdminAnnouncementListResponseDoc {
 }
 
 export interface AdminErrorDoc {
-  data: any;
-  details?: any;
-  errorCode?: string;
-  errorMsg: string;
-  requestId?: string;
+  message: string;
 }
 
-export interface AdminUserIdentityProviderSummaryResponse {
-  id: number;
-  logoURL: string;
-  name: string;
-  slug: string;
-  type: string;
+export interface AdminPageDataInternalTransportHttpAdminAuditLogResponse {
+  results: AuditLogResponse[];
+  total: number;
+}
+
+export interface AdminPageDataInternalTransportHttpAdminAuthEventResponse {
+  results: AuthEventResponse[];
+  total: number;
+}
+
+export interface AdminPageDataInternalTransportHttpAdminConversationEventResponse {
+  results: ConversationEventResponse[];
+  total: number;
+}
+
+export interface AdminPageDataInternalTransportHttpAdminSystemEventResponse {
+  results: SystemEventResponse[];
+  total: number;
+}
+
+export interface AdminPageDataInternalTransportHttpAdminUserResponse {
+  results: AdminUserResponse[];
+  total: number;
 }
 
 export interface AdminUserResponse {
   appearancePreferences: string;
   avatarURL: string;
-  billingAccountCurrency: string;
-  billingAccountStatus: string;
-  billingBalanceNanousd: number;
-  billingBalanceUSD: number;
   createdAt: string;
   displayName: string;
   email: string;
-  emailVerifiedAt: string | null;
   id: number;
-  identityProviders: AdminUserIdentityProviderSummaryResponse[];
-  lastActiveAt: string | null;
-  lastLoginAt: string | null;
+  lastActiveAt: string;
+  lastLoginAt: string;
   locale: string;
-  phone: string;
-  phoneVerifiedAt: string | null;
   profilePreferences: string;
   publicID: string;
   role: string;
   status: string;
-  subscriptionExpiresAt: string | null;
-  subscriptionPlanID: number | null;
-  subscriptionPlanName: string;
-  subscriptionStatus: string;
-  subscriptionTier: string;
   timezone: string;
-  twoFactorAvailable: boolean;
-  twoFactorEnabled: boolean;
-  twoFactorRecoveryCount: number;
-  twoFactorRequired: boolean;
   updatedAt: string;
   username: string;
 }
@@ -182,10 +183,7 @@ export interface AnnouncementStateRequest {
 }
 
 export interface AuditLogListResponseDoc {
-  data: {
-    results: AuditLogResponse[];
-    total: number;
-  };
+  data: AdminPageDataInternalTransportHttpAdminAuditLogResponse;
   errorMsg: string;
 }
 
@@ -209,9 +207,16 @@ export interface AuditLogResponse {
 export interface AuthErrorDoc {
   data: any;
   details?: any;
+  /** @example "invalid_request" */
   errorCode?: string;
+  /** @example "invalid request" */
   errorMsg: string;
   requestId?: string;
+}
+
+export interface AuthEventListResponseDoc {
+  data: AdminPageDataInternalTransportHttpAdminAuthEventResponse;
+  errorMsg: string;
 }
 
 export interface AuthEventResponse {
@@ -232,78 +237,23 @@ export interface AuthEventResponse {
   username: string;
 }
 
-export interface AuthUserIdentityProviderSummaryResponse {
-  id: number;
-  logoURL: string;
-  name: string;
-  slug: string;
-  type: string;
-}
-
 export interface AuthUserResponse {
   appearancePreferences: string;
   avatarURL: string;
   createdAt: string;
   displayName: string;
   email: string;
-  emailBootstrapUsedAt: string | null;
-  emailSource: string;
-  emailVerifiedAt: string | null;
   id: number;
-  identityProviders: AuthUserIdentityProviderSummaryResponse[];
-  initialSecurityRequired: boolean;
-  initialUsernameRequired: boolean;
   lastActiveAt: string | null;
   lastLoginAt: string | null;
   locale: string;
-  mustResetPassword: boolean;
-  onboardingCompletedAt: string | null;
-  passwordEnabled: boolean;
-  passwordOrigin: string;
-  passwordSetAt: string | null;
-  phone: string;
-  phoneVerifiedAt: string | null;
   profilePreferences: string;
   publicID: string;
   role: string;
   status: string;
-  subscriptionExpiresAt: string | null;
-  subscriptionPlanID: number | null;
-  subscriptionPlanName: string;
-  subscriptionStatus: string;
-  subscriptionTier: string;
   timezone: string;
-  twoFactorAvailable: boolean;
-  twoFactorEnabled: boolean;
-  twoFactorRecoveryCount: number;
-  twoFactorRequired: boolean;
   updatedAt: string;
   username: string;
-  usernameChangedAt: string | null;
-}
-
-export interface BatchDeleteRedemptionCodeDataResponse {
-  failedCount: number;
-  notFoundCount: number;
-  results: BatchDeleteRedemptionCodeResultResponse[];
-  successCount: number;
-  total: number;
-}
-
-export interface BatchDeleteRedemptionCodeRequest {
-  /** @minItems 1 */
-  ids: number[];
-}
-
-export interface BatchDeleteRedemptionCodeResponseDoc {
-  data: BatchDeleteRedemptionCodeDataResponse;
-  errorMsg: string;
-}
-
-export interface BatchDeleteRedemptionCodeResultResponse {
-  error?: string;
-  id: number;
-  status: string;
 }
 
 export interface BatchDeleteRequest {
@@ -346,119 +296,8 @@ export interface BatchSetConversationProjectResponseDoc {
   errorMsg: string;
 }
 
-export interface BillingAccountDataResponse {
-  account: BillingAccountResponse;
-}
-
-export interface BillingAccountResponse {
-  balanceNanousd: number;
-  balanceUSD: number;
-  currency: string;
-  status: string;
-  updatedAt: string;
-  userID: number;
-}
-
-export interface BillingAccountResponseDoc {
-  data: BillingAccountDataResponse;
-  errorMsg: string;
-}
-
-export interface BillingConfigDataResponse {
-  config: BillingConfigResponse;
-}
-
-export interface BillingConfigRequest {
-  displayCurrency?: "USD" | "CNY";
-  mode: "self" | "period" | "usage";
-  nativeToolBillingEnabled?: boolean;
-  nativeToolPricing?: NativeToolPricingRequest[];
-  /** @min 0 */
-  prepaidAmountUSD?: number;
-  usdToCNYRate?: number;
-}
-
-export interface BillingConfigResponse {
-  displayCurrency: string;
-  epayTypes: PaymentTypeResponse[];
-  mode: string;
-  nativeToolBillingEnabled: boolean;
-  nativeToolPricing: NativeToolPricingResponse[];
-  paymentProviders: string[];
-  prepaidAmountNanousd: number;
-  prepaidAmountUSD: number;
-  usdToCNYRate: number;
-}
-
-export interface BillingConfigResponseDoc {
-  data: BillingConfigDataResponse;
-  errorMsg: string;
-}
-
 export interface BillingErrorDoc {
-  data: any;
-  details?: any;
-  errorCode?: string;
   errorMsg: string;
-  requestId?: string;
-}
-
-export interface BillingOverviewDataResponse {
-  overview: BillingOverviewResponse;
-}
-
-export interface BillingOverviewResponse {
-  account: BillingAccountResponse | null;
-  mode: string;
-  periodCreditNanousd: number;
-  periodCreditUSD: number;
-  periodEndAt: string | null;
-  periodRemainingNanousd: number;
-  periodRemainingUSD: number;
-  periodStartAt: string | null;
-  periodUsedNanousd: number;
-  periodUsedUSD: number;
-  plan: BillingPlanResponse | null;
-  subscriptionEntitlements: SubscriptionEntitlementResponse[];
-}
-
-export interface BillingOverviewResponseDoc {
-  data: BillingOverviewDataResponse;
-  errorMsg: string;
-}
-
-export interface BillingPlanDataResponse {
-  plan: BillingPlanResponse;
-}
-
-export interface BillingPlanResponse {
-  code: string;
-  description: string;
-  discountPercent: number;
-  featureJSON: string;
-  id: number;
-  isActive: boolean;
-  name: string;
-  periodCreditNanousd: number;
-  periodCreditUSD: number;
-  permissionGroupID: number | null;
-  prices: BillingPriceResponse[];
-  sortOrder: number;
-}
-
-export interface BillingPlanResponseDoc {
-  data: BillingPlanDataResponse;
-  errorMsg: string;
-}
-
-export interface BillingPriceResponse {
-  amountCents: number;
-  billingInterval: string;
-  code: string;
-  currency: string;
-  id: number;
-  isDefault: boolean;
-  planID: number;
 }
 
 export interface BindModelUpstreamSourceRequest {
@@ -516,38 +355,31 @@ export interface BrandingResponseDoc {
   errorMsg: string;
 }
 
+export interface ChangePasswordRequest {
+  /** @maxLength 128 */
+  currentPassword: string;
+  /**
+   * @minLength 8
+   * @maxLength 128
+   */
+  newPassword: string;
+}
+
+export interface ChangePasswordResponse {
+  changed: boolean;
+}
+
+export interface ChangePasswordResponseDoc {
+  data: ChangePasswordResponse;
+  errorMsg: string;
+}
+
 export interface ChannelErrorDoc {
   data: any;
   details?: any;
   errorCode?: string;
   errorMsg: string;
   requestId?: string;
-}
-
-export interface CheckoutDataResponse {
-  checkout: CheckoutResponse;
-}
-
-export interface CheckoutResponse {
-  baseAmountCents: number;
-  baseCurrency: string;
-  checkoutURL: string;
-  creditNanousd: number;
-  creditUSD: number;
-  expiredAt: string | null;
-  externalCheckoutID: string;
-  fxRate: string;
-  orderNo: string;
-  orderType: string;
-  payAmountCents: number;
-  payCurrency: string;
-  provider: string;
-  status: string;
-}
-
-export interface CheckoutResponseDoc {
-  data: CheckoutDataResponse;
-  errorMsg: string;
 }
 
 export interface CircuitResetResponse {
@@ -650,10 +482,7 @@ export interface ConversationEventDetailResponseDoc {
 }
 
 export interface ConversationEventListResponseDoc {
-  data: {
-    results: ConversationEventResponse[];
-    total: number;
-  };
+  data: AdminPageDataInternalTransportHttpAdminConversationEventResponse;
   errorMsg: string;
 }
 
@@ -661,25 +490,16 @@ export interface ConversationEventResponse {
   contentMarkdown: string;
   conversationID: number;
   createdAt: string;
-  endedAt: string | null;
-  errorJSON: string;
+  endedAt: string;
   eventID: string;
   eventScope: string;
   eventType: string;
   id: number;
-  inputJSON: string;
   latencyMS: number;
   messageID: number;
-  outputJSON: string;
-  parentEventID: string;
   payloadJSON: string;
   payloadOmitted: boolean;
-  payloadSizeBytes: number;
   phase: string;
-  platformModelName: string;
-  providerProtocol: string;
-  roundID: string;
-  routedBindingCode: string;
   runID: string;
   seq: number;
   stage: string;
@@ -687,11 +507,8 @@ export interface ConversationEventResponse {
   status: string;
   summary: string;
   title: string;
-  toolCallID: string;
   toolName: string;
   updatedAt: string;
-  upstreamModelName: string;
-  upstreamName: string;
   userDisplayName: string;
   userID: number;
   userLabel: string;
@@ -863,26 +680,6 @@ export interface CreateAnnouncementRequest {
   type?: "critical" | "warning" | "info" | "normal" | "general";
 }
 
-export interface CreateCheckoutRequest {
-  /** @min 0 */
-  amountMinorUnits?: number;
-  /** @maxLength 512 */
-  cancelURL?: string;
-  /**
-   * @min 1
-   * @max 120
-   */
-  cycles?: number;
-  /** @maxLength 32 */
-  epayType?: string;
-  orderType?: "subscription" | "topup";
-  paymentProvider?: "stripe" | "epay";
-  /** @min 1 */
-  priceID?: number;
-  /** @maxLength 512 */
-  successURL?: string;
-}
-
 export interface CreateConversationProjectRequest {
   /** @maxLength 32 */
   color?: string;
@@ -969,48 +766,9 @@ export interface CreateModelVendorRequest {
 }
 
 export interface CreatePermissionGroupRequest {
-  /** @maxLength 512 */
   description?: string;
-  /** @maxLength 128 */
+  /** @maxLength 64 */
   name: string;
-  /**
-   * @min 0
-   * @max 10000
-   */
-  rateMultiplierPercent?: number;
-}
-
-export interface CreateRedemptionCodeRequest {
-  /**
-   * @minLength 3
-   * @maxLength 64
-   */
-  code?: string;
-  /** @min 0 */
-  creditUSD?: number;
-  /** @maxLength 255 */
-  description?: string;
-  /**
-   * @min 0
-   * @max 3660
-   */
-  durationDays?: number;
-  expiresAt?: string | null;
-  /** @min 1 */
-  maxRedemptions?: number;
-  mode: "usage" | "period";
-  /**
-   * @min 1
-   * @max 100
-   */
-  perUserLimit?: number;
-  /** @min 1 */
-  planID?: number;
-  /**
-   * @min 1
-   * @max 100
-   */
-  quantity?: number;
 }
 
 export interface CreateServerRequest {
@@ -1061,60 +819,6 @@ export interface CreateUpstreamResponseDoc {
   errorMsg: string;
 }
 
-export interface CreateUserRequest {
-  /** @maxLength 2048 */
-  avatarURL?: string;
-  /**
-   * @minLength 3
-   * @maxLength 16
-   */
-  displayName?: string;
-  /** @maxLength 128 */
-  email?: string;
-  /** @maxLength 16 */
-  locale?: string;
-  /**
-   * @minLength 8
-   * @maxLength 128
-   */
-  password: string;
-  /** @maxLength 32 */
-  phone?: string;
-  subscriptionExpiresAt?: string;
-  /** @maxLength 32 */
-  subscriptionTier?: string;
-  /** @maxLength 64 */
-  timezone?: string;
-  /**
-   * @minLength 3
-   * @maxLength 16
-   */
-  username: string;
-}
-
-export interface CreateUserResponseDoc {
-  data: UserDataResponse;
-  errorMsg: string;
-}
-
-export interface DeleteAccountRequest {
-  /**
-   * @minLength 6
-   * @maxLength 32
-   */
-  code: string;
-  verificationMethod: "two_factor" | "email";
-}
-
-export interface DeleteAccountResponse {
-  deleted: boolean;
-}
-
-export interface DeleteAccountResponseDoc {
-  data: DeleteAccountResponse;
-  errorMsg: string;
-}
-
 export interface DeleteFileResponse {
   deleted: boolean;
   fileID: string;
@@ -1126,14 +830,9 @@ export interface DeleteFileResponseDoc {
   errorMsg: string;
 }
 
-export interface DeletePermissionGroupResponse {
+export interface DeletePermissionGroupResponseDoc {
   deleted: boolean;
   summary: PermissionGroupDeleteSummaryResponse;
-}
-
-export interface DeletePermissionGroupResponseDoc {
-  data: DeletePermissionGroupResponse;
-  errorMsg: string;
 }
 
 export interface DeleteServerResponse {
@@ -1142,15 +841,6 @@ export interface DeleteServerResponse {
 
 export interface DeleteServerResponseDoc {
   data: DeleteServerResponse;
-  errorMsg: string;
-}
-
-export interface DeleteUserResponse {
-  deleted: boolean;
-}
-
-export interface DeleteUserResponseDoc {
-  data: DeleteUserResponse;
   errorMsg: string;
 }
 
@@ -1181,18 +871,6 @@ export interface EmailRegistrationStartResponse {
 
 export interface EmailRegistrationStartResponseDoc {
   data: EmailRegistrationStartResponse;
-  errorMsg: string;
-}
-
-export interface EmailVerificationStartResponse {
-  availableMethods: string[];
-  expiresAt: string;
-  sent: boolean;
-  verificationMethod: string;
-}
-
-export interface EmailVerificationStartResponseDoc {
-  data: EmailVerificationStartResponse;
   errorMsg: string;
 }
 
@@ -1251,106 +929,13 @@ export interface FileUploadResponse {
   reused: boolean;
 }
 
-export interface GroupModelsResponse {
+export interface GroupModelsResponseDoc {
   modelIDs: number[];
   rules: PermissionGroupModelRuleResponse[];
 }
 
-export interface GroupModelsResponseDoc {
-  data: GroupModelsResponse;
-  errorMsg: string;
-}
-
-export interface GroupUsersResponse {
-  userIDs: number[];
-}
-
 export interface GroupUsersResponseDoc {
-  data: GroupUsersResponse;
-  errorMsg: string;
-}
-
-export interface IdentityProviderDeleteResponse {
-  deleted: boolean;
-}
-
-export interface IdentityProviderDeleteResponseDoc {
-  data: IdentityProviderDeleteResponse;
-  errorMsg: string;
-}
-
-export interface IdentityProviderListResponse {
-  results: IdentityProviderResponse[];
-  total: number;
-}
-
-export interface IdentityProviderListResponseDoc {
-  data: IdentityProviderListResponse;
-  errorMsg: string;
-}
-
-export interface IdentityProviderReorderResponse {
-  updated: boolean;
-}
-
-export interface IdentityProviderReorderResponseDoc {
-  data: IdentityProviderReorderResponse;
-  errorMsg: string;
-}
-
-export interface IdentityProviderResponse {
-  authURL?: string;
-  avatarField: string;
-  clientID?: string;
-  createdAt: string;
-  defaultRole: "user" | "admin" | "superadmin";
-  discoveryURL?: string;
-  emailField: string;
-  emailVerifiedField: string;
-  issuerURL?: string;
-  jwksURL?: string;
-  loginEnabled: boolean;
-  logoURL: string;
-  name: string;
-  nameField: string;
-  publicID: string;
-  registrationEnabled: boolean;
-  scopes: string;
-  slug: string;
-  subjectField: string;
-  tokenURL?: string;
-  type: "oidc" | "oauth2";
-  updatedAt: string;
-  userinfoURL?: string;
-}
-
-export interface IdentityProviderResponseDoc {
-  data: IdentityProviderResponse;
-  errorMsg: string;
-}
-
-export interface ImportOpenWebUIUsersRequest {
-  creditMultiplier: number;
-  dryRun?: boolean;
-  /** @maxLength 2048 */
-  dsn: string;
-}
-
-export interface ImportOpenWebUIUsersResponse {
-  dedupeField: string;
-  dedupeRule: string;
-  imported: number;
-  scanned: number;
-  skippedDuplicateSourceEmail: number;
-  skippedExistingEmail: number;
-  skippedInvalidEmail: number;
-  skippedInvalidRow: number;
-  source: string;
-}
-
-export interface ImportOpenWebUIUsersResponseDoc {
-  data: ImportOpenWebUIUsersResponse;
-  errorMsg: string;
+  userIDs: number[];
 }
 
 export interface ImportUpstreamModelItemRequest {
@@ -1408,15 +993,10 @@ export interface ImportUpstreamModelsResponseDoc {
 }
 
 export interface LoginOptionsResponse {
-  emailEnabled: boolean;
   emailRegistrationEnabled: boolean;
   emailVerificationEnabled: boolean;
-  passwordResetEnabled: boolean;
-  providerAuthBridge: ProviderAuthBridgeResponse;
-  providers: IdentityProviderResponse[];
-  turnstileRegistrationEnabled: boolean;
+  turnstileEnabled: boolean;
   turnstileSiteKey: string;
-  usernameEnabled: boolean;
 }
 
 export interface LoginOptionsResponseDoc {
@@ -1425,27 +1005,24 @@ export interface LoginOptionsResponseDoc {
 }
 
 export interface LoginRequest {
+  /** @maxLength 128 */
+  email: string;
   /**
    * @minLength 6
    * @maxLength 128
    */
   password: string;
-  /**
-   * @minLength 3
-   * @maxLength 128
-   */
-  username: string;
+  /** @maxLength 2048 */
+  turnstileToken?: string;
 }
 
 export interface LoginResponse {
-  accessToken: string;
-  expiresAt: string;
-  refreshExpiresAt: string;
-  sessionID: string;
+  accessToken?: string;
+  expiresAt?: string | null;
+  refreshExpiresAt?: string | null;
+  sessionID?: string;
   twoFactorChallengeToken?: string;
   twoFactorRequired: boolean;
-  user: AuthUserResponse;
-  verificationMethods?: string[];
 }
 
 export interface LoginResponseDoc {
@@ -1481,14 +1058,6 @@ export interface MemoryErrorDoc {
   errorCode?: string;
   errorMsg: string;
   requestId?: string;
-}
-
-export interface MessageBillingCostResponse {
-  billedCurrency: string;
-  billedNanousd: number;
-  billedUSD: number;
-  billingMode: string;
-  pricingSnapshotJSON: string;
 }
 
 export interface MessageFeedbackResponse {
@@ -1554,7 +1123,6 @@ export interface MessagePromptTraceSourceResponse {
 
 export interface MessageResponse {
   attachments: string;
-  billingCost?: MessageBillingCostResponse;
   branchReason: string;
   cacheReadTokens: number;
   cacheWriteTokens: number;
@@ -1664,53 +1232,11 @@ export interface ModelListResponseDoc {
   errorMsg: string;
 }
 
-export interface ModelPermissionGroupsResponse {
+export interface ModelPermissionGroupsResponseDoc {
   effectiveGroupIDs: number[];
   manualGroupIDs: number[];
   matchedGroupIDs: number[];
   unassigned: boolean;
-}
-
-export interface ModelPermissionGroupsResponseDoc {
-  data: ModelPermissionGroupsResponse;
-  errorMsg: string;
-}
-
-export interface ModelPricingDataResponse {
-  modelPricing: ModelPricingResponse;
-}
-
-export interface ModelPricingListResponseDoc {
-  data: {
-    results: ModelPricingResponse[];
-    total: number;
-  };
-  errorMsg: string;
-}
-
-export interface ModelPricingResponse {
-  cacheReadNanousdPerMTokens: number;
-  cacheReadUSDPerMTokens: number;
-  cacheWriteNanousdPerMTokens: number;
-  cacheWriteUSDPerMTokens: number;
-  callNanousdPerCall: number;
-  callUSDPerCall: number;
-  createdAt: string;
-  currency: string;
-  durationNanousdPerSecond: number;
-  durationUSDPerSecond: number;
-  id: number;
-  inputNanousdPerMTokens: number;
-  inputUSDPerMTokens: number;
-  isFree: boolean;
-  modelIcon: string;
-  modelVendor: string;
-  outputNanousdPerMTokens: number;
-  outputUSDPerMTokens: number;
-  platformModelName: string;
-  pricingMode: string;
-  tieredPricingJSON: string;
-  updatedAt: string;
 }
 
 export interface ModelProbeBatchResponse {
@@ -1871,87 +1397,6 @@ export interface ModelVendorResponse {
   updatedAt: string;
 }
 
-export interface NativeToolPricingRequest {
-  billable?: boolean;
-  priceLabel?: string;
-  priceNanousd?: number;
-  toolKey?: string;
-  unit?: string;
-}
-
-export interface NativeToolPricingResponse {
-  billable: boolean;
-  description: string;
-  label: string;
-  priceLabel: string;
-  priceNanousd: number;
-  provider: string;
-  toolKey: string;
-  type: string;
-  unit: string;
-}
-
-export interface OpenRouterOfficialPricingDataResponse {
-  cached: boolean;
-  fetchedAt: string;
-  items: OpenRouterOfficialPricingItemResponse[];
-  stale: boolean;
-}
-
-export interface OpenRouterOfficialPricingItemResponse {
-  canonicalSlug: string;
-  id: string;
-  name: string;
-  pricing: OpenRouterOfficialPricingUnitPricingResponse;
-}
-
-export interface OpenRouterOfficialPricingResponseDoc {
-  data: OpenRouterOfficialPricingDataResponse;
-  errorMsg: string;
-}
-
-export interface OpenRouterOfficialPricingUnitPricingResponse {
-  completion: string;
-  inputCacheRead: string;
-  inputCacheWrite: string;
-  prompt: string;
-}
-
-export interface PasswordResetCompleteRequest {
-  code: string;
-  /** @maxLength 128 */
-  email: string;
-  /**
-   * @minLength 8
-   * @maxLength 128
-   */
-  newPassword: string;
-}
-
-export interface PasswordResetCompleteResponse {
-  changed: boolean;
-}
-
-export interface PasswordResetCompleteResponseDoc {
-  data: PasswordResetCompleteResponse;
-  errorMsg: string;
-}
-
-export interface PasswordResetStartRequest {
-  /** @maxLength 128 */
-  email: string;
-}
-
-export interface PasswordResetStartResponse {
-  expiresAt: string;
-  sent: boolean;
-}
-
-export interface PasswordResetStartResponseDoc {
-  data: PasswordResetStartResponse;
-  errorMsg: string;
-}
-
 export interface PatchAnnouncementRequestDoc {
   /** @maxLength 20000 */
   contentMarkdown?: string;
@@ -1973,26 +1418,18 @@ export interface PatchItem {
 }
 
 export interface PatchMeRequest {
-  /** @maxLength 2048 */
+  /** @maxLength 65536 */
   appearancePreferences?: string;
   /** @maxLength 2048 */
   avatarURL?: string;
-  /**
-   * @minLength 3
-   * @maxLength 16
-   */
+  /** @maxLength 128 */
   displayName?: string;
-  /** @maxLength 16 */
+  /** @maxLength 32 */
   locale?: string;
-  /** @maxLength 1024 */
+  /** @maxLength 65536 */
   profilePreferences?: string;
   /** @maxLength 64 */
   timezone?: string;
-}
-
-export interface PatchMeResponseDoc {
-  data: MeResponse;
-  errorMsg: string;
 }
 
 export interface PatchPromptPresetRequest {
@@ -2006,19 +1443,6 @@ export interface PatchPromptPresetRequest {
   title?: string;
   /** @maxLength 64 */
   trigger?: string;
-}
-
-export interface PatchRedemptionCodeRequestDoc {
-  /** @maxLength 255 */
-  description?: string;
-  expiresAt?: string | null;
-  maxRedemptions?: number | null;
-  /**
-   * @min 1
-   * @max 100
-   */
-  perUserLimit?: number;
-  status?: "active" | "inactive";
 }
 
 export interface PatchSkillRequest {
@@ -2035,119 +1459,34 @@ export interface PatchSkillRequest {
 }
 
 export interface PatchUserRequest {
-  /** @maxLength 2048 */
   avatarURL?: string;
-  /**
-   * @minLength 3
-   * @maxLength 16
-   */
   displayName?: string;
-  /** @maxLength 128 */
-  email?: string;
-  /** @maxLength 16 */
   locale?: string;
-  /** @maxLength 32 */
-  phone?: string;
-  /** @maxLength 1024 */
   profilePreferences?: string;
-  /** @maxLength 255 */
   reason?: string;
-  /** @maxLength 32 */
-  role?: string;
-  /** @maxLength 32 */
-  status?: string;
-  subscriptionExpiresAt?: string;
-  /** @maxLength 32 */
-  subscriptionTier?: string;
-  /** @maxLength 64 */
   timezone?: string;
 }
 
-export interface PatchUsernameRequest {
-  /**
-   * @minLength 3
-   * @maxLength 16
-   */
-  username: string;
-}
-
-export interface PaymentOrderListResponseDoc {
-  data: {
-    results: PaymentOrderResponse[];
-    total: number;
-  };
-  errorMsg: string;
-}
-
-export interface PaymentOrderResponse {
-  baseAmountCents: number;
-  baseCurrency: string;
-  billingInterval: string;
-  createdAt: string;
-  creditNanousd: number;
-  creditUSD: number;
-  cycles: number;
-  expiredAt: string | null;
-  externalCheckoutID: string;
-  externalPaymentID: string;
-  fxRate: string;
-  id: number;
-  orderNo: string;
-  orderType: string;
-  paidAt: string | null;
-  payAmountCents: number;
-  payCurrency: string;
-  planID: number;
-  priceID: number;
-  provider: string;
-  snapshotJSON: string;
-  status: string;
-  updatedAt: string;
-  userDisplayName: string;
-  userID: number;
-  userLabel: string;
-  username: string;
-}
-
-export interface PaymentTypeResponse {
-  name: string;
-  type: string;
-}
-
-export interface PermissionGroupDataResponse {
+export interface PermissionGroupDataResponseDoc {
   group: PermissionGroupResponse;
 }
 
-export interface PermissionGroupDataResponseDoc {
-  data: PermissionGroupDataResponse;
-  errorMsg: string;
-}
-
 export interface PermissionGroupDeleteSummaryResponse {
-  manualModelCount: number;
-  manualUserCount: number;
-  planCount: number;
-  ruleCount: number;
-}
-
-export interface PermissionGroupListResponse {
-  results: PermissionGroupResponse[];
+  modelAccessCount: number;
+  userAccessCount: number;
 }
 
 export interface PermissionGroupListResponseDoc {
-  data: PermissionGroupListResponse;
-  errorMsg: string;
+  results: PermissionGroupResponse[];
 }
 
 export interface PermissionGroupModelRuleRequest {
-  /** @maxLength 32 */
-  type: string;
-  /** @maxLength 128 */
-  value?: string;
+  ruleType: string;
+  value: string;
 }
 
 export interface PermissionGroupModelRuleResponse {
-  type: string;
+  ruleType: string;
   value: string;
 }
 
@@ -2160,16 +1499,9 @@ export interface PermissionGroupResponse {
   manualUserCount: number;
   modelCount: number;
   name: string;
-  rateMultiplierPercent: number;
   ruleModelCount: number;
-  subscriptionUserCount: number;
   updatedAt: string;
   userCount: number;
-}
-
-export interface PlanListResponseDoc {
-  data: BillingPlanResponse[];
-  errorMsg: string;
 }
 
 export interface PromptPresetDataResponse {
@@ -2217,82 +1549,9 @@ export interface PromptPresetResponseDoc {
   errorMsg: string;
 }
 
-export interface ProviderAuthBridgeExchangeRequest {
-  /** @maxLength 128 */
-  clientID: string;
-  /**
-   * @minLength 43
-   * @maxLength 128
-   */
-  codeVerifier: string;
-  /**
-   * @minLength 43
-   * @maxLength 128
-   */
-  grant: string;
-}
-
-export interface ProviderAuthBridgeResponse {
-  callbackBaseURL: string;
-  enabled: boolean;
-  protocolVersion: number;
-}
-
-export interface ProviderAuthBridgeStartRequest {
-  /** @maxLength 128 */
-  clientID: string;
-  /**
-   * @minLength 43
-   * @maxLength 128
-   */
-  clientState: string;
-  /**
-   * @minLength 43
-   * @maxLength 128
-   */
-  codeChallenge: string;
-  intent?: "login" | "register";
-  /** @maxLength 2048 */
-  next?: string;
-  /** @maxLength 2048 */
-  redirectURI: string;
-}
-
-export interface ProviderAuthBridgeStartResponse {
-  authorizationURL: string;
-  expiresAt: string;
-}
-
-export interface ProviderAuthBridgeStartResponseDoc {
-  data: ProviderAuthBridgeStartResponse;
-  errorMsg: string;
-}
-
 export interface PublicModelListResponseDoc {
   data: PublicModelResponse[];
   errorMsg: string;
-}
-
-export interface PublicModelPricingResponse {
-  cacheReadUSDPerMTokens: number;
-  cacheWriteUSDPerMTokens: number;
-  callUSDPerCall: number;
-  currency: string;
-  durationUSDPerSecond: number;
-  inputUSDPerMTokens: number;
-  isFree: boolean;
-  mode: string;
-  outputUSDPerMTokens: number;
-  tiers: PublicModelPricingTierResponse[];
-}
-
-export interface PublicModelPricingTierResponse {
-  cacheReadUSDPerMTokens: number;
-  cacheWriteUSDPerMTokens: number;
-  fromTokens: number;
-  inputUSDPerMTokens: number;
-  outputUSDPerMTokens: number;
-  upToTokens: number | null;
 }
 
 export interface PublicModelResponse {
@@ -2304,7 +1563,6 @@ export interface PublicModelResponse {
   icon: string;
   kindsJSON: string;
   platformModelName: string;
-  pricing: PublicModelPricingResponse | null;
   protocolsJSON: string;
   sortOrder: number;
   vendor: string;
@@ -2357,104 +1615,6 @@ export interface PublicSharedMessageResponse {
   upstreamModelName: string;
 }
 
-export interface RedeemCodeRequest {
-  /**
-   * @minLength 3
-   * @maxLength 64
-   */
-  code: string;
-}
-
-export interface RedemptionApplyDataResponse {
-  account?: BillingAccountResponse;
-  overview: BillingOverviewResponse;
-  redemption: RedemptionResponse;
-  subscription?: SubscriptionResponse;
-}
-
-export interface RedemptionApplyResponseDoc {
-  data: RedemptionApplyDataResponse;
-  errorMsg: string;
-}
-
-export interface RedemptionCodeCreateDataResponse {
-  results: RedemptionCodeResponse[];
-}
-
-export interface RedemptionCodeCreateResponseDoc {
-  data: RedemptionCodeCreateDataResponse;
-  errorMsg: string;
-}
-
-export interface RedemptionCodeDataResponse {
-  code: RedemptionCodeResponse;
-}
-
-export interface RedemptionCodeDeleteDataResponse {
-  deleted: boolean;
-}
-
-export interface RedemptionCodeDeleteResponseDoc {
-  data: RedemptionCodeDeleteDataResponse;
-  errorMsg: string;
-}
-
-export interface RedemptionCodeListDataResponse {
-  results: RedemptionCodeResponse[];
-  total: number;
-}
-
-export interface RedemptionCodeListResponseDoc {
-  data: RedemptionCodeListDataResponse;
-  errorMsg: string;
-}
-
-export interface RedemptionCodeResponse {
-  code?: string;
-  codeHint: string;
-  createdAt: string;
-  createdByUserID: number;
-  creditNanousd: number;
-  creditUSD: number;
-  description: string;
-  durationDays: number;
-  expiresAt: string | null;
-  id: number;
-  maxRedemptions: number | null;
-  mode: string;
-  perUserLimit: number;
-  planID: number;
-  redeemedCount: number;
-  remainingRedemptions: number | null;
-  rewardType: string;
-  status: string;
-  updatedAt: string;
-}
-
-export interface RedemptionCodeResponseDoc {
-  data: RedemptionCodeDataResponse;
-  errorMsg: string;
-}
-
-export interface RedemptionResponse {
-  balanceTransactionID: number;
-  codeID: number;
-  createdAt: string;
-  creditNanousd: number;
-  creditUSD: number;
-  id: number;
-  mode: string;
-  planID: number;
-  rewardType: string;
-  subscriptionID: number;
-  userID: number;
-}
-
-export interface RefreshTokenResponseDoc {
-  data: LoginResponse;
-  errorMsg: string;
-}
-
 export interface RenameConversationRequest {
   /** @maxLength 255 */
   title: string;
@@ -2463,10 +1623,6 @@ export interface RenameConversationRequest {
 export interface ReorderConversationProjectsRequest {
   /** @maxItems 200 */
   projectIDs: string[];
-}
-
-export interface ReorderIdentityProvidersRequest {
-  providerIDs: string[];
 }
 
 export interface ReorderModelsRequest {
@@ -2485,24 +1641,6 @@ export interface ReorderServersRequest {
 
 export interface ResetUpstreamCircuitResponseDoc {
   data: CircuitResetResponse;
-  errorMsg: string;
-}
-
-export interface ResetUserPasswordRequest {
-  mustResetPassword?: boolean;
-  /**
-   * @minLength 8
-   * @maxLength 128
-   */
-  newPassword: string;
-}
-
-export interface ResetUserPasswordResponse {
-  reset: boolean;
-}
-
-export interface ResetUserPasswordResponseDoc {
-  data: ResetUserPasswordResponse;
   errorMsg: string;
 }
 
@@ -2564,10 +1702,6 @@ export interface RunResponse {
   userID: number;
 }
 
-export interface SecurityVerificationStartRequest {
-  verificationMethod?: "none" | "two_factor" | "email";
-}
-
 export interface SendMessageRequest {
   branchReason?: "default" | "retry" | "edit";
   /** @maxLength 64 */
@@ -2577,6 +1711,8 @@ export interface SendMessageRequest {
   /** @maxItems 20 */
   fileIDs?: string[];
   htmlVisualPrompt?: boolean;
+  /** @maxLength 64 */
+  keyBindingID: string;
   /** @maxLength 128 */
   model?: string;
   options?: Record<string, any>;
@@ -2663,12 +1799,12 @@ export interface SetConversationStarRequest {
 }
 
 export interface SetGroupModelsRequest {
-  modelIDs?: number[];
-  rules?: PermissionGroupModelRuleRequest[];
+  modelIDs: number[];
+  rules: PermissionGroupModelRuleRequest[];
 }
 
 export interface SetGroupUsersRequest {
-  userIDs?: number[];
+  userIDs: number[];
 }
 
 export interface SetMessageFeedbackRequest {
@@ -2676,7 +1812,7 @@ export interface SetMessageFeedbackRequest {
 }
 
 export interface SetModelPermissionGroupsRequest {
-  groupIDs?: number[];
+  groupIDs: number[];
 }
 
 export interface SetModelsDisplayGroupRequest {
@@ -2768,33 +1904,302 @@ export interface StorageQuotaResponse {
   userID: number;
 }
 
-export interface SubscribeRequest {
-  /**
-   * @min 1
-   * @max 120
-   */
-  cycles?: number;
-  /** @min 1 */
-  priceID: number;
+export interface Sub2AccountDTO {
+  balance: number;
+  frozenBalance: number;
+  status: string;
 }
 
-export interface SubscribeResponseDoc {
-  data: SubscriptionDataResponse;
+export interface Sub2AccountDataDTO {
+  account: Sub2AccountDTO;
+  observedAt: string;
+}
+
+export interface Sub2AccountResponseDoc {
+  data: Sub2AccountDataDTO;
   errorMsg: string;
 }
 
-export interface SubscriptionDataResponse {
-  subscription: SubscriptionResponse;
+export interface Sub2CheckoutDTO {
+  baseAmountCents: number;
+  baseCurrency: string;
+  checkoutURL: string;
+  creditNanousd: number;
+  creditUSD: number;
+  expiredAt: string;
+  externalCheckoutID: string;
+  fxRate: string;
+  orderNo: string;
+  orderType: string;
+  payAmountCents: number;
+  payCurrency: string;
+  provider: string;
+  status: string;
 }
 
-export interface SubscriptionEntitlementResponse {
+export interface Sub2CheckoutDataDTO {
+  checkout: Sub2CheckoutDTO;
+  observedAt: string;
+}
+
+export interface Sub2CheckoutRequest {
+  amountMinorUnits: number;
+  cancelURL: string;
+  cycles: number;
+  orderType: string;
+  paymentProvider: string;
+  priceID: number;
+  successURL: string;
+}
+
+export interface Sub2CheckoutResponseDoc {
+  data: Sub2CheckoutDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2ConfigDTO {
+  balanceDisabled: boolean;
+  balanceRechargeMultiplier: number;
+  displayCurrency: string;
+  globalDailyLimitUSD: number;
+  globalMonthlyLimitUSD: number;
+  globalWeeklyLimitUSD: number;
+  mode: string;
+  paymentMethods: Sub2PaymentMethodDTO[];
+  plans: Sub2PlanDTO[];
+  rechargeFeeRate: number;
+  usdToCNYRate: number;
+}
+
+export interface Sub2ConfigDataDTO {
+  config: Sub2ConfigDTO;
+  observedAt: string;
+}
+
+export interface Sub2ConfigResponseDoc {
+  data: Sub2ConfigDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2DailyDataDTO {
+  observedAt: string;
+  results: Sub2DailyRowDTO[];
+}
+
+export interface Sub2DailyResponseDoc {
+  data: Sub2DailyDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2DailyRowDTO {
+  actualCost: string;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  recordCount: number;
+  totalTokens: number;
+  usageDate: string;
+}
+
+export interface Sub2MonthlyDataDTO {
+  observedAt: string;
+  results: Sub2MonthlyRowDTO[];
+}
+
+export interface Sub2MonthlyResponseDoc {
+  data: Sub2MonthlyDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2MonthlyRowDTO {
+  actualCost: string;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  callCount: number;
+  inputTokens: number;
+  monthStartAt: string;
+  outputTokens: number;
+  recordCount: number;
+  totalTokens: number;
+}
+
+export interface Sub2OrderDTO {
+  amountUSD: number;
+  completedAt: string;
+  createdAt: string;
+  currency: string;
+  expiresAt: string;
+  feeRate: number;
+  id: number;
+  orderNo: string;
+  orderType: string;
+  paidAt: string;
+  payAmount: number;
+  paymentType: string;
+  planID: number;
+  refundAmount: number;
+  refundReason: string;
+  refundRequestReason: string;
+  refundRequestedAt: string;
+  status: string;
+}
+
+export interface Sub2OrderDataDTO {
+  observedAt: string;
+  order: Sub2OrderDTO;
+}
+
+export interface Sub2OrderResponseDoc {
+  data: Sub2OrderDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2OrdersDataDTO {
+  observedAt: string;
+  page: number;
+  pageSize: number;
+  results: Sub2OrderDTO[];
+  total: number;
+}
+
+export interface Sub2OrdersResponseDoc {
+  data: Sub2OrdersDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2OverviewDTO {
+  account: Sub2AccountDTO;
+  mode: string;
+  periodCreditNanousd: number;
+  periodCreditUSD: number;
+  periodEndAt: string;
+  periodRemainingNanousd: number;
+  periodRemainingUSD: number;
+  periodStartAt: string;
+  periodUsedNanousd: number;
+  periodUsedUSD: number;
+  plan: Sub2PlanDTO;
+  subscriptionEntitlements: Sub2SubscriptionEntitlementDTO[];
+}
+
+export interface Sub2OverviewDataDTO {
+  observedAt: string;
+  overview: Sub2OverviewDTO;
+}
+
+export interface Sub2OverviewResponseDoc {
+  data: Sub2OverviewDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2PaymentMethodDTO {
+  currency: string;
+  id: string;
+  max: number;
+  min: number;
+}
+
+export interface Sub2PlanDTO {
+  code: string;
+  dailyLimitUSD: number;
+  description: string;
+  featureJSON: string;
+  groupPlatform: string;
+  id: number;
+  isActive: boolean;
+  modelRateMultiplier: number;
+  modelScopesJSON: string;
+  monthlyLimitUSD: number;
+  name: string;
+  originalPriceCents: number;
+  periodCreditUSD: number;
+  prices: Sub2PlanPriceDTO[];
+  rateMultiplier: number;
+  sortOrder: number;
+  validityDays: number;
+  weeklyLimitUSD: number;
+}
+
+export interface Sub2PlanPriceDTO {
+  amountCents: number;
+  billingInterval: string;
+  code: string;
+  currency: string;
+  id: number;
+  isActive: boolean;
+  isDefault: boolean;
+  planID: number;
+}
+
+export interface Sub2PlansDataDTO {
+  observedAt: string;
+  plans: Sub2PlanDTO[];
+}
+
+export interface Sub2PlansResponseDoc {
+  data: Sub2PlansDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2RedeemRequest {
+  code: string;
+}
+
+export interface Sub2RedeemResponseDoc {
+  data: Sub2RedemptionDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2RedemptionDTO {
+  id: number;
+  type: string;
+  value: number;
+}
+
+export interface Sub2RedemptionDataDTO {
+  account: Sub2AccountDTO;
+  observedAt: string;
+  overview: Sub2OverviewDTO;
+  redemption: Sub2RedemptionDTO;
+}
+
+export interface Sub2RedemptionHistoryDTO {
+  code: string;
+  createdAt: string;
+  expiresAt: string;
+  groupID: number;
+  id: number;
+  status: string;
+  type: string;
+  usedAt: string;
+  validityDays: number;
+  value: number;
+}
+
+export interface Sub2RedemptionsDataDTO {
+  observedAt: string;
+  results: Sub2RedemptionHistoryDTO[];
+}
+
+export interface Sub2RedemptionsResponseDoc {
+  data: Sub2RedemptionsDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2RefundRequest {
+  reason: string;
+}
+
+export interface Sub2SubscriptionEntitlementDTO {
   autoRenew: boolean;
   cancelAtPeriodEnd: boolean;
-  currentPeriodEndAt: string | null;
+  currentPeriodEndAt: string;
   currentPeriodStartAt: string;
   id: number;
   isCurrent: boolean;
-  plan: BillingPlanResponse;
+  plan: Sub2PlanDTO;
   planID: number;
   priceID: number;
   startAt: string;
@@ -2802,17 +2207,30 @@ export interface SubscriptionEntitlementResponse {
   userID: number;
 }
 
-export interface SubscriptionResponse {
-  autoRenew: boolean;
-  cancelAtPeriodEnd: boolean;
-  currentPeriodEndAt: string | null;
-  currentPeriodStartAt: string;
+export interface Sub2UsageDataDTO {
+  observedAt: string;
+  results: Sub2UsageRowDTO[];
+  total: number;
+}
+
+export interface Sub2UsageResponseDoc {
+  data: Sub2UsageDataDTO;
+  errorMsg: string;
+}
+
+export interface Sub2UsageRowDTO {
+  actualCost: string;
+  createdAt: string;
+  durationMS: number;
   id: number;
-  planID: number;
-  priceID: number;
-  startAt: string;
-  status: string;
-  userID: number;
+  inputTokens: number;
+  model: string;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface Sub2VerifyOrderRequest {
+  operationID: string;
 }
 
 export interface SuccessDoc {
@@ -2841,10 +2259,7 @@ export interface SyncUpstreamModelsResponseDoc {
 }
 
 export interface SystemEventListResponseDoc {
-  data: {
-    results: SystemEventResponse[];
-    total: number;
-  };
+  data: AdminPageDataInternalTransportHttpAdminSystemEventResponse;
   errorMsg: string;
 }
 
@@ -2895,34 +2310,17 @@ export interface ToolResponseDoc {
   errorMsg: string;
 }
 
-export interface UpdateBillingAccountBalanceRequest {
-  /** @min 0 */
-  balanceUSD: number;
-  /** @maxLength 255 */
-  description?: string;
-}
-
-export interface UpdateBillingPlanRequest {
-  /** @min 0 */
-  amountUSD: number;
-  billingInterval: "month" | "year" | "lifetime";
-  /** @maxLength 16 */
-  currency?: string;
-  /** @maxLength 255 */
-  description: string;
+export interface TwoFactorVerifyRequest {
   /**
-   * @min 0
-   * @max 100
+   * @minLength 20
+   * @maxLength 4096
    */
-  discountPercent: number;
+  challengeToken: string;
   /**
-   * @minLength 1
-   * @maxLength 64
+   * @minLength 6
+   * @maxLength 32
    */
-  name: string;
-  /** @min 0 */
-  periodCreditUSD: number;
-  permissionGroupID?: number | null;
+  code: string;
 }
 
 export interface UpdateConversationLabelsRequest {
@@ -2952,18 +2350,21 @@ export interface UpdateConversationProjectRequest {
 export interface UpdateCurrentSessionLocationRequest {
   /**
    * @min 0
-   * @max 1000000
+   * @max 100000
    */
   accuracyMeters?: number;
+  /**
+   * @min -90
+   * @max 90
+   */
   latitude: number;
+  /**
+   * @min -180
+   * @max 180
+   */
   longitude: number;
   /** @maxLength 64 */
   timezone?: string;
-}
-
-export interface UpdateCurrentSessionLocationResponseDoc {
-  data: ActiveSessionResponse;
-  errorMsg: string;
 }
 
 export interface UpdateFileRequest {
@@ -3046,15 +2447,9 @@ export interface UpdateModelVendorRequest {
 }
 
 export interface UpdatePermissionGroupRequest {
-  /** @maxLength 512 */
   description?: string;
-  /** @maxLength 128 */
+  /** @maxLength 64 */
   name: string;
-  /**
-   * @min 0
-   * @max 10000
-   */
-  rateMultiplierPercent?: number;
 }
 
 export interface UpdateServerToolsStatusRequest {
@@ -3118,89 +2513,13 @@ export interface UpdateUpstreamResponseDoc {
   errorMsg: string;
 }
 
-export interface UpdateUserStatusRequest {
-  /** @maxLength 255 */
-  reason?: string;
-  /** @maxLength 32 */
-  status: string;
-}
-
-export interface UpdateUserStatusResponseDoc {
-  data: UserDataResponse;
-  errorMsg: string;
-}
-
 export interface UploadFileResponseDoc {
   data: FileUploadResponse;
   errorMsg: string;
 }
 
-export interface UpsertIdentityProviderRequest {
-  /** @maxLength 512 */
-  authURL?: string;
-  /** @maxLength 64 */
-  avatarField?: string;
-  /** @maxLength 255 */
-  clientID: string;
-  /** @maxLength 4096 */
-  clientSecret?: string;
-  defaultRole?: "user" | "admin" | "superadmin";
-  /** @maxLength 512 */
-  discoveryURL?: string;
-  /** @maxLength 64 */
-  emailField?: string;
-  /** @maxLength 64 */
-  emailVerifiedField?: string;
-  /** @maxLength 512 */
-  issuerURL?: string;
-  /** @maxLength 512 */
-  jwksURL?: string;
-  loginEnabled?: boolean;
-  /** @maxLength 512 */
-  logoURL?: string;
-  /** @maxLength 80 */
-  name: string;
-  /** @maxLength 64 */
-  nameField?: string;
-  registrationEnabled?: boolean;
-  /** @maxLength 255 */
-  scopes?: string;
-  /** @maxLength 64 */
-  slug?: string;
-  /** @maxLength 64 */
-  subjectField?: string;
-  /** @maxLength 512 */
-  tokenURL?: string;
-  type: "oidc" | "oauth2";
-  /** @maxLength 512 */
-  userinfoURL?: string;
-}
-
 export interface UpsertMemoryResponse {
   saved: boolean;
-}
-
-export interface UpsertModelPricingRequest {
-  /** @min 0 */
-  cacheReadUSDPerMTokens: number;
-  /** @min 0 */
-  cacheWriteUSDPerMTokens: number;
-  /** @min 0 */
-  callUSDPerCall: number;
-  /** @maxLength 16 */
-  currency?: string;
-  /** @min 0 */
-  durationUSDPerSecond: number;
-  /** @min 0 */
-  inputUSDPerMTokens: number;
-  isFree: boolean;
-  /** @min 0 */
-  outputUSDPerMTokens: number;
-  /** @maxLength 128 */
-  platformModelName: string;
-  pricingMode: "token" | "call" | "duration" | "tiered";
-  /** @maxLength 20000 */
-  tieredPricingJSON?: string;
 }
 
 export interface UpsertUpstreamModelRequest {
@@ -3370,252 +2689,17 @@ export interface UpstreamSyncModelResponse {
   upstreamModelName: string;
 }
 
-export interface UsageDailyListResponseDoc {
-  data: UsageDailyResponse[];
-  errorMsg: string;
-}
-
-export interface UsageDailyModelResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  durationSeconds: number;
-  inputTokens: number;
-  outputTokens: number;
-  platformModelName: string;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-}
-
-export interface UsageDailyResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  durationSeconds: number;
-  inputTokens: number;
-  models: UsageDailyModelResponse[];
-  outputTokens: number;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-  usageDate: string;
-}
-
-export interface UsageLedgerListResponseDoc {
-  data: {
-    results: UsageLedgerResponse[];
-    total: number;
-  };
-  errorMsg: string;
-}
-
-export interface UsageLedgerResponse {
-  cacheWrite1hTokens: number;
-  cacheWrite5mTokens: number;
-  balanceAfterNanousd: number | null;
-  balanceAfterUSD: number | null;
-  billedCurrency: string;
-  billedNanousd: number;
-  billedUSD: number;
-  billingAt: string;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  conversationID: number;
-  createdAt: string;
-  durationSeconds: number;
-  id: number;
-  inputTokens: number;
-  isFreeModel: boolean;
-  latencyMS: number;
-  modelIcon: string;
-  modelVendor: string;
-  outputTokens: number;
-  platformModelName: string;
-  pricingSnapshotJSON: string;
-  providerProtocol: string;
-  reasoningTokens: number;
-  routedBindingCode: string;
-  serviceTier: string;
-  updatedAt: string;
-  upstreamModelName: string;
-  usageDate: string;
-  usageSpeed: string;
-  userID: number;
-}
-
-export interface UsageLogListResponseDoc {
-  data: {
-    results: UsageLogResponse[];
-    total: number;
-  };
-  errorMsg: string;
-}
-
-export interface UsageLogResponse {
-  cacheWrite1hTokens: number;
-  cacheWrite5mTokens: number;
-  balanceAfterNanousd: number | null;
-  balanceAfterUSD: number | null;
-  billedCurrency: string;
-  billedNanousd: number;
-  billedUSD: number;
-  billingAt: string;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  conversationID: number;
-  createdAt: string;
-  durationSeconds: number;
-  id: number;
-  inputTokens: number;
-  isFreeModel: boolean;
-  latencyMS: number;
-  outputTokens: number;
-  platformModelName: string;
-  pricingSnapshotJSON: string;
-  providerProtocol: string;
-  reasoningTokens: number;
-  routedBindingCode: string;
-  serviceTier: string;
-  updatedAt: string;
-  upstreamModelName: string;
-  upstreamName: string;
-  usageDate: string;
-  usageSpeed: string;
-  userDisplayName: string;
-  userID: number;
-  userLabel: string;
-  username: string;
-}
-
-export interface UsageMonthlyListResponseDoc {
-  data: UsageMonthlyResponse[];
-  errorMsg: string;
-}
-
-export interface UsageMonthlyResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  durationSeconds: number;
-  inputTokens: number;
-  monthStartAt: string;
-  outputTokens: number;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-}
-
-export interface UsageStatisticsMetricsResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-}
-
-export interface UsageStatisticsModelRankResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  platformModelName: string;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-  trend: UsageStatisticsTrendResponse[];
-}
-
-export interface UsageStatisticsResponse {
-  range: {
-    endDate: string;
-    granularity: string;
-    startDate: string;
-  };
-  section: string;
-  topModels: UsageStatisticsModelRankResponse[];
-  topUsers: UsageStatisticsUserRankResponse[];
-  totals: UsageStatisticsMetricsResponse;
-  trend: UsageStatisticsTrendResponse[];
-}
-
-export interface UsageStatisticsResponseDoc {
-  data: UsageStatisticsResponse;
-  errorMsg: string;
-}
-
-export interface UsageStatisticsTrendResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  periodStart: string;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-}
-
-export interface UsageStatisticsUserRankResponse {
-  avgLatencyMS: number;
-  billedNanousd: number;
-  billedUSD: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  callCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  recordCount: number;
-  totalTokens: number;
-  trend: UsageStatisticsTrendResponse[];
-  userDisplayName: string;
-  userID: number;
-  userLabel: string;
-  username: string;
-}
-
-export interface UserAuthEventListResponseDoc {
-  data: {
-    results: AuthEventResponse[];
-    total: number;
-  };
-  errorMsg: string;
-}
-
 export interface UserDataResponse {
   user: AdminUserResponse;
 }
 
+export interface UserDataResponseDoc {
+  data: UserDataResponse;
+  errorMsg: string;
+}
+
 export interface UserListResponseDoc {
-  data: {
-    results: AdminUserResponse[];
-    total: number;
-  };
+  data: AdminPageDataInternalTransportHttpAdminUserResponse;
   errorMsg: string;
 }
 
@@ -3759,454 +2843,42 @@ export namespace Admin {
   }
 
   /**
-   * @description 管理员分页查看全量可追溯审计日志
+   * No description
    * @tags admin
    * @name AuditLogsList
-   * @summary 管理员查询审计日志
+   * @summary List audit logs
    * @request GET:/admin/audit-logs
    * @secure
    */
   export namespace AuditLogsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 动作 */
-      action?: string;
-      /** 操作人用户ID */
-      actor_user_id?: number;
-      /** 创建时间起点(RFC3339) */
-      created_from?: string;
-      /** 创建时间终点(RFC3339) */
-      created_to?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索关键词 */
-      query?: string;
-      /** 资源类型 */
-      resource?: string;
-      /** 排序方式 */
-      sort?: string;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = AuditLogListResponseDoc;
   }
 
   /**
-   * @description 管理员保存第三方身份源的展示顺序
-   * @tags admin-auth
-   * @name AuthProviderOrderPartialUpdate
-   * @summary 调整第三方身份源顺序
-   * @request PATCH:/admin/auth/provider-order
-   * @secure
-   */
-  export namespace AuthProviderOrderPartialUpdate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = ReorderIdentityProvidersRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = IdentityProviderReorderResponseDoc;
-  }
-
-  /**
-   * @description 管理员查看已配置的 OIDC 和 OAuth2 身份源
-   * @tags admin-auth
-   * @name AuthProvidersList
-   * @summary 获取第三方身份源列表
-   * @request GET:/admin/auth/providers
-   * @secure
-   */
-  export namespace AuthProvidersList {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = IdentityProviderListResponseDoc;
-  }
-
-  /**
-   * @description 管理员创建一个 OIDC 或 OAuth2 身份源
-   * @tags admin-auth
-   * @name AuthProvidersCreate
-   * @summary 创建第三方身份源
-   * @request POST:/admin/auth/providers
-   * @secure
-   */
-  export namespace AuthProvidersCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = UpsertIdentityProviderRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = IdentityProviderResponseDoc;
-  }
-
-  /**
-   * @description 管理员删除第三方身份源；force=true 时允许删除仍有关联用户的身份源
-   * @tags admin-auth
-   * @name AuthProvidersDelete
-   * @summary 删除第三方身份源
-   * @request DELETE:/admin/auth/providers/{provider_id}
-   * @secure
-   */
-  export namespace AuthProvidersDelete {
-    export type RequestParams = {
-      /** 身份源 ID */
-      providerId: string;
-    };
-    export type RequestQuery = {
-      /** 是否强制删除 */
-      force?: boolean;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = IdentityProviderDeleteResponseDoc;
-  }
-
-  /**
-   * @description 管理员更新一个 OIDC 或 OAuth2 身份源
-   * @tags admin-auth
-   * @name AuthProvidersPartialUpdate
-   * @summary 更新第三方身份源
-   * @request PATCH:/admin/auth/providers/{provider_id}
-   * @secure
-   */
-  export namespace AuthProvidersPartialUpdate {
-    export type RequestParams = {
-      /** 身份源 ID */
-      providerId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpsertIdentityProviderRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = IdentityProviderResponseDoc;
-  }
-
-  /**
-   * @description 设置指定用户的按量计费余额，金额单位为美元
-   * @tags admin-billing
-   * @name BillingAccountsBalancePartialUpdate
-   * @summary 管理员设置用户按量余额
-   * @request PATCH:/admin/billing/accounts/{user_id}/balance
-   * @secure
-   */
-  export namespace BillingAccountsBalancePartialUpdate {
-    export type RequestParams = {
-      /** 用户ID */
-      userId: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpdateBillingAccountBalanceRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = BillingAccountResponseDoc;
-  }
-
-  /**
-   * @description 查询当前全局计费模式
-   * @tags admin-billing
-   * @name BillingConfigList
-   * @summary 管理员查询计费配置
-   * @request GET:/admin/billing/config
-   * @secure
-   */
-  export namespace BillingConfigList {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = BillingConfigResponseDoc;
-  }
-
-  /**
-   * @description 更新当前全局计费模式
-   * @tags admin-billing
-   * @name BillingConfigPartialUpdate
-   * @summary 管理员更新计费配置
-   * @request PATCH:/admin/billing/config
-   * @secure
-   */
-  export namespace BillingConfigPartialUpdate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = BillingConfigRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = BillingConfigResponseDoc;
-  }
-
-  /**
-   * @description 按平台模型名查询模型按量计费配置
-   * @tags admin-billing
-   * @name BillingModelPricesList
-   * @summary 管理员查询模型按量单价
-   * @request GET:/admin/billing/model-prices
-   * @secure
-   */
-  export namespace BillingModelPricesList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索关键词 */
-      q?: string;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = ModelPricingListResponseDoc;
-  }
-
-  /**
-   * @description 按平台模型名创建或更新模型按量计费配置，金额单位为美元
-   * @tags admin-billing
-   * @name BillingModelPricesUpdate
-   * @summary 管理员保存模型按量单价
-   * @request PUT:/admin/billing/model-prices
-   * @secure
-   */
-  export namespace BillingModelPricesUpdate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = UpsertModelPricingRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = ModelPricingDataResponse;
-  }
-
-  /**
-   * @description 从 storage 缓存读取 OpenRouter 模型定价；缓存不存在、过期或 refresh=true 时由后端刷新。
-   * @tags admin-billing
-   * @name BillingOfficialPricingOpenrouterList
-   * @summary 管理员获取 OpenRouter 官方模型定价
-   * @request GET:/admin/billing/official-pricing/openrouter
-   * @secure
-   */
-  export namespace BillingOfficialPricingOpenrouterList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 强制刷新缓存 */
-      refresh?: boolean;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = OpenRouterOfficialPricingResponseDoc;
-  }
-
-  /**
-   * @description 更新周期套餐基础配置与默认价格
-   * @tags admin-billing
-   * @name BillingPlansPartialUpdate
-   * @summary 管理员更新周期套餐
-   * @request PATCH:/admin/billing/plans/{id}
-   * @secure
-   */
-  export namespace BillingPlansPartialUpdate {
-    export type RequestParams = {
-      /** 套餐ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpdateBillingPlanRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = BillingPlanResponseDoc;
-  }
-
-  /**
-   * @description 分页查询计费兑换码配置
-   * @tags admin-billing
-   * @name BillingRedemptionCodesList
-   * @summary 管理员查询兑换码
-   * @request GET:/admin/billing/redemption-codes
-   * @secure
-   */
-  export namespace BillingRedemptionCodesList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 可兑换性：available/expired/exhausted */
-      availability?: string;
-      /** 计费模式：usage/period */
-      mode?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索关键词 */
-      q?: string;
-      /** 状态：active/inactive */
-      status?: string;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = RedemptionCodeListResponseDoc;
-  }
-
-  /**
-   * @description 创建手动兑换码或随机兑换码，明文只在创建响应中返回
-   * @tags admin-billing
-   * @name BillingRedemptionCodesCreate
-   * @summary 管理员创建兑换码
-   * @request POST:/admin/billing/redemption-codes
-   * @secure
-   */
-  export namespace BillingRedemptionCodesCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = CreateRedemptionCodeRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = RedemptionCodeCreateResponseDoc;
-  }
-
-  /**
-   * @description 批量软删除兑换码，历史兑换记录保留，删除后不可再兑换
-   * @tags admin-billing
-   * @name BillingRedemptionCodesBatchDeleteCreate
-   * @summary 管理员批量删除兑换码
-   * @request POST:/admin/billing/redemption-codes/batch-delete
-   * @secure
-   */
-  export namespace BillingRedemptionCodesBatchDeleteCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = BatchDeleteRedemptionCodeRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = BatchDeleteRedemptionCodeResponseDoc;
-  }
-
-  /**
-   * @description 软删除兑换码，历史兑换记录保留，删除后不可再兑换
-   * @tags admin-billing
-   * @name BillingRedemptionCodesDelete
-   * @summary 管理员删除兑换码
-   * @request DELETE:/admin/billing/redemption-codes/{id}
-   * @secure
-   */
-  export namespace BillingRedemptionCodesDelete {
-    export type RequestParams = {
-      /** 兑换码ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = RedemptionCodeDeleteResponseDoc;
-  }
-
-  /**
-   * @description 更新兑换码状态、次数限制、过期时间和说明，不允许修改奖励本身
-   * @tags admin-billing
-   * @name BillingRedemptionCodesPartialUpdate
-   * @summary 管理员更新兑换码
-   * @request PATCH:/admin/billing/redemption-codes/{id}
-   * @secure
-   */
-  export namespace BillingRedemptionCodesPartialUpdate {
-    export type RequestParams = {
-      /** 兑换码ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = PatchRedemptionCodeRequestDoc;
-    export type RequestHeaders = {};
-    export type ResponseBody = RedemptionCodeResponseDoc;
-  }
-
-  /**
-   * @description 解密单个兑换码明文用于复制；列表接口不会返回明文
-   * @tags admin-billing
-   * @name BillingRedemptionCodesCodeList
-   * @summary 管理员按需复制兑换码明文
-   * @request GET:/admin/billing/redemption-codes/{id}/code
-   * @secure
-   */
-  export namespace BillingRedemptionCodesCodeList {
-    export type RequestParams = {
-      /** 兑换码ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = RedemptionCodeResponseDoc;
-  }
-
-  /**
-   * @description 管理员分页查看全量模型调用与计费用量账本
-   * @tags admin
-   * @name CallLogsList
-   * @summary 管理员查询模型调用日志
-   * @request GET:/admin/call-logs
-   * @secure
-   */
-  export namespace CallLogsList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 计费模式筛选：free/token/call/duration/tiered */
-      billing_mode?: string;
-      /** 创建时间起点(RFC3339) */
-      created_from?: string;
-      /** 创建时间终点(RFC3339) */
-      created_to?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 平台模型名筛选 */
-      platform_model_name?: string;
-      /** 搜索模型、上游、绑定编码、协议 */
-      query?: string;
-      /** 排序方式 */
-      sort?: string;
-      /** 调用人用户ID */
-      user_id?: number;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = UsageLogListResponseDoc;
-  }
-
-  /**
-   * @description 管理员分页查看对话运行轨迹、工具、MCP 与处理事件
+   * No description
    * @tags admin
    * @name ConversationEventsList
-   * @summary 管理员查询对话事件
+   * @summary List conversation events
    * @request GET:/admin/conversation-events
    * @secure
    */
   export namespace ConversationEventsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 会话ID */
-      conversation_id?: number;
-      /** 创建时间起点(RFC3339) */
-      created_from?: string;
-      /** 创建时间终点(RFC3339) */
-      created_to?: string;
-      /** 事件范围(trace_block/trace_event/tool_call) */
-      event_scope?: string;
-      /** 事件类型 */
-      event_type?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索运行ID、事件、阶段、标题、工具名 */
-      query?: string;
-      /** 排序方式 */
-      sort?: string;
-      /** 事件状态 */
-      status?: string;
-      /** 用户ID */
-      user_id?: number;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationEventListResponseDoc;
   }
 
   /**
-   * @description 物理删除指定运行的全部对话事件；保留消息、附件、调用与计费记录
+   * No description
    * @tags admin
    * @name ConversationEventsCleanupCreate
-   * @summary 管理员按运行清理对话事件
+   * @summary Remove conversation event runs
    * @request POST:/admin/conversation-events/cleanup
    * @secure
    */
@@ -4219,38 +2891,22 @@ export namespace Admin {
   }
 
   /**
-   * @description 管理员按事件 ID 查看单条对话运行事件详情；超大历史负载会被安全省略
+   * No description
    * @tags admin
    * @name ConversationEventsDetail
-   * @summary 管理员查询对话事件详情
+   * @summary Get a conversation event
    * @request GET:/admin/conversation-events/{id}
    * @secure
    */
   export namespace ConversationEventsDetail {
     export type RequestParams = {
-      /** 事件 ID */
+      /** Event ID */
       id: number;
     };
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationEventDetailResponseDoc;
-  }
-
-  /**
-   * @description 流式导出全量会话及消息为 NDJSON 文件，最后一行为 export_manifest 元数据
-   * @tags admin
-   * @name ConversationsExportList
-   * @summary 管理员导出全量对话数据
-   * @request GET:/admin/conversations/export
-   * @secure
-   */
-  export namespace ConversationsExportList {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = string;
   }
 
   /**
@@ -5057,10 +3713,10 @@ export namespace Admin {
   }
 
   /**
-   * @description 按日志类型物理删除指定时间点之前的日志；操作不可恢复
+   * No description
    * @tags admin
    * @name LogsCleanupCreate
-   * @summary 管理员清理日志
+   * @summary Remove nonfinancial logs before a timestamp
    * @request POST:/admin/logs/cleanup
    * @secure
    */
@@ -5273,43 +3929,6 @@ export namespace Admin {
     export type RequestBody = SetModelPermissionGroupsRequest;
     export type RequestHeaders = {};
     export type ResponseBody = ModelPermissionGroupsResponseDoc;
-  }
-
-  /**
-   * @description 管理员分页查看订阅和充值支付单
-   * @tags admin
-   * @name PaymentOrdersList
-   * @summary 管理员查询支付订单记录
-   * @request GET:/admin/payment-orders
-   * @secure
-   */
-  export namespace PaymentOrdersList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 创建时间起点(RFC3339) */
-      created_from?: string;
-      /** 创建时间终点(RFC3339) */
-      created_to?: string;
-      /** 订单类型(subscription/topup) */
-      order_type?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 支付渠道 */
-      provider?: string;
-      /** 搜索订单号、支付渠道、外部支付ID */
-      query?: string;
-      /** 排序方式 */
-      sort?: string;
-      /** 支付状态 */
-      status?: string;
-      /** 用户ID */
-      user_id?: number;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = PaymentOrderListResponseDoc;
   }
 
   /**
@@ -5892,254 +4511,89 @@ export namespace Admin {
   }
 
   /**
-   * @description 管理员分页查看后台结构化系统事件
+   * No description
    * @tags admin
    * @name SystemEventsList
-   * @summary 管理员查询系统事件
+   * @summary List system events
    * @request GET:/admin/system-events
    * @secure
    */
   export namespace SystemEventsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 创建时间起点(RFC3339) */
-      created_from?: string;
-      /** 创建时间终点(RFC3339) */
-      created_to?: string;
-      /** 事件 */
-      event?: string;
-      /** 级别 */
-      level?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索关键词 */
-      query?: string;
-      /** 排序方式 */
-      sort?: string;
-      /** 来源 */
-      source?: string;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = SystemEventListResponseDoc;
   }
 
   /**
-   * @description 管理员按日期、统计对象、平台模型和计费范围查看全局费用、Token、调用次数及排名；用户与权限组筛选互斥
-   * @tags admin
-   * @name UsageStatisticsList
-   * @summary 管理员查询全局用量统计
-   * @request GET:/admin/usage-statistics
-   * @secure
-   */
-  export namespace UsageStatisticsList {
-    export type RequestParams = {};
-    export type RequestQuery = {
-      /** 计费范围：all/free/billable */
-      billing_scope?: string;
-      /** 结束日期(YYYY-MM-DD，包含当日) */
-      end_date?: string;
-      /** 模型排名指标：cost/tokens/calls */
-      model_rank_by?: string;
-      /** 权限组ID，与 user_id 互斥 */
-      permission_group_id?: number;
-      /** 平台模型名 */
-      platform_model_name?: string;
-      /** 返回范围：all/models/users */
-      section?: string;
-      /** 开始日期(YYYY-MM-DD)，默认近30天 */
-      start_date?: string;
-      /** 用户ID */
-      user_id?: number;
-      /** 用户排名指标：cost/tokens/calls */
-      user_rank_by?: string;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = UsageStatisticsResponseDoc;
-  }
-
-  /**
-   * @description 管理员分页查询认证事件，支持 user_id/event_type/result 过滤
+   * No description
    * @tags admin
    * @name UserAuthEventsList
-   * @summary 管理员查询用户认证事件
+   * @summary List authentication events
    * @request GET:/admin/user-auth-events
    * @secure
    */
   export namespace UserAuthEventsList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 事件类型过滤 */
-      event_type?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 结果过滤(success/failure/blocked) */
-      result?: string;
-      /** 用户ID过滤 */
-      user_id?: number;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = UserAuthEventListResponseDoc;
+    export type ResponseBody = AuthEventListResponseDoc;
   }
 
   /**
-   * @description 管理员分页查看所有用户，实现账户隔离管理
+   * No description
    * @tags admin
    * @name UsersList
-   * @summary 管理员查询用户
+   * @summary List principals
    * @request GET:/admin/users
    * @secure
    */
   export namespace UsersList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 身份源 slug 过滤 */
-      identity_provider?: string;
-      /** 页码 */
-      page?: number;
-      /** 每页数量 */
-      page_size?: number;
-      /** 搜索用户名、昵称、邮箱或公开ID */
-      q?: string;
-      /** 订阅状态过滤(active/free) */
-      subscription_status?: string;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = UserListResponseDoc;
   }
 
   /**
-   * @description 创建普通用户账号；需要授予管理员权限时，可在账户编辑中调整角色
-   * @tags admin
-   * @name UsersCreate
-   * @summary 管理员创建用户
-   * @request POST:/admin/users
-   * @secure
-   */
-  export namespace UsersCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = CreateUserRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = CreateUserResponseDoc;
-  }
-
-  /**
-   * @description 从 OpenWebUI PostgreSQL 数据库读取用户，按 email 去重导入；已存在用户不会修改
-   * @tags admin
-   * @name UsersImportOpenwebuiCreate
-   * @summary 管理员导入 OpenWebUI 用户
-   * @request POST:/admin/users/import/openwebui
-   * @secure
-   */
-  export namespace UsersImportOpenwebuiCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = ImportOpenWebUIUsersRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = ImportOpenWebUIUsersResponseDoc;
-  }
-
-  /**
-   * @description 管理员硬删除指定普通用户及其主要用户域数据
-   * @tags admin
-   * @name UsersDelete
-   * @summary 管理员删除用户
-   * @request DELETE:/admin/users/{id}
-   * @secure
-   */
-  export namespace UsersDelete {
-    export type RequestParams = {
-      /** 用户ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = DeleteUserResponseDoc;
-  }
-
-  /**
-   * @description 管理员统一维护角色、状态、时区等可编辑字段
+   * No description
    * @tags admin
    * @name UsersPartialUpdate
-   * @summary 管理员更新用户可编辑字段
+   * @summary Patch a principal profile
    * @request PATCH:/admin/users/{id}
    * @secure
    */
   export namespace UsersPartialUpdate {
     export type RequestParams = {
-      /** 用户ID */
+      /** User ID */
       id: number;
     };
     export type RequestQuery = {};
     export type RequestBody = PatchUserRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = UpdateUserStatusResponseDoc;
+    export type ResponseBody = UserDataResponseDoc;
   }
 
   /**
-   * @description 管理员重置指定用户密码并吊销其全部会话
-   * @tags admin
-   * @name UsersResetPasswordCreate
-   * @summary 管理员重置用户密码
-   * @request POST:/admin/users/{id}/reset-password
-   * @secure
-   */
-  export namespace UsersResetPasswordCreate {
-    export type RequestParams = {
-      /** 用户ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = ResetUserPasswordRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = ResetUserPasswordResponseDoc;
-  }
-
-  /**
-   * @description 管理员吊销指定用户全部活跃会话，用于安全治理和风险控制
+   * No description
    * @tags admin
    * @name UsersRevokeSessionsCreate
-   * @summary 管理员吊销用户全部会话
+   * @summary Revoke local sessions
    * @request POST:/admin/users/{id}/revoke-sessions
    * @secure
    */
   export namespace UsersRevokeSessionsCreate {
     export type RequestParams = {
-      /** 用户ID */
+      /** User ID */
       id: number;
     };
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = RevokeUserSessionsResponseDoc;
-  }
-
-  /**
-   * @description 管理员维护用户状态（active/locked/suspended/deactivated），并联动会话治理
-   * @tags admin
-   * @name UsersStatusPartialUpdate
-   * @summary 管理员更新用户状态
-   * @request PATCH:/admin/users/{id}/status
-   * @secure
-   */
-  export namespace UsersStatusPartialUpdate {
-    export type RequestParams = {
-      /** 用户ID */
-      id: number;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpdateUserStatusRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = UpdateUserStatusResponseDoc;
   }
 }
 
@@ -6204,10 +4658,10 @@ export namespace Announcements {
 
 export namespace Auth {
   /**
-   * @description 登录后返回JWT访问令牌
+   * @description Authenticates an email/password with Sub2 and sets the DEEIX refresh cookie on success.
    * @tags auth
    * @name LoginCreate
-   * @summary 用户登录
+   * @summary Log in with Sub2
    * @request POST:/auth/login
    */
   export namespace LoginCreate {
@@ -6219,10 +4673,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 获取用户名、邮箱、OAuth/OIDC 登录入口，以及邮箱注册 Turnstile 公共配置
+   * @description Returns current Sub2 email registration and Turnstile settings.
    * @tags auth
    * @name LoginOptionsList
-   * @summary 获取登录入口配置
+   * @summary Get Sub2 login options
    * @request GET:/auth/login-options
    */
   export namespace LoginOptionsList {
@@ -6234,10 +4688,25 @@ export namespace Auth {
   }
 
   /**
-   * @description 吊销当前 access token 对应会话
+   * @description Verifies the encrypted Sub2 login challenge and sets the DEEIX refresh cookie on success.
+   * @tags auth
+   * @name Login2FaCreate
+   * @summary Complete Sub2 login 2FA
+   * @request POST:/auth/login/2fa
+   */
+  export namespace Login2FaCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = TwoFactorVerifyRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = LoginResponseDoc;
+  }
+
+  /**
+   * @description Revokes the current DEEIX session and clears its refresh cookie.
    * @tags auth
    * @name LogoutCreate
-   * @summary 登出当前会话
+   * @summary Log out the current browser session
    * @request POST:/auth/logout
    * @secure
    */
@@ -6250,10 +4719,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 吊销当前用户所有活跃会话
+   * @description Revokes all DEEIX sessions for the current Sub2 principal and clears the refresh cookie.
    * @tags auth
    * @name LogoutAllCreate
-   * @summary 登出全部会话
+   * @summary Log out all browser sessions
    * @request POST:/auth/logout-all
    * @secure
    */
@@ -6266,76 +4735,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 使用邮箱、验证码和新密码完成密码重置；失败时返回通用错误，避免暴露账号状态
-   * @tags auth
-   * @name PasswordResetCompleteCreate
-   * @summary 完成密码重置
-   * @request POST:/auth/password/reset/complete
-   */
-  export namespace PasswordResetCompleteCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = PasswordResetCompleteRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = PasswordResetCompleteResponseDoc;
-  }
-
-  /**
-   * @description SMTP 配置可用时，向已验证邮箱发送密码重置验证码；失败时返回通用错误，避免暴露账号状态
-   * @tags auth
-   * @name PasswordResetStartCreate
-   * @summary 发送密码重置验证码
-   * @request POST:/auth/password/reset/start
-   */
-  export namespace PasswordResetStartCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = PasswordResetStartRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = PasswordResetStartResponseDoc;
-  }
-
-  /**
-   * @description 为 Web、App 或桌面公共客户端创建 PKCE 保护的 OAuth 授权事务；外部身份源仅回调当前 DEEIX 实例
-   * @tags auth
-   * @name ProvidersAuthorizeCreate
-   * @summary 创建第三方登录授权桥事务
-   * @request POST:/auth/providers/{slug}/authorize
-   */
-  export namespace ProvidersAuthorizeCreate {
-    export type RequestParams = {
-      /** 身份源 slug */
-      slug: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = ProviderAuthBridgeStartRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = ProviderAuthBridgeStartResponseDoc;
-  }
-
-  /**
-   * @description 使用客户端 PKCE verifier 原子兑换服务端回调签发的一次性授权码，并进入统一 2FA/会话流程
-   * @tags auth
-   * @name ProvidersExchangeCreate
-   * @summary 兑换第三方登录一次性授权码
-   * @request POST:/auth/providers/{slug}/exchange
-   */
-  export namespace ProvidersExchangeCreate {
-    export type RequestParams = {
-      /** 身份源 slug */
-      slug: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = ProviderAuthBridgeExchangeRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = LoginResponseDoc;
-  }
-
-  /**
-   * @description 使用 HttpOnly refresh cookie 轮换并签发新的 access token
+   * @description Rotates the DEEIX session using only the HttpOnly refresh cookie and returns no refresh token in JSON.
    * @tags auth
    * @name RefreshCreate
-   * @summary 刷新访问令牌
+   * @summary Refresh the browser session
    * @request POST:/auth/refresh
    */
   export namespace RefreshCreate {
@@ -6343,14 +4746,14 @@ export namespace Auth {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = RefreshTokenResponseDoc;
+    export type ResponseBody = LoginResponseDoc;
   }
 
   /**
-   * @description 使用邮箱、密码和验证码完成注册；未开启邮箱验证码但启用 Turnstile 时需要提交 turnstileToken
+   * @description Registers with Sub2 and creates a DEEIX browser session with a refresh cookie.
    * @tags auth
    * @name RegisterEmailCompleteCreate
-   * @summary 完成邮箱注册
+   * @summary Complete Sub2 email registration
    * @request POST:/auth/register/email/complete
    */
   export namespace RegisterEmailCompleteCreate {
@@ -6362,10 +4765,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 邮箱验证码注册开启时发送验证码；启用 Turnstile 后需要提交 turnstileToken
+   * @description Requests a Sub2 registration code for an email address.
    * @tags auth
    * @name RegisterEmailStartCreate
-   * @summary 发送邮箱注册验证码
+   * @summary Start Sub2 email registration
    * @request POST:/auth/register/email/start
    */
   export namespace RegisterEmailStartCreate {
@@ -6377,10 +4780,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 查询当前登录用户仍然有效的活跃会话列表
+   * @description Lists active DEEIX sessions for the current Sub2 principal.
    * @tags auth
    * @name SessionsList
-   * @summary 当前活跃会话
+   * @summary List active browser sessions
    * @request GET:/auth/sessions
    * @secure
    */
@@ -6393,10 +4796,10 @@ export namespace Auth {
   }
 
   /**
-   * @description 用户授权后，用浏览器定位能力补充当前登录会话的精确位置
+   * @description Updates DEEIX session metadata for the authenticated browser session.
    * @tags auth
    * @name SessionsCurrentLocationUpdate
-   * @summary 更新当前会话精确位置
+   * @summary Update current session location
    * @request PUT:/auth/sessions/current/location
    * @secure
    */
@@ -6405,20 +4808,20 @@ export namespace Auth {
     export type RequestQuery = {};
     export type RequestBody = UpdateCurrentSessionLocationRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = UpdateCurrentSessionLocationResponseDoc;
+    export type ResponseBody = ActiveSessionResponseDoc;
   }
 
   /**
-   * @description 吊销当前用户指定 session_id 对应的活跃会话
+   * @description Revokes the specified DEEIX browser session and clears its stored Sub2 credentials.
    * @tags auth
    * @name SessionsLogoutCreate
-   * @summary 登出指定会话
+   * @summary Revoke a browser session
    * @request POST:/auth/sessions/{session_id}/logout
    * @secure
    */
   export namespace SessionsLogoutCreate {
     export type RequestParams = {
-      /** 会话ID */
+      /** Session ID */
       sessionId: string;
     };
     export type RequestQuery = {};
@@ -6430,10 +4833,10 @@ export namespace Auth {
 
 export namespace Billing {
   /**
-   * @description 查询当前用户按量余额
+   * No description
    * @tags billing
    * @name AccountList
-   * @summary 获取按量计费账户
+   * @summary Get Sub2 account balance
    * @request GET:/billing/account
    * @secure
    */
@@ -6442,14 +4845,119 @@ export namespace Billing {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = BillingAccountResponseDoc;
+    export type ResponseBody = Sub2AccountResponseDoc;
   }
 
   /**
-   * @description 查询当前计费方式、周期额度或按量余额
+   * No description
+   * @tags billing
+   * @name ConfigList
+   * @summary Get Sub2 commerce configuration
+   * @request GET:/billing/config
+   * @secure
+   */
+  export namespace ConfigList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2ConfigResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name OrdersList
+   * @summary List current Sub2 payment orders
+   * @request GET:/billing/orders
+   * @secure
+   */
+  export namespace OrdersList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2OrdersResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name OrdersVerifyCreate
+   * @summary Verify a Sub2 payment after returning from checkout
+   * @request POST:/billing/orders/verify
+   * @secure
+   */
+  export namespace OrdersVerifyCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = Sub2VerifyOrderRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2OrderResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name OrdersDetail
+   * @summary Get a current-user Sub2 payment order
+   * @request GET:/billing/orders/{id}
+   * @secure
+   */
+  export namespace OrdersDetail {
+    export type RequestParams = {
+      /** Order ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2OrderResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name OrdersCancelCreate
+   * @summary Cancel a pending Sub2 payment order
+   * @request POST:/billing/orders/{id}/cancel
+   * @secure
+   */
+  export namespace OrdersCancelCreate {
+    export type RequestParams = {
+      /** Order ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Record<string, any>;
+  }
+
+  /**
+   * No description
+   * @tags billing
+   * @name OrdersRefundRequestCreate
+   * @summary Request a refund for a Sub2 payment order
+   * @request POST:/billing/orders/{id}/refund-request
+   * @secure
+   */
+  export namespace OrdersRefundRequestCreate {
+    export type RequestParams = {
+      /** Order ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = Sub2RefundRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = Record<string, any>;
+  }
+
+  /**
+   * No description
    * @tags billing
    * @name OverviewList
-   * @summary 获取当前用户计费概览
+   * @summary Get Sub2 subscription overview
    * @request GET:/billing/overview
    * @secure
    */
@@ -6458,60 +4966,33 @@ export namespace Billing {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = BillingOverviewResponseDoc;
+    export type ResponseBody = Sub2OverviewResponseDoc;
   }
 
   /**
-   * @description 为当前用户创建套餐支付单，并返回支付跳转地址
+   * No description
    * @tags billing
    * @name PaymentsCheckoutCreate
-   * @summary 创建支付收银台
+   * @summary Create Sub2 payment order
    * @request POST:/billing/payments/checkout
    * @secure
    */
   export namespace PaymentsCheckoutCreate {
     export type RequestParams = {};
     export type RequestQuery = {};
-    export type RequestBody = CreateCheckoutRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = CheckoutResponseDoc;
+    export type RequestBody = Sub2CheckoutRequest;
+    export type RequestHeaders = {
+      /** UUID */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = Sub2CheckoutResponseDoc;
   }
 
   /**
    * No description
-   * @tags billing
-   * @name PaymentsEpayNotifyCreate
-   * @summary 易支付异步通知
-   * @request POST:/billing/payments/epay/notify
-   */
-  export namespace PaymentsEpayNotifyCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = string;
-  }
-
-  /**
-   * No description
-   * @tags billing
-   * @name PaymentsStripeWebhookCreate
-   * @summary Stripe 支付回调
-   * @request POST:/billing/payments/stripe/webhook
-   */
-  export namespace PaymentsStripeWebhookCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = Envelope;
-  }
-
-  /**
-   * @description 查询所有启用的订阅套餐及价格
    * @tags billing
    * @name PlansList
-   * @summary 获取订阅套餐
+   * @summary List Sub2 commerce plans
    * @request GET:/billing/plans
    * @secure
    */
@@ -6520,104 +5001,95 @@ export namespace Billing {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = PlanListResponseDoc;
+    export type ResponseBody = Sub2PlansResponseDoc;
   }
 
   /**
-   * @description 当前用户兑换余额或订阅权益
+   * No description
+   * @tags billing
+   * @name RedemptionsList
+   * @summary List current user's Sub2 redemption history
+   * @request GET:/billing/redemptions
+   * @secure
+   */
+  export namespace RedemptionsList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Sub2RedemptionsResponseDoc;
+  }
+
+  /**
+   * No description
    * @tags billing
    * @name RedemptionsCreate
-   * @summary 兑换计费权益码
+   * @summary Redeem a Sub2 code
    * @request POST:/billing/redemptions
    * @secure
    */
   export namespace RedemptionsCreate {
     export type RequestParams = {};
     export type RequestQuery = {};
-    export type RequestBody = RedeemCodeRequest;
+    export type RequestBody = Sub2RedeemRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = RedemptionApplyResponseDoc;
+    export type ResponseBody = Sub2RedeemResponseDoc;
   }
 
   /**
-   * @description 为当前用户创建或替换订阅
-   * @tags billing
-   * @name SubscriptionsCreate
-   * @summary 创建订阅
-   * @request POST:/billing/subscriptions
-   * @secure
-   */
-  export namespace SubscriptionsCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = SubscribeRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = SubscribeResponseDoc;
-  }
-
-  /**
-   * @description 查询当前用户的每日用量与费用
+   * No description
    * @tags billing
    * @name UsageList
-   * @summary 查询用量账单
+   * @summary List Sub2 usage
    * @request GET:/billing/usage
    * @secure
    */
   export namespace UsageList {
     export type RequestParams = {};
     export type RequestQuery = {
-      /** 页码 */
+      /** Page */
       page?: number;
-      /** 每页数量 */
+      /** Page size */
       page_size?: number;
-      /** 搜索模型 */
-      query?: string;
-      /** 排序：newest/oldest/tokens_desc/cost_desc/latency_desc */
-      sort?: string;
-      /** 状态筛选：free/billable */
-      status?: string;
     };
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = UsageLedgerListResponseDoc;
+    export type ResponseBody = Sub2UsageResponseDoc;
   }
 
   /**
-   * @description 查询当前用户按日期聚合的用量与费用
+   * No description
    * @tags billing
    * @name UsageDailyList
-   * @summary 查询每日用量
+   * @summary Get Sub2 daily usage
    * @request GET:/billing/usage/daily
    * @secure
    */
   export namespace UsageDailyList {
     export type RequestParams = {};
-    export type RequestQuery = {
-      /** 天数 */
-      days?: number;
-    };
+    export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = UsageDailyListResponseDoc;
+    export type ResponseBody = Sub2DailyResponseDoc;
   }
 
   /**
-   * @description 查询当前用户按月份聚合的用量与费用
+   * No description
    * @tags billing
    * @name UsageMonthlyList
-   * @summary 查询月度用量
+   * @summary Get Sub2 monthly usage
    * @request GET:/billing/usage/monthly
    * @secure
    */
   export namespace UsageMonthlyList {
     export type RequestParams = {};
     export type RequestQuery = {
-      /** 月份数量，默认近 12 个月 */
+      /** Months */
       months?: number;
     };
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = UsageMonthlyListResponseDoc;
+    export type ResponseBody = Sub2MonthlyResponseDoc;
   }
 }
 
@@ -7436,10 +5908,10 @@ export namespace Mcp {
 
 export namespace Me {
   /**
-   * @description 查询当前登录用户资料
+   * @description Returns the revalidated Sub2 principal and DEEIX-owned preferences.
    * @tags auth
    * @name GetMe
-   * @summary 当前用户信息
+   * @summary Get the current Sub2 principal projection
    * @request GET:/me
    * @secure
    */
@@ -7452,26 +5924,10 @@ export namespace Me {
   }
 
   /**
-   * @description 删除当前登录用户账户及主要用户域数据
-   * @tags auth
-   * @name DeleteMe
-   * @summary 删除当前用户账户
-   * @request DELETE:/me
-   * @secure
-   */
-  export namespace DeleteMe {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = DeleteAccountRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = DeleteAccountResponseDoc;
-  }
-
-  /**
-   * @description 更新当前登录用户的头像、昵称、时区、对话偏好
+   * @description Updates DEEIX-owned display, avatar, locale, timezone, and preference fields.
    * @tags auth
    * @name PatchMe
-   * @summary 更新当前用户资料
+   * @summary Update local profile preferences
    * @request PATCH:/me
    * @secure
    */
@@ -7480,55 +5936,23 @@ export namespace Me {
     export type RequestQuery = {};
     export type RequestBody = PatchMeRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = PatchMeResponseDoc;
+    export type ResponseBody = MeResponseDoc;
   }
 
   /**
-   * @description 发送删除当前账号前所需的邮箱验证码，或返回可用的两步验证方式
+   * @description Proxies the password change to Sub2, then revokes DEEIX browser sessions.
    * @tags auth
-   * @name DeleteStartCreate
-   * @summary 开始删除账号验证
-   * @request POST:/me/delete/start
+   * @name PasswordUpdate
+   * @summary Change the Sub2 password
+   * @request PUT:/me/password
    * @secure
    */
-  export namespace DeleteStartCreate {
+  export namespace PasswordUpdate {
     export type RequestParams = {};
     export type RequestQuery = {};
-    export type RequestBody = SecurityVerificationStartRequest;
+    export type RequestBody = ChangePasswordRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = EmailVerificationStartResponseDoc;
-  }
-
-  /**
-   * @description 标记当前用户已完成首次引导
-   * @tags auth
-   * @name OnboardingCompleteCreate
-   * @summary 完成首次引导
-   * @request POST:/me/onboarding/complete
-   * @secure
-   */
-  export namespace OnboardingCompleteCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = PatchMeResponseDoc;
-  }
-
-  /**
-   * @description 当前用户仅可自主修改一次登录用户名
-   * @tags auth
-   * @name UsernamePartialUpdate
-   * @summary 修改当前用户用户名
-   * @request PATCH:/me/username
-   * @secure
-   */
-  export namespace UsernamePartialUpdate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = PatchUsernameRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = PatchMeResponseDoc;
+    export type ResponseBody = ChangePasswordResponseDoc;
   }
 }
 

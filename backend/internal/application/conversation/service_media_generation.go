@@ -318,7 +318,6 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 			Usage:            usage,
 			StartedAt:        startedAt,
 			Failure:          failure,
-			Billable:         true,
 		})
 		applyMediaRunUsage(run, result)
 		return result
@@ -382,7 +381,6 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 				EffectiveOptions: filteredOptions,
 				GenerateInput:    generateInput,
 				StartedAt:        startedAt,
-				Billable:         true,
 			})
 			if cancelErr != nil {
 				retErr = cancelErr
@@ -530,7 +528,6 @@ func (s *Service) StreamMediaImage(ctx context.Context, input MediaImageInput) (
 		UserMessage:         *userMessage,
 		AssistantMessage:    *assistantMessage,
 		MetadataRefreshHint: s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
-		Billable:            true,
 		UpstreamID:          route.UpstreamID,
 		UpstreamName:        route.UpstreamName,
 		PlatformModelName:   route.PlatformModelName,

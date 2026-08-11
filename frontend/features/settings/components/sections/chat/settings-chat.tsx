@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { Pencil, Trash2, Plus } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { Switch } from "@/components/ui/switch";
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ChatContentWidth } from "@/shared/model/chat-content-width";
 import { useAppearancePreferencesPersistence } from "@/features/settings/hooks/use-appearance-preferences-persistence";
 import { useSettingsChat } from "@/features/settings/hooks/use-settings-chat";
+import { useChatKeyBindings } from "@/features/chat/hooks/use-chat-key-bindings";
 import {
   type ChatFontOption,
   type ChatFontWeightOption,
@@ -421,17 +423,16 @@ function PreferenceMemorySection() {
 
 export function SettingsChat() {
   const t = useTranslations("settings.chatPage");
+  const chatKeyBindings = useChatKeyBindings();
   const {
     settings,
     loading,
-    billingMode,
     contextCompressionEnabled,
     modelGroups,
     handleBool,
     handleEnum,
     handleDefaultModel,
-  } = useSettingsChat();
-  const billingEnabled = billingMode !== "self";
+  } = useSettingsChat(chatKeyBindings.selectedKeyBindingID);
   const chatFont = useChatFontPreference();
   const chatFontWeight = useChatFontWeightPreference();
   const persistAppearancePreferences = useAppearancePreferencesPersistence();
@@ -483,6 +484,57 @@ export function SettingsChat() {
       <SettingsSection title={t("defaultModel.sectionTitle")}>
         <SettingsFieldList>
           <SettingsFieldRow
+            title={t("defaultKey.title")}
+            description={chatKeyBindings.error ? t("defaultKey.loadFailed") : t("defaultKey.description")}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {chatKeyBindings.loading ? (
+                <Skeleton className="h-8 w-[min(260px,55vw)] rounded-md" />
+              ) : (
+                <Select
+                  value={String(
+                    chatKeyBindings.bindings.find(
+                      (binding) => binding.publicID === chatKeyBindings.selectedKeyBindingID,
+                    )?.remoteKeyID ?? "",
+                  )}
+                  onValueChange={(value) => void chatKeyBindings.select(Number(value))}
+                  disabled={chatKeyBindings.remoteKeys.length === 0}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="w-[min(260px,55vw)] text-left *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:flex-1"
+                    aria-label={t("defaultKey.title")}
+                  >
+                    <SelectValue placeholder={t("defaultKey.empty")} />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    {chatKeyBindings.remoteKeys.map((key) => (
+                      <SelectItem key={key.remoteKeyID} value={String(key.remoteKeyID)}>
+                        <span className="truncate">{key.label || key.maskedKey}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => void chatKeyBindings.refresh()}
+                    disabled={chatKeyBindings.loading}
+                    aria-label={t("defaultKey.refresh")}
+                  >
+                    <RefreshCw className={chatKeyBindings.loading ? "animate-spin" : ""} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("defaultKey.refresh")}</TooltipContent>
+              </Tooltip>
+            </div>
+          </SettingsFieldRow>
+          <div className="pt-4">
+          <SettingsFieldRow
             title={t("defaultModel.title")}
             description={t("defaultModel.description")}
           >
@@ -499,6 +551,7 @@ export function SettingsChat() {
               />
             )}
           </SettingsFieldRow>
+          </div>
           <div className="space-y-4 pt-4">
             <SettingsFieldRow
               title={t("defaultModel.autoTitle")}
@@ -680,20 +733,6 @@ export function SettingsChat() {
                 onCheckedChange={handleBool("chat.show_latency", "showLatency")}
                 disabled={loading}
                 aria-label={t("display.latencyTitle")}
-              />
-            </SettingsFieldRow>
-          </div>
-
-          <div className="pt-4">
-            <SettingsFieldRow
-              title={t("display.costTitle")}
-              description={billingEnabled ? t("display.costDescription") : t("display.costDescriptionSelfMode")}
-            >
-              <Switch
-                checked={billingEnabled && settings.showBillingCost}
-                onCheckedChange={handleBool("chat.show_billing_cost", "showBillingCost")}
-                disabled={loading || !billingEnabled}
-                aria-label={t("display.costTitle")}
               />
             </SettingsFieldRow>
           </div>

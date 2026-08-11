@@ -14,7 +14,6 @@ import type {
   CreateConversationProjectRequest as ContractCreateConversationProjectRequest,
   CreateConversationRequest as ContractCreateConversationRequest,
   CreateConversationShareRequest as ContractCreateConversationShareRequest,
-  MessageBillingCostResponse,
   MessageFeedbackResponse,
   MessageProcessTraceResponse,
   MessagePromptTraceBlockResponse,
@@ -68,7 +67,6 @@ export type ConversationProjectDTO = Omit<ConversationProjectResponse, "mcpDefau
 
 export type MessageDTO = Omit<
   MessageResponse,
-  | "billingCost"
   | "modelIcon"
   | "modelVendor"
   | "platformModelName"
@@ -82,7 +80,6 @@ export type MessageDTO = Omit<
   modelIcon?: string;
   processTrace?: MessageProcessTraceDTO;
   myFeedback: "up" | "down" | "";
-  billingCost?: MessageBillingCostDTO;
 };
 
 export type ConversationRunDTO = Omit<RunResponse, "taskType">;
@@ -96,8 +93,6 @@ export type ConversationExportDTO = Omit<
   runs: ConversationRunDTO[];
   compatibility: ConversationExportResponse["compatibility"];
 };
-
-export type MessageBillingCostDTO = MessageBillingCostResponse;
 
 export type TraceBlockDTO = MessageTraceBlockResponse;
 
@@ -195,6 +190,7 @@ export type MessageFeedbackResult = Omit<MessageFeedbackResponse, "myFeedback"> 
 
 export type SendMessageRequest = Omit<ContractSendMessageRequest, "options"> & {
   options?: ConversationOptions;
+  keyBindingID: string;
 };
 
 export type MediaImageRequest = {

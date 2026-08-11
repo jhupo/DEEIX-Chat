@@ -30,10 +30,6 @@ func (r *Repo) DeleteBefore(ctx context.Context, logType string, before time.Tim
 		result = query.Where("created_at < ?", before).Delete(&model.AuditLog{})
 	case repository.LogCleanupTypeAuth:
 		result = query.Where("occurred_at < ?", before).Delete(&model.UserAuthEvent{})
-	case repository.LogCleanupTypeUsage:
-		result = query.Where("created_at < ?", before).Delete(&model.UsageLedger{})
-	case repository.LogCleanupTypeOrders:
-		result = query.Where("created_at < ?", before).Delete(&model.PaymentOrder{})
 	case repository.LogCleanupTypeConversation:
 		result = query.Where("created_at < ?", before).Delete(&model.ChatRunEvent{})
 	case repository.LogCleanupTypeSystem:

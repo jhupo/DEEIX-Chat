@@ -1,12 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, CircleDollarSign, TicketSlash } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { InputGroupButton } from "@/components/ui/input-group";
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
 import {
@@ -15,21 +14,12 @@ import {
 } from "./chat-model-picker-layout";
 import { useIsMobile } from "@/shared/hooks/use-mobile";
 import { ModelIcon } from "@/shared/components/model-icon";
-import {
-  cacheWritePricingLabel,
-  cacheWritePricingNote,
-  formatBillingDisplayUnitPriceFromUSD,
-  resolveCacheWritePricingUSD,
-} from "@/shared/lib/billing-display";
-import type { BillingDisplayCurrency, BillingDisplayLabels, BillingDisplayOptions } from "@/shared/lib/billing-display";
 import { resolveModelIconURL, resolveModelIdentity } from "@/shared/lib/model-identity";
 import { resolveModelPresentationGroup } from "@/shared/lib/model-presentation";
 import { cn } from "@/lib/utils";
 
 type ChatModelPickerProps = {
   modelOptions: ChatModelOption[];
-  billingDisplayCurrency: BillingDisplayCurrency;
-  billingDisplayUsdToCnyRate: number | null;
   selectedPlatformModelName: string;
   loading: boolean;
   disabled: boolean;
@@ -189,198 +179,15 @@ function ModelMenuScrollContainer({
   );
 }
 
-function ModelPricingTooltipContent({
-  platformModelName,
-  protocols,
-  pricing,
-  billingDisplay,
-  labels,
-}: {
-  platformModelName: string;
-  protocols: readonly string[];
-  pricing: NonNullable<ChatModelOption["pricing"]>;
-  billingDisplay: BillingDisplayOptions;
-  labels: {
-    freeModel: string;
-    freeModelDescription: string;
-    tieredPricing: string;
-    callPricing: string;
-    durationPricing: string;
-    tokenPricing: string;
-    input: string;
-    output: string;
-    cacheRead: string;
-    perCall: string;
-    perSecond: string;
-    callUnit: string;
-    secondUnit: string;
-    billingDisplay: BillingDisplayLabels;
-  };
-}) {
-  const cacheWriteLabel = cacheWritePricingLabel(protocols, labels.billingDisplay);
-  const cacheWriteNote = cacheWritePricingNote(protocols, labels.billingDisplay);
-  if (pricing.isFree) {
-    return (
-      <div className="flex flex-col gap-1">
-        <span className="font-sans text-xs font-medium leading-4 text-background">{labels.freeModel}</span>
-        <span className="font-sans text-[11px] leading-4 text-background/80">{labels.freeModelDescription}</span>
-      </div>
-    );
-  }
-
-  if (pricing.mode === "tiered") {
-    return (
-      <PricingTable
-        platformModelName={platformModelName}
-        title={labels.tieredPricing}
-        footerNote={cacheWriteNote}
-        headerRow={["", ...pricing.tiers.map((tier) => formatTokenRange(tier.fromTokens, tier.upToTokens))]}
-        bodyRows={[
-          [labels.input, ...pricing.tiers.map((tier) => formatPricingUnitUSD(tier.inputUSDPerMTokens, billingDisplay))],
-          [labels.output, ...pricing.tiers.map((tier) => formatPricingUnitUSD(tier.outputUSDPerMTokens, billingDisplay))],
-          [labels.cacheRead, ...pricing.tiers.map((tier) => formatPricingUnitUSD(tier.cacheReadUSDPerMTokens, billingDisplay))],
-          [cacheWriteLabel, ...pricing.tiers.map((tier) => formatPricingUnitUSD(resolveCacheWritePricingUSD(protocols, tier.cacheWriteUSDPerMTokens), billingDisplay))],
-        ]}
-      />
-    );
-  }
-
-  if (pricing.mode === "call") {
-    return (
-      <div className="flex flex-col gap-1">
-        <span className="font-sans text-xs font-medium leading-4 text-background">{labels.callPricing}</span>
-        <PricingTooltipRow label={labels.perCall} value={`${formatPricingUnitUSD(pricing.callUSDPerCall, billingDisplay)} / ${labels.callUnit}`} />
-      </div>
-    );
-  }
-
-  if (pricing.mode === "duration") {
-    return (
-      <div className="flex flex-col gap-1">
-        <span className="font-sans text-xs font-medium leading-4 text-background">{labels.durationPricing}</span>
-        <PricingTooltipRow label={labels.perSecond} value={`${formatPricingUnitUSD(pricing.durationUSDPerSecond, billingDisplay)} / ${labels.secondUnit}`} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="font-sans text-xs font-medium leading-4 text-background">{labels.tokenPricing}</span>
-      <PricingTooltipRow label={labels.input} value={`${formatPricingUnitUSD(pricing.inputUSDPerMTokens, billingDisplay)} / 1M tokens`} />
-      <PricingTooltipRow label={labels.output} value={`${formatPricingUnitUSD(pricing.outputUSDPerMTokens, billingDisplay)} / 1M tokens`} />
-      <PricingTooltipRow label={labels.cacheRead} value={`${formatPricingUnitUSD(pricing.cacheReadUSDPerMTokens, billingDisplay)} / 1M tokens`} />
-      <PricingTooltipRow label={cacheWriteLabel} value={`${formatPricingUnitUSD(resolveCacheWritePricingUSD(protocols, pricing.cacheWriteUSDPerMTokens), billingDisplay)} / 1M tokens`} />
-      {cacheWriteNote ? <span className="block max-w-72 font-sans text-[11px] leading-4 text-background/70">{cacheWriteNote}</span> : null}
-    </div>
-  );
-}
-
-function PricingTooltipRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="grid grid-cols-[minmax(5.5rem,max-content)_auto] items-baseline gap-5 font-sans text-[11px] leading-4 text-background/80">
-      <span className="whitespace-nowrap text-left">{label}</span>
-      <span className="whitespace-nowrap text-right tabular-nums">{value}</span>
-    </div>
-  );
-}
-
-function PricingTable({
-  platformModelName,
-  title,
-  footerNote,
-  headerRow,
-  bodyRows,
-}: {
-  platformModelName: string;
-  title: string;
-  footerNote?: string | null;
-  headerRow: string[];
-  bodyRows: string[][];
-}) {
-  return (
-    <div className="flex max-w-[560px] flex-col gap-2 overflow-x-auto">
-      <span className="font-sans text-xs font-medium leading-4 text-background">{title}</span>
-      <table className="border-collapse text-left font-sans text-[11px] leading-4 text-background/80 tabular-nums">
-        <thead>
-          <tr className="border-b border-background/20">
-            {headerRow.map((cell, index) => (
-              <th
-                key={`${platformModelName}-pricing-head-${index}`}
-                scope="col"
-                className={cn(
-                  "whitespace-nowrap px-2 pb-1 font-medium text-background/70 first:pl-0 last:pr-0",
-                  index > 0 ? "text-right" : null,
-                )}
-              >
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {bodyRows.map((row, rowIndex) => (
-            <tr key={`${platformModelName}-pricing-row-${rowIndex}`} className="border-b border-background/10 last:border-0">
-              {row.map((cell, cellIndex) => (
-                <td
-                  key={`${platformModelName}-pricing-cell-${rowIndex}-${cellIndex}`}
-                  className={cn(
-                    "whitespace-nowrap px-2 py-1 first:pl-0 last:pr-0",
-                    cellIndex === 0 ? "font-medium text-background/90" : "text-right",
-                  )}
-                >
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {footerNote ? <span className="block font-sans text-[11px] leading-4 text-background/70">{footerNote}</span> : null}
-    </div>
-  );
-}
-
-function formatPricingUnitUSD(value: number, billingDisplay: BillingDisplayOptions): string {
-  return formatBillingDisplayUnitPriceFromUSD(value, billingDisplay);
-}
-
-function formatTokenRange(fromTokens: number, upToTokens: number | null): string {
-  if (!upToTokens || upToTokens <= 0) {
-    return `${formatTokenQuantity(fromTokens)}～∞`;
-  }
-  return `${formatTokenQuantity(fromTokens)}～${formatTokenQuantity(upToTokens)}`;
-}
-
-function formatTokenQuantity(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "0";
-  }
-  if (value >= 1000000 && value % 1000000 === 0) {
-    return `${value / 1000000}M`;
-  }
-  if (value >= 1000 && value % 1000 === 0) {
-    return `${value / 1000}K`;
-  }
-  return String(value);
-}
-
 function ChatModelMenuItem({
   model,
   selected,
   onSelect,
-  billingDisplay,
-  pricingLabels,
-  viewPricingLabel,
-  pricingTooltipSide,
   buttonRef,
 }: {
   model: ChatModelOption;
   selected: boolean;
   onSelect: () => void;
-  billingDisplay: BillingDisplayOptions;
-  pricingLabels: React.ComponentProps<typeof ModelPricingTooltipContent>["labels"];
-  viewPricingLabel: string;
-  pricingTooltipSide: "right";
   buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   const platformModelName = model.platformModelName.trim();
@@ -414,45 +221,12 @@ function ChatModelMenuItem({
           {selected ? <Check className="size-3 text-current" strokeWidth={1.7} /> : null}
         </span>
       </button>
-      {model.pricing ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-current focus-visible:text-current focus-visible:outline-none group-hover:text-current group-focus-within:text-current group-data-[selected=true]:text-current"
-              aria-label={viewPricingLabel}
-            >
-              {model.pricing.isFree ? (
-                <TicketSlash className="size-3.5" strokeWidth={1.8} />
-              ) : (
-                <CircleDollarSign className="size-3.5" strokeWidth={1.8} />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent
-            side={pricingTooltipSide}
-            align="center"
-            sideOffset={8}
-            className="z-[80] max-w-[min(92vw,35rem)] text-left font-medium tabular-nums"
-          >
-            <ModelPricingTooltipContent
-              platformModelName={model.platformModelName}
-              protocols={model.protocols}
-              pricing={model.pricing}
-              billingDisplay={billingDisplay}
-              labels={pricingLabels}
-            />
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
     </div>
   );
 }
 
 export function ChatModelPicker({
   modelOptions,
-  billingDisplayCurrency,
-  billingDisplayUsdToCnyRate,
   selectedPlatformModelName,
   loading,
   disabled,
@@ -501,44 +275,6 @@ export function ChatModelPicker({
     () => modelGroups.find((group) => group.key === mobileGroupKey) ?? null,
     [mobileGroupKey, modelGroups],
   );
-  const pricingLabels = React.useMemo(
-    () => ({
-      freeModel: t("freeModel"),
-      freeModelDescription: t("freeModelDescription"),
-      tieredPricing: t("tieredPricing"),
-      callPricing: t("callPricing"),
-      durationPricing: t("durationPricing"),
-      tokenPricing: t("tokenPricing"),
-      input: t("input"),
-      output: t("output"),
-      cacheRead: t("cacheRead"),
-      perCall: t("perCall"),
-      perSecond: t("perSecond"),
-      callUnit: t("callUnit"),
-      secondUnit: t("secondUnit"),
-      billingDisplay: {
-        cacheWrite: t("cacheWrite"),
-        cacheWrite5m: t("cacheWrite5m"),
-        cacheWrite1h: t("cacheWrite1h"),
-        cacheWrite5m1h: t("cacheWrite5m1h"),
-        claudeCacheWriteMixedNote: (multiplier: string) => t("claudeCacheWriteMixedNote", { multiplier }),
-        claudeCacheWriteNote: (timeout: "5m" | "1h", multiplier: string) => t("claudeCacheWriteNote", { timeout, multiplier }),
-        claudeFastModeNote: (multiplier: string) => t("claudeFastModeNote", { multiplier }),
-        openaiServiceTierNote: (tier: string, multiplier: string) => t("openaiServiceTierNote", { tier, multiplier }),
-        cacheWritePricingLabel: t("cacheWritePricingLabel"),
-        cacheWritePricingNote: t("cacheWritePricingNote"),
-      },
-    }),
-    [t],
-  );
-  const billingDisplay = React.useMemo<BillingDisplayOptions>(
-    () => ({
-      currency: billingDisplayCurrency,
-      usdToCnyRate: billingDisplayUsdToCnyRate,
-    }),
-    [billingDisplayCurrency, billingDisplayUsdToCnyRate],
-  );
-
   React.useEffect(() => {
     if (!open || !isMobile) {
       setMobileGroupKey(null);
@@ -771,10 +507,6 @@ export function ChatModelPicker({
                               onModelChange(item.platformModelName);
                               closeMenu();
                             }}
-                            billingDisplay={billingDisplay}
-                            pricingLabels={pricingLabels}
-                            viewPricingLabel={t("viewPricing")}
-                            pricingTooltipSide="right"
                           />
                         ))}
                       </div>
@@ -834,10 +566,6 @@ export function ChatModelPicker({
                               onModelChange(item.platformModelName);
                               closeMenu();
                             }}
-                            billingDisplay={billingDisplay}
-                            pricingLabels={pricingLabels}
-                            viewPricingLabel={t("viewPricing")}
-                            pricingTooltipSide="right"
                           />
                         ))}
                       </div>

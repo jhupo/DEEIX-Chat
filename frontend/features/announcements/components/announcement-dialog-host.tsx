@@ -130,7 +130,7 @@ export function AnnouncementDialogHost() {
   const t = useTranslations("announcements");
   const locale = useLocale();
   const pathname = usePathname();
-  const { accessToken, user, userStatus } = useAuthSession();
+  const { accessToken, userStatus } = useAuthSession();
   const [autoQueue, setAutoQueue] = React.useState<AnnouncementDTO[]>([]);
   const [manualQueue, setManualQueue] = React.useState<AnnouncementDTO[]>([]);
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -145,7 +145,7 @@ export function AnnouncementDialogHost() {
 
   React.useEffect(() => {
     let cancelled = false;
-    if (userStatus !== "ready" || !accessToken || user?.initialSecurityRequired || isSkippedPath(pathname)) {
+    if (userStatus !== "ready" || !accessToken || isSkippedPath(pathname)) {
       autoLoadRequestIDRef.current += 1;
       manualLoadRequestIDRef.current += 1;
       setAutoQueue([]);
@@ -182,12 +182,12 @@ export function AnnouncementDialogHost() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, pathname, user?.initialSecurityRequired, userStatus]);
+  }, [accessToken, pathname, userStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
     const unsubscribe = subscribeOpenAnnouncements(() => {
-      if (userStatus !== "ready" || !accessToken || user?.initialSecurityRequired || isSkippedPath(pathname)) {
+      if (userStatus !== "ready" || !accessToken || isSkippedPath(pathname)) {
         return;
       }
       const requestID = manualLoadRequestIDRef.current + 1;
@@ -224,7 +224,7 @@ export function AnnouncementDialogHost() {
       cancelled = true;
       unsubscribe();
     };
-  }, [accessToken, pathname, t, user?.initialSecurityRequired, userStatus]);
+  }, [accessToken, pathname, t, userStatus]);
 
   const queue = dialogMode === "manual" ? manualQueue : autoQueue;
   const sortedQueue = React.useMemo(() => {

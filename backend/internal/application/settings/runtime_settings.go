@@ -85,50 +85,13 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.TokenTTLHours = toInt(item.Value, cfg.TokenTTLHours)
 	case "auth:refresh_token_ttl_hours":
 		cfg.RefreshTokenTTLHours = toInt(item.Value, cfg.RefreshTokenTTLHours)
-	case "auth:login_max_failures":
-		cfg.LoginMaxFailures = toInt(item.Value, cfg.LoginMaxFailures)
-	case "auth:login_lock_minutes":
-		cfg.LoginLockMinutes = toInt(item.Value, cfg.LoginLockMinutes)
+
 	case "auth:rate_limit_enabled":
 		cfg.RateLimitEnabled = toBool(item.Value, cfg.RateLimitEnabled)
 	case "auth:rate_limit_rpm":
 		cfg.RateLimitRPM = toInt(item.Value, cfg.RateLimitRPM)
 	case "auth:public_auth_rate_limit_rpm":
 		cfg.PublicAuthRateLimitRPM = toInt(item.Value, cfg.PublicAuthRateLimitRPM)
-	case "auth:username_login_enabled":
-		cfg.UsernameLoginEnabled = toBool(item.Value, cfg.UsernameLoginEnabled)
-	case "auth:email_login_enabled":
-		cfg.EmailLoginEnabled = toBool(item.Value, cfg.EmailLoginEnabled)
-	case "auth:third_party_login_enabled":
-		cfg.ThirdPartyLoginEnabled = toBool(item.Value, cfg.ThirdPartyLoginEnabled)
-	case "auth:email_registration_enabled":
-		cfg.EmailRegistrationEnabled = toBool(item.Value, cfg.EmailRegistrationEnabled)
-	case "auth:email_verification_enabled":
-		cfg.EmailVerificationEnabled = toBool(item.Value, cfg.EmailVerificationEnabled)
-	case "auth:password_reset_enabled":
-		cfg.PasswordResetEnabled = toBool(item.Value, cfg.PasswordResetEnabled)
-	case "auth:smtp_host":
-		cfg.SMTPHost = strings.TrimSpace(item.Value)
-	case "auth:smtp_port":
-		cfg.SMTPPort = toInt(item.Value, cfg.SMTPPort)
-	case "auth:smtp_username":
-		cfg.SMTPUsername = strings.TrimSpace(item.Value)
-	case "auth:smtp_password":
-		cfg.SMTPPassword = strings.TrimSpace(item.Value)
-	case "auth:smtp_from":
-		cfg.SMTPFrom = strings.TrimSpace(item.Value)
-	case "auth:email_registration_allowed_domains":
-		cfg.EmailRegistrationDomains = strings.TrimSpace(item.Value)
-	case "auth:email_registration_block_plus_alias":
-		cfg.EmailRegistrationNoAlias = toBool(item.Value, cfg.EmailRegistrationNoAlias)
-	case "auth:auto_link_verified_email":
-		cfg.AutoLinkVerifiedEmail = toBool(item.Value, cfg.AutoLinkVerifiedEmail)
-	case "auth:turnstile_registration_enabled":
-		cfg.TurnstileRegistrationEnabled = toBool(item.Value, cfg.TurnstileRegistrationEnabled)
-	case "auth:turnstile_site_key":
-		cfg.TurnstileSiteKey = strings.TrimSpace(item.Value)
-	case "auth:turnstile_secret_key":
-		cfg.TurnstileSecretKey = strings.TrimSpace(item.Value)
 
 		// 对话配置
 	case "chat:max_context_messages":
@@ -366,15 +329,7 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 }
 
 func (r *RuntimeSettings) normalizeConfig(cfg *config.Config) {
-	if !cfg.EmailLoginEnabled {
-		cfg.EmailRegistrationEnabled = false
-	}
-	if !cfg.EmailRegistrationEnabled {
-		cfg.TurnstileRegistrationEnabled = false
-	}
-	if !cfg.EmailVerificationEnabled || (!cfg.UsernameLoginEnabled && !cfg.EmailLoginEnabled) {
-		cfg.PasswordResetEnabled = false
-	}
+
 	if !cfg.EmbeddingEnabled || strings.TrimSpace(cfg.EmbeddingHost) == "" || strings.TrimSpace(cfg.RAGModel) == "" {
 		cfg.RAGEnabled = false
 		cfg.MessageEmbeddingEnabled = false

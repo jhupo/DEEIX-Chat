@@ -12,18 +12,15 @@ import {
 } from "@/features/settings/utils/chat-settings";
 import { dispatchUserSettingsUpdated } from "@/features/settings/events/user-settings-events";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
-import { listPublicModels } from "@/shared/api/model";
-import { getBillingConfig } from "@/shared/api/billing";
+import { listChatModels } from "@/shared/api/sub2-key";
 import { getChatContextPolicy } from "@/shared/api/settings";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
-import type { BillingMode } from "@/shared/api/billing.types";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 
 type UseSettingsChatResult = {
   settings: ChatSettings;
   loading: boolean;
-  billingMode: BillingMode;
   contextCompressionEnabled: boolean;
   modelGroups: ReturnType<typeof groupModelsForPresentation>;
   handleBool: (key: string, field: keyof ChatSettings) => (checked: boolean) => void;
@@ -31,14 +28,13 @@ type UseSettingsChatResult = {
   handleDefaultModel: (value: string) => void;
 };
 
-export function useSettingsChat(): UseSettingsChatResult {
+export function useSettingsChat(defaultKeyBindingID: string): UseSettingsChatResult {
   const t = useTranslations("settings.chatPage.toasts");
   const translateError = useLocalizedErrorMessage();
   const { accessToken } = useAuthSession();
   const [settings, setSettings] = React.useState<ChatSettings>(DEFAULT_CHAT_SETTINGS);
   const [models, setModels] = React.useState<PublicModelDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [billingMode, setBillingMode] = React.useState<BillingMode>("self");
   const [contextCompressionEnabled, setContextCompressionEnabled] = React.useState(false);
   const settingRequestSeqRef = React.useRef<Record<string, number>>({});
 
@@ -47,10 +43,11 @@ export function useSettingsChat(): UseSettingsChatResult {
 
     void (async () => {
       try {
-        const [map, modelList, billingConfig, contextPolicy] = await Promise.all([
+        const [map, modelList, contextPolicy] = await Promise.all([
           getUserSettings(accessToken),
-          listPublicModels(accessToken).catch((): PublicModelDTO[] => []),
-          getBillingConfig(accessToken).catch(() => null),
+          defaultKeyBindingID
+            ? listChatModels(accessToken, defaultKeyBindingID).catch((): PublicModelDTO[] => [])
+            : Promise.resolve([] as PublicModelDTO[]),
           getChatContextPolicy(accessToken).catch(() => ({ contextCompactEnabled: false })),
         ]);
 
@@ -60,7 +57,6 @@ export function useSettingsChat(): UseSettingsChatResult {
 
         setSettings(parseChatSettings(map));
         setModels(modelList);
-        setBillingMode(billingConfig?.config.mode ?? "self");
         setContextCompressionEnabled(contextPolicy.contextCompactEnabled);
       } finally {
         if (!cancelled) {
@@ -72,7 +68,7 @@ export function useSettingsChat(): UseSettingsChatResult {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, defaultKeyBindingID]);
 
   const modelGroups = React.useMemo(() => groupModelsForPresentation(models), [models]);
 
@@ -134,7 +130,6 @@ export function useSettingsChat(): UseSettingsChatResult {
   return {
     settings,
     loading,
-    billingMode,
     contextCompressionEnabled,
     modelGroups,
     handleBool,

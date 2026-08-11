@@ -21,8 +21,6 @@ type UseAdminAccountsState = {
   setQuery: (value: string) => void;
   loading: boolean;
   loadUsers: () => Promise<void>;
-  setUsersOptimistic: React.Dispatch<React.SetStateAction<AdminUserDTO[]>>;
-  setTotalOptimistic: React.Dispatch<React.SetStateAction<number>>;
 };
 
 export function useAdminAccounts(): UseAdminAccountsState {
@@ -107,7 +105,5 @@ export function useAdminAccounts(): UseAdminAccountsState {
     setQuery,
     loading,
     loadUsers,
-    setUsersOptimistic: setUsers,
-    setTotalOptimistic: setTotal,
   };
 }

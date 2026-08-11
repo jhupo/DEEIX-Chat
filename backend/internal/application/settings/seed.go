@@ -5,7 +5,6 @@ import (
 
 	domainsettings "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/settings"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
 )
 
 const (
@@ -45,20 +44,6 @@ func defaultSettings() []domainsettings.SystemSetting {
 		{Namespace: "auth", Key: "turnstile_secret_key", Value: "", ValueType: "string", Description: "Cloudflare Turnstile Secret Key"},
 
 		// 计费配置
-		{Namespace: "billing", Key: "mode", Value: "self", ValueType: "string", Description: "计费方式：self=自用模式，period=周期计费，usage=按量计费"},
-		{Namespace: "billing", Key: "prepaid_amount_usd", Value: "0", ValueType: "string", Description: "每个付费调用预留的风险预算(美元)，0表示按剩余槽位动态分配可用预算，最多5个并发调用"},
-		{Namespace: "billing", Key: "native_tool_billing_enabled", Value: "true", ValueType: "bool", Description: "是否按官方默认价格计费模型原生工具调用"},
-		{Namespace: "billing", Key: "native_tool_pricing_json", Value: nativetool.DefaultPricingJSON(), ValueType: "json", Description: "官方原生工具计费覆盖 JSON，按 toolKey 配置 priceNanousd、unit、priceLabel、billable"},
-		{Namespace: "billing", Key: "usd_to_cny_rate", Value: "7.2", ValueType: "string", Description: "易支付美元兑人民币汇率"},
-		{Namespace: "billing", Key: "display_currency", Value: "USD", ValueType: "string", Description: "用户端费用展示币种：USD 或 CNY"},
-		{Namespace: "billing", Key: "payment_providers", Value: "disabled", ValueType: "string", Description: "启用支付渠道，多个用英文逗号分隔：stripe,epay"},
-		{Namespace: "billing", Key: "stripe_publishable_key", Value: "", ValueType: "string", Description: "Stripe Publishable Key"},
-		{Namespace: "billing", Key: "stripe_secret_key", Value: "", ValueType: "string", Description: "Stripe Secret Key"},
-		{Namespace: "billing", Key: "stripe_webhook_secret", Value: "", ValueType: "string", Description: "Stripe Webhook Secret"},
-		{Namespace: "billing", Key: "epay_gateway_url", Value: "", ValueType: "string", Description: "易支付网关地址"},
-		{Namespace: "billing", Key: "epay_types", Value: `[{"name":"支付宝","type":"alipay"},{"name":"微信支付","type":"wxpay"}]`, ValueType: "string", Description: "易支付启用的支付类型 JSON"},
-		{Namespace: "billing", Key: "epay_pid", Value: "", ValueType: "string", Description: "易支付商户 ID"},
-		{Namespace: "billing", Key: "epay_key", Value: "", ValueType: "string", Description: "易支付商户密钥"},
 
 		// 对话配置
 		{Namespace: "chat", Key: "max_context_messages", Value: "20", ValueType: "int", Description: "上下文消息数"},

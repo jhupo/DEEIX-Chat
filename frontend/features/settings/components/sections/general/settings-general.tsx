@@ -32,13 +32,9 @@ import {
   isBrowserNotificationSupported,
   readResponseCompletionNotificationsEnabled,
 } from "@/shared/lib/browser-notifications";
-import { patchMe, patchUsername } from "@/shared/api/auth";
+import { patchMe } from "@/shared/api/auth";
 import { uploadFile } from "@/shared/api/file";
-import { ApiError } from "@/shared/api/http-client";
-import {
-  isDisplayNameLengthValid,
-  isUsernamePolicyValid,
-} from "@/shared/auth/account-policy";
+import { isDisplayNameLengthValid } from "@/shared/auth/account-policy";
 import type { UserDTO } from "@/shared/api/auth.types";
 import {
   SettingsPage,
@@ -48,21 +44,6 @@ import { useTheme } from "@/shared/components/theme-provider";
 import { GeneralAppearanceSection } from "./general-appearance";
 import { GeneralNotificationsSection } from "./general-notifications";
 import { GeneralProfileSection } from "./general-profile";
-
-function resolveUsernameErrorMessage(
-  error: unknown,
-  labels: { invalid: string; alreadyChanged: string; taken: string },
-): string {
-  if (error instanceof ApiError) {
-    if (error.status === 400) {
-      return labels.invalid;
-    }
-    if (error.status === 409) {
-      return error.message.includes("already used") ? labels.alreadyChanged : labels.taken;
-    }
-  }
-  return resolveLocalizedErrorMessage(error);
-}
 
 type AvatarUploadPreview = {
   fileID: string;
@@ -88,8 +69,6 @@ export function SettingsGeneral() {
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unsupported">("unsupported");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
-  const [usernameDraft, setUsernameDraft] = React.useState("");
-  const initialUsernameToastShownRef = React.useRef(false);
   const persistAppearancePreferences = useAppearancePreferencesPersistence();
 
   React.useEffect(() => {
@@ -108,7 +87,6 @@ export function SettingsGeneral() {
     setViewer(user);
     setDraft(nextDraft);
     setInitialDraft(nextDraft);
-    setUsernameDraft(user.username);
     setLoading(false);
   }, [user, userStatus]);
 
@@ -160,21 +138,11 @@ export function SettingsGeneral() {
     [avatarDialogValue, resolveAvatarPreviewSrc],
   );
   const hasProfileEdits = !isProfileDraftEqual(draft, initialDraft);
-  const canEditUsername = Boolean(viewer && !viewer.usernameChangedAt);
-  const normalizedUsernameDraft = usernameDraft.trim().toLowerCase();
-  const hasUsernameEdit = canEditUsername && normalizedUsernameDraft !== "" && normalizedUsernameDraft !== viewer?.username;
-  const hasEdits = hasProfileEdits || hasUsernameEdit;
+  const hasEdits = hasProfileEdits;
   const activeThemeMode = themeRuntimeReady
     ? ((theme as ThemeMode | undefined) ?? "system")
     : "system";
   const activeThemePreset = themeRuntimeReady ? preset : "default";
-
-  React.useEffect(() => {
-    if (viewer?.initialUsernameRequired && !initialUsernameToastShownRef.current) {
-      initialUsernameToastShownRef.current = true;
-      toast.info(t("generalPage.toast.initialUsernameRequired"));
-    }
-  }, [t, viewer?.initialUsernameRequired]);
 
   const handleSave = React.useCallback(async () => {
     if (saving || !hasEdits) {
@@ -182,12 +150,6 @@ export function SettingsGeneral() {
     }
 
     try {
-      if (hasUsernameEdit && !isUsernamePolicyValid(normalizedUsernameDraft)) {
-        toast.error(t("generalPage.toast.setUsernameFailed"), {
-          description: t("generalPage.username.invalid"),
-        });
-        return;
-      }
       if (hasProfileEdits && !isDisplayNameLengthValid(draft.displayName)) {
         toast.error(t("generalPage.toast.saveProfileFailed"), {
           description: t("generalPage.profile.displayNameInvalid"),
@@ -197,31 +159,13 @@ export function SettingsGeneral() {
 
       setSaving(true);
 
-      let nextViewer = viewer;
-      if (hasUsernameEdit) {
-        try {
-          nextViewer = await patchUsername(accessToken, { username: normalizedUsernameDraft });
-        } catch (error) {
-          toast.error(t("generalPage.toast.setUsernameFailed"), {
-            description: resolveUsernameErrorMessage(error, {
-              invalid: t("generalPage.username.invalid"),
-              alreadyChanged: t("generalPage.username.alreadyChanged"),
-              taken: t("generalPage.username.taken"),
-            }),
-          });
-          return;
-        }
-      }
-
-      if (hasProfileEdits) {
-        nextViewer = await patchMe(accessToken, {
-          avatarURL: draft.avatarUrl,
-          displayName: draft.displayName,
-          timezone: draft.timezone,
-          locale: draft.locale,
-          profilePreferences: draft.profilePreferences,
-        });
-      }
+      const nextViewer = await patchMe(accessToken, {
+        avatarURL: draft.avatarUrl,
+        displayName: draft.displayName,
+        timezone: draft.timezone,
+        locale: draft.locale,
+        profilePreferences: draft.profilePreferences,
+      });
 
       if (!nextViewer) {
         return;
@@ -231,7 +175,6 @@ export function SettingsGeneral() {
       setViewer(nextViewer);
       setDraft(nextDraft);
       setInitialDraft(nextDraft);
-      setUsernameDraft(nextViewer.username);
       setAvatarUploadPreview((current) => {
         const savedFileID = parseFileAvatarID(nextDraft.avatarUrl);
         if (current && current.fileID === savedFileID) {
@@ -240,11 +183,7 @@ export function SettingsGeneral() {
         return current;
       });
       dispatchUserProfileUpdated(nextViewer);
-      toast.success(
-        hasUsernameEdit && !hasProfileEdits
-          ? t("generalPage.toast.usernameUpdated")
-          : t("generalPage.toast.profileUpdated"),
-      );
+      toast.success(t("generalPage.toast.profileUpdated"));
     } catch (error) {
       toast.error(t("generalPage.toast.saveProfileFailed"), {
         description: resolveLocalizedErrorMessage(error),
@@ -252,11 +191,10 @@ export function SettingsGeneral() {
     } finally {
       setSaving(false);
     }
-  }, [accessToken, draft, hasEdits, hasProfileEdits, hasUsernameEdit, normalizedUsernameDraft, saving, t, viewer]);
+  }, [accessToken, draft, hasEdits, hasProfileEdits, saving, t]);
 
   const handleDiscard = React.useCallback(() => {
     setDraft(initialDraft);
-    setUsernameDraft(viewer?.username ?? "");
     setAvatarUploadPreview((current) => {
       const initialFileID = parseFileAvatarID(initialDraft.avatarUrl);
       if (current && current.fileID !== initialFileID) {
@@ -264,7 +202,7 @@ export function SettingsGeneral() {
       }
       return current;
     });
-  }, [initialDraft, viewer?.username]);
+  }, [initialDraft]);
 
   const handleOpenAvatarDialog = React.useCallback(() => {
     setAvatarDialogValue(draft.avatarUrl.trim());
@@ -430,8 +368,6 @@ export function SettingsGeneral() {
         loading={loading}
         saving={saving}
         hasEdits={hasEdits}
-        canEditUsername={canEditUsername}
-        usernameDraft={usernameDraft}
         viewerInitial={viewerInitial}
         draftAvatarSrc={draftAvatarSrc}
         avatarDialogOpen={avatarDialogOpen}
@@ -439,7 +375,6 @@ export function SettingsGeneral() {
         avatarUploading={avatarUploading}
         avatarDialogPreviewSrc={avatarDialogPreviewSrc}
         onDraftChange={setDraft}
-        onUsernameDraftChange={setUsernameDraft}
         onReset={handleDiscard}
         onSave={() => void handleSave()}
         onOpenAvatarDialog={handleOpenAvatarDialog}

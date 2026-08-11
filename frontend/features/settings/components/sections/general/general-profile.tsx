@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { SpinnerLabel } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProfileDraft } from "@/features/settings/types/settings";
-import { DISPLAY_NAME_MAX_LENGTH, USERNAME_MAX_LENGTH } from "@/shared/auth/account-policy";
+import { DISPLAY_NAME_MAX_LENGTH } from "@/shared/auth/account-policy";
 import type { UserDTO } from "@/shared/api/auth.types";
 import { SettingsSection } from "@/shared/components/settings-layout";
 import { TimeZoneSelect } from "@/shared/components/time-zone-select";
@@ -23,8 +23,6 @@ export function GeneralProfileSection({
   loading,
   saving,
   hasEdits,
-  canEditUsername,
-  usernameDraft,
   viewerInitial,
   draftAvatarSrc,
   avatarDialogOpen,
@@ -32,7 +30,6 @@ export function GeneralProfileSection({
   avatarUploading,
   avatarDialogPreviewSrc,
   onDraftChange,
-  onUsernameDraftChange,
   onReset,
   onSave,
   onOpenAvatarDialog,
@@ -47,8 +44,6 @@ export function GeneralProfileSection({
   loading: boolean;
   saving: boolean;
   hasEdits: boolean;
-  canEditUsername: boolean;
-  usernameDraft: string;
   viewerInitial: string;
   draftAvatarSrc: string;
   avatarDialogOpen: boolean;
@@ -56,7 +51,6 @@ export function GeneralProfileSection({
   avatarUploading: boolean;
   avatarDialogPreviewSrc: string;
   onDraftChange: React.Dispatch<React.SetStateAction<ProfileDraft>>;
-  onUsernameDraftChange: (value: string) => void;
   onReset: () => void;
   onSave: () => void;
   onOpenAvatarDialog: () => void;
@@ -105,20 +99,6 @@ export function GeneralProfileSection({
                     </AvatarFallback>
                   </Avatar>
                 </button>
-              </div>
-            </Field>
-
-            <Field>
-              <FieldLabel>{t("generalPage.profile.username")}</FieldLabel>
-              <div className="space-y-1.5">
-                <Input
-                  value={usernameDraft}
-                  onChange={(event) => onUsernameDraftChange(event.target.value.toLowerCase())}
-                  readOnly={!canEditUsername}
-                  disabled={loading || saving || !canEditUsername}
-                  maxLength={USERNAME_MAX_LENGTH}
-                  placeholder={t("generalPage.profile.usernamePlaceholder")}
-                />
               </div>
             </Field>
 

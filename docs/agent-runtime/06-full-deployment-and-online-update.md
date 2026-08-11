@@ -9,11 +9,22 @@ cp config.example.yaml config.yaml
 cat > .env <<'EOF'
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
+SUB2_BASE_URL=https://api.ovload.com
 EOF
 docker compose -f compose.yaml up -d
 ```
 
 The application container uses `restart: unless-stopped`. PostgreSQL and Redis must pass their health checks before the application starts.
+
+`SUB2_BASE_URL` is the only Sub2 deployment setting and defaults to `https://api.ovload.com`. It must be a canonical HTTP(S) origin without credentials, path, query, or fragment; production requires HTTPS. The application derives its internal Sub2 instance fingerprint from this origin.
+
+## v0.4 Clean-Slate Upgrade
+
+Before any v0.4 schema mutation, startup checks for populated legacy identity schema. A populated legacy identity table or data that cannot satisfy the Sub2 Principal shape causes the upgrade to stop before it changes the schema. Back up the existing PostgreSQL instance, then deploy v0.4 with a fresh PostgreSQL database or volume.
+
+This is a clean-slate release: there is no data migration, compatibility layer, old-login continuity, or old-chat-history continuity. SQLite, Lite, and old local billing deployment paths remain unsupported.
+
+A fresh v0.4 deployment leaves `REDIS_DB` unset and uses logical database `0`. When cutting over against a Redis instance that still contains the legacy cache, operators may select an unused logical database in `.env`, for example `REDIS_DB=1`, instead of flushing those keys.
 
 ## Persistent Data And Runtime
 
@@ -93,6 +104,6 @@ docker compose -f compose.yaml pull app
 docker compose -f compose.yaml up -d app
 ```
 
-Verify `/readyz`, `/api/v1/version`, login, conversation history, PostgreSQL, Redis, and uploaded files. After that verification, remove the old host updater service and socket mount. Future stable application releases use the admin online update flow.
+Verify `/readyz`, `/api/v1/version`, a new Sub2-backed login, PostgreSQL, Redis, and uploaded files. Do not expect legacy login or chat-history continuity after the v0.4 fresh-database cutover. After that verification, remove the old host updater service and socket mount. Future stable application releases use the admin online update flow.
 
-There is no automatic database rollback. Application startup keeps the existing migration behavior, so production operators still need normal PostgreSQL backups before releases that introduce schema migrations.
+There is no automatic database rollback. After the v0.4 clean-slate cutover, operators still need normal PostgreSQL backups before later releases that introduce schema migrations.

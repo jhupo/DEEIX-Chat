@@ -23,6 +23,7 @@ type messageSendRunState struct {
 	result           **SendMessageResult
 	traceContext     context.Context
 	reuseUserMessage bool
+	runCreated       bool
 }
 
 func newMessageSendRunState(
@@ -101,7 +102,9 @@ func (r *messageSendRunState) finalize(ctx context.Context, retErr error) {
 		r.service.persistConversationFallbackTitle(finalizeCtx, *r.conversation, *userMessage)
 	}
 	r.finalizeAssistantMessage(finalizeCtx, retErr)
-	r.createRun(finalizeCtx)
+	if r.runCreated {
+		_ = r.createRun(finalizeCtx)
+	}
 }
 
 func shouldPersistConversationFallbackTitleAfterSend(retErr error, userMessage *model.Message) bool {
@@ -204,14 +207,17 @@ func (r *messageSendRunState) finalizeAssistantMessage(ctx context.Context, retE
 	}
 }
 
-func (r *messageSendRunState) createRun(ctx context.Context) {
+func (r *messageSendRunState) createRun(ctx context.Context) error {
 	if err := r.service.repo.CreateConversationRun(ctx, r.run); err != nil {
 		r.service.logger.Error("create_conversation_run_failed",
 			zap.String("trace_id", traceid.FromContext(r.traceContext)),
 			zap.String("run_id", r.run.RunID),
 			zap.Error(err),
 		)
+		return err
 	}
+	r.runCreated = true
+	return nil
 }
 
 func (r *messageSendRunState) currentUserMessage() *model.Message {
@@ -248,13 +254,13 @@ func applyRetainedGenerationRunUsage(run *model.Run, result *SendMessageResult, 
 		return
 	}
 	run.InputTokens = result.UserMessage.InputTokens
-	if sendMessageResultUsesAssistantSideInput(result) {
+	if result.AssistantMessage.SourceMessageID != nil {
 		run.InputTokens = result.AssistantMessage.InputTokens
 	}
 	run.OutputTokens = result.AssistantMessage.OutputTokens
 	run.CacheReadTokens = result.UserMessage.CacheReadTokens
 	run.CacheWriteTokens = result.UserMessage.CacheWriteTokens
-	if sendMessageResultUsesAssistantSideInput(result) {
+	if result.AssistantMessage.SourceMessageID != nil {
 		run.CacheReadTokens = result.AssistantMessage.CacheReadTokens
 		run.CacheWriteTokens = result.AssistantMessage.CacheWriteTokens
 	}

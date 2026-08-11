@@ -29,21 +29,18 @@ const (
 	defaultBrandAppleTouchIcon180URL    = "/pwa/apple-touch-icon.png"
 	defaultJWTSecret                    = "deeix-chat-dev-secret"
 	defaultDataEncryptionKey            = "deeix-chat-dev-data-encryption-key"
-	defaultAdminUsername                = "admin"
-	defaultAdminDisplayName             = "System Admin"
 	defaultGeoIPMaxBytes                = 100 * 1024 * 1024
 	defaultHTTPReadHeaderTimeoutSeconds = 10
 	defaultHTTPReadTimeoutSeconds       = 120
 	defaultHTTPIdleTimeoutSeconds       = 120
 	defaultHTTPMaxHeaderBytes           = 1 << 20
+	// DefaultSub2BaseURL 是唯一受信任的 Sub2API 实例。
+	DefaultSub2BaseURL = "https://api.ovload.com"
 	// DefaultFileFullContextMaxBytes 是全文注入的默认提取文本大小上限（2 MiB）。
 	DefaultFileFullContextMaxBytes int64 = 2 * 1024 * 1024
 )
 
 const (
-	// DefaultTurnstileSiteverifyURL 是 Cloudflare Turnstile 默认校验端点。
-	DefaultTurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-
 	// DefaultMCPMaxSelectedToolsPerMessage 是单次消息可选择 MCP 工具数量的默认值。
 	DefaultMCPMaxSelectedToolsPerMessage = 32
 	// MaxMCPSelectedToolsPerMessage 是运行时配置允许的安全上限，防止一次请求暴露过多工具 schema。
@@ -237,12 +234,11 @@ type yamlConfig struct {
 		DownloadTimeoutSeconds int    `yaml:"download_timeout_seconds"`
 	} `yaml:"update"`
 	Security struct {
-		JWTSecret              string `yaml:"jwt_secret"`
-		DataEncryptionKey      string `yaml:"data_encryption_key"`
-		SSRFProtectionEnabled  *bool  `yaml:"ssrf_protection_enabled"`
-		SSRFAllowedHosts       string `yaml:"ssrf_allowed_hosts"`
-		SSRFAllowedCIDRs       string `yaml:"ssrf_allowed_cidrs"`
-		TurnstileSiteverifyURL string `yaml:"turnstile_siteverify_url"`
+		JWTSecret             string `yaml:"jwt_secret"`
+		DataEncryptionKey     string `yaml:"data_encryption_key"`
+		SSRFProtectionEnabled *bool  `yaml:"ssrf_protection_enabled"`
+		SSRFAllowedHosts      string `yaml:"ssrf_allowed_hosts"`
+		SSRFAllowedCIDRs      string `yaml:"ssrf_allowed_cidrs"`
 	} `yaml:"security"`
 	Database struct {
 		Postgres struct {
@@ -328,6 +324,7 @@ type Config struct {
 	UpdateRuntimeDir             string
 	UpdateStateFile              string
 	UpdateDownloadTimeoutSeconds int
+	Sub2BaseURL                  string
 	JWTSecret                    string
 	DataEncryptionKey            string
 	SSRFProtectionEnabled        bool
@@ -353,8 +350,6 @@ type Config struct {
 	StorageS3AccessKeyID         string
 	StorageS3SecretAccessKey     string
 	StorageS3ForcePathStyle      bool
-	AdminUsername                string
-	AdminDisplayName             string
 	GeoIPProvider                string
 	GeoIPBaseURL                 string
 	GeoIPToken                   string
@@ -363,12 +358,6 @@ type Config struct {
 	GeoIPDatabasePath            string
 	GeoIPDatabaseMaxBytes        int64
 	GeoIPRefreshIntervalHours    int
-	SMTPHost                     string
-	SMTPPort                     int
-	SMTPUsername                 string
-	SMTPPassword                 string
-	SMTPFrom                     string
-	TurnstileSiteverifyURL       string
 	OTelEnabled                  *bool
 	OTelExporterOTLPEndpoint     string
 	OTelExporterOTLPHeaders      string
@@ -378,25 +367,11 @@ type Config struct {
 
 	// ── 动态配置（由 DB 种子初始化默认值，settings.RuntimeSettings.ApplyTo 覆盖） ──
 	// 认证配置
-	TokenTTLHours                int
-	RefreshTokenTTLHours         int
-	LoginMaxFailures             int
-	LoginLockMinutes             int
-	RateLimitEnabled             bool
-	RateLimitRPM                 int
-	PublicAuthRateLimitRPM       int
-	UsernameLoginEnabled         bool
-	EmailLoginEnabled            bool
-	ThirdPartyLoginEnabled       bool
-	EmailRegistrationEnabled     bool
-	EmailVerificationEnabled     bool
-	PasswordResetEnabled         bool
-	EmailRegistrationDomains     string
-	EmailRegistrationNoAlias     bool
-	AutoLinkVerifiedEmail        bool
-	TurnstileRegistrationEnabled bool
-	TurnstileSiteKey             string
-	TurnstileSecretKey           string
+	TokenTTLHours          int
+	RefreshTokenTTLHours   int
+	RateLimitEnabled       bool
+	RateLimitRPM           int
+	PublicAuthRateLimitRPM int
 	// 对话配置
 	MaxContextMessages       int
 	ContextMaxTurns          int
@@ -558,6 +533,7 @@ func Load() Config {
 		UpdateRuntimeDir:             absoluteConfigPath(envOrPath("UPDATE_RUNTIME_DIR", yc.Update.RuntimeDir, "./data/runtime", yc.sourceDir)),
 		UpdateStateFile:              absoluteConfigPath(envOrPath("UPDATE_STATE_FILE", yc.Update.StateFile, "./data/update-journal.json", yc.sourceDir)),
 		UpdateDownloadTimeoutSeconds: envOrInt("UPDATE_DOWNLOAD_TIMEOUT_SECONDS", yc.Update.DownloadTimeoutSeconds, 1800),
+		Sub2BaseURL:                  strings.TrimRight(envOr("SUB2_BASE_URL", "", DefaultSub2BaseURL), "/"),
 		JWTSecret:                    envOr("JWT_SECRET", yc.Security.JWTSecret, defaultJWTSecret),
 		DataEncryptionKey:            envOr("DATA_ENCRYPTION_KEY", yc.Security.DataEncryptionKey, defaultDataEncryptionKey),
 		SSRFProtectionEnabled:        envOrBoolPtr("SSRF_PROTECTION_ENABLED", yc.Security.SSRFProtectionEnabled, false),
@@ -583,8 +559,6 @@ func Load() Config {
 		StorageS3AccessKeyID:         envOr("STORAGE_S3_ACCESS_KEY_ID", yc.Storage.S3.AccessKeyID, ""),
 		StorageS3SecretAccessKey:     envOr("STORAGE_S3_SECRET_ACCESS_KEY", yc.Storage.S3.SecretAccessKey, ""),
 		StorageS3ForcePathStyle:      envOrBoolPtr("STORAGE_S3_FORCE_PATH_STYLE", yc.Storage.S3.ForcePathStyle, true),
-		AdminUsername:                defaultAdminUsername,
-		AdminDisplayName:             defaultAdminDisplayName,
 		GeoIPProvider:                envOr("GEOIP_PROVIDER", yc.GeoIP.Provider, "ipwhois"),
 		GeoIPBaseURL:                 envOr("GEOIP_BASE_URL", yc.GeoIP.BaseURL, "https://ipwho.is"),
 		GeoIPToken:                   envOr("GEOIP_TOKEN", yc.GeoIP.Token, ""),
@@ -593,12 +567,6 @@ func Load() Config {
 		GeoIPDatabasePath:            envOrPath("GEOIP_DATABASE_PATH", yc.GeoIP.DatabasePath, "./data/geoip/geoip.mmdb", yc.sourceDir),
 		GeoIPDatabaseMaxBytes:        envOrInt64("GEOIP_DATABASE_MAX_BYTES", yc.GeoIP.DatabaseMaxBytes, defaultGeoIPMaxBytes),
 		GeoIPRefreshIntervalHours:    envOrInt("GEOIP_REFRESH_INTERVAL_HOURS", yc.GeoIP.RefreshIntervalHours, 168),
-		SMTPHost:                     "",
-		SMTPPort:                     587,
-		SMTPUsername:                 "",
-		SMTPPassword:                 "",
-		SMTPFrom:                     "",
-		TurnstileSiteverifyURL:       envOr("TURNSTILE_SITEVERIFY_URL", yc.Security.TurnstileSiteverifyURL, DefaultTurnstileSiteverifyURL),
 		OTelEnabled:                  envOrBoolOptional("OTEL_ENABLED", yc.Observability.Tracing.Enabled),
 		OTelExporterOTLPEndpoint:     envOr("OTEL_EXPORTER_OTLP_ENDPOINT", yc.Observability.Tracing.Endpoint, ""),
 		OTelExporterOTLPHeaders:      envOr("OTEL_EXPORTER_OTLP_HEADERS", yc.Observability.Tracing.Headers, ""),
@@ -609,23 +577,9 @@ func Load() Config {
 		// 动态配置默认值（会被 DB 覆盖）
 		TokenTTLHours:                     24,
 		RefreshTokenTTLHours:              720,
-		LoginMaxFailures:                  5,
-		LoginLockMinutes:                  15,
 		RateLimitEnabled:                  false,
 		RateLimitRPM:                      60,
 		PublicAuthRateLimitRPM:            30,
-		UsernameLoginEnabled:              true,
-		EmailLoginEnabled:                 true,
-		ThirdPartyLoginEnabled:            true,
-		EmailRegistrationEnabled:          true,
-		EmailVerificationEnabled:          false,
-		PasswordResetEnabled:              false,
-		EmailRegistrationDomains:          "",
-		EmailRegistrationNoAlias:          false,
-		AutoLinkVerifiedEmail:             true,
-		TurnstileRegistrationEnabled:      false,
-		TurnstileSiteKey:                  "",
-		TurnstileSecretKey:                "",
 		MaxContextMessages:                20,
 		ContextMaxTurns:                   48,
 		ContextMaxInputTokens:             32000,
@@ -749,6 +703,9 @@ func (c Config) Validate() error {
 			return errors.New("invalid UPDATE_PROXY_URL")
 		}
 	}
+	if err := validateSub2BaseURL(c.Sub2BaseURL, normalizeEnv(c.Env) == "prod"); err != nil {
+		return err
+	}
 	if err := c.validateDatabase(); err != nil {
 		return err
 	}
@@ -764,9 +721,6 @@ func (c Config) Validate() error {
 	}
 	if _, err := sharedsecurity.NewOutboundPolicy(c.ssrfProtectionEnforced(), splitCommaSeparated(c.SSRFAllowedHosts), splitCommaSeparated(c.SSRFAllowedCIDRs)); err != nil {
 		return fmt.Errorf("invalid config: SSRF allowlist: %w", err)
-	}
-	if err := validateHTTPIntegrationURL(c.TurnstileSiteverifyURL, "TURNSTILE_SITEVERIFY_URL"); err != nil {
-		return err
 	}
 	if env != "prod" {
 		return nil
@@ -832,6 +786,23 @@ func validateHTTPIntegrationURL(raw string, label string) error {
 	}
 	if err := sharedsecurity.ValidateTrustedOutboundHTTPURL(value); err != nil {
 		return fmt.Errorf("invalid config: %s must be an http(s) URL without credentials; metadata and link-local targets are not allowed", label)
+	}
+	return nil
+}
+
+func validateSub2BaseURL(raw string, production bool) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed == nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return errors.New("invalid config: SUB2_BASE_URL must be an http(s) origin without credentials, path, query, or fragment")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("invalid config: SUB2_BASE_URL must use http or https")
+	}
+	if production && parsed.Scheme != "https" {
+		return errors.New("invalid production config: SUB2_BASE_URL must use https")
+	}
+	if err = sharedsecurity.ValidateTrustedOutboundHTTPURL(parsed.String()); err != nil {
+		return errors.New("invalid config: SUB2_BASE_URL contains a blocked target")
 	}
 	return nil
 }

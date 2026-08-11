@@ -31,13 +31,11 @@ func (h *Handler) permissionGroupModelIDParam(c *gin.Context) (uint, bool) {
 func (h *Handler) writePermissionGroupError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, appadmin.ErrInvalidPermissionGroupName),
-		errors.Is(err, appadmin.ErrInvalidPermissionGroupRateMultiplier),
 		errors.Is(err, appadmin.ErrInvalidPermissionGroupModels),
 		errors.Is(err, appadmin.ErrInvalidPermissionGroupUsers):
 		response.ErrorFrom(c, http.StatusBadRequest, err)
 	case errors.Is(err, appadmin.ErrDefaultPermissionGroupDeleteNotAllowed),
-		errors.Is(err, appadmin.ErrDefaultPermissionGroupUsersImmutable),
-		errors.Is(err, appadmin.ErrPermissionGroupReferencedByPlan):
+		errors.Is(err, appadmin.ErrDefaultPermissionGroupUsersImmutable):
 		response.ErrorFrom(c, http.StatusConflict, err)
 	case errors.Is(err, appadmin.ErrPermissionGroupNotFound):
 		response.ErrorFrom(c, http.StatusNotFound, err)
@@ -87,7 +85,7 @@ func (h *Handler) CreatePermissionGroup(c *gin.Context) {
 		response.InvalidRequestBody(c, err)
 		return
 	}
-	item, err := h.service.CreatePermissionGroup(c.Request.Context(), req.Name, req.Description, req.RateMultiplierPercent)
+	item, err := h.service.CreatePermissionGroup(c.Request.Context(), req.Name, req.Description)
 	if err != nil {
 		h.writePermissionGroupError(c, err)
 		return
@@ -119,7 +117,7 @@ func (h *Handler) UpdatePermissionGroup(c *gin.Context) {
 		response.InvalidRequestBody(c, err)
 		return
 	}
-	item, err := h.service.UpdatePermissionGroup(c.Request.Context(), groupID, req.Name, req.Description, req.RateMultiplierPercent)
+	item, err := h.service.UpdatePermissionGroup(c.Request.Context(), groupID, req.Name, req.Description)
 	if err != nil {
 		h.writePermissionGroupError(c, err)
 		return

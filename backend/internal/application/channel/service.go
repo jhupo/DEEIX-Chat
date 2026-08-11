@@ -5,17 +5,11 @@ import (
 	"sync"
 	"time"
 
-	appbilling "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/billing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
-
-type billingModelPricingFilter interface {
-	GetBillingMode(ctx context.Context) (string, error)
-	ListPublicModelPricing(ctx context.Context) (map[string]appbilling.PublicModelPricing, error)
-}
 
 // permissionGroupRepo 提供模型访问权限组的查询能力。
 type permissionGroupRepo interface {
@@ -93,15 +87,14 @@ func (s *Service) isModelAccessible(ctx context.Context, platformModelID uint, u
 
 // Service 封装上游、平台模型与路由绑定业务能力。
 type Service struct {
-	cfg                *config.Runtime
-	repo               repository.ChannelRepository
-	presentationRepo   repository.ModelPresentationRepository
-	cache              repository.ChannelCacheRepository
-	llmClient          *llm.Client
-	modelPricingFilter billingModelPricingFilter
-	permGroupRepo      permissionGroupRepo
-	subGroupResolver   subscriptionGroupResolver
-	logger             *zap.Logger
+	cfg              *config.Runtime
+	repo             repository.ChannelRepository
+	presentationRepo repository.ModelPresentationRepository
+	cache            repository.ChannelCacheRepository
+	llmClient        *llm.Client
+	permGroupRepo    permissionGroupRepo
+	subGroupResolver subscriptionGroupResolver
+	logger           *zap.Logger
 
 	modelCatalogMu         sync.RWMutex
 	modelCatalog           []ModelView
@@ -206,11 +199,6 @@ func NewServiceWithRuntime(cfg *config.Runtime, repo repository.ChannelRepositor
 		cache:            cache,
 		llmClient:        llmClient,
 	}
-}
-
-// SetBillingModelPricingFilter 注入计费模型过滤器，用于用户侧模型选择列表。
-func (s *Service) SetBillingModelPricingFilter(filter billingModelPricingFilter) {
-	s.modelPricingFilter = filter
 }
 
 // SetPermissionGroupRepo 注入模型访问权限组仓储，用于按用户过滤模型访问。

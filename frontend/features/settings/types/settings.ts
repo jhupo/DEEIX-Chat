@@ -13,7 +13,6 @@ export type ChatSettings = {
   showTokenUsage: boolean;
   showModelInfo: boolean;
   showLatency: boolean;
-  showBillingCost: boolean;
   markdownRender: boolean;
   autoGenerateTitle: boolean;
   autoGenerateLabels: boolean;

@@ -17,17 +17,56 @@ func TestLoadDefaultsUseBootstrapAdmin(t *testing.T) {
 	if cfg.Env != "prod" {
 		t.Fatalf("expected default env prod, got %q", cfg.Env)
 	}
-	if cfg.AdminUsername != defaultAdminUsername {
-		t.Fatalf("expected default admin username %q, got %q", defaultAdminUsername, cfg.AdminUsername)
-	}
-	if cfg.AdminDisplayName != defaultAdminDisplayName {
-		t.Fatalf("expected default admin display name %q, got %q", defaultAdminDisplayName, cfg.AdminDisplayName)
-	}
+
 	if cfg.FileFullContextMaxBytes != DefaultFileFullContextMaxBytes {
 		t.Fatalf("expected default full-context size %d, got %d", DefaultFileFullContextMaxBytes, cfg.FileFullContextMaxBytes)
 	}
 	if cfg.SSRFAllowedHosts != "" || cfg.SSRFAllowedCIDRs != "" {
 		t.Fatalf("expected SSRF allowlist to be empty by default, hosts=%q CIDRs=%q", cfg.SSRFAllowedHosts, cfg.SSRFAllowedCIDRs)
+	}
+	if cfg.Sub2BaseURL != DefaultSub2BaseURL {
+		t.Fatalf("expected default Sub2 base URL %q, got %q", DefaultSub2BaseURL, cfg.Sub2BaseURL)
+	}
+}
+
+func TestLoadReadsSub2BaseURL(t *testing.T) {
+	cleanupConfigEnv(t)
+	chdir(t, t.TempDir())
+	t.Setenv("SUB2_BASE_URL", "https://sub2.example.test/")
+
+	cfg := Load()
+	if cfg.Sub2BaseURL != "https://sub2.example.test" {
+		t.Fatalf("unexpected Sub2 base URL %q", cfg.Sub2BaseURL)
+	}
+}
+
+func TestValidateSub2BaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		env     string
+		wantErr bool
+	}{
+		{name: "production https", value: "https://sub2.example.test", env: "prod"},
+		{name: "development http", value: "http://127.0.0.1:8080", env: "dev"},
+		{name: "production http", value: "http://sub2.example.test", env: "prod", wantErr: true},
+		{name: "credentials", value: "https://user:pass@sub2.example.test", env: "dev", wantErr: true},
+		{name: "path", value: "https://sub2.example.test/api", env: "dev", wantErr: true},
+		{name: "query", value: "https://sub2.example.test?x=1", env: "dev", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfigForEnv(tt.env)
+			cfg.Sub2BaseURL = tt.value
+			err := cfg.Validate()
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
 	}
 }
 
@@ -143,40 +182,10 @@ geoip:
 	chdir(t, backendDir)
 
 	cfg := Load()
-	if cfg.AdminUsername != defaultAdminUsername {
-		t.Fatalf("expected built-in admin username, got %q", cfg.AdminUsername)
-	}
-	if cfg.AdminDisplayName != defaultAdminDisplayName {
-		t.Fatalf("expected built-in admin display name, got %q", cfg.AdminDisplayName)
-	}
+
 	assertPath(t, "frontend dist", cfg.FrontendDistDir, filepath.Join(root, "frontend", "out"))
 	assertPath(t, "storage root", cfg.StorageRootDir, filepath.Join(root, "data", "storage"))
 	assertPath(t, "geoip database", cfg.GeoIPDatabasePath, filepath.Join(root, "data", "geoip.mmdb"))
-}
-
-func TestLoadReadsTurnstileSiteverifyURL(t *testing.T) {
-	cleanupConfigEnv(t)
-
-	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	configBody := []byte(`
-security:
-  turnstile_siteverify_url: "https://turnstile.example.test/siteverify"
-`)
-	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	t.Setenv("CONFIG_FILE", configPath)
-
-	cfg := Load()
-	if cfg.TurnstileSiteverifyURL != "https://turnstile.example.test/siteverify" {
-		t.Fatalf("expected turnstile siteverify url from config, got %q", cfg.TurnstileSiteverifyURL)
-	}
-
-	t.Setenv("TURNSTILE_SITEVERIFY_URL", "https://turnstile-env.example.test/siteverify")
-	cfg = Load()
-	if cfg.TurnstileSiteverifyURL != "https://turnstile-env.example.test/siteverify" {
-		t.Fatalf("expected turnstile siteverify url from env, got %q", cfg.TurnstileSiteverifyURL)
-	}
 }
 
 func TestLoadReadsSSRFAllowlistWithEnvironmentPriority(t *testing.T) {
@@ -228,34 +237,6 @@ func TestValidateRejectsInvalidSSRFAllowlist(t *testing.T) {
 			cfg.SSRFAllowedCIDRs = test.cidrs
 			if err := cfg.Validate(); !errors.Is(err, sharedsecurity.ErrInvalidOutboundPolicy) {
 				t.Fatalf("expected invalid outbound policy, got %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateTurnstileSiteverifyURL(t *testing.T) {
-	for _, test := range []struct {
-		name    string
-		value   string
-		wantErr bool
-	}{
-		{name: "default fallback", value: ""},
-		{name: "public HTTPS", value: "https://turnstile.example.test/siteverify"},
-		{name: "private administrator endpoint", value: "http://turnstile:8080/siteverify"},
-		{name: "metadata endpoint", value: "http://169.254.169.254/latest/meta-data", wantErr: true},
-		{name: "credentials", value: "http://user:password@turnstile:8080/siteverify", wantErr: true},
-		{name: "unsupported scheme", value: "file:///etc/passwd", wantErr: true},
-		{name: "relative URL", value: "/siteverify", wantErr: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			cfg := validConfigForEnv("dev")
-			cfg.TurnstileSiteverifyURL = test.value
-			err := cfg.Validate()
-			if test.wantErr && err == nil {
-				t.Fatal("expected invalid Turnstile endpoint to be rejected")
-			}
-			if !test.wantErr && err != nil {
-				t.Fatalf("expected Turnstile endpoint to be accepted, got %v", err)
 			}
 		})
 	}
@@ -390,6 +371,7 @@ func validConfigForEnv(env string) Config {
 		PublicWebBaseURL:  "https://example.com",
 		PostgresDSN:       "postgres://deeix:secret@postgres:5432/deeix?sslmode=disable",
 		RedisAddr:         "redis:6379",
+		Sub2BaseURL:       DefaultSub2BaseURL,
 	}
 }
 
@@ -401,10 +383,10 @@ func cleanupConfigEnv(t *testing.T) {
 		"FRONTEND_DIST_DIR",
 		"STORAGE_ROOT_DIR",
 		"GEOIP_DATABASE_PATH",
-		"TURNSTILE_SITEVERIFY_URL",
 		"SSRF_ALLOWED_HOSTS",
 		"SSRF_ALLOWED_CIDRS",
 		"POSTGRES_DSN",
+		"SUB2_BASE_URL",
 	}
 	for _, key := range keys {
 		key := key

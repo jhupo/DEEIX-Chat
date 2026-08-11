@@ -162,6 +162,12 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrModelRouteNotConfigured):
 		status = http.StatusServiceUnavailable
 		message = "model route not configured"
+	case errors.Is(err, appconversation.ErrInvalidKeyBinding):
+		status = http.StatusBadRequest
+		message = "invalid key binding"
+	case errors.Is(err, appconversation.ErrKeyBindingUnavailable):
+		status = http.StatusBadGateway
+		message = "key binding unavailable"
 	case errors.Is(err, appconversation.ErrGeneratedMediaArtifactUnavailable):
 		status = http.StatusBadGateway
 		code = appconversation.MessageErrorCode(err)

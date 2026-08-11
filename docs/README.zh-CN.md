@@ -42,9 +42,9 @@ DEEIX Chat 是一款开源可部署的 AI 平台，面向需要长期、稳定�
 | 文件与检索 | 提供文件上传、预览、提取、OCR、存储配额、全文注入、分片、向量嵌入和语义检索能力，让文件内容自然进入对话上下文。 |
 | 工具生态 | 同时支持 MCP Server 和厂商官方原生工具，覆盖工具发现、启停、用户选择、执行限制、结果渲染和调用链路追踪。 |
 | 上下文与记忆 | 支持消息窗口、Token 预算、压缩摘要、会话记忆、长期记忆和 RAG 证据记录，在可控成本下维持连续对话体验。 |
-| 计费与支付 | 内置模型定价、工具按次定价、订阅、充值、余额、用量账本、计费快照、Stripe Checkout、易支付和 Webhook 校验。 |
-| 身份与安全 | 覆盖本地账号、会话管理、HttpOnly Refresh Cookie、2FA/TOTP、可信设备、SSO/OIDC/OAuth、联系方式验证和敏感信息加密。 |
-| 管理与审计 | 后台集中管理用户、角色、上游、模型、路由、价格、订阅、余额、调用日志、审计日志、认证事件和系统事件。 |
+| Sub2 商业能力 | 订阅页通过当前登录用户的服务端 Sub2 session 读取余额、订阅、套餐、用量、支付和兑换状态；DEEIX 不保存本地账本、结算、价格或支付渠道权威数据。 |
+| 身份与安全 | 通过 Sub2 完成登录、注册、改密和登录时 TOTP 验证；角色实时从 Sub2 刷新，DEEIX 仅保存资源归属投影、浏览器会话、HttpOnly Refresh Cookie 和加密的上游令牌。 |
+| 管理与审计 | 后台只读展示 Sub2 用户投影并支持吊销 DEEIX 会话，同时管理上游、模型、路由、调用日志、审计日志、认证事件和系统事件。 |
 | 部署与运维 | 支持单运行时托管前端与 API、Docker 部署、PostgreSQL + pgvector、Redis、S3 兼容存储、Swagger、结构化日志、版本接口、GeoIP 和 OpenTelemetry。 |
 
 <p align="center">
@@ -185,7 +185,14 @@ Compose 可从 `.env` 读取 `DEEIX_BIND_ADDRESS`、`DEEIX_HTTP_PORT`、`POSTGRE
 ```dotenv
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
+SUB2_BASE_URL=https://api.ovload.com
 ```
+
+`SUB2_BASE_URL` 是唯一的 Sub2 部署配置，默认值为 `https://api.ovload.com`。只有在 DEEIX 明确连接另一个兼容 Sub2 实例时才覆盖它；后端从规范化 origin 派生实例标识，浏览器不能提交上游地址。
+
+#### v0.4 升级边界
+
+v0.4 在修改 schema 前拒绝已填充的遗留 identity schema。先备份当前 PostgreSQL，再以新的 PostgreSQL 数据库或 volume 部署 v0.4。该 clean-slate cutover 没有数据迁移或兼容层，也不保留旧登录或旧聊天历史连续性。详见 [Full 部署与在线更新](./agent-runtime/06-full-deployment-and-online-update.md)。
 
 #### 配置、持久化和镜像
 
@@ -233,9 +240,9 @@ docker compose -f docker/docling/docker-compose.yml up -d --build
 
 `docker/rapidocr` 当前提供 Dockerfile 和服务入口，但还没有 compose 文件。如果选择 RapidOCR，需要自行补 compose 或手动运行。
 
-### 分离部署
+### 分离来源开发（不是部署 Profile）
 
-当前端和后端分别暴露在不同公网地址时使用分离部署，例如 `https://chat.example.com` 和 `https://api.example.com`。
+Full Compose bundle 是唯一受支持的部署 Profile。以下内容仅说明在源码开发中如何以独立静态站点测试 API，不构成 v0.4 的替代部署拓扑或在线更新目标。
 
 1. 配置公开地址。
 
@@ -280,22 +287,13 @@ docker compose -f compose.yaml exec app ls -l /app/config.yaml
 docker compose -f compose.yaml logs app
 ```
 
-如果数据库中还不存在超级管理员，后端会在首次启动时自动创建初始管理员，并且只在创建当次输出一次初始密码。
-
-| 项目 | 说明 |
-| --- | --- |
-| 初始用户名 | `admin` |
-| 初始密码 | 查看后端启动日志，搜索 `bootstrap superadmin created`，读取其中的 `password` 字段。 |
-| 首次登录 | 系统会要求修改用户名和密码。 |
-| 后续变更 | 通过账户流程或后台管理完成；不会通过 `config.yaml` 修改。 |
-
-如果数据库中已经存在超级管理员，服务不会重新生成或再次输出初始密码。
+使用所配置 Sub2 实例中的用户登录。每次登录成功后，DEEIX 都通过 Sub2 `/api/v1/auth/me` 复核身份：Sub2 `admin` 映射为 DEEIX `superadmin`，Sub2 `user` 映射为 DEEIX `user`。DEEIX 不再创建本地初始管理员，也不会在日志中输出本地初始密码。
 
 ## 配置说明
 
 > 完整配置说明：[配置说明](https://deeix.com/zh/docs/deeix-chat/configuration)。
 
-后端配置分为静态运行配置和运行时业务配置。静态运行配置用于描述品牌以及服务启动所需的基础设施、安全和存储参数，由 `config.yaml` 与环境变量提供；运行时业务配置用于认证、会话、模型、文件、计费等产品能力，写入 `system_settings` 并通过后台管理维护。环境变量会覆盖配置文件中的同名项，适合容器化、分离部署和密钥注入场景。
+后端配置分为静态运行配置和 DEEIX 自有运行时设置。静态运行配置用于描述品牌以及服务启动所需的基础设施、安全和存储参数，由 `config.yaml` 与环境变量提供；DEEIX 自有设置覆盖会话、模型和文件等应用行为，写入 `system_settings` 并通过后台管理维护。Sub2 身份与商业能力不是 DEEIX 运行时业务设置：BFF 使用当前服务端 Sub2 session，浏览器永不接收 Sub2 bearer token。环境变量会覆盖配置文件中的同名项，适合容器化、源码开发和密钥注入场景。
 
 后端启动时会按运行目录解析默认配置文件：从仓库根目录启动读取 `config.yaml`，从 `backend/` 目录启动读取 `../config.yaml`。Docker 部署通常将宿主机 `./config.yaml` 只读挂载到容器内 `/app/config.yaml`；如果配置文件放在其他位置，请使用 `CONFIG_FILE` 指向实际运行环境可访问的路径。
 
@@ -309,6 +307,7 @@ docker compose -f compose.yaml logs app
 | 配置文件 | `CONFIG_FILE` | 可选配置文件路径；Docker 场景应填写容器内路径。 |
 | 应用 | `APP_NAME` | 应用名称。 |
 | 应用 | `APP_ENV` | 运行环境，支持 `dev`/`development` 和 `prod`/`production`；未配置时默认 `prod`。 |
+| Sub2 | `SUB2_BASE_URL` | Sub2 规范 origin；默认 `https://api.ovload.com`，生产环境必须使用 HTTPS。 |
 | HTTP 服务 | `HTTP_PORT` | API/运行时端口。 |
 | HTTP 服务 | `CORS_ALLOW_ORIGIN` | 允许跨域访问的来源，多个来源用逗号分隔。 |
 | HTTP 服务 | `TRUSTED_PROXIES` | 可信代理 CIDR 列表。 |
@@ -320,11 +319,10 @@ docker compose -f compose.yaml logs app
 | HTTP 服务 | `HTTP_IDLE_TIMEOUT_SECONDS` | HTTP keep-alive 空闲超时。 |
 | HTTP 服务 | `HTTP_MAX_HEADER_BYTES` | HTTP 请求头最大字节数。 |
 | 安全 | `JWT_SECRET` | JWT 签名密钥。 |
-| 安全 | `DATA_ENCRYPTION_KEY` | 上游 API Key、SSO Secret、MCP Token、敏感设置和 TOTP Secret 的加密密钥材料。 |
+| 安全 | `DATA_ENCRYPTION_KEY` | Sub2 会话令牌、上游 API Key、MCP Token 和敏感设置的加密密钥材料。 |
 | 安全 | `SSRF_PROTECTION_ENABLED` | 是否启用出站 SSRF 防护。 |
 | 安全 | `SSRF_ALLOWED_HOSTS` | 部署级集成或可信私网重定向目标的主机名，逗号分隔。 |
 | 安全 | `SSRF_ALLOWED_CIDRS` | 部署级集成或可信私网重定向目标的 CIDR 网段，逗号分隔。 |
-| 安全 | `TURNSTILE_SITEVERIFY_URL` | Cloudflare Turnstile siteverify 端点。 |
 | PostgreSQL | `POSTGRES_DSN` | PostgreSQL DSN。 |
 | PostgreSQL | `POSTGRES_MAX_OPEN_CONNS` | 最大打开连接数。 |
 | PostgreSQL | `POSTGRES_MAX_IDLE_CONNS` | 最大空闲连接数。 |
@@ -360,19 +358,9 @@ docker compose -f compose.yaml logs app
 | OpenTelemetry | `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP exporter 协议：`grpc`、`http` 或 `http/protobuf`；默认 `grpc`。 |
 | OpenTelemetry | `OTEL_TRACES_SAMPLER_ARG` / `OTEL_SAMPLING_RATE` | Trace 采样率，范围 `0~1`；`OTEL_TRACES_SAMPLER_ARG` 优先。 |
 
-认证、注册、会话配置、模型参数策略、文件处理、RAG、Embedding、MCP、计费、支付和公告等运行时业务配置不属于静态 YAML 配置，默认值由后端种子初始化，并在后台管理中维护。
+DEEIX Token 有效期、限流、登录后路径、会话配置、模型参数策略、文件处理、RAG、Embedding、MCP、计费、支付和公告属于运行时业务配置。登录、注册、邮箱验证、登录因子、用户角色和账户状态由 Sub2 管理，DEEIX 后台不再重复提供这些控制项。
 
-生产环境启用 SSRF 防护后，管理员保存的模型、MCP、Embedding、OIDC/OAuth2 和自定义 Turnstile endpoint 均按精确 origin（协议、主机和端口）获得局部授权，不需要加入全局白名单。模型、MCP 与 Embedding 保留标准重定向兼容性：跨 origin 的公网目标可以继续访问，跨 origin 的私网目标必须命中 `SSRF_ALLOWED_HOSTS` 或 `SSRF_ALLOWED_CIDRS`；OIDC/OAuth2 与 Turnstile 继续维持更严格的身份边界。模型生成的图片或视频由后端下载、校验并转存：私网制品 URL 只有与本次选中的模型 endpoint 同 origin 时才继承该局部信任；跨 origin 的公网制品仍按严格公网策略下载，跨 origin 的私网制品会被拦截。全局白名单也继续用于无法绑定管理员保存 endpoint 的部署级集成，例如部分 GeoIP 或提取服务部署。链路本地、组播、未指定地址和已知云元数据目标始终禁止。白名单配置不合法会阻止后端启动；全局白名单修改后需重启生效。
-
-### Web、App 与桌面端 OAuth 回调（多端暂未发布）
-
-启用第三方授权桥前，请先把 `PUBLIC_API_BASE_URL` 配置为外部可访问的 API 地址。每个 OIDC/OAuth2 身份源都应登记后台身份源弹窗展示的服务器回调：
-
-```text
-<PUBLIC_API_BASE_URL>/api/v1/auth/providers/<provider-slug>/callback
-```
-
-Web、App 与桌面端会自动复用当前实例的这个回调。外部身份源的授权码和 Client Secret 始终留在用户自己的服务器；公共客户端只会收到一个短时、单次使用并绑定 PKCE verifier 的 DEEIX 授权码。如果仍需使用账号身份绑定或兼容旧版 Web 客户端，请同时保留后台展示的旧版 Web 回调地址。
+生产环境启用 SSRF 防护后，管理员保存的模型、MCP 和 Embedding endpoint 按精确 origin（协议、主机和端口）获得局部授权，不需要加入全局白名单。跨 origin 的公网重定向可以继续访问，跨 origin 的私网重定向必须命中 `SSRF_ALLOWED_HOSTS` 或 `SSRF_ALLOWED_CIDRS`。模型生成的图片或视频由后端下载、校验并转存；私网制品 URL 只有与本次选中的模型 endpoint 同 origin 时才继承局部信任。`SUB2_BASE_URL` 独立按规范 origin 校验，且重定向不得改变 origin。链路本地、组播、未指定地址和已知云元数据目标始终禁止。
 
 ## 功能指南
 
@@ -382,11 +370,10 @@ Web、App 与桌面端会自动复用当前实例的这个回调。外部身份�
 
 ## 安全说明
 
-- 用户密码使用 bcrypt 哈希存储。
+- 密码、注册验证因子和登录时 TOTP 由 Sub2 处理，DEEIX 不持久化这些数据。
 - 生产模式会拒绝不安全的默认密钥、过短的加密密钥、通配 CORS 和非 HTTPS 公开地址。
-- Refresh Token 和恢复类凭证只存储哈希。
-- 上游 API Key、SSO Client Secret、MCP 鉴权 Token、敏感系统设置和 TOTP Secret 使用 `DATA_ENCRYPTION_KEY` 通过 AES-GCM 加密。
-- Access Token 为短期令牌并保存在前端内存中；Refresh Token 由后端写入 HttpOnly Cookie。
+- DEEIX Refresh Token 只存储哈希；每个浏览器会话独占的 Sub2 Access/Refresh Token 使用 `DATA_ENCRYPTION_KEY` 通过 AES-GCM 加密。
+- DEEIX Access Token 为短期令牌并保存在前端内存中；DEEIX Refresh Token 由后端写入 HttpOnly Cookie，Sub2 Bearer Token 不进入浏览器。
 - 用户输入的模型参数会在请求上游前经过白名单/黑名单过滤。模型名、消息、工具、系统提示词、请求头和 previous response 标识等系统链路字段不允许被用户 options 覆盖。
 
 ## 文档入口

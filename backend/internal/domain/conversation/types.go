@@ -185,9 +185,6 @@ type Message struct {
 	CacheWriteTokens int64
 	ReasoningTokens  int64
 	LatencyMS        int64
-	BilledCurrency   string
-	BilledNanousd    int64
-	PricingSnapshot  string
 	Status           string
 	ErrorCode        string
 	ErrorMessage     string
@@ -340,6 +337,9 @@ type Run struct {
 	RunID               string
 	RequestID           string
 	UserID              uint
+	KeyBindingPublicID  string
+	KeyBindingVersion   uint
+	RemoteKeyID         int64
 	ConversationID      uint
 	TaskType            string
 	Endpoint            string

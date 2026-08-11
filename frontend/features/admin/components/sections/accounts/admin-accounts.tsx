@@ -20,8 +20,6 @@ export function AdminAccountsPage() {
         setQuery={accounts.setQuery}
         loading={accounts.loading}
         onLoadUsers={accounts.loadUsers}
-        onSetUsers={accounts.setUsersOptimistic}
-        onSetTotal={accounts.setTotalOptimistic}
       />
     </div>
   );

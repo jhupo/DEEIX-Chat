@@ -42,7 +42,6 @@ import {
   mergeLiveUpstreamThinkTrace,
   useLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
-import type { BillingDisplayCurrency } from "@/shared/lib/billing-display";
 import { useBranding } from "@/shared/config/branding-provider";
 
 const EMPTY_TRACE_EVENTS: NonNullable<ChatAreaMessage["processTrace"]>["events"] = [];
@@ -138,9 +137,6 @@ type ChatMessageBotProps = {
   showModelInfo?: boolean;
   showLatency?: boolean;
   showTokenUsage?: boolean;
-  showBillingCost?: boolean;
-  billingDisplayCurrency?: BillingDisplayCurrency;
-  billingDisplayUsdToCnyRate?: number | null;
   readOnly?: boolean;
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
@@ -165,9 +161,6 @@ export function ChatMessageBot({
   showModelInfo = true,
   showLatency = true,
   showTokenUsage = true,
-  showBillingCost = false,
-  billingDisplayCurrency = "USD",
-  billingDisplayUsdToCnyRate = null,
   readOnly = false,
   attachmentContentLoader,
   onEditImageAttachment,
@@ -415,9 +408,6 @@ export function ChatMessageBot({
         showModelInfo={showModelInfo}
         showLatency={showLatency}
         showTokenUsage={showTokenUsage}
-        showBillingCost={showBillingCost}
-        billingDisplayCurrency={billingDisplayCurrency}
-        billingDisplayUsdToCnyRate={billingDisplayUsdToCnyRate}
         readOnly={readOnly}
         alwaysVisible={readOnly}
         showBranchNavigator={showBranchNavigator}

@@ -18,11 +18,6 @@ const AnnouncementDialogHost = dynamic(
   { ssr: false },
 );
 
-const InitialSecurityGuard = dynamic(
-  () => import("@/features/auth").then((mod) => mod.InitialSecurityGuard),
-  { ssr: false },
-);
-
 function ProjectLayoutShell({
   children,
 }: {
@@ -82,7 +77,6 @@ export function ProjectLayout({
     <>
       <UserLocaleSync />
       <AppearancePreferencesSync />
-      <InitialSecurityGuard />
       <AnnouncementDialogHost />
       <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>
         <SidebarConversationsProvider

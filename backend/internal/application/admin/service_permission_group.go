@@ -14,7 +14,7 @@ type permissionGroupRepo interface {
 	ListPermissionGroups(ctx context.Context) ([]domainchannel.PermissionGroup, error)
 	GetPermissionGroup(ctx context.Context, id uint) (*domainchannel.PermissionGroup, error)
 	CreatePermissionGroup(ctx context.Context, item *domainchannel.PermissionGroup) error
-	UpdatePermissionGroup(ctx context.Context, id uint, name string, description string, rateMultiplierPercent int) (*domainchannel.PermissionGroup, error)
+	UpdatePermissionGroup(ctx context.Context, id uint, name string, description string) (*domainchannel.PermissionGroup, error)
 	DeletePermissionGroup(ctx context.Context, id uint) error
 	GetPermissionGroupDeleteSummary(ctx context.Context, id uint) (domainchannel.PermissionGroupDeleteSummary, error)
 	ListGroupModelIDs(ctx context.Context, groupID uint) ([]uint, error)
@@ -32,10 +32,6 @@ type permissionGroupModelLookup interface {
 	GetModelByID(ctx context.Context, modelID uint) (*domainchannel.PlatformModel, error)
 }
 
-type permissionGroupBillingPlanReferenceChecker interface {
-	CountPlansWithPermissionGroup(ctx context.Context, groupID uint) (int64, error)
-}
-
 // SetPermissionGroupRepo 注入权限组仓储能力。
 func (s *Service) SetPermissionGroupRepo(repo permissionGroupRepo) {
 	s.permissionGroupRepo = repo
@@ -44,11 +40,6 @@ func (s *Service) SetPermissionGroupRepo(repo permissionGroupRepo) {
 // SetPermissionGroupModelLookup 注入权限组模型目标校验能力。
 func (s *Service) SetPermissionGroupModelLookup(lookup permissionGroupModelLookup) {
 	s.permissionGroupModelLookup = lookup
-}
-
-// SetPermissionGroupBillingPlanReferenceChecker 注入权限组套餐引用校验能力。
-func (s *Service) SetPermissionGroupBillingPlanReferenceChecker(checker permissionGroupBillingPlanReferenceChecker) {
-	s.permissionGroupBillingPlanReferenceChecker = checker
 }
 
 // ListPermissionGroups 返回全部权限组。
@@ -60,7 +51,7 @@ func (s *Service) ListPermissionGroups(ctx context.Context) ([]domainchannel.Per
 }
 
 // CreatePermissionGroup 创建权限组。
-func (s *Service) CreatePermissionGroup(ctx context.Context, name, description string, rateMultiplierPercent int) (*domainchannel.PermissionGroup, error) {
+func (s *Service) CreatePermissionGroup(ctx context.Context, name, description string) (*domainchannel.PermissionGroup, error) {
 	if s.permissionGroupRepo == nil {
 		return nil, ErrPermissionGroupRepoUnavailable
 	}
@@ -68,14 +59,8 @@ func (s *Service) CreatePermissionGroup(ctx context.Context, name, description s
 	if trimmedName == "" {
 		return nil, ErrInvalidPermissionGroupName
 	}
-	normalizedPercent, err := normalizePermissionGroupRatePercent(rateMultiplierPercent)
-	if err != nil {
-		return nil, err
-	}
 	item := &domainchannel.PermissionGroup{
-		Name:                  trimmedName,
-		Description:           strings.TrimSpace(description),
-		RateMultiplierPercent: normalizedPercent,
+		Name: trimmedName, Description: strings.TrimSpace(description),
 	}
 	if err := s.permissionGroupRepo.CreatePermissionGroup(ctx, item); err != nil {
 		return nil, err
@@ -84,7 +69,7 @@ func (s *Service) CreatePermissionGroup(ctx context.Context, name, description s
 }
 
 // UpdatePermissionGroup 更新权限组名称、说明与计费倍率。
-func (s *Service) UpdatePermissionGroup(ctx context.Context, id uint, name, description string, rateMultiplierPercent int) (*domainchannel.PermissionGroup, error) {
+func (s *Service) UpdatePermissionGroup(ctx context.Context, id uint, name, description string) (*domainchannel.PermissionGroup, error) {
 	if s.permissionGroupRepo == nil {
 		return nil, ErrPermissionGroupRepoUnavailable
 	}
@@ -92,11 +77,7 @@ func (s *Service) UpdatePermissionGroup(ctx context.Context, id uint, name, desc
 	if trimmedName == "" {
 		return nil, ErrInvalidPermissionGroupName
 	}
-	normalizedPercent, err := normalizePermissionGroupRatePercent(rateMultiplierPercent)
-	if err != nil {
-		return nil, err
-	}
-	item, err := s.permissionGroupRepo.UpdatePermissionGroup(ctx, id, trimmedName, strings.TrimSpace(description), normalizedPercent)
+	item, err := s.permissionGroupRepo.UpdatePermissionGroup(ctx, id, trimmedName, strings.TrimSpace(description))
 	if err != nil {
 		return nil, mapPermissionGroupRepoError(err)
 	}
@@ -104,16 +85,6 @@ func (s *Service) UpdatePermissionGroup(ctx context.Context, id uint, name, desc
 }
 
 // normalizePermissionGroupRatePercent 校验计费倍率百分比：0 表示未填按 100 处理，范围 [1, 10000]。
-func normalizePermissionGroupRatePercent(value int) (int, error) {
-	if value == 0 {
-		return 100, nil
-	}
-	if value < 1 || value > 10000 {
-		return 0, ErrInvalidPermissionGroupRateMultiplier
-	}
-	return value, nil
-}
-
 // DeletePermissionGroup 删除权限组，默认组不可删除，被套餐引用时不可删除。
 func (s *Service) DeletePermissionGroup(ctx context.Context, id uint) (*domainchannel.PermissionGroupDeleteSummary, error) {
 	if s.permissionGroupRepo == nil {
@@ -129,17 +100,6 @@ func (s *Service) DeletePermissionGroup(ctx context.Context, id uint) (*domainch
 	summary, err := s.permissionGroupRepo.GetPermissionGroupDeleteSummary(ctx, id)
 	if err != nil {
 		return nil, mapPermissionGroupRepoError(err)
-	}
-	if s.permissionGroupBillingPlanReferenceChecker == nil {
-		return nil, ErrPermissionGroupRepoUnavailable
-	}
-	planCount, err := s.permissionGroupBillingPlanReferenceChecker.CountPlansWithPermissionGroup(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	summary.PlanCount = planCount
-	if planCount > 0 {
-		return nil, ErrPermissionGroupReferencedByPlan
 	}
 	if err := s.permissionGroupRepo.DeletePermissionGroup(ctx, id); err != nil {
 		return nil, mapPermissionGroupRepoError(err)

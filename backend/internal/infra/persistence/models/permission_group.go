@@ -3,10 +3,9 @@ package model
 // PermissionGroup 权限组主数据，控制平台模型的访问范围与计费倍率。
 type PermissionGroup struct {
 	ControlPlaneModel
-	Name                  string `gorm:"not null;size:128;comment:权限组名称"`
-	Description           string `gorm:"size:512;comment:权限组说明"`
-	IsDefault             bool   `gorm:"default:false;comment:是否内置默认组(所有用户隐式归属)"`
-	RateMultiplierPercent int    `gorm:"not null;default:100;comment:计费倍率百分比(100=1.0x)"`
+	Name        string `gorm:"not null;size:128;comment:权限组名称"`
+	Description string `gorm:"size:512;comment:权限组说明"`
+	IsDefault   bool   `gorm:"default:false;comment:是否内置默认组(所有用户隐式归属)"`
 }
 
 func (PermissionGroup) TableName() string {

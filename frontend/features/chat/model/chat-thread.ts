@@ -227,7 +227,6 @@ export function mapServerMessage(
     msg.cacheWriteTokens = item.cacheWriteTokens ?? 0;
     msg.reasoningTokens = item.reasoningTokens ?? 0;
     msg.latencyMS = item.latencyMS ?? 0;
-    msg.billingCost = item.billingCost;
     msg.processTrace = parseProcessTrace(item);
     if ((item.status === "error" || item.status === "interrupted") && item.errorMessage?.trim()) {
       const details = extractInlineAlertDetails(item);

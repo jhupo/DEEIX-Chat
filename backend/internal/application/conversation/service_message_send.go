@@ -10,6 +10,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	appcompact "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
+	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
@@ -66,15 +67,6 @@ func messageRouteConfig(route *channel.ResolvedRoute, attributionReferer string,
 		AttributionReferer:  attributionReferer,
 		AttributionTitle:    attributionTitle,
 	}
-}
-
-func canFailoverMessageRoute(attemptCount int, llmRequestCount int, maxLLMCalls int, visibleDeltaCount int, attemptHadSideEffect bool, cause error) bool {
-	return cause != nil &&
-		attemptCount < maxRequestRouteAttempts &&
-		llmRequestCount < maxLLMCalls &&
-		visibleDeltaCount == 0 &&
-		!attemptHadSideEffect &&
-		channel.ShouldFailoverRoute(cause)
 }
 
 // emitEvent 统一处理可选事件回调，调用方无需重复判断 nil。
@@ -286,7 +278,6 @@ func (s *Service) sendMessageInternal(
 			result = &SendMessageResult{
 				UserMessage:      *userMessage,
 				AssistantMessage: *assistantMessage,
-				Billable:         false,
 				LatencyMS:        latencyMS,
 				StartedAt:        startedAt,
 			}
@@ -317,35 +308,37 @@ func (s *Service) sendMessageInternal(
 	s.persistInitialConversationFallbackTitle(ctx, *conversation, *userMessage)
 	traceRecorder = newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
 
-	if s.routeResolver == nil || s.llmClient == nil {
+	if s.sub2Resolver == nil || s.llmClient == nil {
 		retErr = ErrModelRouteNotConfigured
 		return nil, retErr
 	}
 
-	routeResolveInput := channel.ResolveRouteInput{
-		PlatformModelName: conversation.Model,
-		TaskType:          channel.TaskTypeChat,
-		Scope:             channel.RouteScopeUser,
-		UserID:            input.UserID,
-		ConversationID:    input.ConversationID,
-		RequestID:         strings.TrimSpace(input.RequestID),
-	}
-	route, err := s.routeResolver.ResolveRoute(ctx, routeResolveInput)
+	execution, err := s.sub2Resolver.ResolveBinding(ctx, input.UserID, input.KeyBindingID)
 	if err != nil {
-		if errors.Is(err, channel.ErrModelAccessDenied) {
-			retErr = ErrModelAccessDenied
-			return nil, retErr
+		if errors.Is(err, appsub2key.ErrInvalidBinding) {
+			retErr = ErrInvalidKeyBinding
+		} else {
+			retErr = ErrKeyBindingUnavailable
 		}
-		if errors.Is(err, channel.ErrRouteNotFound) || errors.Is(err, channel.ErrModelNotFound) {
-			retErr = ErrModelRouteNotConfigured
-			return nil, retErr
+		return nil, retErr
+	}
+	execution, err = s.sub2Resolver.ValidateModel(ctx, execution, targetPlatformModelName)
+	if err != nil {
+		if errors.Is(err, appsub2key.ErrInvalidBinding) {
+			retErr = ErrInvalidKeyBinding
+		} else {
+			retErr = ErrKeyBindingUnavailable
 		}
-		if errors.Is(err, channel.ErrAllRoutesUnavailable) {
-			retErr = wrapUpstreamRequestError(err)
-			return nil, retErr
-		}
-		retErr = err
-		return nil, err
+		return nil, retErr
+	}
+	route := &channel.ResolvedRoute{
+		PlatformModelName: execution.Model,
+		UpstreamName:      "sub2",
+		BindingCode:       execution.BindingPublicID,
+		Protocol:          llm.AdapterOpenAIResponses,
+		BaseURL:           s.cfg.Snapshot().Sub2BaseURL,
+		APIKey:            execution.APIKey,
+		UpstreamModel:     execution.Model,
 	}
 	resolvedRoute = route
 	reasoningContentPassback := s.reasoningContentPassbackEnabled(ctx, input.UserID, route)
@@ -371,6 +364,9 @@ func (s *Service) sendMessageInternal(
 		}
 	}
 	applyRouteToRun(route)
+	run.KeyBindingPublicID = execution.BindingPublicID
+	run.KeyBindingVersion = execution.BindingVersion
+	run.RemoteKeyID = execution.RemoteKeyID
 	if strings.TrimSpace(run.Provider) == "" {
 		run.Provider = inferProvider(conversation.Model)
 	}
@@ -797,7 +793,6 @@ func (s *Service) sendMessageInternal(
 	llmRequestCount := 0
 	firstVisibleDeltaLatencyMS := int64(0)
 	visibleDeltaCount := 0
-	attemptHadSideEffect := false
 	emitVisibleDelta := func(delta string) error {
 		if delta == "" {
 			return nil
@@ -819,10 +814,8 @@ func (s *Service) sendMessageInternal(
 		streamedText.WriteString(delta)
 		return nil
 	}
-	var lastGenerationAttemptObservation *generationAttemptObservation
 	runGenerate := func(currentInput llm.GenerateInput) (*llm.GenerateOutput, error) {
 		attemptObservation := &generationAttemptObservation{}
-		lastGenerationAttemptObservation = attemptObservation
 		callPromptMode := "full"
 		if strings.TrimSpace(currentInput.PreviousResponseID) != "" {
 			callPromptMode = "stateful"
@@ -935,7 +928,6 @@ func (s *Service) sendMessageInternal(
 				return ErrMessageGenerationCanceled
 			}
 			if event.Usage != (llm.Usage{}) {
-				attemptHadSideEffect = true
 				// 上游流式 usage 通常是“本次 LLM 调用累计值”，但一条消息可能包含多轮 LLM 调用。
 				// 这里先换算成本次调用内增量，再累加成本轮消息总量，保证实时展示和最终账单口径一致。
 				usageDelta := diffLLMUsage(event.Usage, callStreamUsage)
@@ -952,7 +944,6 @@ func (s *Service) sendMessageInternal(
 				}
 			}
 			if event.GeneratedImage != nil {
-				attemptHadSideEffect = true
 				if input.OnEvent != nil && strings.TrimSpace(event.GeneratedImage.B64JSON) != "" {
 					attemptObservation.markObservable()
 				}
@@ -961,7 +952,6 @@ func (s *Service) sendMessageInternal(
 				}
 			}
 			if event.Reasoning != nil && event.Reasoning.Text != "" {
-				attemptHadSideEffect = true
 			}
 			if traceRecorder != nil && event.Reasoning != nil && event.Reasoning.Text != "" {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
@@ -973,7 +963,6 @@ func (s *Service) sendMessageInternal(
 				}
 			}
 			if event.ServerToolCall != nil {
-				attemptHadSideEffect = true
 			}
 			if traceRecorder != nil && event.ServerToolCall != nil {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
@@ -997,7 +986,6 @@ func (s *Service) sendMessageInternal(
 			}
 			visibleDelta, thinkDelta := thinkingRouter.consume(event.Delta)
 			if thinkDelta != "" {
-				attemptHadSideEffect = true
 			}
 			if traceRecorder != nil && thinkDelta != "" {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
@@ -1041,14 +1029,6 @@ func (s *Service) sendMessageInternal(
 				output.Text = callVisibleText.String()
 			}
 		}
-		if !attemptHadSideEffect && llmRequestCount < maxLLMCalls &&
-			attemptObservation.canRetry(generateErr, shouldFallbackToNonStreaming) {
-			llmRequestCount++
-			output, generateErr = s.llmClient.Generate(generationCtx, routeConfig, currentInput)
-			if generateErr == nil {
-				generateErr = emitNonStreamingOutput(output)
-			}
-		}
 		if generateErr == nil {
 			usageAccumulator.finishCall((callStreamUsage.InputTokens > 0) || (output != nil && output.Usage.InputTokens > 0))
 		}
@@ -1064,188 +1044,22 @@ func (s *Service) sendMessageInternal(
 	}
 
 	runInitialRouteAttempt := func() (*llm.GenerateOutput, error) {
-		output, attemptErr := runGenerate(generateInput)
-		if !attemptHadSideEffect && llmRequestCount < maxLLMCalls && generateInput.ResponsesBackground &&
-			lastGenerationAttemptObservation.canRetry(attemptErr, shouldRetryWithoutResponsesBackground) {
-			if s.logger != nil {
-				s.logger.Warn("openai_responses_background_rejected_retry_standard",
-					zap.String("trace_id", traceid.FromContext(ctx)),
-					zap.Uint("conversation_id", input.ConversationID),
-					zap.String("protocol", route.Protocol),
-					zap.String("upstream_name", route.UpstreamName),
-					zap.Error(attemptErr),
-				)
-			}
-			generateInput.ResponsesBackground = false
-			responsesBackgroundRecovery = openAIResponsesBackgroundRecoveryState{}
-			output, attemptErr = runGenerate(generateInput)
-		}
-		if !attemptHadSideEffect && llmRequestCount < maxLLMCalls && strings.TrimSpace(generateInput.PreviousResponseID) != "" &&
-			lastGenerationAttemptObservation.canRetry(attemptErr, shouldRetryWithoutPreviousResponseID) {
-			if s.logger != nil {
-				s.logger.Warn("previous_response_id_rejected_retry_full_context",
-					zap.String("trace_id", traceid.FromContext(ctx)),
-					zap.Uint("conversation_id", input.ConversationID),
-					zap.String("protocol", route.Protocol),
-					zap.String("upstream_name", route.UpstreamName),
-					zap.Error(attemptErr),
-				)
-			}
-			_ = s.repo.UpdateConversationLastResponseID(ctx, input.ConversationID, "")
-			generateInput.PreviousResponseID = ""
-			generateInput.Messages = fullLLMMessages
-			applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &generateInput)
-			estimatedPromptTokens = estimateGenerateInputTokens(generateInput)
-			initialPromptShape = summarizePromptShape("full_retry", generateInput.Messages, fullLLMMessages, "")
-			if traceRecorder != nil {
-				traceRecorder.recordPromptTrace(buildMessagePromptTrace(messagePromptTraceInput{
-					Plan:              promptPlan.Trace,
-					Mode:              "full_retry",
-					PromptFingerprint: statefulPrefixFingerprint,
-					StatefulDecision: statefulResponseDecision{
-						DisabledReason: "previous_response_rejected",
-					},
-					SentMessages: generateInput.Messages,
-					FullMessages: fullLLMMessages,
-				}))
-			}
-			sendSpan.SetAttributes(promptShapeTraceAttributes("conversation.prompt_retry", initialPromptShape)...)
-			output, attemptErr = runGenerate(generateInput)
-		}
-		return output, attemptErr
+		return runGenerate(generateInput)
 	}
 
 	var upstreamOutput *llm.GenerateOutput
+	if err = runState.createRun(ctx); err != nil {
+		retErr = err
+		return nil, err
+	}
 	upstreamOutput, err = runInitialRouteAttempt()
 	if handleCanceledGeneration(err) {
 		return nil, retErr
 	}
-	attemptedRouteIDs := []uint{route.RouteID}
-	routeFailureRecorded := false
-	for canFailoverMessageRoute(len(attemptedRouteIDs), llmRequestCount, maxLLMCalls, visibleDeltaCount, attemptHadSideEffect, err) {
-		failedRoute := route
-		failedErr := err
-		s.routeResolver.MarkRouteFailure(ctx, failedRoute, failedErr)
-		routeFailureRecorded = true
-
-		routeResolveInput.ExcludedRouteIDs = append([]uint(nil), attemptedRouteIDs...)
-		nextRoute, resolveErr := s.routeResolver.ResolveRoute(ctx, routeResolveInput)
-		if resolveErr != nil {
-			if s.logger != nil {
-				s.logger.Warn("upstream_route_failover_unavailable",
-					zap.String("trace_id", traceid.FromContext(ctx)),
-					zap.Uint("conversation_id", input.ConversationID),
-					zap.Uint("failed_route_id", failedRoute.RouteID),
-					zap.Error(resolveErr),
-				)
-			}
-			err = failedErr
-			break
-		}
-
-		route = nextRoute
-		attemptedRouteIDs = append(attemptedRouteIDs, route.RouteID)
-		routeFailureRecorded = false
-		nextPromptPlan, nextReasoningContentPassback, buildErr := buildRoutePrompt(route)
-		if buildErr != nil {
-			retErr = buildErr
-			return nil, buildErr
-		}
-		promptPlan = nextPromptPlan
-		reasoningContentPassback = nextReasoningContentPassback
-		llmMessages = promptPlan.Messages
-		applyRouteToRun(route)
-		routeConfig = messageRouteConfig(route, attributionReferer, attributionTitle)
-		responsesBackgroundRouteConfig = routeConfig
-		filteredOptions = filterModelOptions(input.Options, route.Protocol, modelOptionPolicyConfig{
-			Mode:                  cfg.ModelOptionPolicyMode,
-			AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
-			DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,
-			ModelCapabilitiesJSON: route.ModelCapabilitiesJSON,
-		})
-		filteredOptions = withMessageRouteReasoningPassbackOptions(
-			filteredOptions,
-			input.Options,
-			route,
-			reasoningContentPassback,
-			llmMessages,
-		)
-		promptCacheKey, filteredOptions, llmMessages = configureOpenAIPromptCacheRequestForRoute(
-			route,
-			promptCacheSessionKey,
-			filteredOptions,
-			llmMessages,
-		)
-		fullLLMMessages = llmMessages
-		generateInput = llm.GenerateInput{
-			RequestID:              strings.TrimSpace(input.RequestID),
-			ConversationID:         input.ConversationID,
-			ConversationPublicID:   strings.TrimSpace(conversation.PublicID),
-			ConversationSessionKey: strings.TrimSpace(conversation.SessionKey),
-			PromptCacheKey:         promptCacheKey,
-			Messages:               cloneLLMMessages(llmMessages),
-			Tools:                  toolRuntime.definitions,
-			Options:                filteredOptions,
-		}
-		if supportsOpenAIResponsesBackgroundMode(route) {
-			generateInput.ResponsesBackground = true
-		}
-		applyOpenAIResponsesInstructions(route, routeConfig.Endpoint, &generateInput)
-		estimatedPromptTokens = estimateGenerateInputTokens(generateInput)
-		statefulPrefixFingerprint = buildPromptStateFingerprint(promptStateFingerprintInput{
-			Protocol:          route.Protocol,
-			Endpoint:          routeConfig.Endpoint,
-			UpstreamID:        route.UpstreamID,
-			UpstreamModel:     route.UpstreamModel,
-			PlatformModelName: conversation.Model,
-			ContextConfig:     statefulContextConfig,
-			ContextState:      statefulContextState,
-			Messages:          promptStatePrefixMessages(fullLLMMessages),
-			Tools:             toolRuntime.definitions,
-			Options:           filteredOptions,
-		})
-		initialPromptShape = summarizePromptShape("route_failover", generateInput.Messages, fullLLMMessages, "")
-		if traceRecorder != nil {
-			traceRecorder.recordPromptTrace(buildMessagePromptTrace(messagePromptTraceInput{
-				Plan:              promptPlan.Trace,
-				Mode:              "route_failover",
-				PromptFingerprint: statefulPrefixFingerprint,
-				StatefulDecision: statefulResponseDecision{
-					DisabledReason: "route_failover",
-				},
-				SentMessages: generateInput.Messages,
-				FullMessages: fullLLMMessages,
-			}))
-		}
-		sendSpan.SetAttributes(
-			attribute.Bool("conversation.route_failover", true),
-			attribute.Int("conversation.route_attempt", len(attemptedRouteIDs)),
-		)
-		attemptHadSideEffect = false
-		streamedText.Reset()
-		if s.logger != nil {
-			s.logger.Warn("upstream_route_failover",
-				zap.String("trace_id", traceid.FromContext(ctx)),
-				zap.Uint("conversation_id", input.ConversationID),
-				zap.Uint("failed_route_id", failedRoute.RouteID),
-				zap.Uint("next_route_id", route.RouteID),
-				zap.Int("attempt", len(attemptedRouteIDs)),
-				zap.Error(failedErr),
-			)
-		}
-		upstreamOutput, err = runInitialRouteAttempt()
-		if handleCanceledGeneration(err) {
-			return nil, retErr
-		}
-	}
 	if err != nil {
-		if !routeFailureRecorded {
-			s.routeResolver.MarkRouteFailure(ctx, route, err)
-		}
 		retErr = wrapUpstreamRequestError(err)
 		return nil, retErr
 	}
-	s.routeResolver.MarkRouteSuccess(ctx, route)
 
 	assistantText, nativeToolRows := syncUpstreamOutputTrace(traceRecorder, upstreamOutput, runID)
 	toolCallRows = append(toolCallRows, nativeToolRows...)
@@ -1376,11 +1190,9 @@ func (s *Service) sendMessageInternal(
 			return nil, retErr
 		}
 		if nextErr != nil {
-			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
 			retErr = wrapUpstreamRequestError(nextErr)
 			return nil, retErr
 		}
-		s.routeResolver.MarkRouteSuccess(ctx, route)
 		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
 		if nextOutput.Usage != (llm.Usage{}) {
 			usageAccumulator.setObservedUsage(totalUsage)
@@ -1406,11 +1218,9 @@ func (s *Service) sendMessageInternal(
 			return nil, retErr
 		}
 		if nextErr != nil {
-			s.routeResolver.MarkRouteFailure(ctx, route, nextErr)
 			retErr = wrapUpstreamRequestError(nextErr)
 			return nil, retErr
 		}
-		s.routeResolver.MarkRouteSuccess(ctx, route)
 		totalUsage = addLLMUsage(totalUsage, nextOutput.Usage)
 		if nextOutput.Usage != (llm.Usage{}) {
 			usageAccumulator.setObservedUsage(totalUsage)
@@ -1548,7 +1358,7 @@ func (s *Service) sendMessageInternal(
 		Messages:            compactMessages,
 		PromptTokenEstimate: estimatedPromptTokens,
 	}
-	var postBillingCompaction *postBillingCompactionTask
+	var postSendCompaction *postSendCompactionTask
 	if !compactPolicy.EffectiveEnabled() {
 		// 用户已关闭自动压缩，仅完成 trace 记录
 		if traceRecorder != nil {
@@ -1558,7 +1368,7 @@ func (s *Service) sendMessageInternal(
 	} else {
 		compactPlatformModelName := s.resolveTextTaskModel(ctx, compactCfg.CompactTaskModel, conversation.Model, input.UserID, input.ConversationID, strings.TrimSpace(input.RequestID))
 		compactInput.PlatformModelName = compactPlatformModelName
-		postBillingCompaction = &postBillingCompactionTask{
+		postSendCompaction = &postSendCompactionTask{
 			Async:          compactCfg.CompactAsyncEnabled,
 			Input:          compactInput,
 			ConversationID: input.ConversationID,
@@ -1572,8 +1382,8 @@ func (s *Service) sendMessageInternal(
 		if compactCfg.CompactAsyncEnabled && traceRecorder != nil {
 			traceRecorder.complete()
 			traceRecorder.attachToMessage(assistantMessage)
-			postBillingCompaction.TraceRecorder = nil
-			postBillingCompaction.OnEvent = nil
+			postSendCompaction.TraceRecorder = nil
+			postSendCompaction.OnEvent = nil
 		}
 	}
 
@@ -1588,26 +1398,35 @@ func (s *Service) sendMessageInternal(
 		}
 	}
 
-	return &SendMessageResult{
-		UserMessage:           *userMessage,
-		AssistantMessage:      *assistantMessage,
-		MetadataRefreshHint:   s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
-		Billable:              true,
-		UpstreamID:            run.UpstreamID,
-		UpstreamName:          run.UpstreamName,
-		PlatformModelName:     route.PlatformModelName,
-		RoutedBindingCode:     route.BindingCode,
-		UpstreamModelName:     route.UpstreamModel,
-		UpstreamProtocol:      route.Protocol,
-		EffectiveOptions:      filteredOptions,
-		UsageSpeed:            totalUsage.Speed,
-		UsageServiceTier:      totalUsage.ServiceTier,
-		RawUsageJSON:          totalUsage.RawUsageJSON,
-		CacheWrite5mTokens:    totalUsage.CacheWrite5mTokens,
-		CacheWrite1hTokens:    totalUsage.CacheWrite1hTokens,
-		ServerSideToolUsage:   totalServerSideToolUsage,
-		LatencyMS:             time.Since(startedAt).Milliseconds(),
-		StartedAt:             startedAt,
-		postBillingCompaction: postBillingCompaction,
-	}, nil
+	result = &SendMessageResult{
+		UserMessage:         *userMessage,
+		AssistantMessage:    *assistantMessage,
+		MetadataRefreshHint: s.resolveConversationMetadataRefreshHint(ctx, *conversation, *userMessage),
+		UpstreamID:          run.UpstreamID,
+		UpstreamName:        run.UpstreamName,
+		PlatformModelName:   route.PlatformModelName,
+		RoutedBindingCode:   route.BindingCode,
+		UpstreamModelName:   route.UpstreamModel,
+		UpstreamProtocol:    route.Protocol,
+		EffectiveOptions:    filteredOptions,
+		UsageSpeed:          totalUsage.Speed,
+		UsageServiceTier:    totalUsage.ServiceTier,
+		RawUsageJSON:        totalUsage.RawUsageJSON,
+		CacheWrite5mTokens:  totalUsage.CacheWrite5mTokens,
+		CacheWrite1hTokens:  totalUsage.CacheWrite1hTokens,
+		ServerSideToolUsage: totalServerSideToolUsage,
+		LatencyMS:           time.Since(startedAt).Milliseconds(),
+		StartedAt:           startedAt,
+		postSendCompaction:  postSendCompaction,
+	}
+	if postSendCompaction != nil {
+		if postSendCompaction.Async {
+			go s.runPostSendCompaction(postSendCompaction, &result.AssistantMessage)
+		} else {
+			s.runPostSendCompaction(postSendCompaction, &result.AssistantMessage)
+		}
+		result.postSendCompaction = nil
+	}
+	s.maybeGenerateConversationMetadataAsync(*conversation, *userMessage)
+	return result, nil
 }

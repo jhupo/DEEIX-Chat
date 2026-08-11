@@ -43,6 +43,29 @@ func TestDefaultMCPToolIDsSettingIsAllowed(t *testing.T) {
 	}
 }
 
+func TestDefaultSub2KeyBindingIDSettingIsAllowed(t *testing.T) {
+	t.Parallel()
+
+	const key = "chat.default_sub2_key_binding_id"
+	if got := allowedKeys[key]; got != "" {
+		t.Fatalf("expected %s default to be empty, got %q", key, got)
+	}
+	for _, value := range []string{"", "sub2_0123456789abcdef0123456789abcdef"} {
+		if err := validateValue(key, value); err != nil {
+			t.Fatalf("expected %q to be accepted, got %v", value, err)
+		}
+	}
+	for _, value := range []string{
+		"sub2_0123456789abcdef0123456789abcde",
+		"sub2_0123456789abcdef0123456789abcdeg",
+		"sub2_0123456789ABCDEF0123456789abcdef",
+	} {
+		if err := validateValue(key, value); err == nil {
+			t.Fatalf("expected %q to be rejected", value)
+		}
+	}
+}
+
 func TestContentWidthSettingIsAllowed(t *testing.T) {
 	t.Parallel()
 

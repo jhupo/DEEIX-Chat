@@ -162,7 +162,7 @@ func assistantCompletionCacheWriteTokens(input persistMessageGenerationInput) in
 	return 0
 }
 
-// persistAssistantImagePayloadIfPresent 保存结构化图片或兼容旧文本图片载荷。
+// persistAssistantImagePayloadIfPresent 淇濆瓨缁撴瀯鍖栧浘鐗囨垨鍏煎鏃ф枃鏈浘鐗囪浇鑽枫€?
 func (s *Service) persistAssistantImagePayloadIfPresent(ctx context.Context, input persistMessageGenerationInput) (bool, error) {
 	var normalized *assistantImageContentNormalization
 	var err error
@@ -285,7 +285,7 @@ func (s *Service) finishSuccessfulMessageGeneration(ctx context.Context, input p
 		return err
 	}
 
-	// 非默认分支不代表会话主链，不能覆盖后续默认消息使用的 Responses 状态。
+	// 闈為粯璁ゅ垎鏀笉浠ｈ〃浼氳瘽涓婚摼锛屼笉鑳借鐩栧悗缁粯璁ゆ秷鎭娇鐢ㄧ殑 Responses 鐘舵€併€?
 	if normalizeBranchReason(input.SendInput.BranchReason) == "default" {
 		s.updateStatefulResponseAsync(input.SendInput.ConversationID, input.ResponseID, input.StatefulPromptFingerprint)
 	}
@@ -298,8 +298,8 @@ func (s *Service) finishSuccessfulMessageGeneration(ctx context.Context, input p
 	return nil
 }
 
-// persistInterruptedMessageGeneration 在模型调用已经产生可见内容或工具轨迹后失败时，保留本轮 assistant 消息。
-// 显式取消由取消流程单独处理，避免把用户主动停止误标为异常中断。
+// persistInterruptedMessageGeneration 鍦ㄦā鍨嬭皟鐢ㄥ凡缁忎骇鐢熷彲瑙佸唴瀹规垨宸ュ叿杞ㄨ抗鍚庡け璐ユ椂锛屼繚鐣欐湰杞?assistant 娑堟伅銆?
+// 鏄惧紡鍙栨秷鐢卞彇娑堟祦绋嬪崟鐙鐞嗭紝閬垮厤鎶婄敤鎴蜂富鍔ㄥ仠姝㈣鏍囦负寮傚父涓柇銆?
 func (s *Service) persistInterruptedMessageGeneration(ctx context.Context, input persistInterruptedMessageGenerationInput) *SendMessageResult {
 	if !shouldPersistInterruptedMessageGeneration(input) {
 		return nil
@@ -388,7 +388,7 @@ func (s *Service) persistInterruptedMessageGeneration(ctx context.Context, input
 	return buildInterruptedSendMessageResult(input, metrics)
 }
 
-// shouldPersistInterruptedMessageGeneration 只在已有可计费用量、可展示内容或可追踪工具结果时保留中断消息。
+// shouldPersistInterruptedMessageGeneration 鍙湪宸叉湁鍙璐圭敤閲忋€佸彲灞曠ず鍐呭鎴栧彲杩借釜宸ュ叿缁撴灉鏃朵繚鐣欎腑鏂秷鎭€?
 func shouldPersistInterruptedMessageGeneration(input persistInterruptedMessageGenerationInput) bool {
 	if input.Error == nil || input.UserMessage == nil || input.AssistantMessage == nil {
 		return false
@@ -405,7 +405,7 @@ func shouldPersistInterruptedMessageGeneration(input persistInterruptedMessageGe
 	return strings.TrimSpace(input.AssistantText) != "" || hasRetainedToolTrace || hasObservedUsage || hasEstimatedCanceledInput
 }
 
-// resolveInterruptedMessageGenerationMetrics 统一处理中断消息的真实 usage 与估算兜底。
+// resolveInterruptedMessageGenerationMetrics 缁熶竴澶勭悊涓柇娑堟伅鐨勭湡瀹?usage 涓庝及绠楀厹搴曘€?
 func resolveInterruptedMessageGenerationMetrics(input persistInterruptedMessageGenerationInput) interruptedMessageGenerationMetrics {
 	inputTokens := resolveObservedOrHigherEstimatedTokens(input.Usage.InputTokens, input.EstimatedInputTokens)
 	outputTokens := input.Usage.OutputTokens
@@ -493,7 +493,7 @@ func interruptedCompletionCacheWriteTokens(input persistInterruptedMessageGenera
 	return 0
 }
 
-// applyInterruptedMessageGenerationState 同步内存消息对象，保证后续响应、run 记录和持久化状态一致。
+// applyInterruptedMessageGenerationState 鍚屾鍐呭瓨娑堟伅瀵硅薄锛屼繚璇佸悗缁搷搴斻€乺un 璁板綍鍜屾寔涔呭寲鐘舵€佷竴鑷淬€?
 func applyInterruptedMessageGenerationState(input persistInterruptedMessageGenerationInput, metrics interruptedMessageGenerationMetrics) {
 	if !input.ReuseUserMessage {
 		input.UserMessage.Status = "success"
@@ -531,12 +531,11 @@ func retainedGenerationStatus(err error) string {
 	return "interrupted"
 }
 
-// buildInterruptedSendMessageResult 构造中断回复响应，供 handler 继续走计费和前端展示链路。
+// buildInterruptedSendMessageResult 鏋勯€犱腑鏂洖澶嶅搷搴旓紝渚?handler 缁х画璧拌璐瑰拰鍓嶇灞曠ず閾捐矾銆?
 func buildInterruptedSendMessageResult(input persistInterruptedMessageGenerationInput, metrics interruptedMessageGenerationMetrics) *SendMessageResult {
 	result := &SendMessageResult{
 		UserMessage:         *input.UserMessage,
 		AssistantMessage:    *input.AssistantMessage,
-		Billable:            true,
 		EffectiveOptions:    input.EffectiveOptions,
 		UsageSpeed:          input.Usage.Speed,
 		UsageServiceTier:    input.Usage.ServiceTier,
@@ -559,7 +558,7 @@ func buildInterruptedSendMessageResult(input persistInterruptedMessageGeneration
 	return result
 }
 
-// persistMessageToolCalls 持久化工具调用并写入上下文 artifact，成功和中断路径共用同一套归属规则。
+// persistMessageToolCalls 鎸佷箙鍖栧伐鍏疯皟鐢ㄥ苟鍐欏叆涓婁笅鏂?artifact锛屾垚鍔熷拰涓柇璺緞鍏辩敤鍚屼竴濂楀綊灞炶鍒欍€?
 func (s *Service) persistMessageToolCalls(ctx context.Context, input persistMessageToolCallsInput) error {
 	rows := normalizeMessageToolCallRows(input)
 	if len(rows) == 0 {
@@ -586,7 +585,7 @@ func (s *Service) persistMessageToolCalls(ctx context.Context, input persistMess
 	return nil
 }
 
-// normalizeMessageToolCallRows 补齐工具调用归属字段，避免不同路径写入的 trace 缺少 message/run 关联。
+// normalizeMessageToolCallRows 琛ラ綈宸ュ叿璋冪敤褰掑睘瀛楁锛岄伩鍏嶄笉鍚岃矾寰勫啓鍏ョ殑 trace 缂哄皯 message/run 鍏宠仈銆?
 func normalizeMessageToolCallRows(input persistMessageToolCallsInput) []model.ToolCall {
 	if len(input.Rows) == 0 {
 		return nil

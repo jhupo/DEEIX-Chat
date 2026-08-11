@@ -26,6 +26,7 @@ import (
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
+	sub2keyhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/sub2key"
 	userhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/user"
 	usersettingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/usersettings"
 	"github.com/gin-gonic/gin"
@@ -57,6 +58,7 @@ type Modules struct {
 	MCP          *mcphttp.Module
 	Memory       *memoryhttp.Module
 	Billing      *billinghttp.Module
+	Sub2Key      *sub2keyhttp.Module
 	Admin        *adminhttp.Module
 	Announcement *announcementhttp.Module
 	PromptPreset *promptpresethttp.Module
@@ -154,6 +156,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	if modules.Billing != nil {
 		modules.Billing.RegisterRoutes(authRequired)
 	}
+	if modules.Sub2Key != nil {
+		modules.Sub2Key.RegisterRoutes(authRequired)
+	}
 	if modules.Announcement != nil {
 		modules.Announcement.RegisterRoutes(authRequired)
 	}
@@ -169,15 +174,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)
 	}
-	if modules.User != nil {
-		modules.User.RegisterRoutes(authRequired)
-	}
-	if modules.Admin != nil || modules.Auth != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil {
+	if modules.Admin != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil {
 		adminGroup := authRequired.Group("/admin")
 		adminGroup.Use(middleware.AdminOnly())
-		if modules.Auth != nil {
-			modules.Auth.RegisterAdminRoutes(adminGroup)
-		}
 		if modules.Admin != nil {
 			modules.Admin.RegisterRoutes(adminGroup)
 		}

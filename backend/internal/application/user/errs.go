@@ -25,10 +25,6 @@ var (
 	ErrInvalidTimeZone = errors.New("invalid timezone")
 	// ErrInvalidLocale 非法语言区域。
 	ErrInvalidLocale = errors.New("invalid user locale")
-	// ErrInvalidSubscriptionTier 非法订阅等级。
-	ErrInvalidSubscriptionTier = errors.New("invalid subscription tier")
-	// ErrSubscriptionExpiryRequired 付费订阅必须指定到期时间。
-	ErrSubscriptionExpiryRequired = errors.New("subscription expiry required")
 	// ErrInvalidSubscriptionExpiry 非法订阅到期时间。
 	ErrInvalidSubscriptionExpiry = errors.New("invalid subscription expiry")
 )

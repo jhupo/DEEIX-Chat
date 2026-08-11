@@ -1,6 +1,6 @@
 # DEEIX Chat Backend
 
-DEEIX Chat 后端是 Go API 服务，负责认证、用户、对话、模型渠道、模型能力、文件处理、MCP 工具、官方原生工具、记忆、计费、支付、系统设置、审计日志与可观测性等核心业务。
+DEEIX Chat 后端是 Go API 服务，负责 Sub2 身份与 commerce BFF、对话、模型渠道、模型能力、文件处理、MCP 工具、官方原生工具、记忆、系统设置、审计日志与可观测性等核心业务。DEEIX 不保留本地计费、支付、余额或订阅权威实现。
 
 ## 技术栈
 
@@ -67,6 +67,7 @@ cp config.example.yaml config.yaml
 关键配置：
 
 - `APP_ENV`：运行环境，支持 `dev`/`development` 和 `prod`/`production`；未配置时默认 `prod`
+- `SUB2_BASE_URL`：唯一的 Sub2 配置，默认 `https://api.ovload.com`；生产环境必须是 HTTPS canonical origin
 - `HTTP_PORT`：HTTP 端口
 - `JWT_SECRET`：JWT 签名密钥
 - `POSTGRES_DSN`：PostgreSQL DSN
@@ -98,47 +99,34 @@ observability:
 
 `config.yaml` 是静态基础设施配置入口，环境变量优先级高于 YAML。未显式配置 `enabled` 时，`endpoint` 非空会自动启用 Trace；显式配置 `enabled: true` 时，`endpoint` 必填。运行时业务设置由数据库 settings 覆盖，不把 OpenTelemetry collector、header/token 等部署层配置放入后台管理。
 
-初始化超级管理员用户名为 `admin`。当数据库中没有超级管理员时，后端会生成随机密码并只在首次创建账号的启动日志中输出一次，日志关键字为 `bootstrap superadmin created`。首次登录会强制修改用户名和密码；后续账号变更不通过 `config.yaml`。
+`APP_ENV` 未配置时默认 `prod`。`dev`/`development` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
+
+## Sub2 身份与会话
+
+DEEIX 通过 BFF 调用 Sub2 处理登录、邮箱注册、登录 TOTP、refresh、logout、`/me` 和密码修改。Sub2 `admin` 映射为 DEEIX `superadmin`，Sub2 `user` 映射为 DEEIX `user`；不创建本地 bootstrap 管理员。
+
+DEEIX 仅保存稳定的本地 Principal projection、browser session 及 display name、avatar 和本地偏好。Sub2 access/refresh token 只保存在服务端 session 密文列，Browser 永不接收。
+
+当前 Browser route 为：`POST /api/v1/auth/login`、`POST /api/v1/auth/login/2fa`、`POST /api/v1/auth/register/email/start`、`POST /api/v1/auth/register/email/complete`、cookie-backed `POST /api/v1/auth/refresh`、`POST /api/v1/auth/logout`、`POST /api/v1/auth/logout-all`、`GET/PATCH /api/v1/me` 和 `PUT /api/v1/me/password`。
+
+余额、订阅、套餐、每日用量、调用日志、支付、订单和兑换均由 BFF 使用当前登录用户的服务端 Sub2 session 访问。`/setting/subscription` 保留现有页面、手动刷新、充值和兑换入口；它不写入本地 commerce 数据。用量响应以精确十进制字符串 `actualCost` 透传 Sub2 `actual_cost`，月度汇总也使用精确十进制加法。普通 Chat 显示 Sub2 key 选择器，默认 binding ID 保存在 DEEIX 用户设置 `chat.default_sub2_key_binding_id` 中，raw key 只在服务端加密保存；选择 binding 后再获取可用模型。Work/Agent 不使用这个选择器。
 
 `APP_ENV` 未配置时默认 `prod`。`dev`/`development` 只用于本地开发；公网生产部署应保持 `APP_ENV=prod` 或 `APP_ENV=production` 并使用生产密钥。
 
-## 邮箱注册 Turnstile
-
-邮箱注册可选启用 Cloudflare Turnstile 人机验证，作用范围仅限邮箱注册；OAuth/OIDC 登录或注册不需要 Turnstile 校验。
-
-相关运行时设置：
-
-- `auth:turnstile_registration_enabled`：是否在邮箱注册时启用 Turnstile。
-- `auth:turnstile_site_key`：前端渲染 Turnstile 组件使用的 Site Key，会通过 `/api/v1/auth/login-options` 返回。
-- `auth:turnstile_secret_key`：后端调用 Cloudflare siteverify 使用的 Secret Key，属于敏感设置。
-- `TURNSTILE_SITEVERIFY_URL` / `security.turnstile_siteverify_url`：可选覆盖 siteverify 端点，默认使用 Cloudflare 官方地址。
-
-启用 Turnstile 需要同时启用 `auth:email_registration_enabled`，并配置 Site Key 与 Secret Key。开启邮箱验证码注册时，前端在 `/api/v1/auth/register/email/start` 提交 `turnstileToken`；关闭邮箱验证码但允许邮箱注册时，前端在 `/api/v1/auth/register/email/complete` 提交 `turnstileToken`。
-
-## OAuth 公共客户端授权桥（多端暂未发布）
-
-Web、App 和桌面端统一通过当前实例完成第三方 OAuth 回调。部署必须提供外部可访问的 `PUBLIC_API_BASE_URL`，身份源回调格式为：
-
-```text
-<PUBLIC_API_BASE_URL>/api/v1/auth/providers/<provider-slug>/callback
-```
-
-`POST /auth/providers/:slug/authorize` 创建短时事务并使用服务端独立 PKCE 访问上游；`GET /auth/providers/:slug/callback` 在服务端兑换上游授权码；`POST /auth/providers/:slug/exchange` 使用公共客户端 PKCE verifier 原子兑换一次性 DEEIX grant。事务与 grant 使用 Redis 后端，外部 provider code、Client Secret 和 Token 均不会进入公共客户端。旧 `/start` 与 `POST /callback` 流程继续保留，用于账号身份绑定与旧版 Web 客户端兼容。
-
-生产环境安全校验：
+## 生产环境安全校验
 
 - `APP_ENV` 支持 `dev`/`development` 和 `prod`/`production`，其他值会启动失败。
 - `APP_ENV=prod` 时，`JWT_SECRET` 不能为空、不能过短、不能使用默认开发值。
 - `APP_ENV=prod` 时，`DATA_ENCRYPTION_KEY` 不能为空、不能过短、不能使用默认开发值。
 - `APP_ENV=prod` 时，`CORS_ALLOW_ORIGIN` 不能为空或 `*`，`PUBLIC_API_BASE_URL` / `PUBLIC_WEB_BASE_URL` 必须是 HTTPS。
 
-Stripe Webhook 使用公开 API 地址：
+Sub2 是支付和履约的唯一权威。后台不提供本地余额、套餐、价格或支付配置的修改入口。
 
-```text
-https://api.example.com/api/v1/billing/payments/stripe/webhook
-```
+## v0.4 Clean-Slate Upgrade
 
-在 Stripe Dashboard 中监听 `checkout.session.completed`，并把生成的 `whsec_...` 填入后台「计费 / 支付配置 / Stripe Webhook Secret」。
+v0.4 在任何 schema mutation 前检查遗留 identity schema。发现已填充的旧 identity 表或不满足 Sub2 Principal 约束的旧数据时，启动迁移会失败。升级前备份现有 PostgreSQL；v0.4 必须使用新的 PostgreSQL 数据库或 volume。没有自动迁移、兼容层、旧登录连续性或旧聊天历史连续性。
+
+生产部署只有仓库根目录 `compose.yaml` 的 Full profile（应用、PostgreSQL + pgvector、Redis）。以下宿主机启动说明只用于源码开发；SQLite、Lite profile 和宿主机 updater 都不是部署选项。
 
 ## 本地启动
 

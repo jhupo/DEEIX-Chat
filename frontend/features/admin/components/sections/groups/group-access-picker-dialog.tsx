@@ -26,8 +26,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { TablePagination, TableToolbar, type TableToolbarFilter } from "@/components/ui/table-tools";
-import { IdentityProviderIcon } from "@/shared/components/identity-provider-icon";
-import type { UserIdentityProviderSummaryDTO } from "@/shared/api/auth.types";
 import { cn } from "@/lib/utils";
 
 export type GroupAccessTableItem = {
@@ -35,8 +33,6 @@ export type GroupAccessTableItem = {
   label: string;
   nickname?: string;
   email?: string;
-  subscriptionStatus?: string;
-  identityProviders?: UserIdentityProviderSummaryDTO[];
   sourceLabels?: string[];
   vendorLabels?: string[];
   protocolLabels?: string[];
@@ -69,8 +65,6 @@ type GroupAccessPickerDialogProps = {
   itemTitle: string;
   nicknameTitle?: string;
   emailTitle?: string;
-  subscriptionTitle?: string;
-  identityTitle?: string;
   sourceTitle?: string;
   vendorTitle?: string;
   protocolTitle?: string;
@@ -106,8 +100,6 @@ export function GroupAccessPickerDialog({
   itemTitle,
   nicknameTitle,
   emailTitle,
-  subscriptionTitle,
-  identityTitle,
   sourceTitle,
   vendorTitle,
   protocolTitle,
@@ -138,8 +130,6 @@ export function GroupAccessPickerDialog({
       itemTitle={itemTitle}
       nicknameTitle={nicknameTitle}
       emailTitle={emailTitle}
-      subscriptionTitle={subscriptionTitle}
-      identityTitle={identityTitle}
       sourceTitle={sourceTitle}
       vendorTitle={vendorTitle}
       protocolTitle={protocolTitle}
@@ -222,40 +212,6 @@ function BadgeList({
   );
 }
 
-function IdentityProviderIconList({
-  providers,
-}: {
-  providers?: UserIdentityProviderSummaryDTO[];
-}) {
-  const values = (providers ?? []).filter((provider) => provider.slug || provider.name);
-  if (values.length === 0) {
-    return <span className="text-xs text-muted-foreground">-</span>;
-  }
-
-  const visible = values.slice(0, 4);
-  const hiddenCount = Math.max(0, values.length - visible.length);
-  const title = values.map((provider) => provider.name || provider.slug).join(", ");
-
-  return (
-    <div className="flex min-w-0 items-center gap-1" title={title}>
-      {visible.map((provider) => (
-        <IdentityProviderIcon
-          key={`${provider.id}:${provider.slug}`}
-          name={provider.name}
-          slug={provider.slug}
-          logoURL={provider.logoURL}
-          className="size-4"
-          iconClassName="size-4"
-          fallbackClassName="text-[10px]"
-        />
-      ))}
-      {hiddenCount > 0 ? (
-        <span className="text-[10px] text-muted-foreground">+{hiddenCount}</span>
-      ) : null}
-    </div>
-  );
-}
-
 type GroupAccessTableProps = {
   items: GroupAccessTableItem[];
   selectedIDs: Set<number>;
@@ -277,8 +233,6 @@ type GroupAccessTableProps = {
   itemTitle: string;
   nicknameTitle?: string;
   emailTitle?: string;
-  subscriptionTitle?: string;
-  identityTitle?: string;
   sourceTitle?: string;
   vendorTitle?: string;
   protocolTitle?: string;
@@ -307,8 +261,6 @@ function GroupAccessTable({
   itemTitle,
   nicknameTitle,
   emailTitle,
-  subscriptionTitle,
-  identityTitle,
   sourceTitle,
   vendorTitle,
   protocolTitle,
@@ -324,14 +276,10 @@ function GroupAccessTable({
   const showProtocolColumn = Boolean(protocolTitle);
   const showNicknameColumn = Boolean(nicknameTitle);
   const showEmailColumn = Boolean(emailTitle);
-  const showSubscriptionColumn = Boolean(subscriptionTitle);
-  const showIdentityColumn = Boolean(identityTitle);
   const tableColumnCount =
     2 +
     (showNicknameColumn ? 1 : 0) +
     (showEmailColumn ? 1 : 0) +
-    (showSubscriptionColumn ? 1 : 0) +
-    (showIdentityColumn ? 1 : 0) +
     (showSourceColumn ? 1 : 0) +
     (showVendorColumn ? 1 : 0) +
     (showProtocolColumn ? 1 : 0);
@@ -414,7 +362,7 @@ function GroupAccessTable({
       <Table
         shellClassName="rounded-md"
         className={cn(
-          (showSourceColumn || showNicknameColumn || showEmailColumn || showSubscriptionColumn || showIdentityColumn) &&
+          (showSourceColumn || showNicknameColumn || showEmailColumn) &&
             "min-w-[820px] table-fixed",
         )}
         viewportClassName={cn(
@@ -440,12 +388,6 @@ function GroupAccessTable({
             ) : null}
             {showEmailColumn ? (
               <TableHead className="w-[220px]">{emailTitle}</TableHead>
-            ) : null}
-            {showSubscriptionColumn ? (
-              <TableHead className="w-[160px]">{subscriptionTitle}</TableHead>
-            ) : null}
-            {showIdentityColumn ? (
-              <TableHead className="w-[110px]">{identityTitle}</TableHead>
             ) : null}
             {showSourceColumn ? (
               <TableHead className="w-[160px]">{sourceTitle}</TableHead>
@@ -504,18 +446,6 @@ function GroupAccessTable({
                         <span className="block max-w-full truncate" title={item.email}>
                           {item.email || "-"}
                         </span>
-                      </TableCell>
-                    ) : null}
-                    {showSubscriptionColumn ? (
-                      <TableCell className="w-[160px] py-1.5 text-xs text-muted-foreground">
-                        <span className="block max-w-full truncate" title={item.subscriptionStatus}>
-                          {item.subscriptionStatus || "-"}
-                        </span>
-                      </TableCell>
-                    ) : null}
-                    {showIdentityColumn ? (
-                      <TableCell className="w-[110px] py-1.5 text-xs text-muted-foreground">
-                        <IdentityProviderIconList providers={item.identityProviders} />
                       </TableCell>
                     ) : null}
                     {showSourceColumn ? (

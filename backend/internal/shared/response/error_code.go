@@ -19,14 +19,11 @@ const (
 	CodeAuthInvalidRefreshToken  = "auth.invalid_refresh_token"
 	CodeAuthInvalidTwoFactorCode = "auth.invalid_two_factor_code"
 	CodeAuthTwoFactorExpired     = "auth.two_factor_expired"
-	CodeAuthTwoFactorNotStarted  = "auth.two_factor_not_started"
-	CodeAuthLastLoginRequired    = "auth.last_login_method_required"
 	CodeAuthSessionInvalid       = "auth.session_invalid"
 	CodeResourceNotFound         = "resource.not_found"
 	CodeResourceConflict         = "resource.conflict"
 	CodeBillingPaymentRequired   = "billing.payment_required"
 	CodeBillingInsufficientFunds = "billing.insufficient_funds"
-	CodeBillingPricingRequired   = "billing.pricing_required"
 	CodeRateLimitExceeded        = "rate_limit.exceeded"
 	CodeQuotaExceeded            = "quota.exceeded"
 	CodeFileInUse                = "file.in_use"
@@ -44,101 +41,37 @@ type errorSpec struct {
 }
 
 var exactErrorSpecs = map[string]errorSpec{
-	"unauthorized":                                               {Code: CodeAuthUnauthorized, Message: "unauthorized"},
-	"forbidden":                                                  {Code: CodeAuthForbidden, Message: "forbidden"},
-	"admin permission required":                                  {Code: "auth.admin_required", Message: "admin permission required"},
-	"superadmin permission required":                             {Code: "auth.superadmin_required", Message: "superadmin permission required"},
-	"missing authorization header":                               {Code: CodeAuthInvalidToken, Message: "authorization header is required"},
-	"invalid authorization header":                               {Code: CodeAuthInvalidToken, Message: "invalid authorization header"},
-	"invalid token":                                              {Code: CodeAuthInvalidToken, Message: "invalid token"},
-	"invalid token type":                                         {Code: CodeAuthInvalidToken, Message: "invalid token type"},
-	"session invalid":                                            {Code: CodeAuthSessionInvalid, Message: "session invalid"},
-	"invalid username or password":                               {Code: CodeAuthInvalidCredentials, Message: "invalid username or password"},
-	"invalid current password":                                   {Code: CodeAuthInvalidCurrentPass, Message: "invalid current password"},
-	"invalid refresh token":                                      {Code: CodeAuthInvalidRefreshToken, Message: "invalid refresh token"},
-	"session revoked":                                            {Code: CodeAuthSessionInvalid, Message: "session invalid"},
-	"invalid two factor code":                                    {Code: CodeAuthInvalidTwoFactorCode, Message: "invalid two factor code"},
-	"two factor challenge expired":                               {Code: CodeAuthTwoFactorExpired, Message: "two factor challenge expired"},
-	"two factor setup expired":                                   {Code: CodeAuthTwoFactorExpired, Message: "two factor setup expired"},
-	"two factor setup not started":                               {Code: CodeAuthTwoFactorNotStarted, Message: "two factor setup not started"},
-	"two factor setup was not persisted":                         {Code: CodeInternal, Message: "internal server error"},
-	"two factor authentication is already enabled":               {Code: "auth.two_factor_already_enabled", Message: "two factor authentication is already enabled"},
-	"password reset required":                                    {Code: "auth.password_reset_required", Message: "password reset required"},
-	"password reset failed":                                      {Code: "auth.password_reset_failed", Message: "password reset failed"},
-	"username change required":                                   {Code: "auth.username_change_required", Message: "username change required"},
-	"password length must be between 6 and 128":                  {Code: "auth.invalid_password", Message: "password length must be between 6 and 128"},
-	"invalid password":                                           {Code: "auth.invalid_password", Message: "password must be at least 8 characters and not digits only"},
-	"new password must be different from the bootstrap password": {Code: "auth.password_reuse_not_allowed", Message: "new password must be different from the bootstrap password"},
-	"account locked":                                             {Code: CodeAuthInvalidCredentials, Message: "invalid username or password"},
-	"cannot unlink the last available login method":              {Code: CodeAuthLastLoginRequired, Message: "set a password or bind another identity provider first"},
-	"configure the provider callback url to the frontend callback endpoint": {Code: "auth.provider_callback_misconfigured", Message: "configure the provider callback URL to the frontend callback endpoint"},
-	"email registration is disabled":                                        {Code: "auth.email_registration_disabled", Message: "email registration is disabled"},
-	"email verification is disabled":                                        {Code: "auth.email_verification_disabled", Message: "email verification is disabled"},
-	"email already exists":                                                  {Code: "auth.email_already_exists", Message: "email already exists"},
-	"user email is invalid":                                                 {Code: "auth.invalid_email", Message: "invalid email"},
-	"admin email is invalid":                                                {Code: "auth.invalid_email", Message: "invalid email"},
-	"invalid email":                                                         {Code: "auth.invalid_email", Message: "invalid email"},
-	"user email is not verified":                                            {Code: "auth.email_not_verified", Message: "email is not verified"},
-	"admin email is not verified":                                           {Code: "auth.email_not_verified", Message: "email is not verified"},
-	"current email is not verified":                                         {Code: "auth.email_not_verified", Message: "email is not verified"},
-	"new email must be different":                                           {Code: "auth.email_unchanged", Message: "new email must be different"},
-	"email aliases are not allowed":                                         {Code: "auth.email_alias_not_allowed", Message: "email aliases are not allowed"},
-	"email domain is not allowed":                                           {Code: "auth.email_domain_not_allowed", Message: "email domain is not allowed"},
-	"email bootstrap is not allowed":                                        {Code: "auth.email_bootstrap_not_allowed", Message: "email bootstrap is not allowed"},
-	"turnstile is not configured":                                           {Code: "auth.turnstile_not_configured", Message: "turnstile is not configured"},
-	"turnstile verification is required":                                    {Code: "auth.turnstile_required", Message: "turnstile verification is required"},
-	"turnstile token is too long":                                           {Code: "auth.turnstile_invalid", Message: "turnstile token is invalid"},
-	"turnstile verification failed":                                         {Code: "auth.turnstile_invalid", Message: "turnstile verification failed"},
-	"third-party login is disabled":                                         {Code: "auth.provider_login_disabled", Message: "third-party login is disabled"},
-	"authorization code is required":                                        {Code: "auth.authorization_code_required", Message: "authorization code is required"},
-	"provider id is required":                                               {Code: "auth.provider_id_required", Message: "provider id is required"},
-	"provider bind must use account binding endpoint":                       {Code: "auth.provider_bind_endpoint_required", Message: "provider bind must use account binding endpoint"},
-	"provider email belongs to another account; sign in to that account or change its email before binding": {
-		Code:    "auth.provider_email_conflict",
-		Message: "provider email belongs to another account",
-	},
-	"invalid redirect uri":                                        {Code: "auth.invalid_redirect_uri", Message: "invalid redirect uri"},
-	"redirect uri origin is not allowed":                          {Code: "auth.invalid_redirect_uri", Message: "redirect uri origin is not allowed"},
-	"provider ids must be unique":                                 {Code: "auth.provider_order_invalid", Message: "provider ids must be unique"},
-	"provider type must be oidc or oauth2":                        {Code: "auth.provider_type_invalid", Message: "provider type must be oidc or oauth2"},
-	"provider name is required":                                   {Code: "auth.provider_name_required", Message: "provider name is required"},
-	"provider slug is required":                                   {Code: "auth.provider_slug_required", Message: "provider slug is required"},
-	"default role must be user, admin or superadmin":              {Code: "auth.provider_default_role_invalid", Message: "default role must be user, admin or superadmin"},
-	"only superadmin can set superadmin default role":             {Code: "auth.provider_superadmin_default_role_protected", Message: "only superadmin can set superadmin default role"},
-	"logo url must be a valid http(s) or absolute path":           {Code: "auth.provider_logo_url_invalid", Message: "logo url must be a valid http(s) or absolute path"},
-	"provider registration requires provider login to be enabled": {Code: "auth.provider_registration_requires_login", Message: "provider registration requires provider login to be enabled"},
-	"client id is required":                                       {Code: "auth.provider_client_id_required", Message: "client id is required"},
-	"client secret is required":                                   {Code: "auth.provider_client_secret_required", Message: "client secret is required"},
-	"oidc issuer url or discovery url is required":                {Code: "auth.provider_oidc_issuer_required", Message: "OIDC issuer url or discovery url is required"},
-	"oauth2 auth url, token url and userinfo url are required":    {Code: "auth.provider_oauth_urls_required", Message: "OAuth2 auth url, token url and userinfo url are required"},
-	"provider auth url is not configured":                         {Code: "auth.provider_auth_url_not_configured", Message: "provider auth url is not configured"},
+	"unauthorized":                       {Code: CodeAuthUnauthorized, Message: "unauthorized"},
+	"forbidden":                          {Code: CodeAuthForbidden, Message: "forbidden"},
+	"admin permission required":          {Code: "auth.admin_required", Message: "admin permission required"},
+	"superadmin permission required":     {Code: "auth.superadmin_required", Message: "superadmin permission required"},
+	"missing authorization header":       {Code: CodeAuthInvalidToken, Message: "authorization header is required"},
+	"invalid authorization header":       {Code: CodeAuthInvalidToken, Message: "invalid authorization header"},
+	"invalid token":                      {Code: CodeAuthInvalidToken, Message: "invalid token"},
+	"invalid token type":                 {Code: CodeAuthInvalidToken, Message: "invalid token type"},
+	"session invalid":                    {Code: CodeAuthSessionInvalid, Message: "session invalid"},
+	"invalid email or password":          {Code: CodeAuthInvalidCredentials, Message: "invalid email or password"},
+	"invalid current password":           {Code: CodeAuthInvalidCurrentPass, Message: "invalid current password"},
+	"invalid refresh token":              {Code: CodeAuthInvalidRefreshToken, Message: "invalid refresh token"},
+	"session revoked":                    {Code: CodeAuthSessionInvalid, Message: "session invalid"},
+	"invalid two factor code":            {Code: CodeAuthInvalidTwoFactorCode, Message: "invalid two factor code"},
+	"two factor challenge expired":       {Code: CodeAuthTwoFactorExpired, Message: "two factor challenge expired"},
+	"email registration is disabled":     {Code: "auth.email_registration_disabled", Message: "email registration is disabled"},
+	"email already exists":               {Code: "auth.email_already_exists", Message: "email already exists"},
+	"email verification is required":     {Code: "auth.email_verification_required", Message: "email verification is required"},
+	"email domain is not allowed":        {Code: "auth.email_domain_not_allowed", Message: "email domain is not allowed"},
+	"turnstile is not configured":        {Code: "auth.turnstile_not_configured", Message: "turnstile is not configured"},
+	"turnstile verification is required": {Code: "auth.turnstile_required", Message: "turnstile verification is required"},
+	"turnstile token is too long":        {Code: "auth.turnstile_invalid", Message: "turnstile token is invalid"},
+	"turnstile verification failed":      {Code: "auth.turnstile_invalid", Message: "turnstile verification failed"},
 
-	"invalid time zone":                       {Code: "user.invalid_time_zone", Message: "invalid time zone"},
-	"invalid timezone":                        {Code: "user.invalid_time_zone", Message: "invalid time zone"},
-	"invalid location":                        {Code: "user.invalid_location", Message: "invalid location"},
-	"invalid avatar url":                      {Code: "user.invalid_avatar_url", Message: "invalid avatar url"},
-	"invalid username":                        {Code: "user.invalid_username", Message: "invalid username"},
-	"invalid display name":                    {Code: "user.invalid_display_name", Message: "invalid display name"},
-	"invalid user email":                      {Code: "user.invalid_email", Message: "invalid user email"},
-	"invalid user phone":                      {Code: "user.invalid_phone", Message: "invalid user phone"},
-	"invalid user locale":                     {Code: "user.invalid_locale", Message: "invalid user locale"},
-	"invalid user status":                     {Code: "user.invalid_status", Message: "invalid user status"},
-	"invalid user role":                       {Code: "user.invalid_role", Message: "invalid user role"},
-	"invalid user timezone":                   {Code: "user.invalid_time_zone", Message: "invalid time zone"},
-	"username already exists":                 {Code: "user.username_already_exists", Message: "username already exists"},
-	"username change already used":            {Code: "user.username_change_used", Message: "username change already used"},
-	"superadmin account deletion not allowed": {Code: "user.superadmin_delete_protected", Message: "superadmin account deletion is not allowed"},
-	"account deletion requires verification":  {Code: "user.account_delete_verification_required", Message: "account deletion requires verification"},
-	"superadmin delete not allowed":           {Code: "user.superadmin_delete_protected", Message: "superadmin account deletion is not allowed"},
-	"superadmin status change not allowed":    {Code: "user.superadmin_status_protected", Message: "superadmin status change is not allowed"},
-	"superadmin password reset not allowed":   {Code: "user.superadmin_password_reset_protected", Message: "superadmin password reset is not allowed"},
-	"superadmin two factor reset not allowed": {Code: "user.superadmin_two_factor_reset_protected", Message: "superadmin two factor reset is not allowed"},
-	"superadmin management not allowed":       {Code: "user.superadmin_management_protected", Message: "superadmin management is not allowed"},
-	"last superadmin role change not allowed": {Code: "user.last_superadmin_role_protected", Message: "last superadmin role change is not allowed"},
-	"self role change not allowed":            {Code: "user.self_role_change_not_allowed", Message: "self role change is not allowed"},
-	"self status change not allowed":          {Code: "user.self_status_change_not_allowed", Message: "self status change is not allowed"},
-	"self delete not allowed":                 {Code: "user.self_delete_not_allowed", Message: "self delete is not allowed"},
-	"empty admin user patch":                  {Code: "user.empty_patch", Message: "at least one user field is required"},
+	"invalid time zone":                 {Code: "user.invalid_time_zone", Message: "invalid time zone"},
+	"invalid timezone":                  {Code: "user.invalid_time_zone", Message: "invalid time zone"},
+	"invalid location":                  {Code: "user.invalid_location", Message: "invalid location"},
+	"invalid avatar url":                {Code: "user.invalid_avatar_url", Message: "invalid avatar url"},
+	"invalid display name":              {Code: "user.invalid_display_name", Message: "invalid display name"},
+	"invalid user locale":               {Code: "user.invalid_locale", Message: "invalid user locale"},
+	"superadmin management not allowed": {Code: "user.superadmin_management_protected", Message: "superadmin management is not allowed"},
 
 	"invalid conversation title":                              {Code: "conversation.invalid_title", Message: "invalid conversation title"},
 	"conversation has no titleable content":                   {Code: "conversation.no_titleable_content", Message: "conversation has no titleable content"},
@@ -187,17 +120,12 @@ var exactErrorSpecs = map[string]errorSpec{
 	"file too large for full context":                      {Code: "file.too_large_for_context", Message: "file is too large for full context"},
 	"at least one of file_name or rag_opt_out is required": {Code: CodeRequestRequired, Message: "at least one of file_name or rag_opt_out is required"},
 
-	"invalid billing plan":                           {Code: "billing.invalid_plan", Message: "invalid billing plan"},
-	"billing plan not found":                         {Code: "billing.plan_not_found", Message: "billing plan not found"},
-	"invalid permission group":                       {Code: "billing.invalid_permission_group", Message: "invalid permission group"},
-	"permission group not found":                     {Code: "admin.permission_group_not_found", Message: "permission group not found"},
-	"invalid permission group name":                  {Code: "admin.invalid_permission_group_name", Message: "invalid permission group name"},
-	"invalid permission group rate multiplier":       {Code: "admin.invalid_permission_group_rate_multiplier", Message: "invalid permission group rate multiplier"},
-	"invalid permission group models":                {Code: "admin.invalid_permission_group_models", Message: "invalid permission group models"},
-	"invalid permission group users":                 {Code: "admin.invalid_permission_group_users", Message: "invalid permission group users"},
-	"default permission group delete not allowed":    {Code: "admin.default_permission_group_delete_not_allowed", Message: "default permission group cannot be deleted"},
-	"default permission group users are implicit":    {Code: "admin.default_permission_group_users_implicit", Message: "default permission group users are implicit"},
-	"permission group is referenced by billing plan": {Code: "admin.permission_group_referenced_by_plan", Message: "permission group is referenced by a billing plan"},
+	"permission group not found":                  {Code: "admin.permission_group_not_found", Message: "permission group not found"},
+	"invalid permission group name":               {Code: "admin.invalid_permission_group_name", Message: "invalid permission group name"},
+	"invalid permission group models":             {Code: "admin.invalid_permission_group_models", Message: "invalid permission group models"},
+	"invalid permission group users":              {Code: "admin.invalid_permission_group_users", Message: "invalid permission group users"},
+	"default permission group delete not allowed": {Code: "admin.default_permission_group_delete_not_allowed", Message: "default permission group cannot be deleted"},
+	"default permission group users are implicit": {Code: "admin.default_permission_group_users_implicit", Message: "default permission group users are implicit"},
 
 	"model route not configured":                  {Code: "llm.model_route_not_configured", Message: "model route is not configured"},
 	"model access denied by group policy":         {Code: "llm.model_access_denied", Message: "you do not have access to this model"},
@@ -226,41 +154,8 @@ var exactErrorSpecs = map[string]errorSpec{
 	"api_keys is required":                        {Code: "llm.api_keys_required", Message: "api_keys is required"},
 
 	"usage balance is insufficient":                                {Code: CodeBillingInsufficientFunds, Message: "insufficient balance"},
-	"usage concurrency limit exceeded":                             {Code: "billing.concurrency_limit_exceeded", Message: "too many concurrent paid requests"},
-	"usage reservation already exists":                             {Code: "billing.reservation_conflict", Message: "usage request already exists"},
-	"model pricing is required":                                    {Code: CodeBillingPricingRequired, Message: "model pricing is required"},
-	"period usage credit exceeded":                                 {Code: "billing.period_credit_exceeded", Message: "period usage credit exceeded"},
-	"invalid subscription tier":                                    {Code: "billing.invalid_subscription_tier", Message: "invalid subscription tier"},
-	"subscription expiry required":                                 {Code: "billing.subscription_expiry_required", Message: "subscription expiry required"},
-	"invalid subscription expiry":                                  {Code: "billing.invalid_subscription_expiry", Message: "invalid subscription expiry"},
-	"subscription entitlement is active":                           {Code: "billing.subscription_entitlement_active", Message: "subscription entitlement is active"},
-	"invalid model pricing":                                        {Code: "billing.invalid_model_pricing", Message: "invalid model pricing"},
-	"invalid daily usage date range":                               {Code: "billing.invalid_daily_usage_date_range", Message: "invalid daily usage date range"},
-	"invalid daily usage days":                                     {Code: "billing.invalid_daily_usage_days", Message: "invalid daily usage days"},
-	"redemption code hash secret unavailable":                      {Code: "billing.redemption_secret_unavailable", Message: "redemption code service is unavailable"},
 	"invalid redemption code":                                      {Code: "billing.invalid_redemption_code", Message: "invalid redemption code"},
-	"redemption code already exists":                               {Code: "billing.redemption_code_conflict", Message: "redemption code already exists"},
-	"redemption code is unavailable":                               {Code: "billing.redemption_code_unavailable", Message: "redemption code is unavailable"},
-	"redemption code plaintext unavailable":                        {Code: "billing.redemption_code_plaintext_unavailable", Message: "redemption code plaintext unavailable"},
-	"redemption code exhausted":                                    {Code: "billing.redemption_code_exhausted", Message: "redemption code exhausted"},
-	"redemption user limit exceeded":                               {Code: "billing.redemption_user_limit_exceeded", Message: "redemption user limit exceeded"},
 	"payment is required":                                          {Code: CodeBillingPaymentRequired, Message: "payment is required"},
-	"payment provider is unavailable":                              {Code: "payment.provider_unavailable", Message: "payment provider is unavailable"},
-	"create checkout failed":                                       {Code: "payment.checkout_failed", Message: "create checkout failed"},
-	"provider mismatch":                                            {Code: "payment.notification_mismatch", Message: "payment notification does not match the order"},
-	"checkout id mismatch":                                         {Code: "payment.notification_mismatch", Message: "payment notification does not match the order"},
-	"amount mismatch":                                              {Code: "payment.notification_mismatch", Message: "payment notification does not match the order"},
-	"currency mismatch":                                            {Code: "payment.notification_mismatch", Message: "payment notification does not match the order"},
-	"merchant mismatch":                                            {Code: "payment.notification_mismatch", Message: "payment notification does not match the order"},
-	"epay payment type is not supported":                           {Code: "payment.epay_type_unsupported", Message: "epay payment type is not supported"},
-	"payment return url is invalid":                                {Code: "payment.return_url_invalid", Message: "payment return url is invalid"},
-	"payment return url must use the configured public web origin": {Code: "payment.return_url_cross_origin", Message: "payment return url must use the configured public web origin"},
-	"stripe webhook is not configured":                             {Code: "payment.webhook_not_configured", Message: "stripe webhook is not configured"},
-	"read webhook body failed":                                     {Code: "payment.invalid_webhook_body", Message: "invalid webhook body"},
-	"webhook body too large":                                       {Code: "payment.webhook_body_too_large", Message: "webhook body too large"},
-	"invalid stripe signature":                                     {Code: "payment.invalid_signature", Message: "invalid stripe signature"},
-	"invalid stripe event":                                         {Code: "payment.invalid_event", Message: "invalid stripe event"},
-	"missing order_no":                                             {Code: "payment.order_no_required", Message: "order_no is required"},
 
 	"invalid namespace":                     {Code: "settings.invalid_namespace", Message: "invalid namespace"},
 	"invalid setting key":                   {Code: "settings.invalid_key", Message: "invalid setting key"},
@@ -291,8 +186,6 @@ var exactErrorSpecs = map[string]errorSpec{
 	"rate limit exceeded":              {Code: CodeRateLimitExceeded, Message: "rate limit exceeded"},
 	"too many refresh attempts":        {Code: "rate_limit.refresh_exceeded", Message: "too many refresh attempts"},
 	"too many authentication attempts": {Code: "rate_limit.authentication_exceeded", Message: "too many authentication attempts"},
-
-	"deleting this identity provider would remove the only login method for some users": {Code: "identity_provider.delete_conflict", Message: "deleting this identity provider would remove the only login method for some users"},
 }
 
 // InferErrorCode provides a compatibility code for legacy response.Error calls.
@@ -325,8 +218,6 @@ func InferErrorCode(status int, msg string) string {
 		return CodeQuotaExceeded
 	case strings.Contains(text, "insufficient"):
 		return CodeBillingInsufficientFunds
-	case strings.Contains(text, "pricing"):
-		return CodeBillingPricingRequired
 	case strings.Contains(text, "payment required"):
 		return CodeBillingPaymentRequired
 	case strings.Contains(text, "file too large"):
@@ -421,7 +312,7 @@ func fallbackMessage(status int, code string) string {
 	case CodeAuthInvalidToken:
 		return "invalid token"
 	case CodeAuthInvalidCredentials:
-		return "invalid username or password"
+		return "invalid email or password"
 	case CodeAuthInvalidCurrentPass:
 		return "invalid current password"
 	case CodeAuthInvalidRefreshToken:
@@ -430,10 +321,6 @@ func fallbackMessage(status int, code string) string {
 		return "invalid two factor code"
 	case CodeAuthTwoFactorExpired:
 		return "two factor challenge expired"
-	case CodeAuthTwoFactorNotStarted:
-		return "two factor setup not started"
-	case CodeAuthLastLoginRequired:
-		return "set a password or bind another identity provider first"
 	case CodeAuthSessionInvalid:
 		return "session invalid"
 	case CodeResourceNotFound:
@@ -442,8 +329,6 @@ func fallbackMessage(status int, code string) string {
 		return "resource conflict"
 	case CodeBillingInsufficientFunds:
 		return "insufficient balance"
-	case CodeBillingPricingRequired:
-		return "model pricing is required"
 	case CodeBillingPaymentRequired:
 		return "payment required"
 	case CodeQuotaExceeded:
@@ -490,64 +375,16 @@ var fallbackMessages = map[string]string{
 	CodeRequestInvalidQuery:                             "invalid query parameter",
 	"auth.admin_required":                               "admin permission required",
 	"auth.superadmin_required":                          "superadmin permission required",
-	"auth.password_reset_required":                      "password reset required",
-	"auth.password_reset_failed":                        "password reset failed",
-	"auth.username_change_required":                     "username change required",
-	"auth.invalid_password":                             "invalid password",
-	"auth.password_reuse_not_allowed":                   "new password must be different",
-	"auth.provider_callback_misconfigured":              "configure the provider callback URL to the frontend callback endpoint",
 	"auth.verification_code_invalid":                    "verification code is invalid or expired",
 	"auth.verification_code_recent":                     "verification code was sent recently",
 	"auth.email_registration_disabled":                  "email registration is disabled",
-	"auth.email_verification_disabled":                  "email verification is disabled",
 	"auth.email_already_exists":                         "email already exists",
-	"auth.email_not_verified":                           "email is not verified",
-	"auth.email_unchanged":                              "new email must be different",
-	"auth.email_alias_not_allowed":                      "email aliases are not allowed",
+	"auth.email_verification_required":                  "email verification is required",
 	"auth.email_domain_not_allowed":                     "email domain is not allowed",
-	"auth.email_bootstrap_not_allowed":                  "email bootstrap is not allowed",
-	"auth.provider_login_disabled":                      "provider login is disabled",
-	"auth.provider_registration_disabled":               "provider registration is disabled",
-	"auth.authorization_code_required":                  "authorization code is required",
-	"auth.two_factor_already_enabled":                   "two factor authentication is already enabled",
-	"auth.provider_bind_endpoint_required":              "provider bind must use account binding endpoint",
-	"auth.provider_email_conflict":                      "provider email belongs to another account",
-	"auth.provider_invalid":                             "provider authentication failed",
-	"auth.provider_upstream_failed":                     "provider authentication failed",
-	"auth.provider_subject_missing":                     "provider subject is missing",
-	"auth.provider_identity_conflict":                   "provider identity is already bound to another account",
-	"auth.provider_already_bound":                       "provider is already bound",
-	"auth.provider_account_not_registered":              "provider account is not registered",
-	"auth.oauth_intent_mismatch":                        "oauth intent mismatch",
-	"auth.oauth_state_invalid":                          "invalid oauth state",
-	"auth.oauth_state_expired":                          "oauth state expired",
-	"auth.invalid_redirect_uri":                         "invalid redirect uri",
-	"auth.invalid_pkce":                                 "invalid pkce parameters",
-	"auth.provider_id_required":                         "provider id is required",
-	"auth.provider_order_invalid":                       "provider ids must be unique",
-	"auth.provider_type_invalid":                        "provider type must be oidc or oauth2",
-	"auth.provider_name_required":                       "provider name is required",
-	"auth.provider_slug_required":                       "provider slug is required",
-	"auth.provider_default_role_invalid":                "default role must be user, admin or superadmin",
-	"auth.provider_superadmin_default_role_protected":   "only superadmin can set superadmin default role",
-	"auth.provider_logo_url_invalid":                    "logo url must be a valid http(s) or absolute path",
-	"auth.provider_registration_requires_login":         "provider registration requires provider login to be enabled",
-	"auth.provider_client_id_required":                  "client id is required",
-	"auth.provider_client_secret_required":              "client secret is required",
-	"auth.provider_oidc_issuer_required":                "OIDC issuer url or discovery url is required",
-	"auth.provider_oauth_urls_required":                 "OAuth2 auth url, token url and userinfo url are required",
-	"auth.provider_auth_url_not_configured":             "provider auth url is not configured",
 	"user.invalid_time_zone":                            "invalid time zone",
 	"user.invalid_avatar_url":                           "invalid avatar url",
-	"user.invalid_username":                             "invalid username",
 	"user.invalid_location":                             "invalid location",
-	"user.invalid_email":                                "invalid user email",
-	"user.invalid_phone":                                "invalid user phone",
 	"user.invalid_locale":                               "invalid user locale",
-	"user.invalid_status":                               "invalid user status",
-	"user.invalid_role":                                 "invalid user role",
-	"user.username_already_exists":                      "username already exists",
-	"user.username_change_used":                         "username change already used",
 	"user.superadmin_management_protected":              "superadmin management is not allowed",
 	"conversation.invalid_id":                           "invalid conversation id",
 	"conversation.not_found":                            "conversation not found",
@@ -565,17 +402,12 @@ var fallbackMessages = map[string]string{
 	"file.invalid_reference":                            "invalid file reference",
 	"context_artifact.invalid_id":                       "invalid context artifact id",
 	"context_artifact.not_found":                        "context artifact not found",
-	"billing.invalid_plan":                              "invalid billing plan",
-	"billing.plan_not_found":                            "billing plan not found",
-	"billing.invalid_permission_group":                  "invalid permission group",
 	"admin.permission_group_not_found":                  "permission group not found",
 	"admin.invalid_permission_group_name":               "invalid permission group name",
-	"admin.invalid_permission_group_rate_multiplier":    "invalid permission group rate multiplier",
 	"admin.invalid_permission_group_models":             "invalid permission group models",
 	"admin.invalid_permission_group_users":              "invalid permission group users",
 	"admin.default_permission_group_delete_not_allowed": "default permission group cannot be deleted",
 	"admin.default_permission_group_users_implicit":     "default permission group users are implicit",
-	"admin.permission_group_referenced_by_plan":         "permission group is referenced by a billing plan",
 	"llm.model_route_not_configured":                    "model route is not configured",
 	"llm.model_access_denied":                           "you do not have access to this model",
 	"llm.remote_models_unavailable":                     "remote models unavailable",
@@ -587,41 +419,13 @@ var fallbackMessages = map[string]string{
 	"llm.system_prompt_too_long":                        "system prompt too long",
 	"llm.platform_model_name_required":                  "platform model name is required",
 	"llm.protocol_required":                             "protocol is required",
-	"media.artifact_unavailable":                       "generated media artifact is temporarily unavailable",
-	"media.image_stream_unsupported":                   "upstream may not support image streaming; disable image.stream for this model",
-	"billing.period_credit_exceeded":                    "period usage credit exceeded",
-	"billing.invalid_subscription_tier":                 "invalid subscription tier",
-	"billing.subscription_expiry_required":              "subscription expiry required",
-	"billing.invalid_subscription_expiry":               "invalid subscription expiry",
-	"billing.subscription_entitlement_active":           "subscription entitlement is active",
-	"billing.invalid_model_pricing":                     "invalid model pricing",
-	"billing.invalid_daily_usage_date_range":            "invalid daily usage date range",
-	"billing.invalid_daily_usage_days":                  "invalid daily usage days",
-	"billing.redemption_secret_unavailable":             "redemption code service is unavailable",
-	"billing.invalid_redemption_code":                   "invalid redemption code",
-	"billing.redemption_code_conflict":                  "redemption code already exists",
-	"billing.redemption_code_unavailable":               "redemption code is unavailable",
-	"billing.redemption_code_plaintext_unavailable":     "redemption code plaintext unavailable",
-	"billing.redemption_code_exhausted":                 "redemption code exhausted",
-	"billing.redemption_user_limit_exceeded":            "redemption user limit exceeded",
-	"payment.provider_unavailable":                      "payment provider is unavailable",
-	"payment.checkout_failed":                           "create checkout failed",
-	"payment.notification_mismatch":                     "payment notification does not match the order",
-	"payment.epay_type_unsupported":                     "epay payment type is not supported",
-	"payment.return_url_invalid":                        "payment return url is invalid",
-	"payment.return_url_cross_origin":                   "payment return url must use the configured public web origin",
-	"payment.webhook_not_configured":                    "stripe webhook is not configured",
-	"payment.invalid_webhook_body":                      "invalid webhook body",
-	"payment.webhook_body_too_large":                    "webhook body too large",
-	"payment.invalid_signature":                         "invalid stripe signature",
-	"payment.invalid_event":                             "invalid stripe event",
-	"payment.order_no_required":                         "order_no is required",
+	"media.artifact_unavailable":                        "generated media artifact is temporarily unavailable",
+	"media.image_stream_unsupported":                    "upstream may not support image streaming; disable image.stream for this model",
 	"settings.invalid_namespace":                        "invalid namespace",
 	"settings.invalid_key":                              "invalid setting key",
 	"settings.not_found":                                "setting not found",
 	"settings.invalid_value":                            "invalid setting value",
 	"settings.smtp_invalid":                             "invalid smtp settings",
-	"settings.billing_payment_invalid":                  "invalid billing payment settings",
 	"settings.model_option_policy_invalid":              "invalid model option policy settings",
 	"settings.embedding_invalid":                        "invalid embedding settings",
 	"settings.extract_invalid":                          "invalid file extraction settings",
@@ -652,8 +456,6 @@ func resolveErrorSpec(status int, msg string) (errorSpec, bool) {
 			return errorSpec{Code: "settings.invalid_key", Message: detail}, true
 		case strings.Contains(detail, "smtp"):
 			return errorSpec{Code: "settings.smtp_invalid", Message: detail}, true
-		case strings.Contains(detail, "payment_providers"):
-			return errorSpec{Code: "settings.billing_payment_invalid", Message: detail}, true
 		case strings.Contains(detail, "model_option_"):
 			return errorSpec{Code: "settings.model_option_policy_invalid", Message: detail}, true
 		case strings.Contains(detail, "embedding") || strings.Contains(detail, "rag") || strings.Contains(detail, "semantic"):
@@ -669,9 +471,6 @@ func resolveErrorSpec(status int, msg string) (errorSpec, bool) {
 	}
 	if strings.HasPrefix(text, "invalid value for ") {
 		return errorSpec{Code: "user_settings.invalid_value", Message: text}, true
-	}
-	if status < http.StatusInternalServerError && status != http.StatusBadGateway && (strings.Contains(text, "provider") || strings.Contains(text, "oauth") || strings.Contains(text, "pkce")) {
-		return providerErrorSpec(text)
 	}
 	if strings.HasPrefix(text, "invalid ") && strings.HasSuffix(text, " id") {
 		return errorSpec{Code: invalidIDCode(text), Message: text}, true
@@ -699,15 +498,6 @@ func resolveErrorSpec(status int, msg string) (errorSpec, bool) {
 	}
 	if strings.Contains(text, "email already exists") {
 		return errorSpec{Code: "auth.email_already_exists", Message: "email already exists"}, true
-	}
-	if strings.Contains(text, "invalid email") || strings.Contains(text, "user email is invalid") {
-		return errorSpec{Code: "auth.invalid_email", Message: "invalid email"}, true
-	}
-	if strings.Contains(text, "email verification is disabled") {
-		return errorSpec{Code: "auth.email_verification_disabled", Message: "email verification is disabled"}, true
-	}
-	if strings.Contains(text, "email bootstrap is not allowed") {
-		return errorSpec{Code: "auth.email_bootstrap_not_allowed", Message: "email bootstrap is not allowed"}, true
 	}
 	if strings.Contains(text, "smtp") {
 		return errorSpec{Code: "settings.smtp_invalid", Message: text}, true
@@ -742,41 +532,6 @@ func notFoundCode(text string) string {
 		return CodeResourceNotFound
 	}
 	return slug(resource) + ".not_found"
-}
-
-func providerErrorSpec(text string) (errorSpec, bool) {
-	switch {
-	case strings.Contains(text, "third-party login is disabled"):
-		return errorSpec{Code: "auth.provider_login_disabled", Message: "third-party login is disabled"}, true
-	case strings.Contains(text, "provider login is disabled"):
-		return errorSpec{Code: "auth.provider_login_disabled", Message: "provider login is disabled"}, true
-	case strings.Contains(text, "provider registration is disabled"):
-		return errorSpec{Code: "auth.provider_registration_disabled", Message: "provider registration is disabled"}, true
-	case strings.Contains(text, "authorization code is required"):
-		return errorSpec{Code: CodeRequestRequired, Message: "authorization code is required"}, true
-	case strings.Contains(text, "oauth intent mismatch"):
-		return errorSpec{Code: "auth.oauth_intent_mismatch", Message: "oauth intent mismatch"}, true
-	case strings.Contains(text, "provider subject is missing"):
-		return errorSpec{Code: "auth.provider_subject_missing", Message: "provider subject is missing"}, true
-	case strings.Contains(text, "provider identity is already bound"):
-		return errorSpec{Code: "auth.provider_identity_conflict", Message: "provider identity is already bound to another account"}, true
-	case strings.Contains(text, "provider is already bound"):
-		return errorSpec{Code: "auth.provider_already_bound", Message: "provider is already bound"}, true
-	case strings.Contains(text, "provider account is not registered"):
-		return errorSpec{Code: "auth.provider_account_not_registered", Message: "provider account is not registered"}, true
-	case strings.Contains(text, "invalid oauth state") || strings.Contains(text, "oauth state mismatch"):
-		return errorSpec{Code: "auth.oauth_state_invalid", Message: "invalid oauth state"}, true
-	case strings.Contains(text, "oauth state expired"):
-		return errorSpec{Code: "auth.oauth_state_expired", Message: "oauth state expired"}, true
-	case strings.Contains(text, "redirect uri"):
-		return errorSpec{Code: "auth.invalid_redirect_uri", Message: "invalid redirect uri"}, true
-	case strings.Contains(text, "pkce"):
-		return errorSpec{Code: "auth.invalid_pkce", Message: text}, true
-	case strings.Contains(text, "provider token") || strings.Contains(text, "provider userinfo") || strings.Contains(text, "provider discovery"):
-		return errorSpec{Code: "auth.provider_upstream_failed", Message: "provider authentication failed"}, true
-	default:
-		return errorSpec{Code: "auth.provider_invalid", Message: text}, true
-	}
 }
 
 func slug(value string) string {

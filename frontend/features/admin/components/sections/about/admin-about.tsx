@@ -36,6 +36,7 @@ import {
 import { AboutSettingsContent } from "@/shared/components/about-settings-content";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
+import { createIdempotencyKey } from "@/shared/lib/idempotency-key";
 import { cn } from "@/lib/utils";
 
 type DialogState = "checking" | "current" | "available" | "confirming" | "job" | "failed";
@@ -172,7 +173,7 @@ function AdminUpdateCheck() {
   const startInstall = async () => {
     if (!candidate || installing) return;
 
-    const attemptKey = key || crypto.randomUUID();
+    const attemptKey = key || createIdempotencyKey();
     setKey(attemptKey);
     setInstallError(false);
     setInstalling(true);

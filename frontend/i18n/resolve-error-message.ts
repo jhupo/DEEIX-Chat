@@ -23,10 +23,6 @@ type RequestBodyErrorDetails = {
   fieldErrors?: unknown;
 };
 
-type RedemptionCodeErrorDetails = {
-  reason?: unknown;
-};
-
 const REQUEST_FIELD_LABELS: Record<AppLocale, Record<string, string>> = {
   "en-US": {
     apiKeys: "API keys",
@@ -393,18 +389,6 @@ function resolveSettingsValidationMessage(error: ApiError, locale: AppLocale): s
   return resolveSettingsReason(locale, resolveSettingsFieldLabel(locale, match[1]), match[2]);
 }
 
-function isRedemptionCodeErrorDetails(details: unknown): details is RedemptionCodeErrorDetails {
-  return Boolean(details && typeof details === "object" && "reason" in details);
-}
-
-function resolveRedemptionCodeValidationMessage(error: ApiError, locale: AppLocale): string | undefined {
-  if (error.errorCode !== "billing.invalid_redemption_code") return undefined;
-  if (!isRedemptionCodeErrorDetails(error.details) || typeof error.details.reason !== "string") return undefined;
-  const reason = error.details.reason.trim();
-  if (!reason) return undefined;
-  return lookupErrorMessage(locale, `billing.redemption_validation.${reason}`);
-}
-
 export function resolveLocalizedErrorMessage(error: unknown, fallback?: string): string {
   const locale = readClientLocale();
   if (error instanceof ApiError && error.errorCode) {
@@ -416,11 +400,6 @@ export function resolveLocalizedErrorMessage(error: unknown, fallback?: string):
     const settingsValidationMessage = resolveSettingsValidationMessage(error, locale);
     if (settingsValidationMessage) {
       return settingsValidationMessage;
-    }
-
-    const redemptionCodeValidationMessage = resolveRedemptionCodeValidationMessage(error, locale);
-    if (redemptionCodeValidationMessage) {
-      return redemptionCodeValidationMessage;
     }
 
     const translated = lookupErrorMessage(locale, error.errorCode);

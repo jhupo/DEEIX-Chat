@@ -106,45 +106,18 @@
     }
   },
   "profile": "Profile",
-  "security": "Security",
   "notifications": "Notifications",
   "memory": "AI preference memory",
   "accountPage": {
     "title": "Account",
     "password": "Sign-in password",
-    "twoFactor": "Two-factor authentication",
     "logoutAllDevices": "Sign out of all active devices",
-    "deleteAccount": "Delete your account",
     "publicID": "Public user ID",
     "copyPublicID": "Copy public user ID",
-    "email": {
-      "label": "Email",
-      "withAddress": "Email ({email})",
-      "verified": "Verified",
-      "unverified": "Unverified"
-    },
     "actions": {
-      "set": "Set",
       "update": "Update",
-      "manage": "Manage",
-      "generating": "Generating",
       "logOut": "Sign out",
-      "loggingOut": "Signing out",
-      "deleteAccount": "Delete account",
-      "deleting": "Deleting",
-      "bind": "Bind",
-      "cancel": "Cancel",
-      "verify": "Verify"
-    },
-    "identity": {
-      "title": "Linked identity providers",
-      "provider": "Provider",
-      "username": "Username",
-      "email": "Email",
-      "linkedAt": "Linked at",
-      "empty": "No third-party identity provider is linked.",
-      "unlink": "Unlink identity provider",
-      "unlinkDisabled": "Set a password or link another identity provider first."
+      "loggingOut": "Signing out"
     },
     "session": {
       "title": "Active sessions",
@@ -165,141 +138,31 @@
       "description": "After confirmation, active sessions for this account in other browsers, desktop apps, or mobile devices will be invalidated. This device will return to the sign-in page too.",
       "confirm": "Sign out all devices"
     },
-    "deleteDialog": {
-      "title": "Delete account",
-      "description": "Deleting your account is permanent. Your account and chat history cannot be restored.",
-      "verificationTitle": "Verify account deletion",
-      "verificationDescription": {
-        "twoFactor": "Enter your authenticator code or a recovery code to delete the account.",
-        "email": "Send a code to your verified email, then enter it to delete the account."
-      },
-      "verificationUnavailable": "Account deletion requires identity verification. Verify your email or enable two-factor authentication first."
-    },
     "securityDialog": {
       "common": {
         "cancel": "Cancel",
         "save": "Save",
-        "saving": "Saving",
-        "sending": "Sending",
-        "sendCode": "Send",
-        "resendIn": "Resend in {seconds}s",
-        "processing": "Processing",
-        "done": "Done",
-        "verify": "Verify",
-        "continue": "Continue",
-        "back": "Back",
-        "debugCode": "Development code: {code}",
-        "copiedLabel": "{label} copied",
-        "copyFailed": "Copy failed",
-        "copyManually": "Please select the content manually."
+        "saving": "Saving"
       },
       "password": {
         "title": {
-          "required": "Set your first password",
-          "change": "Change password",
-          "set": "Set password"
+          "change": "Change password"
         },
         "description": {
-          "required": "The initial password must be changed before continuing. This session will expire after the change.",
-          "change": "Your current session will expire after the password is changed. Sign in again with the new password.",
-          "set": "After setting a password, you can sign in with a username and password and use it as a fallback credential before unlinking identity providers."
-        },
-        "verificationTitle": "Verify password change",
-        "verificationDescription": {
-          "twoFactor": "Enter your authenticator code or a recovery code to continue.",
-          "email": "Send a code to your verified email, then enter it to continue."
+          "change": "Your current session will expire after the password is changed. Sign in again with the new password."
         },
         "labels": {
           "currentPassword": "Current password",
-          "newPassword": "New password",
-          "loginPassword": "Sign-in password",
-          "twoFactorCode": "Two-factor code",
-          "emailCode": "Email code"
+          "newPassword": "New password"
         },
         "placeholders": {
-          "password": "At least 8 characters, not digits only",
-          "otpOrRecovery": "Code or recovery code",
-          "sixDigitCode": "6-digit code"
+          "password": "At least 8 characters, not digits only"
         }
       },
       "email": {
-        "title": {
-          "set": "Set email",
-          "change": "Change email"
-        },
         "description": {
-          "bootstrapVerified": "Setting your first email requires verifying ownership of the new address.",
-          "saveOnly": "The email address will be updated after saving.",
           "change": "DEEIX Chat will ask for the verification required by your account before saving this change."
-        },
-        "labels": {
-          "newEmail": "New email"
         }
-      },
-      "verification": {
-        "title": {
-          "emailBootstrap": "Verify new email",
-          "emailChange": "Verify email change",
-          "currentEmail": "Verify email"
-        },
-        "description": {
-          "emailBootstrap": "Send a code to the new email address, then enter it to save the email.",
-          "emailChange": "Complete the required verification before saving the email change.",
-          "currentEmail": "Send a code to {email}, then enter it to mark the address as verified."
-        },
-        "labels": {
-          "twoFactorCode": "Two-factor code",
-          "emailCode": "Email code",
-          "currentEmailCode": "Current email code",
-          "newEmail": "New email",
-          "newEmailCode": "New email code",
-          "verificationCode": "Verification code"
-        },
-        "placeholders": {
-          "otpOrRecovery": "Code or recovery code",
-          "sixDigitCode": "6-digit code"
-        },
-        "actions": {
-          "useEmail": "Use email instead",
-          "useTwoFactor": "Use two-factor instead"
-        }
-      },
-      "twoFactor": {
-        "title": {
-          "setup": "Enable two-factor authentication",
-          "manage": "Manage two-factor authentication",
-          "recovery": "Save recovery codes"
-        },
-        "description": {
-          "setup": "Scan the QR code with an authenticator app, or enter the key manually.",
-          "manage": "Enter a code or recovery code to continue.",
-          "recovery": "Recovery codes are shown only once. Save them somewhere safe."
-        },
-        "tabs": {
-          "qr": "QR code",
-          "manual": "Manual setup"
-        },
-        "errors": {
-          "codeRequired": "Enter a verification code."
-        },
-        "qrLabel": "Two-factor authentication QR code",
-        "setupExpired": "This setup has expired.",
-        "qrUnavailable": "QR code unavailable. Use the manual key instead.",
-        "scanThenVerify": "Scan the code, then enter a verification code to finish setup.",
-        "regenerate": "Regenerate",
-        "validUntil": "Valid until {time}",
-        "secret": "Secret",
-        "copySecret": "Copy secret",
-        "otpAuthUri": "OTP Auth URI",
-        "copyOtpUri": "Copy URI",
-        "code": "Verification code",
-        "sixDigitCode": "6-digit code",
-        "codeOrRecovery": "Verification code or recovery code",
-        "regenerateRecoveryCodes": "Regenerate codes",
-        "recoveryCodes": "Recovery codes",
-        "copyRecoveryCodes": "Copy codes",
-        "enable": "Enable",
-        "disable": "Disable"
       }
     },
     "toasts": {
@@ -308,37 +171,21 @@
       "loadFailed": "Failed to load account information",
       "publicIDCopied": "Public ID copied",
       "copyFailed": "Copy failed",
-      "codeSent": "Verification code sent",
-      "sendCodeFailed": "Failed to send verification code",
       "passwordChanged": "Password changed",
       "passwordChangedDescription": "Please sign in again with your new password.",
       "changePasswordFailed": "Failed to change password",
-      "emailSet": "Email set",
-      "setEmailFailed": "Failed to set email",
-      "emailVerified": "Email verified",
-      "verifyEmailFailed": "Failed to verify email",
-      "currentEmailCodeSent": "Current email verification code sent",
-      "newEmailCodeSent": "New email verification code sent",
-      "deleteAccountCodeSent": "Account deletion code sent",
-      "emailChanged": "Email changed",
-      "changeEmailFailed": "Failed to change email",
-      "deleteAccountFailed": "Failed to delete account",
       "sessionLoggedOut": "Session signed out",
-      "logoutSessionFailed": "Failed to sign out session",
-      "identityUnlinked": "Identity provider unlinked",
-      "unlinkIdentityFailed": "Failed to unlink identity provider",
-      "startTwoFactorFailed": "Failed to start two-factor setup",
-      "twoFactorEnabled": "Two-factor authentication enabled",
-      "enableTwoFactorFailed": "Failed to enable two-factor authentication",
-      "twoFactorDisabled": "Two-factor authentication disabled",
-      "disableTwoFactorFailed": "Failed to disable two-factor authentication",
-      "recoveryCodesRegenerated": "Recovery codes regenerated",
-      "regenerateRecoveryCodesFailed": "Failed to regenerate recovery codes",
-      "providerUnavailable": "This identity provider is not available for binding.",
-      "bindIdentityFailed": "Failed to bind identity provider"
+      "logoutSessionFailed": "Failed to sign out session"
     }
   },
   "chatPage": {
+    "defaultKey": {
+      "title": "Default API key",
+      "description": "The Sub2 API key used by new chats and their model catalog.",
+      "empty": "No available API key",
+      "loadFailed": "Failed to load API keys",
+      "refresh": "Refresh API keys"
+    },
     "defaultModel": {
       "sectionTitle": "Conversation basics",
       "title": "Default model for new chats",
@@ -457,6 +304,7 @@
   },
   "subscriptionPage": {
     "title": "Subscription",
+    "refresh": "Refresh subscription data",
     "actions": {
       "cancel": "Cancel",
       "processing": "Processing"
@@ -506,18 +354,16 @@
       "monthly": "Monthly",
       "dailyUsage": "Daily usage",
       "monthlyUsage": "Monthly usage",
-      "otherModels": "Other",
       "empty": "No usage data.",
       "metrics": {
         "totalCost": "Total cost",
         "totalTokens": "Total tokens",
-        "totalCalls": "Total calls",
-        "averageLatency": "Average latency"
+        "totalCalls": "Total calls"
       },
       "tooltip": {
+        "tokens": "Tokens",
         "cost": "Cost",
-        "calls": "Calls",
-        "latency": "Average latency"
+        "calls": "Calls"
       }
     },
     "usageLog": {
@@ -526,58 +372,23 @@
       "type": "Type",
       "filters": {
         "all": "All",
-        "free": "Free models",
-        "billable": "Billable models"
+        "balance": "Balance",
+        "subscription": "Subscription"
       },
       "sort": {
         "newest": "Newest calls",
-        "oldest": "Oldest calls",
-        "tokensDesc": "Most tokens",
-        "costDesc": "Highest cost",
-        "latencyDesc": "Longest latency"
+        "oldest": "Oldest calls"
       },
       "columns": {
         "time": "Time",
         "model": "Model",
-        "baseBilling": "Base billing",
-        "serviceBilling": "Service billing",
-        "balanceAfter": "Balance after settlement",
-        "latency": "Latency"
+        "inputTokens": "Input",
+        "outputTokens": "Output",
+        "totalTokens": "Total tokens",
+        "cost": "Cost",
+        "duration": "Duration"
       },
       "empty": "No usage logs."
-    },
-    "billingTooltip": {
-      "cacheWrite": "Cache write",
-      "cacheWrite5m": "Cache write 5m",
-      "cacheWrite1h": "Cache write 1h",
-      "cacheWrite5m1h": "Cache write 5m/1h",
-      "cacheWritePricingLabel": "Cache write 5m",
-      "cacheWritePricingNote": "Claude cache read uses configured pricing; cache write 5m uses 1.25x, 1h uses 2x, and Fast Mode applies another 6x on top.",
-      "claudeCacheWriteMixedNote": "Claude cache write uses configured pricing at {multiplier}.",
-      "claudeCacheWriteNote": "Claude {timeout} cache write uses configured pricing at {multiplier}.",
-      "claudeFastModeNote": "Claude Fast Mode bills input, output, and cache usage at {multiplier}.",
-      "openaiServiceTierNote": "OpenAI service_tier={tier} bills at {multiplier}.",
-      "baseService": "Base service",
-      "input": "Input",
-      "output": "Output",
-      "cacheRead": "Cache read",
-      "rateNote": "Multiplier",
-      "cacheNote": "Cache",
-      "total": "Total",
-      "subtotal": "Subtotal",
-      "freeModelNoBilling": "free model, not billed",
-      "perCall": "Per call",
-      "perSecond": "Per second",
-      "callUnit": "call",
-      "secondUnit": "second",
-      "tieredRangeBounded": "Original input range {from}-{upTo}",
-      "tieredRangeOpen": "Original input range {from}+",
-      "table": {
-        "item": "Billing item",
-        "usage": "Usage",
-        "unitPrice": "Unit price",
-        "amount": "Amount"
-      }
     },
     "plans": {
       "title": "Subscription plans",
@@ -620,6 +431,8 @@
       "currentBalance": "Current balance {value}",
       "amount": "Top-up amount",
       "amountAria": "Top-up amount",
+      "paymentAmount": "Estimated payment",
+      "creditedBalance": "Credited balance",
       "confirm": "Top up"
     },
     "redemption": {
@@ -635,6 +448,8 @@
       "usageLogLoadFailed": "Failed to load usage logs",
       "checkoutCreateFailed": "Failed to create payment",
       "checkoutURLMissing": "The payment provider did not return a checkout URL.",
+      "paymentVerified": "Payment status refreshed",
+      "paymentVerifyFailed": "Failed to verify payment status",
       "planUpdated": "Subscription plan updated",
       "subscribeFailed": "Subscription failed",
       "invalidTopUpAmount": "Invalid top-up amount",

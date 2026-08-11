@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
@@ -38,10 +37,6 @@ func (r *Repo) ListPermissionGroups(ctx context.Context) ([]domainchannel.Permis
 	if err != nil {
 		return nil, err
 	}
-	subscriptionUserIDsByGroup, err := r.listSubscriptionPermissionGroupUserIDs(ctx, time.Now())
-	if err != nil {
-		return nil, err
-	}
 	results := make([]domainchannel.PermissionGroup, 0, len(rows))
 	for _, row := range rows {
 		item := toPermissionGroupDomain(row)
@@ -52,8 +47,7 @@ func (r *Repo) ListPermissionGroups(ctx context.Context) ([]domainchannel.Permis
 			item.UserCount = totalUsers
 		} else {
 			item.ManualUserCount = int64(len(manualUserIDsByGroup[item.ID]))
-			item.SubscriptionUserCount = int64(len(subscriptionUserIDsByGroup[item.ID]))
-			item.UserCount = int64(len(mergeUserIDSets(manualUserIDsByGroup[item.ID], subscriptionUserIDsByGroup[item.ID])))
+			item.UserCount = int64(len(manualUserIDsByGroup[item.ID]))
 		}
 		results = append(results, item)
 	}
@@ -94,10 +88,9 @@ func (r *Repo) CreatePermissionGroup(ctx context.Context, item *domainchannel.Pe
 		return repository.ErrInvalidInput
 	}
 	entity := model.PermissionGroup{
-		Name:                  strings.TrimSpace(item.Name),
-		Description:           strings.TrimSpace(item.Description),
-		IsDefault:             item.IsDefault,
-		RateMultiplierPercent: normalizeRateMultiplierPercent(item.RateMultiplierPercent),
+		Name:        strings.TrimSpace(item.Name),
+		Description: strings.TrimSpace(item.Description),
+		IsDefault:   item.IsDefault,
 	}
 	if entity.Name == "" {
 		return repository.ErrInvalidInput
@@ -110,14 +103,12 @@ func (r *Repo) CreatePermissionGroup(ctx context.Context, item *domainchannel.Pe
 }
 
 // UpdatePermissionGroup 更新权限组名称、说明与计费倍率。
-func (r *Repo) UpdatePermissionGroup(ctx context.Context, id uint, name string, description string, rateMultiplierPercent int) (*domainchannel.PermissionGroup, error) {
+func (r *Repo) UpdatePermissionGroup(ctx context.Context, id uint, name string, description string) (*domainchannel.PermissionGroup, error) {
 	result := r.db.WithContext(ctx).
 		Model(&model.PermissionGroup{}).
 		Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"name":                    strings.TrimSpace(name),
-			"description":             strings.TrimSpace(description),
-			"rate_multiplier_percent": normalizeRateMultiplierPercent(rateMultiplierPercent),
+			"name": strings.TrimSpace(name), "description": strings.TrimSpace(description),
 		})
 	if result.Error != nil {
 		return nil, translateError(result.Error)
@@ -323,25 +314,6 @@ func (r *Repo) listManualPermissionGroupUserIDs(ctx context.Context) (map[uint]m
 	return groupUserIDsByGroup(rows), nil
 }
 
-func (r *Repo) listSubscriptionPermissionGroupUserIDs(ctx context.Context, now time.Time) (map[uint]map[uint]struct{}, error) {
-	rows := make([]permissionGroupUserIDRow, 0)
-	if err := r.db.WithContext(ctx).
-		Table("billing_subscriptions AS subscription").
-		Select("plan.permission_group_id AS group_id, subscription.user_id").
-		Joins("JOIN billing_plans AS plan ON plan.id = subscription.plan_id").
-		Where(`
-			plan.permission_group_id IS NOT NULL
-			AND plan.is_active = ?
-			AND subscription.status = ?
-			AND subscription.current_period_start_at <= ?
-			AND (subscription.current_period_end_at IS NULL OR subscription.current_period_end_at > ?)
-		`, true, "active", now, now).
-		Scan(&rows).Error; err != nil {
-		return nil, translateError(err)
-	}
-	return groupUserIDsByGroup(rows), nil
-}
-
 func groupUserIDsByGroup(rows []permissionGroupUserIDRow) map[uint]map[uint]struct{} {
 	results := make(map[uint]map[uint]struct{})
 	for _, row := range rows {
@@ -352,17 +324,6 @@ func groupUserIDsByGroup(rows []permissionGroupUserIDRow) map[uint]map[uint]stru
 			results[row.GroupID] = make(map[uint]struct{})
 		}
 		results[row.GroupID][row.UserID] = struct{}{}
-	}
-	return results
-}
-
-func mergeUserIDSets(left map[uint]struct{}, right map[uint]struct{}) map[uint]struct{} {
-	results := make(map[uint]struct{}, len(left)+len(right))
-	for id := range left {
-		results[id] = struct{}{}
-	}
-	for id := range right {
-		results[id] = struct{}{}
 	}
 	return results
 }
@@ -722,13 +683,12 @@ func (r *Repo) ListDefaultGroupIDs(ctx context.Context) ([]uint, error) {
 
 func toPermissionGroupDomain(item model.PermissionGroup) domainchannel.PermissionGroup {
 	return domainchannel.PermissionGroup{
-		ID:                    item.ID,
-		Name:                  item.Name,
-		Description:           item.Description,
-		IsDefault:             item.IsDefault,
-		RateMultiplierPercent: normalizeRateMultiplierPercent(item.RateMultiplierPercent),
-		CreatedAt:             item.CreatedAt,
-		UpdatedAt:             item.UpdatedAt,
+		ID:          item.ID,
+		Name:        item.Name,
+		Description: item.Description,
+		IsDefault:   item.IsDefault,
+		CreatedAt:   item.CreatedAt,
+		UpdatedAt:   item.UpdatedAt,
 	}
 }
 
@@ -738,58 +698,6 @@ func toPermissionGroupModelRuleDomain(item model.PermissionGroupModelRule) domai
 		RuleType: item.RuleType,
 		Value:    item.Value,
 	}
-}
-
-func normalizeRateMultiplierPercent(value int) int {
-	if value <= 0 {
-		return 100
-	}
-	return value
-}
-
-// GetUserModelGroupRateMultiplierPercent 返回用户当前模型命中权限组的计费倍率百分比。
-//
-// 用户有效权限组由手动成员、默认权限组和订阅绑定权限组共同组成；当模型访问控制已启用时，
-// 只在用户有效权限组与当前模型权限组的交集中取最低倍率。
-func (r *Repo) GetUserModelGroupRateMultiplierPercent(ctx context.Context, userID uint, platformModelID uint, extraGroupIDs []uint) (int, error) {
-	userGroupIDs, err := r.listEffectiveUserGroupIDs(ctx, userID, extraGroupIDs)
-	if err != nil {
-		return 100, translateError(err)
-	}
-	if len(userGroupIDs) == 0 {
-		return 100, nil
-	}
-	if platformModelID == 0 {
-		return 100, nil
-	}
-	groupIDs := userGroupIDs
-	if platformModelID > 0 {
-		modelGroupIDs, err := r.ListModelGroupIDs(ctx, platformModelID)
-		if err != nil {
-			return 100, translateError(err)
-		}
-		if len(modelGroupIDs) == 0 {
-			return 100, nil
-		} else {
-			groupIDs = intersectGroupIDLists(userGroupIDs, modelGroupIDs)
-		}
-	}
-	return r.minGroupRateMultiplierPercent(ctx, groupIDs)
-}
-
-func (r *Repo) minGroupRateMultiplierPercent(ctx context.Context, groupIDs []uint) (int, error) {
-	if len(groupIDs) == 0 {
-		return 100, nil
-	}
-	var minPercent int
-	if err := r.db.WithContext(ctx).
-		Model(&model.PermissionGroup{}).
-		Where("id IN ?", groupIDs).
-		Select("COALESCE(MIN(rate_multiplier_percent), 100)").
-		Scan(&minPercent).Error; err != nil {
-		return 100, translateError(err)
-	}
-	return normalizeRateMultiplierPercent(minPercent), nil
 }
 
 func intersectGroupIDLists(left []uint, right []uint) []uint {
