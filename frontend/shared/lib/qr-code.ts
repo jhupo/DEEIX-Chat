@@ -12,6 +12,17 @@ const QR_VERSION_SPECS: QRVersionSpec[] = [
   { version: 7, dataCodewords: 156, ecCodewordsPerBlock: 20, blocks: 2, alignment: [6, 22, 38] },
   { version: 8, dataCodewords: 194, ecCodewordsPerBlock: 24, blocks: 2, alignment: [6, 24, 42] },
   { version: 9, dataCodewords: 232, ecCodewordsPerBlock: 30, blocks: 2, alignment: [6, 26, 46] },
+  { version: 10, dataCodewords: 274, ecCodewordsPerBlock: 18, blocks: 4, alignment: [6, 28, 50] },
+  { version: 11, dataCodewords: 324, ecCodewordsPerBlock: 20, blocks: 4, alignment: [6, 30, 54] },
+  { version: 12, dataCodewords: 370, ecCodewordsPerBlock: 24, blocks: 4, alignment: [6, 32, 58] },
+  { version: 13, dataCodewords: 428, ecCodewordsPerBlock: 26, blocks: 4, alignment: [6, 34, 62] },
+  { version: 14, dataCodewords: 461, ecCodewordsPerBlock: 30, blocks: 4, alignment: [6, 26, 46, 66] },
+  { version: 15, dataCodewords: 523, ecCodewordsPerBlock: 22, blocks: 6, alignment: [6, 26, 48, 70] },
+  { version: 16, dataCodewords: 589, ecCodewordsPerBlock: 24, blocks: 6, alignment: [6, 26, 50, 74] },
+  { version: 17, dataCodewords: 647, ecCodewordsPerBlock: 28, blocks: 6, alignment: [6, 30, 54, 78] },
+  { version: 18, dataCodewords: 721, ecCodewordsPerBlock: 30, blocks: 6, alignment: [6, 30, 56, 82] },
+  { version: 19, dataCodewords: 795, ecCodewordsPerBlock: 28, blocks: 7, alignment: [6, 30, 58, 86] },
+  { version: 20, dataCodewords: 861, ecCodewordsPerBlock: 28, blocks: 8, alignment: [6, 34, 62, 90] },
 ];
 
 type QRMatrix = {
@@ -35,7 +46,7 @@ export function createQRCodeSVG(value: string, scale = 4, ariaLabel = "QR code")
     return "";
   }
 
-  const codewords = createDataCodewords(data, spec.dataCodewords);
+  const codewords = createDataCodewords(data, spec);
   const payload = interleaveBlocks(codewords, spec);
   const matrix = createMatrix(spec);
   placeData(matrix, payload);
@@ -61,14 +72,14 @@ export function createQRCodeDataURL(value: string, scale = 4, ariaLabel = "QR co
   return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : "";
 }
 
-function createDataCodewords(data: Uint8Array, totalCodewords: number): number[] {
+function createDataCodewords(data: Uint8Array, spec: QRVersionSpec): number[] {
   const bits: number[] = [];
   appendBits(bits, 0b0100, 4);
-  appendBits(bits, data.length, 8);
+  appendBits(bits, data.length, spec.version < 10 ? 8 : 16);
   data.forEach((byte) => {
     appendBits(bits, byte, 8);
   });
-  appendBits(bits, 0, Math.min(4, totalCodewords * 8 - bits.length));
+  appendBits(bits, 0, Math.min(4, spec.dataCodewords * 8 - bits.length));
   while (bits.length % 8 !== 0) {
     bits.push(0);
   }
@@ -83,7 +94,7 @@ function createDataCodewords(data: Uint8Array, totalCodewords: number): number[]
   }
 
   let pad = 0xec;
-  while (codewords.length < totalCodewords) {
+  while (codewords.length < spec.dataCodewords) {
     codewords.push(pad);
     pad = pad === 0xec ? 0x11 : 0xec;
   }

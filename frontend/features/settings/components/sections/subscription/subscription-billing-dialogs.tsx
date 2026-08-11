@@ -44,7 +44,7 @@ export function PendingPaymentDialog({
   onVerify,
 }: PendingPaymentDialogProps) {
   const t = useTranslations("settings.subscriptionPage.payment");
-  const stableQRCode = useDialogSnapshot(open ? qrCode : null) ?? "";
+  const stableQRCode = useDialogSnapshot(open ? qrCode.trim() || checkoutURL.trim() : null) ?? "";
   const qrDataURL = React.useMemo(
     () => createQRCodeDataURL(stableQRCode, 5, t("qrCodeAlt")),
     [stableQRCode, t],

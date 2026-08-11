@@ -313,11 +313,8 @@
       "year": "year",
       "month": "month"
     },
-    "currentSubscription": {
-      "title": "Current subscription",
-      "none": "No subscription",
-      "empty": "No subscription plan is available.",
-      "subscribe": "Subscribe"
+    "commerce": {
+      "open": "Top up & subscribe"
     },
     "periodUsage": {
       "title": "Plan usage",
@@ -325,22 +322,9 @@
       "used": "Used {value}",
       "total": "Total {value}"
     },
-    "periodOverage": {
-      "title": "Overage billing",
-      "balance": "Available balance {value}"
-    },
-    "entitlements": {
-      "title": "Subscription entitlements",
-      "count": "{count} segments",
-      "current": "Current",
-      "upcoming": "Upcoming",
-      "range": "{start} - {end}",
-      "credit": "{credit} credit"
-    },
     "usageBilling": {
       "title": "Usage billing",
-      "balance": "Account balance {value}",
-      "topUp": "Top up"
+      "balance": "Account balance {value}"
     },
     "selfMode": {
       "title": "Billing mode",

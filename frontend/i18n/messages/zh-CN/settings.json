@@ -313,11 +313,8 @@
       "year": "年",
       "month": "月"
     },
-    "currentSubscription": {
-      "title": "当前订阅",
-      "none": "未订阅",
-      "empty": "当前没有可用订阅方案",
-      "subscribe": "订阅"
+    "commerce": {
+      "open": "充值与订阅"
     },
     "periodUsage": {
       "title": "套餐使用情况",
@@ -325,22 +322,9 @@
       "used": "已使用 {value}",
       "total": "总额度 {value}"
     },
-    "periodOverage": {
-      "title": "超额按量",
-      "balance": "可用余额 {value}"
-    },
-    "entitlements": {
-      "title": "订阅权益",
-      "count": "{count} 段",
-      "current": "当前",
-      "upcoming": "待生效",
-      "range": "{start} - {end}",
-      "credit": "{credit} 额度"
-    },
     "usageBilling": {
       "title": "按量付费",
-      "balance": "账户余额 {value}",
-      "topUp": "充值"
+      "balance": "账户余额 {value}"
     },
     "selfMode": {
       "title": "计费模式",

@@ -1,18 +1,23 @@
 "use client";
 
 import * as React from "react";
-import { Banknote, Check, Ticket } from "lucide-react";
+import { Banknote, Check, ChevronDown, Ticket, WalletCards } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { SpinnerLabel } from "@/components/ui/spinner";
-import type { BillingOverviewData, BillingSubscriptionEntitlementDTO } from "@/shared/api/billing.types";
+import type { BillingOverviewData } from "@/shared/api/billing.types";
 import type { BillingPlanDTO, BillingPlanPriceDTO } from "@/shared/api/billing.types";
 import {
   formatAccountBalance,
-  formatMediumDate,
   formatPlanCredit,
   formatPlanPrice,
   formatShortDate,
@@ -35,15 +40,6 @@ type SubscriptionIntervalLabels = {
   lifetime: string;
   year: string;
   month: string;
-};
-
-type SubscriptionEntitlementQueueLabels = {
-  title: string;
-  count: (count: number) => string;
-  current: string;
-  upcoming: string;
-  range: (start: string, end: string) => string;
-  credit: (credit: string) => string;
 };
 
 type PlanFeatureLabels = {
@@ -110,60 +106,6 @@ function ValueRow({
   );
 }
 
-function entitlementTimeMS(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : null;
-}
-
-function SubscriptionEntitlementQueue({
-  items,
-  labels,
-  locale,
-  billingDisplay,
-}: {
-  items: BillingSubscriptionEntitlementDTO[];
-  labels: SubscriptionEntitlementQueueLabels;
-  locale: string;
-  billingDisplay: BillingDisplayOptions;
-}) {
-  if (items.length === 0) {
-    return null;
-  }
-  const orderedItems = [...items].sort((left, right) => {
-    const leftStart = entitlementTimeMS(left.currentPeriodStartAt || left.startAt) ?? 0;
-    const rightStart = entitlementTimeMS(right.currentPeriodStartAt || right.startAt) ?? 0;
-    if (leftStart !== rightStart) return leftStart - rightStart;
-    return left.id - right.id;
-  });
-
-  return (
-    <div className="px-1 text-xs text-muted-foreground">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-medium text-foreground">{labels.title}</span>
-        <span>{labels.count(items.length)}</span>
-        <span className="text-muted-foreground/50">/</span>
-        {orderedItems.map((item, index) => {
-          const start = formatMediumDate(item.currentPeriodStartAt || item.startAt, locale);
-          const end = item.currentPeriodEndAt ? formatMediumDate(item.currentPeriodEndAt, locale) : "-";
-          return (
-            <React.Fragment key={`${item.id}-${item.currentPeriodStartAt}`}>
-              {index > 0 ? <span className="text-muted-foreground/50">/</span> : null}
-              <span
-                className={item.isCurrent ? "font-medium text-foreground" : undefined}
-                title={`${labels.range(start, end)} · ${labels.credit(formatPlanCredit(item.plan.periodCreditUSD, billingDisplay))}`}
-              >
-                {item.plan.name || item.plan.code}
-              </span>
-              <span className="tabular-nums">{labels.range(start, end)}</span>
-            </React.Fragment>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 type SubscriptionSummaryProps = {
   billingMode: BillingMode;
   billingLoading: boolean;
@@ -173,12 +115,9 @@ type SubscriptionSummaryProps = {
   billingPlans: BillingPlanDTO[];
   billingOverview: BillingOverviewData["overview"] | null;
   currentPlan: BillingPlanDTO | null;
-  currentPrice: BillingPlanPriceDTO | null;
   billingAccount: BillingAccount | null;
-  subscriptionEntitlements: BillingSubscriptionEntitlementDTO[];
   locale: string;
   intervalLabels: SubscriptionIntervalLabels;
-  entitlementLabels: SubscriptionEntitlementQueueLabels;
   planActionLabels: PlanActionLabels;
   planFeatureLabels: PlanFeatureLabels;
   paymentProviders: string[];
@@ -211,12 +150,9 @@ export function SubscriptionSummary({
   billingPlans,
   billingOverview,
   currentPlan,
-  currentPrice,
   billingAccount,
-  subscriptionEntitlements,
   locale,
   intervalLabels,
-  entitlementLabels,
   planActionLabels,
   planFeatureLabels,
   paymentProviders,
@@ -273,91 +209,63 @@ export function SubscriptionSummary({
 
   return (
     <>
-      {billingMode === "period" ? (
+      {billingMode !== "self" ? (
         <section className="space-y-6 px-0.5 md:space-y-7 xl:space-y-8 xl:px-1">
-          <div className="space-y-4 md:space-y-5">
-            <div className="flex items-start justify-between gap-3 md:gap-4">
-              <div className="min-w-0 space-y-1">
-                <p className="text-xs font-medium">{t("currentSubscription.title")}</p>
-                <p className="truncate text-sm font-semibold">{currentPlan?.name ?? t("currentSubscription.none")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {currentPlan ? `${formatPlanPrice(currentPrice, intervalLabels, billingDisplay)} · ${t("plans.features.monthlyCredit", { credit: formatPlanCredit(periodCredit, billingDisplay) })}` : t("currentSubscription.empty")}
-                </p>
+          {billingMode === "period" ? (
+            <>
+              <div className="space-y-3 rounded-md bg-muted/35 p-3 md:space-y-4">
+                <div className="flex items-start justify-between gap-3 md:gap-4">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium">{t("periodUsage.title")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {billingOverview?.periodStartAt && billingOverview?.periodEndAt
+                        ? `${formatShortDate(billingOverview.periodStartAt, locale)} - ${formatShortDate(billingOverview.periodEndAt, locale)}`
+                        : t("periodUsage.currentPeriod")}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-xs font-medium text-muted-foreground">{Math.round(periodPercent)}%</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-muted-foreground">{t("periodUsage.used", { value: formatPlanCredit(periodUsed, billingDisplay) })}</span>
+                    <span className="text-muted-foreground">{t("periodUsage.total", { value: formatPlanCredit(periodCredit, billingDisplay) })}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-foreground/70" style={{ width: `${periodPercent}%` }} />
+                  </div>
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button type="button" variant="outline" disabled={billingLoading || redemptionLoading} onClick={onOpenRedemptionDialog}>
-                  <Ticket className="size-3.5" />
-                  {t("redemption.open")}
-                </Button>
-                <Button type="button" variant="outline" disabled={billingLoading || billingPlans.length === 0} onClick={() => onPricingDialogOpenChange(true)}>
-                  <Banknote className="size-3.5" />
-                  {t("currentSubscription.subscribe")}
-                </Button>
-              </div>
-            </div>
-          </div>
+              <Separator />
+            </>
+          ) : null}
 
-          <SubscriptionEntitlementQueue
-            items={subscriptionEntitlements}
-            labels={entitlementLabels}
-            locale={locale}
-            billingDisplay={billingDisplay}
-          />
-
-          <Separator />
-
-          <div className="space-y-3 rounded-md bg-muted/35 p-3 md:space-y-4">
-            <div className="flex items-start justify-between gap-3 md:gap-4">
-              <div className="space-y-1">
-                <p className="text-xs font-medium">{t("periodUsage.title")}</p>
-                <p className="text-xs text-muted-foreground">
-                  {billingOverview?.periodStartAt && billingOverview?.periodEndAt
-                    ? `${formatShortDate(billingOverview.periodStartAt, locale)} - ${formatShortDate(billingOverview.periodEndAt, locale)}`
-                    : t("periodUsage.currentPeriod")}
-                </p>
-              </div>
-              <p className="shrink-0 text-xs font-medium text-muted-foreground">{Math.round(periodPercent)}%</p>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-4 text-xs">
-                <span className="text-muted-foreground">{t("periodUsage.used", { value: formatPlanCredit(periodUsed, billingDisplay) })}</span>
-                <span className="text-muted-foreground">{t("periodUsage.total", { value: formatPlanCredit(periodCredit, billingDisplay) })}</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-foreground/70" style={{ width: `${periodPercent}%` }} />
-              </div>
-            </div>
-          </div>
-
-          <ActionRow
-            title={t("periodOverage.title")}
-            value={t("periodOverage.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
-            action={
-              <Button type="button" variant="outline" disabled={billingLoading || topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
-                <Banknote className="size-3.5" />
-                {t("usageBilling.topUp")}
-              </Button>
-            }
-          />
-        </section>
-      ) : null}
-
-      {billingMode === "usage" ? (
-        <section className="space-y-6 px-0.5 md:space-y-7 xl:space-y-8 xl:px-1">
           <ActionRow
             title={t("usageBilling.title")}
             value={t("usageBilling.balance", { value: formatAccountBalance(billingAccount?.balance ?? 0) })}
             action={
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" disabled={billingLoading || redemptionLoading} onClick={onOpenRedemptionDialog}>
-                  <Ticket className="size-3.5" />
-                  {t("redemption.open")}
-                </Button>
-                <Button type="button" variant="outline" disabled={billingLoading || topUpLoading || paymentDisabled} onClick={onOpenTopUpDialog}>
-                  <Banknote className="size-3.5" />
-                  {t("usageBilling.topUp")}
-                </Button>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="outline" disabled={billingLoading}>
+                    <WalletCards className="size-3.5" />
+                    {t("commerce.open")}
+                    <ChevronDown className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem disabled={topUpLoading || paymentDisabled} onSelect={() => onOpenTopUpDialog()}>
+                    <Banknote className="size-3.5" />
+                    {t("topUp.title")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={billingPlans.length === 0} onSelect={() => onPricingDialogOpenChange(true)}>
+                    <WalletCards className="size-3.5" />
+                    {t("plans.title")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={redemptionLoading} onSelect={() => onOpenRedemptionDialog()}>
+                    <Ticket className="size-3.5" />
+                    {t("redemption.title")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             }
           />
         </section>

@@ -98,11 +98,13 @@ type RedeemResult struct {
 	Value float64 `json:"value"`
 }
 type CreatePaymentOrderInput struct {
-	OrderType   string  `json:"order_type"`
-	PlanID      int64   `json:"plan_id,omitempty"`
-	Amount      float64 `json:"amount,omitempty"`
-	PaymentType string  `json:"payment_type"`
-	ReturnURL   string  `json:"return_url,omitempty"`
+	OrderType     string  `json:"order_type"`
+	PlanID        int64   `json:"plan_id,omitempty"`
+	Amount        float64 `json:"amount,omitempty"`
+	PaymentType   string  `json:"payment_type"`
+	ReturnURL     string  `json:"return_url,omitempty"`
+	PaymentSource string  `json:"payment_source,omitempty"`
+	IsMobile      bool    `json:"is_mobile"`
 }
 type CreatePaymentOrderResult struct {
 	OrderID     int64      `json:"order_id"`

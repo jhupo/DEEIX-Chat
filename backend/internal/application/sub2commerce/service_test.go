@@ -154,8 +154,12 @@ func TestCheckoutIdempotencyStateMachine(t *testing.T) {
 	mux.HandleFunc("/api/v1/payment/checkout-info", func(w http.ResponseWriter, _ *http.Request) {
 		writeKeyEnvelope(w, map[string]any{"methods": map[string]any{"alipay": map[string]any{}}})
 	})
-	mux.HandleFunc("/api/v1/payment/orders", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/api/v1/payment/orders", func(w http.ResponseWriter, r *http.Request) {
 		posts++
+		var request map[string]any
+		if json.NewDecoder(r.Body).Decode(&request) != nil || request["is_mobile"] != false || request["payment_source"] != "hosted_redirect" {
+			t.Fatalf("unexpected QR checkout request: %#v", request)
+		}
 		if failing {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

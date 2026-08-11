@@ -40,7 +40,6 @@ import {
   formatAccountBalance,
   isFreePlan,
   planRank,
-  resolveDefaultPrice,
   resolvePlanActionKind,
   billingDisplayAmountToMinorUnits,
   billingDisplayAmountToUSD,
@@ -166,17 +165,6 @@ export function SettingsSubscription() {
     }),
     [t],
   );
-  const entitlementLabels = React.useMemo(
-    () => ({
-      title: t("entitlements.title"),
-      count: (count: number) => t("entitlements.count", { count }),
-      current: t("entitlements.current"),
-      upcoming: t("entitlements.upcoming"),
-      range: (start: string, end: string) => t("entitlements.range", { start, end }),
-      credit: (credit: string) => t("entitlements.credit", { credit }),
-    }),
-    [t],
-  );
   const loadBillingData = React.useCallback(async () => {
     setBillingLoading(true);
     try {
@@ -289,9 +277,6 @@ export function SettingsSubscription() {
       }
       setPendingPayment({ ...data.checkout, operationID });
       setPaymentDialogOpen(false);
-      if (data.checkout.checkoutURL && !data.checkout.qrCode) {
-        window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
-      }
     } catch (error) {
       toast.error(t("toasts.checkoutCreateFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
     } finally {
@@ -323,9 +308,6 @@ export function SettingsSubscription() {
       }
       setPendingPayment({ ...data.checkout, operationID });
       setTopUpDialogOpen(false);
-      if (data.checkout.checkoutURL && !data.checkout.qrCode) {
-        window.open(data.checkout.checkoutURL, "_blank", "noopener,noreferrer");
-      }
     } catch (error) {
       toast.error(t("toasts.checkoutCreateFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
     } finally {
@@ -359,7 +341,6 @@ export function SettingsSubscription() {
   );
   const paymentDisabled = paymentProviders.length === 0;
   const currentPlan = billingOverview?.plan ?? null;
-  const currentPrice = React.useMemo(() => resolveDefaultPrice(currentPlan), [currentPlan]);
   const protectedPaidPlanRank = React.useMemo(
     () => Math.max(
       currentPlan && !isFreePlan(currentPlan) ? planRank(currentPlan) : 0,
@@ -453,12 +434,9 @@ export function SettingsSubscription() {
         billingPlans={billingPlans}
         billingOverview={billingOverview}
         currentPlan={currentPlan}
-        currentPrice={currentPrice}
         billingAccount={billingAccount}
-        subscriptionEntitlements={subscriptionEntitlements}
         locale={locale}
         intervalLabels={intervalLabels}
-        entitlementLabels={entitlementLabels}
         planActionLabels={planActionLabels}
         planFeatureLabels={planFeatureLabels}
         paymentProviders={paymentProviders}

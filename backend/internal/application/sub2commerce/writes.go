@@ -26,7 +26,7 @@ var (
 
 const (
 	paymentOutcomePersistTimeout = 3 * time.Second
-	maxQRCodePayloadBytes        = 229
+	maxQRCodePayloadBytes        = 858
 )
 
 type CheckoutInput struct {
@@ -84,7 +84,13 @@ func (s *Service) Checkout(ctx context.Context, userID uint, sessionID, idempote
 	if !claimed {
 		return replayPaymentOperation(op, hash)
 	}
-	order := sub2api.CreatePaymentOrderInput{OrderType: mapOrderType(input.OrderType), PaymentType: input.PaymentProvider, ReturnURL: input.SuccessURL}
+	order := sub2api.CreatePaymentOrderInput{
+		OrderType:     mapOrderType(input.OrderType),
+		PaymentType:   input.PaymentProvider,
+		ReturnURL:     input.SuccessURL,
+		PaymentSource: "hosted_redirect",
+		IsMobile:      false,
+	}
 	if input.OrderType == "subscription" {
 		order.PlanID = input.PriceID
 	} else {
