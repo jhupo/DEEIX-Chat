@@ -53,6 +53,8 @@ import {
 } from "@/shared/components/settings-layout";
 import { resolveModelOptionIconUrl, resolveModelOptionLabel } from "@/shared/lib/model-option-display";
 import { parseKindsJSON } from "@/shared/model/llm-schema";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { resolveChatProtocol } from "@/shared/model/chat-protocol";
 import { platformModifierLabel, platformSendShortcut } from "@/shared/lib/platform-shortcuts";
 import type { SendShortcut } from "@/features/settings/types/settings";
 import { ChatDisplayAppearance } from "./chat-display-appearance";
@@ -442,7 +444,11 @@ export function SettingsChat() {
       { label: t("defaultModel.systemRecommended"), value: SYSTEM_RECOMMENDED_MODEL, iconUrl: null },
       ...modelGroups.flatMap(([, items]) =>
         items
-          .filter((model) => model.platformModelName.trim() && parseKindsJSON(model.kindsJSON).includes("chat"))
+          .filter((model) =>
+            model.platformModelName.trim() &&
+            parseKindsJSON(model.kindsJSON).includes("chat") &&
+            Boolean(resolveChatProtocol(chatKeyBindings.selectedRemoteKey?.groupPlatform ?? "", parseProtocolsJSON(model.protocolsJSON))),
+          )
           .map((model) => ({
             label: resolveModelOptionLabel(model.platformModelName),
             value: model.platformModelName,
@@ -454,7 +460,7 @@ export function SettingsChat() {
           })),
       ),
     ],
-    [modelGroups, t],
+    [chatKeyBindings.selectedRemoteKey?.groupPlatform, modelGroups, t],
   );
   const selectedRemoteKey = chatKeyBindings.selectedRemoteKey;
 

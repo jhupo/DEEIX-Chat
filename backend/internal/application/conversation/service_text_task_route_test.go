@@ -103,8 +103,8 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 	if route.PlatformModelID != 9 || route.PlatformModelName != "catalog-model" || route.UpstreamModel != "catalog-model" {
 		t.Fatalf("route did not use administrator catalog identity: %#v", route)
 	}
-	if route.Protocol != llm.AdapterOpenAIResponses {
-		t.Fatalf("route protocol = %q, want Responses", route.Protocol)
+	if route.Protocol != llm.AdapterAnthropicMessages {
+		t.Fatalf("route protocol = %q, want Anthropic Messages", route.Protocol)
 	}
 	if run.PlatformModelName != "catalog-model" || run.RoutedBindingCode != binding.execution.BindingPublicID || run.KeyBindingVersion != 3 || run.RemoteKeyID != 42 {
 		t.Fatalf("run did not pin catalog route and binding: %#v", run)
@@ -122,12 +122,56 @@ func TestResolveSub2ChatRouteRejectsNonChatModel(t *testing.T) {
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			PlatformModelName: "openai-only-model",
 			KindsJSON:         `["image_gen"]`,
+			ProtocolsJSON:     `["openai_responses"]`,
 		}},
 		sub2Resolver: binding,
 	}
 
 	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "openai-only-model", binding.execution.BindingPublicID); !errors.Is(err, ErrModelAccessDenied) {
 		t.Fatalf("resolveSub2ChatRoute() error = %v, want ErrModelAccessDenied", err)
+	}
+}
+
+func TestResolveSub2ChatRouteRejectsModelWithoutKeyGroupProtocol(t *testing.T) {
+	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
+		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
+		APIKey:          "secret",
+	}}
+	service := &Service{
+		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
+			PlatformModelName: "messages-only-model",
+			KindsJSON:         `["chat"]`,
+			ProtocolsJSON:     `["openai_responses"]`,
+		}},
+		sub2Resolver: binding,
+	}
+
+	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "messages-only-model", binding.execution.BindingPublicID); !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("resolveSub2ChatRoute() error = %v, want ErrModelAccessDenied", err)
+	}
+}
+
+func TestResolveSub2ChatProtocolUsesAdministratorModelProtocolForKeyGroup(t *testing.T) {
+	tests := []struct {
+		name, platform, protocols, want string
+	}{
+		{name: "OpenAI prefers Responses", platform: "openai", protocols: `["openai_chat_completions","openai_responses"]`, want: llm.AdapterOpenAIResponses},
+		{name: "OpenAI accepts Completions", platform: "openai", protocols: `["openai_chat_completions"]`, want: llm.AdapterOpenAIChatCompletions},
+		{name: "Anthropic uses Messages", platform: "anthropic", protocols: `["anthropic_messages"]`, want: llm.AdapterAnthropicMessages},
+		{name: "Grok uses native Responses", platform: "grok", protocols: `["xai_responses"]`, want: llm.AdapterXAIResponses},
+		{name: "Gemini uses Generate Content", platform: "gemini", protocols: `["google_generate_content"]`, want: llm.AdapterGoogleGenerateContent},
+		{name: "Composite accepts OpenRouter", platform: "composite", protocols: `["openrouter_responses"]`, want: llm.AdapterOpenRouterResponses},
+		{name: "Composite prefers Responses", platform: "composite", protocols: `["anthropic_messages","openai_responses"]`, want: llm.AdapterOpenAIResponses},
+		{name: "Missing group", platform: "", protocols: `["openai_responses"]`, want: ""},
+		{name: "No overlap", platform: "anthropic", protocols: `["openai_responses"]`, want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := resolveSub2ChatProtocol(test.platform, test.protocols); got != test.want {
+				t.Fatalf("resolveSub2ChatProtocol(%q, %s) = %q, want %q", test.platform, test.protocols, got, test.want)
+			}
+		})
 	}
 }
 

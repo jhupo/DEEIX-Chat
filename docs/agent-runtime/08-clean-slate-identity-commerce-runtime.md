@@ -262,9 +262,9 @@ binding ID；默认值写入 DEEIX 用户设置 `chat.default_sub2_key_binding_i
 
 DEEIX 用户设置保存 `chat.default_sub2_key_binding_id`；普通对话发送时静默读取该默认 binding。每个 Run 在任何 route/network 前固定：
 
-普通文本对话只使用 Sub2 `/v1/responses` 作为统一入口。DEEIX 不保存用户协议偏好，也不按密钥分组切换请求 DTO；Sub2 根据 API key
-所属分组完成实际的上游路由和协议转换。管理员发布的模型能力配置因此使用 Responses 字段，例如 `reasoning.effort`、
-`reasoning.summary` 和 `text.verbosity`，不混入 Chat Completions 的同义字段。
+普通文本对话不保存用户协议偏好。DEEIX 根据管理员为模型发布的协议与默认 API key 所属分组解析实际请求协议；两者没有交集时，
+该模型不会出现在当前 key 的模型列表中，后端也会重复校验。模型能力配置按解析后的协议过滤字段和原生工具，例如 Responses
+使用 `reasoning.effort`、`reasoning.summary` 与 `text.verbosity`，Anthropic Messages 使用对应的 Messages 字段。
 
 ```text
 principal_id
@@ -436,7 +436,7 @@ profile 状态并调度 device command；它不读取 Chat `sub2_key_bindings`�
 | 页面 | 数据源 | 选择状态 |
 | --- | --- | --- |
 | `/setting/subscription` | `/billing/*` BFF -> Sub2 profile/payment/redeem/subscriptions/usage | 套餐购买、余额充值、兑换、订单/兑换/用量记录；通过既有页面刷新/重载控件手动刷新；无 local commerce mutation |
-| `/chat` | DEEIX 管理员发布的模型目录 + 服务端默认 Sub2 key binding | 对话页只选择管理员配置的模型与展示分组；默认 key 仅在对话设置中选择，发送时静默使用；Run 固定实际 model/binding/version。Sub2 Chat 模型无需创建 DEEIX 本地上游路由：有显式路由时使用其协议，否则由管理员设置的平台模型 vendor 推导网关协议。 |
+| `/chat` | DEEIX 管理员发布的模型目录 + 服务端默认 Sub2 key binding | 对话页只选择管理员发布为 `chat` 且协议与当前 key 分组匹配的模型与展示分组；默认 key 仅在对话设置中选择，发送时静默使用；Run 固定实际 model/binding/version/protocol。协议由管理员模型配置和 key 分组共同解析，用户不配置协议。 |
 | `/agent` | Agent device/profile/workspace + app-server projection | 无 key selector；turn UI 选择 runtime/model/permission |
 | `/setting/account` | `GET /api/v1/me` composite、`/api/v1/auth/sessions`、Sub2 password-change BFF route | Principal projection、DEEIX browser sessions 和 password change |
 | `/setting/general` and chat preferences | DEEIX Principal/user-settings routes | displayName/avatar/timezone/locale/appearance/notification/conversation preferences；Sub2 profile 仅可在新 Principal 创建时提供初始投影，不进行写回 |

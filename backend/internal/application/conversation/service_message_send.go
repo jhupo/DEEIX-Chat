@@ -78,6 +78,9 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		}
 		return nil, nil, err
 	}
+	if !sub2ChatModelSupportsKind(chatModel.KindsJSON, "chat") {
+		return nil, nil, ErrModelAccessDenied
+	}
 	execution, err := s.sub2Resolver.ResolveBinding(ctx, userID, keyBindingID)
 	if err != nil {
 		if errors.Is(err, appsub2key.ErrInvalidBinding) {
@@ -85,8 +88,8 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		}
 		return nil, nil, ErrKeyBindingUnavailable
 	}
-	protocol := llm.AdapterOpenAIResponses
-	if !sub2ChatModelSupportsKind(chatModel.KindsJSON, "chat") {
+	protocol := resolveSub2ChatProtocol(execution.GroupPlatform, chatModel.ProtocolsJSON)
+	if protocol == "" {
 		return nil, nil, ErrModelAccessDenied
 	}
 	return &channel.ResolvedRoute{
@@ -117,6 +120,50 @@ func sub2ChatModelSupportsKind(raw, kind string) bool {
 		}
 	}
 	return false
+}
+
+func resolveSub2ChatProtocol(groupPlatform, rawProtocols string) string {
+	var protocols []string
+	if json.Unmarshal([]byte(strings.TrimSpace(rawProtocols)), &protocols) != nil {
+		return ""
+	}
+	configured := make(map[string]struct{}, len(protocols))
+	for _, rawProtocol := range protocols {
+		if strings.TrimSpace(rawProtocol) == "" {
+			continue
+		}
+		protocol := llm.NormalizeAdapter(rawProtocol)
+		configured[protocol] = struct{}{}
+	}
+	var allowed []string
+	switch strings.ToLower(strings.TrimSpace(groupPlatform)) {
+	case "anthropic":
+		allowed = []string{llm.AdapterAnthropicMessages}
+	case "composite":
+		allowed = []string{
+			llm.AdapterOpenAIResponses,
+			llm.AdapterOpenRouterResponses,
+			llm.AdapterAnthropicMessages,
+			llm.AdapterGoogleGenerateContent,
+			llm.AdapterXAIResponses,
+			llm.AdapterOpenAIChatCompletions,
+			llm.AdapterOpenRouterChat,
+		}
+	case "openai":
+		allowed = []string{llm.AdapterOpenAIResponses, llm.AdapterOpenAIChatCompletions}
+	case "grok":
+		allowed = []string{llm.AdapterXAIResponses, llm.AdapterOpenAIResponses, llm.AdapterOpenAIChatCompletions}
+	case "gemini", "antigravity":
+		allowed = []string{llm.AdapterGoogleGenerateContent, llm.AdapterOpenAIChatCompletions}
+	default:
+		return ""
+	}
+	for _, protocol := range allowed {
+		if _, ok := configured[protocol]; ok {
+			return protocol
+		}
+	}
+	return ""
 }
 
 func pinSub2ChatRouteToRun(run *model.Run, route *channel.ResolvedRoute, execution *appsub2key.Execution) {

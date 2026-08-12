@@ -394,7 +394,8 @@ function ChatInputComponent({
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
   const requiresKeyBinding = submitTask === "chat";
-  const canSend = hasSubmitContent && !loading && !uploading && (!requiresKeyBinding || Boolean(selectedKeyBindingID));
+  const chatRouteReady = Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
+  const canSend = hasSubmitContent && !loading && !uploading && (!requiresKeyBinding || chatRouteReady);
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;

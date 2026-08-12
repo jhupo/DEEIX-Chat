@@ -9,6 +9,8 @@ import type {
   ModelOptionControlType,
 } from "@/features/chat/types/chat-runtime";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
+import { resolveChatProtocol } from "@/shared/model/chat-protocol";
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
 import {
   DEFAULT_CHAT_CONTENT_WIDTH,
@@ -309,6 +311,7 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupName: item.displayGroupName,
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
+    protocols: parseProtocolsJSON(item.protocolsJSON),
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),
@@ -321,10 +324,12 @@ export function useChatModelOptions({
   conversationPublicID,
   conversationModel,
   resetToken,
+  groupPlatform,
 }: {
   conversationPublicID: string | null;
   conversationModel?: string | null;
   resetToken?: number;
+  groupPlatform?: string;
 }) {
   const t = useTranslations("chat.models");
   const [availableModels, setAvailableModels] = React.useState<PublicModelDTO[]>([]);
@@ -348,8 +353,11 @@ export function useChatModelOptions({
   const runModelRequestRef = React.useRef(0);
   const modelCatalogRequestRef = React.useRef<Promise<ModelCatalogRefreshResult> | null>(null);
   const compatibleModels = React.useMemo(
-    () => availableModels.filter((model) => parseKindsJSON(model.kindsJSON).includes("chat")),
-    [availableModels],
+    () => availableModels.filter(
+      (model) => parseKindsJSON(model.kindsJSON).includes("chat") &&
+        Boolean(resolveChatProtocol(groupPlatform ?? "", parseProtocolsJSON(model.protocolsJSON))),
+    ),
+    [availableModels, groupPlatform],
   );
 
   const selectPlatformModelName = React.useCallback((platformModelName: string) => {
@@ -400,10 +408,12 @@ export function useChatModelOptions({
 
     const nextModels = await refreshModelCatalog();
     const nextModel = nextModels.find(
-      (item) => item.platformModelName === normalizedName && parseKindsJSON(item.kindsJSON).includes("chat"),
+      (item) => item.platformModelName === normalizedName &&
+        parseKindsJSON(item.kindsJSON).includes("chat") &&
+        Boolean(resolveChatProtocol(groupPlatform ?? "", parseProtocolsJSON(item.protocolsJSON))),
     );
     return nextModel ? toChatModelOption(nextModel) : null;
-  }, [refreshModelCatalog]);
+  }, [groupPlatform, refreshModelCatalog]);
 
   React.useEffect(() => {
     let cancelled = false;
