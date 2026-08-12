@@ -3,24 +3,37 @@ package announcement
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	domainannouncement "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/announcement"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
 	maxAnnouncementTitleLength   = 120
 	maxAnnouncementContentLength = 20000
+	activeAnnouncementCacheTTL   = 30 * time.Second
+	activeAnnouncementCacheMax   = 512
 )
 
 // Service 封装公告业务逻辑。
 type Service struct {
-	repo   repository.AnnouncementRepository
-	tokens TokenResolver
-	client *sub2api.Client
+	repo    repository.AnnouncementRepository
+	tokens  TokenResolver
+	client  *sub2api.Client
+	cacheMu sync.Mutex
+	cache   map[string]activeAnnouncementCacheEntry
+	group   singleflight.Group
+}
+
+type activeAnnouncementCacheEntry struct {
+	items     []domainannouncement.Announcement
+	expiresAt time.Time
 }
 
 type TokenResolver interface {
@@ -29,7 +42,7 @@ type TokenResolver interface {
 
 // NewService 创建公告服务。
 func NewService(repo repository.AnnouncementRepository, tokens TokenResolver, client *sub2api.Client) *Service {
-	return &Service{repo: repo, tokens: tokens, client: client}
+	return &Service{repo: repo, tokens: tokens, client: client, cache: make(map[string]activeAnnouncementCacheEntry)}
 }
 
 // ListActive 查询当前用户可展示公告。
@@ -37,6 +50,41 @@ func (s *Service) ListActive(ctx context.Context, userID uint, sessionID string)
 	if userID == 0 || strings.TrimSpace(sessionID) == "" || s.tokens == nil || s.client == nil {
 		return nil, repository.ErrInvalidInput
 	}
+	cacheKey := fmt.Sprintf("%d:%s", userID, strings.TrimSpace(sessionID))
+	now := time.Now()
+	s.cacheMu.Lock()
+	if entry, ok := s.cache[cacheKey]; ok && now.Before(entry.expiresAt) {
+		items := append([]domainannouncement.Announcement(nil), entry.items...)
+		s.cacheMu.Unlock()
+		return items, nil
+	}
+	delete(s.cache, cacheKey)
+	s.cacheMu.Unlock()
+
+	value, err, _ := s.group.Do(cacheKey, func() (any, error) {
+		results, loadErr := s.loadActive(ctx, userID, sessionID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		s.cacheMu.Lock()
+		for len(s.cache) >= activeAnnouncementCacheMax {
+			for key := range s.cache {
+				delete(s.cache, key)
+				break
+			}
+		}
+		s.cache[cacheKey] = activeAnnouncementCacheEntry{items: append([]domainannouncement.Announcement(nil), results...), expiresAt: time.Now().Add(activeAnnouncementCacheTTL)}
+		s.cacheMu.Unlock()
+		return results, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	results := value.([]domainannouncement.Announcement)
+	return append([]domainannouncement.Announcement(nil), results...), nil
+}
+
+func (s *Service) loadActive(ctx context.Context, userID uint, sessionID string) ([]domainannouncement.Announcement, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -127,7 +175,14 @@ func (s *Service) Close(ctx context.Context, userID uint, sessionID string, anno
 	if err != nil {
 		return err
 	}
-	return s.client.MarkAnnouncementRead(ctx, token, int64(announcementID))
+	if err := s.client.MarkAnnouncementRead(ctx, token, int64(announcementID)); err != nil {
+		return err
+	}
+	cacheKey := fmt.Sprintf("%d:%s", userID, strings.TrimSpace(sessionID))
+	s.cacheMu.Lock()
+	delete(s.cache, cacheKey)
+	s.cacheMu.Unlock()
+	return nil
 }
 
 // ListInput 定义公告列表入参。

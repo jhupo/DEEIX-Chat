@@ -110,6 +110,7 @@ export function SettingsSubscription() {
   const [usageSort, setUsageSort] = React.useState<BillingUsageSort>("newest");
   const [usageView, setUsageView] = React.useState<UsageTrendView>("daily");
   const [billingLoading, setBillingLoading] = React.useState(true);
+  const [trendLoading, setTrendLoading] = React.useState(true);
   const [usageLoading, setUsageLoading] = React.useState(true);
   const [checkoutPriceID, setCheckoutPriceID] = React.useState<number | null>(null);
   const [topUpAmount, setTopUpAmount] = React.useState("20");
@@ -126,6 +127,7 @@ export function SettingsSubscription() {
   const [redemptionLoading, setRedemptionLoading] = React.useState(false);
   const [pendingPayment, setPendingPayment] = React.useState<PendingPayment | null>(null);
   const [paymentVerificationLoading, setPaymentVerificationLoading] = React.useState(false);
+  const trendRequestID = React.useRef(0);
   const billingMode: BillingMode = billingConfig?.mode ?? "usage";
   const billingDisplay = React.useMemo<BillingDisplayOptions>(
     () => ({
@@ -165,19 +167,13 @@ export function SettingsSubscription() {
   const loadBillingData = React.useCallback(async () => {
     setBillingLoading(true);
     try {
-      const [configData, overviewData, nextHourlyUsage, nextDailyUsage, nextMonthlyUsage] = await Promise.all([
+      const [configData, overviewData] = await Promise.all([
         getBillingConfig(accessToken),
         getBillingOverview(accessToken),
-        listBillingHourlyUsage(accessToken),
-        listBillingDailyUsage(accessToken),
-        listBillingMonthlyUsage(accessToken, 12),
       ]);
       setBillingConfig(configData.config);
       setBillingPlans(configData.config.plans);
       setBillingOverview(overviewData.overview);
-      setHourlyUsage(nextHourlyUsage ?? []);
-      setDailyUsage(nextDailyUsage ?? []);
-      setMonthlyUsage(nextMonthlyUsage ?? []);
     } catch (error) {
       toast.error(t("toasts.subscriptionLoadFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
     } finally {
@@ -188,6 +184,33 @@ export function SettingsSubscription() {
   React.useEffect(() => {
     void loadBillingData();
   }, [loadBillingData]);
+
+  const loadUsageTrend = React.useCallback(async (view: UsageTrendView) => {
+    const requestID = ++trendRequestID.current;
+    setTrendLoading(true);
+    try {
+      if (view === "hourly") {
+        const results = await listBillingHourlyUsage(accessToken);
+        if (requestID === trendRequestID.current) setHourlyUsage(results);
+      } else if (view === "monthly") {
+        const results = await listBillingMonthlyUsage(accessToken, 12);
+        if (requestID === trendRequestID.current) setMonthlyUsage(results);
+      } else {
+        const results = await listBillingDailyUsage(accessToken);
+        if (requestID === trendRequestID.current) setDailyUsage(results);
+      }
+    } catch (error) {
+      if (requestID === trendRequestID.current) {
+        toast.error(t("toasts.subscriptionLoadFailed"), { description: resolveErrorMessage(error, t("toasts.retryLater")) });
+      }
+    } finally {
+      if (requestID === trendRequestID.current) setTrendLoading(false);
+    }
+  }, [accessToken, resolveErrorMessage, t]);
+
+  React.useEffect(() => {
+    void loadUsageTrend(usageView);
+  }, [loadUsageTrend, usageView]);
 
   const loadUsageLogs = React.useCallback(async (page: number, pageSize: number, query: string, billingType: BillingUsageType | "", sort: BillingUsageSort) => {
     setUsageLoading(true);
@@ -385,14 +408,15 @@ export function SettingsSubscription() {
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                disabled={billingLoading || usageLoading}
+                disabled={billingLoading || trendLoading || usageLoading}
                 onClick={() => void Promise.all([
                   loadBillingData(),
+                  loadUsageTrend(usageView),
                   loadUsageLogs(usagePage, usagePageSize, usageQuery, usageBillingType, usageSort),
                 ])}
                 aria-label={t("refresh")}
               >
-                <RefreshCw className={billingLoading || usageLoading ? "animate-spin" : ""} />
+                <RefreshCw className={billingLoading || trendLoading || usageLoading ? "animate-spin" : ""} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("refresh")}</TooltipContent>
@@ -442,7 +466,7 @@ export function SettingsSubscription() {
           hourlyUsage={hourlyUsage}
           dailyUsage={dailyUsage}
           monthlyUsage={monthlyUsage}
-          loading={billingLoading}
+          loading={trendLoading}
           view={usageView}
           billingDisplay={billingDisplay}
           onViewChange={setUsageView}

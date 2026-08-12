@@ -79,8 +79,10 @@ func TestCloseRejectsInvalidInput(t *testing.T) {
 
 func TestSub2AnnouncementProjectionAndRead(t *testing.T) {
 	read := false
+	listCalls := 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/announcements", func(w http.ResponseWriter, r *http.Request) {
+		listCalls++
 		if r.Header.Get("Authorization") != "Bearer token" {
 			t.Fatalf("authorization = %q", r.Header.Get("Authorization"))
 		}
@@ -107,8 +109,14 @@ func TestSub2AnnouncementProjectionAndRead(t *testing.T) {
 	if items[0].NotifyMode != "popup" || !items[0].Pinned || items[0].Type != domainannouncement.TypeInfo {
 		t.Fatalf("projection = %#v", items[0])
 	}
+	if _, err := service.ListActive(context.Background(), 1, "session"); err != nil || listCalls != 1 {
+		t.Fatalf("cached ListActive() calls = %d, error = %v", listCalls, err)
+	}
 	if err := service.Close(context.Background(), 1, "session", 7); err != nil || !read {
 		t.Fatalf("Close() error = %v, read = %v", err, read)
+	}
+	if _, err := service.ListActive(context.Background(), 1, "session"); err != nil || listCalls != 2 {
+		t.Fatalf("invalidated ListActive() calls = %d, error = %v", listCalls, err)
 	}
 }
 

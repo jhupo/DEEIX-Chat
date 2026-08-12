@@ -16,6 +16,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -85,6 +86,10 @@ type Service struct {
 	encryptionKey string
 	remoteCacheMu sync.Mutex
 	remoteCache   map[string]remoteKeyCacheEntry
+	remoteGroup   singleflight.Group
+	groupCacheMu  sync.Mutex
+	groupCache    map[string]groupCacheEntry
+	groupGroup    singleflight.Group
 }
 
 type remoteKeyCacheEntry struct {
@@ -93,8 +98,16 @@ type remoteKeyCacheEntry struct {
 	expiresAt time.Time
 }
 
+type groupCacheEntry struct {
+	groups    []sub2api.AvailableGroup
+	expiresAt time.Time
+}
+
 func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, client *sub2api.Client, encryptionKey string) *Service {
-	return &Service{repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey, remoteCache: make(map[string]remoteKeyCacheEntry)}
+	return &Service{
+		repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey,
+		remoteCache: make(map[string]remoteKeyCacheEntry), groupCache: make(map[string]groupCacheEntry),
+	}
 }
 
 func (s *Service) List(ctx context.Context, principalID uint, sessionID string) ([]BindingView, error) {
@@ -134,11 +147,7 @@ func (s *Service) ListRemote(ctx context.Context, principalID uint, sessionID st
 	return out, nil
 }
 func (s *Service) ListGroups(ctx context.Context, principalID uint, sessionID string) ([]GroupView, error) {
-	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	groups, err := s.client.AvailableGroups(ctx, token)
+	groups, err := s.currentGroups(ctx, principalID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +159,44 @@ func (s *Service) ListGroups(ctx context.Context, principalID uint, sessionID st
 		out = append(out, GroupView{ID: group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform})
 	}
 	return out, nil
+}
+
+func (s *Service) currentGroups(ctx context.Context, principalID uint, sessionID string) ([]sub2api.AvailableGroup, error) {
+	cacheKey := fmt.Sprintf("%d:%s", principalID, strings.TrimSpace(sessionID))
+	now := time.Now()
+	s.groupCacheMu.Lock()
+	if entry, ok := s.groupCache[cacheKey]; ok && now.Before(entry.expiresAt) {
+		groups := append([]sub2api.AvailableGroup(nil), entry.groups...)
+		s.groupCacheMu.Unlock()
+		return groups, nil
+	}
+	delete(s.groupCache, cacheKey)
+	s.groupCacheMu.Unlock()
+
+	value, err, _ := s.groupGroup.Do(cacheKey, func() (any, error) {
+		token, tokenErr := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		groups, loadErr := s.client.AvailableGroups(ctx, token)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		s.groupCacheMu.Lock()
+		for len(s.groupCache) >= remoteKeyCacheMax {
+			for key := range s.groupCache {
+				delete(s.groupCache, key)
+				break
+			}
+		}
+		s.groupCache[cacheKey] = groupCacheEntry{groups: append([]sub2api.AvailableGroup(nil), groups...), expiresAt: time.Now().Add(remoteKeyCacheTTL)}
+		s.groupCacheMu.Unlock()
+		return groups, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]sub2api.AvailableGroup(nil), value.([]sub2api.AvailableGroup)...), nil
 }
 func (s *Service) CreateRemote(ctx context.Context, principalID uint, sessionID, name string, groupID int64, idempotencyKey string) (*RemoteKeyView, error) {
 	name = strings.TrimSpace(name)
@@ -164,7 +211,7 @@ func (s *Service) CreateRemote(ctx context.Context, principalID uint, sessionID,
 	if err != nil {
 		return nil, err
 	}
-	groups, err := s.client.AvailableGroups(ctx, token)
+	groups, err := s.currentGroups(ctx, principalID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +326,9 @@ func (s *Service) invalidateRemoteCache(principalID uint, sessionID string) {
 	s.remoteCacheMu.Lock()
 	delete(s.remoteCache, cacheKey)
 	s.remoteCacheMu.Unlock()
+	s.groupCacheMu.Lock()
+	delete(s.groupCache, cacheKey)
+	s.groupCacheMu.Unlock()
 }
 func (s *Service) remoteKeys(ctx context.Context, token string, expectedUserID int64) ([]sub2api.APIKey, error) {
 	keys := make([]sub2api.APIKey, 0)
@@ -323,30 +373,45 @@ func (s *Service) currentRemoteKeys(ctx context.Context, principalID uint, sessi
 	}
 	s.remoteCacheMu.Unlock()
 
-	token, err := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
+	value, err, _ := s.remoteGroup.Do(cacheKey, func() (any, error) {
+		now := time.Now()
+		s.remoteCacheMu.Lock()
+		if cached, ok := s.remoteCache[cacheKey]; ok && now.Before(cached.expiresAt) {
+			copy := cached
+			copy.keys = append([]sub2api.APIKey(nil), cached.keys...)
+			s.remoteCacheMu.Unlock()
+			return copy, nil
+		}
+		s.remoteCacheMu.Unlock()
+		token, tokenErr := s.tokens.Sub2AccessTokenForSession(ctx, principalID, sessionID)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		profile, profileErr := s.client.UserProfile(ctx, token)
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		keys, keysErr := s.remoteKeys(ctx, token, profile.ID)
+		if keysErr != nil {
+			return nil, keysErr
+		}
+		loaded := remoteKeyCacheEntry{profile: *profile, keys: append([]sub2api.APIKey(nil), keys...), expiresAt: time.Now().Add(remoteKeyCacheTTL)}
+		s.remoteCacheMu.Lock()
+		reserve := 1
+		if _, exists := s.remoteCache[cacheKey]; exists {
+			reserve = 0
+		}
+		s.pruneRemoteCacheLocked(time.Now(), reserve)
+		s.remoteCache[cacheKey] = loaded
+		s.remoteCacheMu.Unlock()
+		return loaded, nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	profile, err := s.client.UserProfile(ctx, token)
-	if err != nil {
-		return nil, nil, err
-	}
-	keys, err := s.remoteKeys(ctx, token, profile.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	storedAt := time.Now()
-	s.remoteCacheMu.Lock()
-	reserve := 1
-	if _, exists := s.remoteCache[cacheKey]; exists {
-		reserve = 0
-	}
-	s.pruneRemoteCacheLocked(storedAt, reserve)
-	s.remoteCache[cacheKey] = remoteKeyCacheEntry{
-		profile: *profile, keys: append([]sub2api.APIKey(nil), keys...), expiresAt: storedAt.Add(remoteKeyCacheTTL),
-	}
-	s.remoteCacheMu.Unlock()
-	return profile, keys, nil
+	loaded := value.(remoteKeyCacheEntry)
+	profile := &loaded.profile
+	return profile, append([]sub2api.APIKey(nil), loaded.keys...), nil
 }
 
 func (s *Service) pruneRemoteCacheLocked(now time.Time, reserve int) {

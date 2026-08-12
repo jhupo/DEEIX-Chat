@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"golang.org/x/sync/singleflight"
 )
 
 type TokenResolver interface {
@@ -24,6 +26,10 @@ type Service struct {
 	repo          repository.Sub2PaymentOperationRepository
 	checkoutMu    sync.Mutex
 	checkoutCache map[string]checkoutCacheEntry
+	checkoutGroup singleflight.Group
+	readMu        sync.Mutex
+	readCache     map[string]readCacheEntry
+	readGroup     singleflight.Group
 }
 
 type checkoutCacheEntry struct {
@@ -31,13 +37,84 @@ type checkoutCacheEntry struct {
 	expiresAt time.Time
 }
 
+type readCacheEntry struct {
+	value     any
+	expiresAt time.Time
+}
+
 const (
 	checkoutCacheTTL = time.Minute
 	checkoutCacheMax = 256
+	accountCacheTTL  = 20 * time.Second
+	overviewCacheTTL = 20 * time.Second
+	usageCacheTTL    = 10 * time.Second
+	trendCacheTTL    = 30 * time.Second
+	readCacheMax     = 1024
 )
 
 func NewService(tokens TokenResolver, client *sub2api.Client, repo repository.Sub2PaymentOperationRepository) *Service {
-	return &Service{tokens: tokens, client: client, repo: repo, checkoutCache: make(map[string]checkoutCacheEntry)}
+	return &Service{
+		tokens: tokens, client: client, repo: repo,
+		checkoutCache: make(map[string]checkoutCacheEntry),
+		readCache:     make(map[string]readCacheEntry),
+	}
+}
+
+func (s *Service) cachedRead(key string, ttl time.Duration, load func() (any, error)) (any, error) {
+	now := time.Now()
+	s.readMu.Lock()
+	if entry, ok := s.readCache[key]; ok && now.Before(entry.expiresAt) {
+		s.readMu.Unlock()
+		return entry.value, nil
+	}
+	delete(s.readCache, key)
+	s.readMu.Unlock()
+
+	value, err, _ := s.readGroup.Do(key, func() (any, error) {
+		now := time.Now()
+		s.readMu.Lock()
+		if entry, ok := s.readCache[key]; ok && now.Before(entry.expiresAt) {
+			s.readMu.Unlock()
+			return entry.value, nil
+		}
+		s.readMu.Unlock()
+
+		loaded, loadErr := load()
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		s.readMu.Lock()
+		for cacheKey, entry := range s.readCache {
+			if !now.Before(entry.expiresAt) {
+				delete(s.readCache, cacheKey)
+			}
+		}
+		for len(s.readCache) >= readCacheMax {
+			for cacheKey := range s.readCache {
+				delete(s.readCache, cacheKey)
+				break
+			}
+		}
+		s.readCache[key] = readCacheEntry{value: loaded, expiresAt: now.Add(ttl)}
+		s.readMu.Unlock()
+		return loaded, nil
+	})
+	return value, err
+}
+
+func commerceCacheKey(userID uint, sessionID, kind, suffix string) string {
+	return strconv.FormatUint(uint64(userID), 10) + ":" + strings.TrimSpace(sessionID) + ":" + kind + ":" + suffix
+}
+
+func (s *Service) invalidateReadCache(userID uint, sessionID string) {
+	prefix := strconv.FormatUint(uint64(userID), 10) + ":" + strings.TrimSpace(sessionID) + ":"
+	s.readMu.Lock()
+	for key := range s.readCache {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.readCache, key)
+		}
+	}
+	s.readMu.Unlock()
 }
 
 func (s *Service) checkoutInfo(ctx context.Context, userID uint, sessionID, token string) (sub2api.CheckoutInfo, error) {
@@ -52,20 +129,33 @@ func (s *Service) checkoutInfo(ctx context.Context, userID uint, sessionID, toke
 	}
 	s.checkoutMu.Unlock()
 
-	info, err := s.client.CheckoutInfo(ctx, token)
+	value, err, _ := s.checkoutGroup.Do(key, func() (any, error) {
+		now := time.Now()
+		s.checkoutMu.Lock()
+		if cached, ok := s.checkoutCache[key]; ok && now.Before(cached.expiresAt) {
+			s.checkoutMu.Unlock()
+			return cached.info, nil
+		}
+		s.checkoutMu.Unlock()
+		info, loadErr := s.client.CheckoutInfo(ctx, token)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		storedAt := time.Now()
+		s.checkoutMu.Lock()
+		reserve := 1
+		if _, exists := s.checkoutCache[key]; exists {
+			reserve = 0
+		}
+		s.pruneCheckoutCacheLocked(storedAt, reserve)
+		s.checkoutCache[key] = checkoutCacheEntry{info: info, expiresAt: storedAt.Add(checkoutCacheTTL)}
+		s.checkoutMu.Unlock()
+		return info, nil
+	})
 	if err != nil {
 		return sub2api.CheckoutInfo{}, err
 	}
-	storedAt := time.Now()
-	s.checkoutMu.Lock()
-	reserve := 1
-	if _, exists := s.checkoutCache[key]; exists {
-		reserve = 0
-	}
-	s.pruneCheckoutCacheLocked(storedAt, reserve)
-	s.checkoutCache[key] = checkoutCacheEntry{info: info, expiresAt: storedAt.Add(checkoutCacheTTL)}
-	s.checkoutMu.Unlock()
-	return info, nil
+	return value.(sub2api.CheckoutInfo), nil
 }
 
 func (s *Service) pruneCheckoutCacheLocked(now time.Time, reserve int) {
@@ -90,16 +180,21 @@ func (s *Service) pruneCheckoutCacheLocked(now time.Time, reserve int) {
 	}
 }
 func (s *Service) Account(ctx context.Context, userID uint, sessionID string) (*AccountData, error) {
-	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
+	value, err := s.cachedRead(commerceCacheKey(userID, sessionID, "account", "current"), accountCacheTTL, func() (any, error) {
+		token, tokenErr := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
+		if tokenErr != nil {
+			return nil, tokenErr
+		}
+		profile, profileErr := s.client.UserProfile(ctx, token)
+		if profileErr != nil {
+			return nil, profileErr
+		}
+		return &AccountData{Account: Account{Balance: profile.Balance, FrozenBalance: profile.FrozenBalance, Status: profile.Status}, ObservedAt: time.Now().UTC()}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	profile, err := s.client.UserProfile(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	return &AccountData{Account: Account{Balance: profile.Balance, FrozenBalance: profile.FrozenBalance, Status: profile.Status}, ObservedAt: now}, nil
+	return value.(*AccountData), nil
 }
 func (s *Service) Config(ctx context.Context, userID uint, sessionID string) (*ConfigData, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
@@ -138,6 +233,16 @@ func (s *Service) Plans(ctx context.Context, userID uint, sessionID string) (*Pl
 	return &PlansData{Plans: plansFromRemote(info.Plans, checkoutPlanCurrency(info.Methods)), ObservedAt: time.Now().UTC()}, nil
 }
 func (s *Service) Overview(ctx context.Context, userID uint, sessionID string) (*OverviewData, error) {
+	value, err := s.cachedRead(commerceCacheKey(userID, sessionID, "overview", "current"), overviewCacheTTL, func() (any, error) {
+		return s.loadOverview(ctx, userID, sessionID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*OverviewData), nil
+}
+
+func (s *Service) loadOverview(ctx context.Context, userID uint, sessionID string) (*OverviewData, error) {
 	account, err := s.Account(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -266,6 +371,17 @@ func (s *Service) Usage(ctx context.Context, userID uint, sessionID string, inpu
 	if input.Page < 1 || input.PageSize < 1 || input.PageSize > 100 || !validUsageInput(input) {
 		return nil, ErrInvalidQuery
 	}
+	key := commerceCacheKey(userID, sessionID, "usage", fmt.Sprintf("%s|%s|%s|%s|%d|%d", input.Model, input.BillingType, input.SortBy, input.SortOrder, input.Page, input.PageSize))
+	value, err := s.cachedRead(key, usageCacheTTL, func() (any, error) {
+		return s.loadUsage(ctx, userID, sessionID, input)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*UsageData), nil
+}
+
+func (s *Service) loadUsage(ctx context.Context, userID uint, sessionID string, input UsageInput) (*UsageData, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err
@@ -308,6 +424,17 @@ func (s *Service) Trend(ctx context.Context, userID uint, sessionID, start, end,
 	if err != nil || b.Before(a) || b.Sub(a) > 366*24*time.Hour {
 		return nil, ErrInvalidQuery
 	}
+	key := commerceCacheKey(userID, sessionID, "trend", start+"|"+end+"|"+granularity)
+	value, err := s.cachedRead(key, trendCacheTTL, func() (any, error) {
+		return s.loadTrend(ctx, userID, sessionID, start, end, granularity)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*DailyData), nil
+}
+
+func (s *Service) loadTrend(ctx context.Context, userID uint, sessionID, start, end, granularity string) (*DailyData, error) {
 	token, err := s.tokens.Sub2AccessTokenForSession(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err

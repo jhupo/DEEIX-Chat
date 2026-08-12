@@ -146,6 +146,7 @@ func (s *Service) Redeem(ctx context.Context, userID uint, sessionID, code strin
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateReadCache(userID, sessionID)
 	overview, err := s.Overview(ctx, userID, sessionID)
 	if err != nil {
 		return nil, err

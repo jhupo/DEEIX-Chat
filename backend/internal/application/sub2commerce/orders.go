@@ -121,6 +121,7 @@ func (s *Service) VerifyOrder(ctx context.Context, userID uint, sessionID, opera
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateReadCache(userID, sessionID)
 	if operation.State == "outcome_unknown" {
 		if err := s.repo.FinishPaymentOperation(ctx, userID, operationID, "completed_success", operation.ExternalOrderID); err != nil {
 			return nil, ErrOutcomeUnknown
