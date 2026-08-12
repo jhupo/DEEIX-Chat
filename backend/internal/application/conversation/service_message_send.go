@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -89,12 +90,16 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 	if s.repo != nil {
 		configuredProtocol, _ = s.getUserSettingCached(ctx, userID, defaultProtocolSettingKey)
 	}
+	protocol := resolveSub2ChatProtocol(execution.GroupPlatform, configuredProtocol)
+	if !sub2ChatModelSupportsProtocol(chatModel.ProtocolsJSON, protocol) {
+		return nil, nil, ErrModelAccessDenied
+	}
 	return &channel.ResolvedRoute{
 		PlatformModelID:       chatModel.ID,
 		PlatformModelName:     chatModel.PlatformModelName,
 		UpstreamName:          "sub2",
 		BindingCode:           execution.BindingPublicID,
-		Protocol:              resolveSub2ChatProtocol(execution.GroupPlatform, configuredProtocol),
+		Protocol:              protocol,
 		BaseURL:               s.cfg.Snapshot().Sub2BaseURL,
 		APIKey:                execution.APIKey,
 		ModelVendor:           chatModel.Vendor,
@@ -103,6 +108,20 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		ModelSystemPrompt:     chatModel.SystemPrompt,
 		UpstreamModel:         chatModel.PlatformModelName,
 	}, execution, nil
+}
+
+func sub2ChatModelSupportsProtocol(raw, protocol string) bool {
+	var protocols []string
+	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &protocols) != nil {
+		return false
+	}
+	want := llm.NormalizeAdapter(protocol)
+	for _, candidate := range protocols {
+		if llm.NormalizeAdapter(candidate) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveSub2ChatProtocol(groupPlatform, configured string) string {

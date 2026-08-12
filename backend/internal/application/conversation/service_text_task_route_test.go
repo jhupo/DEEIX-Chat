@@ -88,6 +88,7 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 			PlatformModelName: "catalog-model",
 			Vendor:            "openai",
 			Icon:              "openai",
+			ProtocolsJSON:     `["openai_chat_completions"]`,
 		}},
 		sub2Resolver: binding,
 	}
@@ -103,6 +104,26 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 	}
 	if run.PlatformModelName != "catalog-model" || run.RoutedBindingCode != binding.execution.BindingPublicID || run.KeyBindingVersion != 3 || run.RemoteKeyID != 42 {
 		t.Fatalf("run did not pin catalog route and binding: %#v", run)
+	}
+}
+
+func TestResolveSub2ChatRouteRejectsModelProtocolMismatch(t *testing.T) {
+	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
+		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
+		APIKey:          "secret",
+		GroupPlatform:   "anthropic",
+	}}
+	service := &Service{
+		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
+			PlatformModelName: "openai-only-model",
+			ProtocolsJSON:     `["openai_chat_completions","openai_responses"]`,
+		}},
+		sub2Resolver: binding,
+	}
+
+	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "openai-only-model", binding.execution.BindingPublicID); !errors.Is(err, ErrModelAccessDenied) {
+		t.Fatalf("resolveSub2ChatRoute() error = %v, want ErrModelAccessDenied", err)
 	}
 }
 

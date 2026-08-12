@@ -323,10 +323,12 @@ export function useChatModelOptions({
   conversationPublicID,
   conversationModel,
   resetToken,
+  protocol,
 }: {
   conversationPublicID: string | null;
   conversationModel?: string | null;
   resetToken?: number;
+  protocol?: string;
 }) {
   const t = useTranslations("chat.models");
   const [availableModels, setAvailableModels] = React.useState<PublicModelDTO[]>([]);
@@ -349,6 +351,10 @@ export function useChatModelOptions({
   const userSelectedModelRef = React.useRef(false);
   const runModelRequestRef = React.useRef(0);
   const modelCatalogRequestRef = React.useRef<Promise<ModelCatalogRefreshResult> | null>(null);
+  const compatibleModels = React.useMemo(
+    () => availableModels.filter((model) => parseProtocolsJSON(model.protocolsJSON).includes(protocol?.trim() ?? "")),
+    [availableModels, protocol],
+  );
 
   const selectPlatformModelName = React.useCallback((platformModelName: string) => {
     userSelectedModelRef.current = true;
@@ -397,9 +403,11 @@ export function useChatModelOptions({
     }
 
     const nextModels = await refreshModelCatalog();
-    const nextModel = nextModels.find((item) => item.platformModelName === normalizedName);
+    const nextModel = nextModels.find(
+      (item) => item.platformModelName === normalizedName && parseProtocolsJSON(item.protocolsJSON).includes(protocol?.trim() ?? ""),
+    );
     return nextModel ? toChatModelOption(nextModel) : null;
-  }, [refreshModelCatalog]);
+  }, [protocol, refreshModelCatalog]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -515,7 +523,7 @@ export function useChatModelOptions({
   }, [conversationModel, conversationPublicID, resetToken]);
 
   React.useEffect(() => {
-    if (availableModels.length === 0) {
+    if (compatibleModels.length === 0) {
       return;
     }
     if (conversationPublicID?.trim()) {
@@ -530,7 +538,7 @@ export function useChatModelOptions({
       }
       const result = await resolveConversationDefaultModel({
         accessToken: token,
-        availableModels,
+        availableModels: compatibleModels,
         userDefaultModel,
       });
       if (!cancelled && !userSelectedModelRef.current) {
@@ -540,27 +548,30 @@ export function useChatModelOptions({
 
     void applyDefaultModel().catch(() => {
       if (!cancelled && !userSelectedModelRef.current) {
-        setSelectedPlatformModelName(availableModels[0]?.platformModelName ?? "");
+        setSelectedPlatformModelName(compatibleModels[0]?.platformModelName ?? "");
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [availableModels, conversationPublicID, resetToken, userDefaultModel]);
+  }, [compatibleModels, conversationPublicID, resetToken, userDefaultModel]);
 
   React.useEffect(() => {
-    if (availableModels.length === 0) return;
+    if (compatibleModels.length === 0) {
+      setSelectedPlatformModelName("");
+      return;
+    }
     setSelectedPlatformModelName((current) =>
-      availableModels.some((item) => item.platformModelName === current)
+      compatibleModels.some((item) => item.platformModelName === current)
         ? current
-        : (availableModels[0]?.platformModelName ?? ""),
+        : (compatibleModels[0]?.platformModelName ?? ""),
     );
-  }, [availableModels]);
+  }, [compatibleModels]);
 
   const modelOptions = React.useMemo<ChatModelOption[]>(
     () =>
-      availableModels.map(toChatModelOption),
-    [availableModels],
+      compatibleModels.map(toChatModelOption),
+    [compatibleModels],
   );
 
   return {

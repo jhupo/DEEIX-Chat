@@ -332,6 +332,7 @@ export function AppChatArea() {
     conversationPublicID: conversationID,
     conversationModel: currentConversation?.model ?? null,
     resetToken: newConversationRevision,
+    protocol: chatKeyBindings.selectedProtocol,
   });
   const {
     conversationKey,
