@@ -1,7 +1,7 @@
 # DEEIX Chat 与 Agent Runtime 并存设计
 
-> 状态：实现设计
-> 源码基线：`dev@026c877`
+> 状态：本地 Bridge 与 Cloud Agent 后端控制面已实现；Web 工作台待实现
+> 源码基线：`dev` 当前工作树
 > 调研日期：2026-08-09
 
 ## 决策
@@ -34,12 +34,15 @@ Web /agent -> /api/v1/agent/*         -> AgentThread / Turn / Item
 | [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md) | Full Docker、tag 全量应用包、持久化运行卷和 Superadmin 在线更新 |
 | [07-sub2api-account-and-billing.md](./07-sub2api-account-and-billing.md) | 历史 Sub2API 双 authority 调研；已由 08 替代 |
 | [08-clean-slate-identity-commerce-runtime.md](./08-clean-slate-identity-commerce-runtime.md) | 只改 DEEIX：Sub2 REST 登录与 commerce BFF、保留订阅/充值/兑换 UI、Chat-only key binding、本地现有 key 的 HMAC 准入证明 |
+| [09-local-gateway-design.md](./09-local-gateway-design.md) | 复用统一 Agent/Provider 合同的 Local Gateway、Runtime Registry、Codex Adapter、WAL、认证与恢复实施基线 |
 
 ## 不变量
 
-- Sub2API 是固定外部服务；账号、套餐、余额、支付订单、兑换、订阅、Chat key 与 Runtime auth-proof 方案只修改 DEEIX Cloud/Web/Bridge，并只调用 Sub2 当前已有的 REST auth、user、payment、redeem、keys、subscriptions、usage 与 gateway routes。DEEIX 的 opaque browser session、Principal ownership、session/security UI、general/chat preferences 和 Agent ownership 保留；本地 password、2FA、identity credential、Plan/Price/Subscription/PaymentOrder/余额/ledger 与 admin commerce authority 在 cutover 删除。详见 08。
+- Agent 不建立第二套用户实体。表内 ownership 外键统一使用 `user_id -> identity_users.id`；Browser API 响应中的 `userId` 使用现有 `identity_users.public_id`（例如账户页显示的用户公开 ID），请求体不接受调用方提交用户 ID。Bridge 只持有 opaque device/profile/workspace/thread refs。
+- Sub2API 是固定外部服务；账号、套餐、余额、支付订单、兑换、订阅、Chat key 与 Runtime auth-proof 方案只修改 DEEIX Cloud/Web/Bridge，并只调用 Sub2 当前已有的 REST auth、user、payment、redeem、keys、subscriptions、usage 与 gateway routes。DEEIX 的 opaque browser session、User ownership、session/security UI、general/chat preferences 和 Agent ownership 保留；本地 password、2FA、identity credential、Plan/Price/Subscription/PaymentOrder/余额/ledger 与 admin commerce authority 在 cutover 删除。详见 08。
 - Cloud `AgentCommand` 是 allowlisted discriminated union，只含 opaque device/profile/workspace/thread refs、适用的 Bridge-issued source refs 与类型化用户输入。`thread.create` 在 Bridge 绑定前没有 source ref 和用户输入；浏览器初始输入保存在 `awaiting_thread` provisional turn，source ref 绑定后才生成唯一的 `turn.start`。transfer 命令只存 `transferTicketRef` 和 allowlisted public/source refs。Bridge 通过本地映射校验这些 refs 后生成含 canonical cwd/raw provider ID 的 local `ProviderCommand`；transfer 由 Bridge transport 执行，不传给 ProviderAdapter。
 - `ProviderAdapter.execute` 只接收 `ProviderCommand`。一个本地 TypeScript adapter interface 覆盖 lifecycle、execute 与 capabilities；Codex 使用生成 app-server types，未来 Claude 只增加 adapter 与 mapper。
+- Web 与 Cloud 只使用 provider-neutral 的 `AgentCommand`、`AgentEvent` 与 `AgentInteraction`；Cloud 根据 Thread 绑定的 Profile 选择并校验目标，本地 Runtime Registry 才选择 Adapter 并把 `ProviderCommand` 转成 provider 协议。Codex JSON-RPC、raw ID 与 canonical cwd 不越过本地边界；详见 09。
 - Web 重放固定为 `GET /api/v1/agent/threads/:thread_id/events?after_seq=N`。`AgentEvent.seq` 是 thread projection 的 `thread_seq`，与 Bridge `bridge_seq`、下行 `server_seq` 分离。
 - Bridge 上行 durable frame 先写 private `Bridge durable WAL store`，以 `(device_id, bridge_seq)` 去重。它是本地 Bridge 的嵌入式 durable crash/reconnect store，不是服务端 deployment database。云端下行只用 `agent_commands` 队列：per-device `server_seq`、交付字段和 ack 字段都在该表。Bridge 对 `transfer.execute` 先持久化无 bearer 的 sanitized command record，并在 claim receipt 持久化后才推进该 `server_seq` ack。
 - Agent server target deployment has one Full Docker Compose profile: application, PostgreSQL with pgvector, and Redis. PostgreSQL is the only server Gorm database and Redis is required for cache/wake behavior; see [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md). Current product deployment instructions remain separate until that implementation phase lands.

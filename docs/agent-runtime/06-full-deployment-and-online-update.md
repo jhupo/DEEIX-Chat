@@ -20,7 +20,7 @@ The application container uses `restart: unless-stopped`. PostgreSQL and Redis m
 
 ## v0.4 Clean-Slate Upgrade
 
-Before any v0.4 schema mutation, startup checks for populated legacy identity schema. A populated legacy identity table or data that cannot satisfy the Sub2 Principal shape causes the upgrade to stop before it changes the schema. Back up the existing PostgreSQL instance, then deploy v0.4 with a fresh PostgreSQL database or volume.
+Before any v0.4 schema mutation, startup checks for populated legacy identity schema. A populated legacy identity table or data that cannot satisfy the Sub2 User shape causes the upgrade to stop before it changes the schema. Back up the existing PostgreSQL instance, then deploy v0.4 with a fresh PostgreSQL database or volume.
 
 This is a clean-slate release: there is no data migration, compatibility layer, old-login continuity, or old-chat-history continuity. SQLite, Lite, and old local billing deployment paths remain unsupported.
 

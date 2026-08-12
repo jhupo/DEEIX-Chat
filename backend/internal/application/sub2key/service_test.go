@@ -2,6 +2,8 @@ package sub2key
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +22,10 @@ type keyTestTokens struct{}
 
 func (keyTestTokens) Sub2AccessTokenForSession(context.Context, uint, string) (string, error) {
 	return "token", nil
+}
+
+func (keyTestTokens) Sub2AccessTokensForUser(context.Context, uint) ([]string, error) {
+	return []string{"token"}, nil
 }
 
 type keyTestRepo struct{}
@@ -75,6 +81,35 @@ func TestListRemotePaginatesToTotal(t *testing.T) {
 	}
 	if len(items) != len(keys) || items[100].RemoteKeyID != 101 {
 		t.Fatalf("ListRemote() = %#v", items)
+	}
+}
+
+func TestMatchRuntimeProofUsesLiveActiveSub2Key(t *testing.T) {
+	const runtimeKey = "sk-test-runtime-key"
+	challenge := []byte("deeix-runtime-auth-proof-v1\nf6f910e920934def9a5cda479fc25251\ndevice\nprofile\nfingerprint\nnonce\n1786550460")
+	mac := hmac.New(sha256.New, []byte(runtimeKey))
+	_, _ = mac.Write(challenge)
+	service := newKeyTestService(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/user/profile":
+			writeKeyEnvelope(w, map[string]any{"id": 7})
+		case "/api/v1/keys":
+			writeKeyEnvelope(w, map[string]any{"total": 2, "items": []any{
+				map[string]any{"id": 31, "user_id": 7, "key": runtimeKey, "status": "active"},
+				map[string]any{"id": 32, "user_id": 7, "key": "sk-inactive", "status": "disabled"},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	remoteKeyID, credentialHash, err := service.MatchRuntimeProof(context.Background(), 1, 7, challenge, mac.Sum(nil))
+	if err != nil || remoteKeyID != 31 || len(credentialHash) != sha256.Size*2 || strings.Contains(credentialHash, runtimeKey) {
+		t.Fatalf("MatchRuntimeProof() = %d, %q, %v", remoteKeyID, credentialHash, err)
+	}
+	invalid := append([]byte(nil), mac.Sum(nil)...)
+	invalid[0] ^= 0xff
+	if _, _, err = service.MatchRuntimeProof(context.Background(), 1, 7, challenge, invalid); err != ErrBindingUnavailable {
+		t.Fatalf("invalid proof error = %v, want %v", err, ErrBindingUnavailable)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/admin"
+	appagentgateway "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/announcement"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/audit"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/auth"
@@ -41,6 +42,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mediaartifact"
 	platformlogger "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/logger"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
+	agentgatewayrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/agentgateway"
 	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
 	auditrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/audit"
 	channelrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/channel"
@@ -61,6 +63,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
+	agentgatewayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgateway"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
@@ -185,6 +188,11 @@ func NewApp() (*App, error) {
 
 	userRepo := userrepo.NewRepo(db)
 	userService := user.NewService(userRepo)
+	agentGatewayService, err := appagentgateway.NewService(agentgatewayrepo.NewRepo(db), cfg.DataEncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("init agent gateway service: %w", err)
+	}
+	agentGatewayModule := agentgatewayhttp.NewModule(agentgatewayhttp.NewHandler(agentGatewayService))
 	var billingModule *billinghttp.Module
 	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
@@ -208,6 +216,7 @@ func NewApp() (*App, error) {
 	authModule := authhttp.NewModule(authHandler)
 	billingModule = billinghttp.NewSub2Module(billinghttp.NewSub2Handler(appsub2commerce.NewService(authService, sub2Client, sub2commercerepo.NewRepo(db))))
 	sub2KeyService := appsub2key.NewService(sub2keyrepo.NewRepo(db), authService, sub2Client, cfg.DataEncryptionKey)
+	agentGatewayService.SetRuntimeAuth(authService, sub2KeyService)
 	sub2KeyModule := sub2keyhttp.NewModule(sub2keyhttp.NewHandler(sub2KeyService))
 	memoryRepo := memoryrepo.NewRepo(db)
 	memoryService := memory.NewService(memoryRepo)
@@ -319,6 +328,7 @@ func NewApp() (*App, error) {
 	hc := newHealthChecker(db, redisClient)
 	rateLimiter := buildRateLimiter(redisClient)
 	engine, err := platformhttp.NewEngine(runtimeCfg, log, platformhttp.Modules{
+		AgentGateway: agentGatewayModule,
 		Auth:         authModule,
 		AuthService:  authService,
 		Channel:      channelModule,

@@ -4838,6 +4838,1688 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/devices": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取当前用户的 Agent 设备",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/DeviceListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/enrollments": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "创建本地 Agent 设备配对码",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/EnrollmentResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent 设备",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/DeviceResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "撤销 Agent 设备",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/DeviceRevokeResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "重命名 Agent 设备",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "设备名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/renameDeviceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/DeviceResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/profiles": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取设备 Runtime Profile",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RuntimeProfileListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Profile 本地资源快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Profile ID",
+                        "name": "profile_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "models",
+                            "permission-profiles",
+                            "apps",
+                            "mcp",
+                            "plugins",
+                            "auth-status"
+                        ],
+                        "type": "string",
+                        "description": "资源",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ResourceSnapshotResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "刷新 Profile 本地资源快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Profile ID",
+                        "name": "profile_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "models",
+                            "permission-profiles",
+                            "apps",
+                            "mcp",
+                            "plugins",
+                            "auth-status"
+                        ],
+                        "type": "string",
+                        "description": "资源",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/workspaces": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取设备工作区",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/WorkspaceListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Workspace 本地资源快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "workspace_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "sessions",
+                            "skills",
+                            "hooks"
+                        ],
+                        "type": "string",
+                        "description": "资源",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ResourceSnapshotResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "刷新 Workspace 本地资源快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备公开 ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "workspace_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "sessions",
+                            "skills",
+                            "hooks"
+                        ],
+                        "type": "string",
+                        "description": "资源",
+                        "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/interactions/{interaction_id}/respond": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "响应 Agent 交互请求",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Interaction ID",
+                        "name": "interaction_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "类型化响应",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/RespondInteractionRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/InteractionResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent Thread",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ThreadListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "创建 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Thread 参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/StartThreadRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/StartThreadResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent Thread 详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ThreadResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "删除 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/archive": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "归档 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/compact": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "压缩 Agent Thread 上下文",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/events": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "重放 Agent Thread 事件",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "已消费的 Thread 事件序号",
+                        "name": "after_seq",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/EventListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/fork": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Fork Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ThreadResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/interactions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent 交互请求",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "pending",
+                            "responding",
+                            "resolved",
+                            "failed"
+                        ],
+                        "type": "string",
+                        "description": "状态",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/InteractionListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/name": {
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "重命名 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "新名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/RenameThreadRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/resume": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "恢复 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/reviews": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "启动 Agent 代码审查",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "审查目标",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/StartReviewRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/turns": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent Turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/TurnListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "启动 Agent Turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Turn 参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/StartTurnRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/TurnResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/threads/{thread_id}/unarchive": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "取消归档 Agent Thread",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/turns/{turn_id}/interrupt": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "中断 Agent Turn",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Turn ID",
+                        "name": "turn_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/turns/{turn_id}/steer": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "追加 Agent Turn 输入",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Turn ID",
+                        "name": "turn_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "追加输入",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/SteerTurnRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/announcements": {
             "get": {
                 "security": [
@@ -10107,6 +11789,76 @@ const docTemplate = `{
                 }
             }
         },
+        "AgentSettingsDoc": {
+            "type": "object",
+            "properties": {
+                "approvalPolicy": {
+                    "type": "string",
+                    "enum": [
+                        "untrusted",
+                        "on-request",
+                        "never"
+                    ]
+                },
+                "model": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
+                    "type": "string",
+                    "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                    ]
+                },
+                "sandboxPolicy": {
+                    "type": "string",
+                    "enum": [
+                        "read-only",
+                        "workspace-write"
+                    ]
+                }
+            }
+        },
+        "AgentTextInputDoc": {
+            "type": "object",
+            "required": [
+                "kind",
+                "text"
+            ],
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "text"
+                    ]
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "AgentgatewayErrorDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
         "AnnouncementCloseDataResponse": {
             "type": "object",
             "required": [
@@ -11036,6 +12788,36 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/CleanupLogsResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "CommandDoc": {
+            "type": "object",
+            "required": [
+                "commandId",
+                "status"
+            ],
+            "properties": {
+                "commandId": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "CommandResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/CommandDoc"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -12371,6 +14153,106 @@ const docTemplate = `{
                 }
             }
         },
+        "DeviceDoc": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "deviceId",
+                "lastSeenAt",
+                "name",
+                "platform",
+                "status",
+                "updatedAt",
+                "userId"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "deviceId": {
+                    "type": "string"
+                },
+                "lastSeenAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "userId": {
+                    "type": "string"
+                }
+            }
+        },
+        "DeviceListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/DeviceDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "DeviceResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/DeviceDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "DeviceRevokeDoc": {
+            "type": "object",
+            "required": [
+                "revoked"
+            ],
+            "properties": {
+                "revoked": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "DeviceRevokeResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/DeviceRevokeDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "EmailRegistrationCompleteRequest": {
             "type": "object",
             "required": [
@@ -12442,6 +14324,36 @@ const docTemplate = `{
                 }
             }
         },
+        "EnrollmentDataDoc": {
+            "type": "object",
+            "required": [
+                "enrollmentCode",
+                "expiresAt"
+            ],
+            "properties": {
+                "enrollmentCode": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "EnrollmentResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/EnrollmentDataDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "Envelope": {
             "type": "object",
             "required": [
@@ -12458,6 +14370,56 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "requestId": {
+                    "type": "string"
+                }
+            }
+        },
+        "EventDoc": {
+            "type": "object",
+            "required": [
+                "eventId",
+                "kind",
+                "occurredAt",
+                "payload",
+                "seq",
+                "threadId"
+            ],
+            "properties": {
+                "eventId": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "occurredAt": {
+                    "type": "string"
+                },
+                "payload": {},
+                "seq": {
+                    "type": "integer"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "turnId": {
+                    "type": "string"
+                }
+            }
+        },
+        "EventListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/EventDoc"
+                    }
+                },
+                "errorMsg": {
                     "type": "string"
                 }
             }
@@ -12827,6 +14789,71 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/ImportUpstreamModelsResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "InteractionDoc": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "interactionId",
+                "kind",
+                "request",
+                "status",
+                "threadId"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "interactionId": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "request": {},
+                "status": {
+                    "type": "string"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "turnId": {
+                    "type": "string"
+                }
+            }
+        },
+        "InteractionListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/InteractionDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "InteractionResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/InteractionDoc"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -14932,6 +16959,17 @@ const docTemplate = `{
                 }
             }
         },
+        "RenameThreadRequestDoc": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "ReorderConversationProjectsRequest": {
             "type": "object",
             "required": [
@@ -15005,6 +17043,129 @@ const docTemplate = `{
                     "$ref": "#/definitions/CircuitResetResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ResourceSnapshotDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "deviceId",
+                "profileId",
+                "refreshedAt",
+                "resource",
+                "scope"
+            ],
+            "properties": {
+                "data": {},
+                "deviceId": {
+                    "type": "string"
+                },
+                "profileId": {
+                    "type": "string"
+                },
+                "refreshedAt": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": [
+                        "profile",
+                        "workspace"
+                    ]
+                },
+                "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "ResourceSnapshotResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ResourceSnapshotDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "RespondInteractionRequestDoc": {
+            "type": "object",
+            "required": [
+                "response"
+            ],
+            "properties": {
+                "response": {
+                    "type": "object",
+                    "required": [
+                        "kind"
+                    ],
+                    "properties": {
+                        "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "content": {},
+                        "decision": {
+                            "type": "string",
+                            "enum": [
+                                "accept",
+                                "decline"
+                            ]
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "approval",
+                                "user-input",
+                                "permission",
+                                "mcp-elicitation",
+                                "dynamic-tool"
+                            ]
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": [
+                                "turn",
+                                "session"
+                            ]
+                        },
+                        "success": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        },
+        "ReviewTargetDoc": {
+            "type": "object",
+            "required": [
+                "kind"
+            ],
+            "properties": {
+                "branch": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "working-tree",
+                        "base-branch",
+                        "commit"
+                    ]
+                },
+                "sha": {
                     "type": "string"
                 }
             }
@@ -15207,6 +17368,59 @@ const docTemplate = `{
                 },
                 "userID": {
                     "type": "integer"
+                }
+            }
+        },
+        "RuntimeProfileDoc": {
+            "type": "object",
+            "required": [
+                "deviceId",
+                "leaseExpiresAt",
+                "profileId",
+                "provider",
+                "status",
+                "verifiedAt"
+            ],
+            "properties": {
+                "deviceId": {
+                    "type": "string"
+                },
+                "leaseExpiresAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                },
+                "profileId": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "verifiedAt": {
+                    "type": "string",
+                    "x-nullable": true,
+                    "x-omitempty": false
+                }
+            }
+        },
+        "RuntimeProfileListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/RuntimeProfileDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
                 }
             }
         },
@@ -15833,6 +18047,115 @@ const docTemplate = `{
                 }
             }
         },
+        "StartReviewRequestDoc": {
+            "type": "object",
+            "required": [
+                "target"
+            ],
+            "properties": {
+                "target": {
+                    "$ref": "#/definitions/ReviewTargetDoc"
+                }
+            }
+        },
+        "StartThreadDataDoc": {
+            "type": "object",
+            "required": [
+                "thread"
+            ],
+            "properties": {
+                "thread": {
+                    "$ref": "#/definitions/ThreadDoc"
+                },
+                "turn": {
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/TurnDoc"
+                        }
+                    ],
+                    "x-nullable": true
+                }
+            }
+        },
+        "StartThreadRequestDoc": {
+            "type": "object",
+            "required": [
+                "deviceId",
+                "profileId",
+                "settings",
+                "workspaceId"
+            ],
+            "properties": {
+                "deviceId": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentTextInputDoc"
+                    }
+                },
+                "profileId": {
+                    "type": "string"
+                },
+                "settings": {
+                    "$ref": "#/definitions/AgentSettingsDoc"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "StartThreadResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/StartThreadDataDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "StartTurnRequestDoc": {
+            "type": "object",
+            "required": [
+                "input",
+                "settings"
+            ],
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentTextInputDoc"
+                    }
+                },
+                "settings": {
+                    "$ref": "#/definitions/AgentSettingsDoc"
+                }
+            }
+        },
+        "SteerTurnRequestDoc": {
+            "type": "object",
+            "required": [
+                "input"
+            ],
+            "properties": {
+                "input": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/AgentTextInputDoc"
+                    }
+                }
+            }
+        },
         "StorageQuotaResponse": {
             "type": "object",
             "required": [
@@ -16265,6 +18588,78 @@ const docTemplate = `{
                 }
             }
         },
+        "ThreadDoc": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "deviceId",
+                "profileId",
+                "status",
+                "threadId",
+                "title",
+                "updatedAt",
+                "workspaceId"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "deviceId": {
+                    "type": "string"
+                },
+                "profileId": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "ThreadListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ThreadDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ThreadResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ThreadDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "ToolListResponse": {
             "type": "object",
             "required": [
@@ -16379,6 +18774,66 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/ToolResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "TurnDoc": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "status",
+                "threadId",
+                "turnId",
+                "updatedAt"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "turnId": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "TurnListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/TurnDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "TurnResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/TurnDoc"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -17586,6 +20041,55 @@ const docTemplate = `{
                 }
             }
         },
+        "WorkspaceDoc": {
+            "type": "object",
+            "required": [
+                "deviceId",
+                "lastSeenAt",
+                "name",
+                "profileId",
+                "status",
+                "workspaceId"
+            ],
+            "properties": {
+                "deviceId": {
+                    "type": "string"
+                },
+                "lastSeenAt": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "profileId": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "WorkspaceListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/WorkspaceDoc"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "WritePromptPresetRequest": {
             "type": "object",
             "required": [
@@ -17647,6 +20151,17 @@ const docTemplate = `{
                 "trigger": {
                     "type": "string",
                     "maxLength": 64
+                }
+            }
+        },
+        "renameDeviceRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
                 }
             }
         },

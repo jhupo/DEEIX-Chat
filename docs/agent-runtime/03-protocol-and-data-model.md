@@ -57,7 +57,7 @@ POST   /api/v1/agent/workspaces/:workspace_id/uploads
 GET    /api/v1/agent/artifacts/:artifact_id/download
 ```
 
-Picker is a queued Bridge command. Files use signed opaque `file_ref`; requests never include a local absolute path. Upload and artifact download endpoints issue durable `agent_transfer_tickets` rows after principal/workspace ownership checks and return the ticket public ref and state, not a transfer bearer.
+Picker is a queued Bridge command. Files use signed opaque `file_ref`; requests never include a local absolute path. Upload and artifact download endpoints issue durable `agent_transfer_tickets` rows after user/workspace ownership checks and return the ticket public ref and state, not a transfer bearer.
 
 ### 2.4 Thread lifecycle
 
@@ -101,7 +101,7 @@ Serialized command payloads carry public IDs, applicable `sourceThreadRef`, `sou
 Every HTTP mutation uses this order:
 
 1. Authenticate the user, bind DTO, perform pure structural/size/enum validation, normalize the accepted request, and calculate `request_hash`.
-2. Start a transaction and claim/read `(principal_id, operation, idempotency_key)`. A committed matching-hash record returns its saved response immediately, before ownership, capability, current-state or CAS validation. A differing hash returns conflict.
+2. Start a transaction and claim/read `(user_id, operation, idempotency_key)`. A committed matching-hash record returns its saved response immediately, before ownership, capability, current-state or CAS validation. A differing hash returns conflict.
 3. Only a newly inserted record continues with ownership/capability/current-state validation, aggregate mutation/CAS, command/audit creation, response persistence, and commit.
 4. Concurrent requests lock/read the same record and observe that committed response after the first transaction finishes.
 
@@ -134,9 +134,9 @@ GET wss://HOST/api/v1/agent/bridge/connect
 Sec-WebSocket-Protocol: deeix.bridge.v1, deeix.auth.<connection-token>
 ```
 
-Enrollment code, challenge nonce and ordinary `connection` token are issued as deterministic Base64URL bearers using Go standard-library HMAC-SHA-256 over active derivation key version, purpose/domain separator, immutable random issuance `public_id`, `principal_id`/device/credential version, expiry and normalized issuance fields. Database rows store only SHA-256 `token_hash`, `derivation_key_version` and immutable issuance fields; raw bearer, seed and key material are absent. Ordinary connection tokens remain short-lived and one-use. A `settlement` token is the only second kind: while device is `revoking` and delivery-started work remains, a fresh device-key-signed challenge may issue a short-lived one-use bearer derived/hashed with purpose/domain `bridge-settlement`, device, current credential version, immutable issuance ID/expiry and immutable `settlement_upper_server_seq` equal to the highest already delivery-started command eligible at issuance. Consumption is one conditional update: `consumed_at IS NULL AND expires_at > now`. Upgrade validates the device key/token, marks the connection credential consumed, selects `deeix.bridge.v1`, and creates ordinary or settlement-scoped in-memory epoch. Final revoke/credential rotation invalidates settlement tokens. This subprotocol transport works with Node 24 native `WebSocket` without placing token text in URL logs.
+Enrollment code, challenge nonce and ordinary `connection` token are issued as deterministic Base64URL bearers using Go standard-library HMAC-SHA-256 over active derivation key version, purpose/domain separator, immutable random issuance `public_id`, `user_id`/device/credential version, expiry and normalized issuance fields. Database rows store only SHA-256 `token_hash`, `derivation_key_version` and immutable issuance fields; raw bearer, seed and key material are absent. Ordinary connection tokens remain short-lived and one-use. A `settlement` token is the only second kind: while device is `revoking` and delivery-started work remains, a fresh device-key-signed challenge may issue a short-lived one-use bearer derived/hashed with purpose/domain `bridge-settlement`, device, current credential version, immutable issuance ID/expiry and immutable `settlement_upper_server_seq` equal to the highest already delivery-started command eligible at issuance. Consumption is one conditional update: `consumed_at IS NULL AND expires_at > now`. Upgrade validates the device key/token, marks the connection credential consumed, selects `deeix.bridge.v1`, and creates ordinary or settlement-scoped in-memory epoch. Final revoke/credential rotation invalidates settlement tokens. This subprotocol transport works with Node 24 native `WebSocket` without placing token text in URL logs.
 
-A settlement-scoped epoch permits only hello/welcome, resend/ack for already delivery-started command rows at or below `settlement_upper_server_seq`, result/error/recovery/provider frames tied to that settlement set, and existing transfer receipt/data required to finish those commands. It rejects new Principal-scoped commands, resource refresh/mutation, new transfer claims, unrelated provider frames and every command above the bound. A repeat disconnect may obtain another one-use settlement token through a fresh signed challenge while unsettled work remains; ordinary credential issuance stays blocked.
+A settlement-scoped epoch permits only hello/welcome, resend/ack for already delivery-started command rows at or below `settlement_upper_server_seq`, result/error/recovery/provider frames tied to that settlement set, and existing transfer receipt/data required to finish those commands. It rejects new User-scoped commands, resource refresh/mutation, new transfer claims, unrelated provider frames and every command above the bound. A repeat disconnect may obtain another one-use settlement token through a fresh signed challenge while unsettled work remains; ordinary credential issuance stays blocked.
 
 Derivation key ring retains an old key until every issuance under that version has expired and its idempotency replay window has elapsed. Key material is server secret/KMS configuration only; database data contains key version, hash and immutable issuance fields.
 
@@ -220,23 +220,23 @@ export type AgentEvent = {
 
 ## 5. Persistent model
 
-All public IDs are immutable opaque strings. Cloud source refs are opaque text values. Raw provider IDs use text types only in Local Bridge durable mappings. JSON values carry schema version and are encrypted/redacted where they can contain user content. In the clean-slate identity schema, every ownership foreign key below is `principal_id`; it replaces the current local `user_id` naming without introducing a second owner authority.
+All public IDs are immutable opaque strings. Cloud source refs are opaque text values. Raw provider IDs use text types only in Local Bridge durable mappings. JSON values carry schema version and are encrypted/redacted where they can contain user content. Every ownership foreign key below is `user_id` and references the existing `identity_users.id`; Browser DTOs expose the owner's existing `identity_users.public_id` and never accept a caller-provided user ID.
 
 ### 5.1 `agent_devices`
 
 ```text
-id, public_id, principal_id, name, platform_json, status, device_public_key,
+id, public_id, user_id, name, platform_json, status, device_public_key,
 credential_version, bridge_version, protocol_version,
 next_server_seq, last_acked_server_seq, last_acked_bridge_seq,
 last_seen_at, revoked_at, created_at, updated_at
 ```
 
-Unique `public_id`; indexes `(principal_id, status, last_seen_at)`. `next_server_seq` and `last_acked_server_seq` are delivery cursors. `last_acked_bridge_seq` is the largest contiguous Bridge frame cursor already applied/projected, not an inbox-receipt cursor; all are updated under the configured database transaction rules.
+Unique `public_id`; indexes `(user_id, status, last_seen_at)`. `next_server_seq` and `last_acked_server_seq` are delivery cursors. `last_acked_bridge_seq` is the largest contiguous Bridge frame cursor already applied/projected, not an inbox-receipt cursor; all are updated under the configured database transaction rules.
 
 ### 5.2 `agent_device_credentials`
 
 ```text
-id, public_id, principal_id, device_id NULL, kind, token_hash, derivation_key_version,
+id, public_id, user_id, device_id NULL, kind, token_hash, derivation_key_version,
 credential_version, settlement_upper_server_seq NULL, expires_at, consumed_at, created_at
 ```
 
@@ -264,14 +264,14 @@ Unique `(device_id, local_ref)` and `public_id`; index `(device_id, status)`. `l
 ### 5.5 `agent_threads`
 
 ```text
-id, public_id, principal_id, device_id, runtime_profile_id, workspace_id,
+id, public_id, user_id, device_id, runtime_profile_id, workspace_id,
 source_thread_ref NULL, source_kind, title, preview, labels_json,
 metadata_json, status, is_pinned, archived_at, forked_from_thread_id,
 git_json, last_turn_id, last_thread_seq, last_synced_at,
 created_at, updated_at, deleted_at
 ```
 
-Partial unique `(runtime_profile_id, source_thread_ref)` where `source_thread_ref` is non-NULL, plus unique `public_id`; indexes `(principal_id, device_id, workspace_id, updated_at)` and `(workspace_id, status)`. This schema has no ConversationProject relation. Thread create begins with NULL source ref; Bridge result/event backfills its high-entropy stable source ref atomically. In that same transaction, a locked provisional `awaiting_thread` turn may receive its sole initial `turn.start` command; duplicate result/event sees the existing linked command and creates none.
+Partial unique `(runtime_profile_id, source_thread_ref)` where `source_thread_ref` is non-NULL, plus unique `public_id`; indexes `(user_id, device_id, workspace_id, updated_at)` and `(workspace_id, status)`. This schema has no ConversationProject relation. Thread create begins with NULL source ref; Bridge result/event backfills its high-entropy stable source ref atomically. In that same transaction, a locked provisional `awaiting_thread` turn may receive its sole initial `turn.start` command; duplicate result/event sees the existing linked command and creates none.
 
 `source_thread_ref`, `source_turn_ref`, `source_item_ref` and `source_request_ref` are high-entropy stable opaque values issued by Bridge. They are not derivable from a raw provider ID. Cloud tables, API DTOs and command aggregates carry public IDs/source refs only; Local Bridge uses its durable mapping to resolve the corresponding raw IDs for `ProviderCommand`.
 
@@ -295,13 +295,13 @@ Partial unique `(thread_id, source_turn_ref)` where `source_turn_ref` is non-NUL
 ### 5.7 `agent_interactions`
 
 ```text
-id, public_id, principal_id, thread_id, turn_id NULL, runtime_profile_id, source_request_ref,
+id, public_id, user_id, thread_id, turn_id NULL, runtime_profile_id, source_request_ref,
 scope, kind, request_encrypted_json, display_json, response_encrypted_json, status,
 terminal_code NULL, expires_at, responded_at, resolved_at, provider_cleared_at, terminal_at NULL,
 created_at, updated_at
 ```
 
-Unique `(runtime_profile_id, source_request_ref)` and `public_id`; indexes `(thread_id, status, expires_at)` and `(principal_id, status)`. `scope` is `turn` or `thread`: turn scope requires non-NULL `turn_id` related to `thread_id`; thread scope requires NULL `turn_id` and is used by no-turn MCP elicitation. Thread/profile/source request ref are always present. `pending` may expire. A `responding` interaction may expire atomically with its response command only while that command has not begun delivery; after delivery starts, deadline enforcement belongs to Bridge and the interaction remains `responding` until provider resolved/cleared or linked Bridge terminal result/recovery writes resolved, failed, or expired as appropriate. Thread soft deletion retains interaction/audit data for configured history window, then retention worker redacts encrypted request/response before physical purge.
+Unique `(runtime_profile_id, source_request_ref)` and `public_id`; indexes `(thread_id, status, expires_at)` and `(user_id, status)`. `scope` is `turn` or `thread`: turn scope requires non-NULL `turn_id` related to `thread_id`; thread scope requires NULL `turn_id` and is used by no-turn MCP elicitation. Thread/profile/source request ref are always present. `pending` may expire. A `responding` interaction may expire atomically with its response command only while that command has not begun delivery; after delivery starts, deadline enforcement belongs to Bridge and the interaction remains `responding` until provider resolved/cleared or linked Bridge terminal result/recovery writes resolved, failed, or expired as appropriate. Thread soft deletion retains interaction/audit data for configured history window, then retention worker redacts encrypted request/response before physical purge.
 
 ### 5.8 `agent_events`
 
@@ -317,7 +317,7 @@ Unique `(device_id, bridge_seq)`; `projection_state` is `staged` or `applied`; p
 ### 5.9 `agent_commands`
 
 ```text
-id, public_id, principal_id, device_id, runtime_profile_id NULL, workspace_id NULL,
+id, public_id, user_id, device_id, runtime_profile_id NULL, workspace_id NULL,
 thread_id NULL, turn_id NULL, interaction_id NULL, idempotency_record_id NULL,
 operation, initial_thread_create boolean NOT NULL default false, server_seq, payload_json, status, attempt_count, delivery_started_at NULL, dispatched_at, last_sent_at,
 acked_at, completed_at, result_json, error_code, error_json, expires_at,
@@ -329,24 +329,24 @@ Unique `(device_id, server_seq)` and partial unique `(turn_id) WHERE operation='
 ### 5.10 `agent_idempotency_records`
 
 ```text
-id, public_id, principal_id, operation, idempotency_key, request_hash,
+id, public_id, user_id, operation, idempotency_key, request_hash,
 response_status, response_skeleton_json, secret_kind NULL, secret_ref NULL, command_id NULL,
 created_at, expires_at
 ```
 
-Unique `(principal_id, operation, idempotency_key)`; indexes `(expires_at)`, `(command_id)` and `(secret_ref)`. `request_hash` is calculated from normalized validated request content. `response_skeleton_json` excludes bearer token material. For enrollment/challenge/connection issuance, `secret_kind` and `secret_ref` point to credential public ID; initial response and same-hash replay rebuild bearer from the issuance row, verify its SHA-256 against `token_hash`, then attach it to the response skeleton. Transfer issuance records the ticket public ID but returns no bearer; dispatcher reconstruction is WSS-only. This works after process restart and even after credential consumption: replay returns the same credential bearer while consume CAS still permits only one use. Retention expires response skeleton after the retry window while retaining minimal audit evidence. Every HTTP mutation transaction claims/inserts the record, changes aggregate state, creates/links command when needed, and stores response before commit. Labels/share policy mutations follow the same transaction. Concurrent same-key requests lock/read the record rather than creating a second command.
+Unique `(user_id, operation, idempotency_key)`; indexes `(expires_at)`, `(command_id)` and `(secret_ref)`. `request_hash` is calculated from normalized validated request content. `response_skeleton_json` excludes bearer token material. For enrollment/challenge/connection issuance, `secret_kind` and `secret_ref` point to credential public ID; initial response and same-hash replay rebuild bearer from the issuance row, verify its SHA-256 against `token_hash`, then attach it to the response skeleton. Transfer issuance records the ticket public ID but returns no bearer; dispatcher reconstruction is WSS-only. This works after process restart and even after credential consumption: replay returns the same credential bearer while consume CAS still permits only one use. Retention expires response skeleton after the retry window while retaining minimal audit evidence. Every HTTP mutation transaction claims/inserts the record, changes aggregate state, creates/links command when needed, and stores response before commit. Labels/share policy mutations follow the same transaction. Concurrent same-key requests lock/read the record rather than creating a second command.
 
 ### 5.11 `agent_artifacts`, `agent_thread_shares`, and `agent_transfer_tickets`
 
 ```text
-agent_artifacts(id, public_id, principal_id, thread_id, turn_id NULL, item_id NULL,
+agent_artifacts(id, public_id, user_id, thread_id, turn_id NULL, item_id NULL,
   workspace_id, file_ref, object_key NULL, name, mime_type, byte_size, sha256,
   status, display_json, expires_at NULL, created_at, updated_at, deleted_at)
 
-agent_thread_shares(id, public_id, principal_id, thread_id, snapshot_json,
+agent_thread_shares(id, public_id, user_id, thread_id, snapshot_json,
   status, expires_at NULL, revoked_at NULL, created_at, updated_at)
 
-agent_transfer_tickets(id, public_id, principal_id, device_id, workspace_id,
+agent_transfer_tickets(id, public_id, user_id, device_id, workspace_id,
   artifact_id NULL, direction, token_hash, derivation_key_version, object_key NULL, file_ref NULL,
   target_ref NULL, sha256, byte_size, mime_type, status, expires_at,
   claim_command_id NULL, claim_receipt_ref NULL, consumed_at NULL, created_at, updated_at)
@@ -354,7 +354,7 @@ agent_transfer_tickets(id, public_id, principal_id, device_id, workspace_id,
 
 Artifact unique key is `(workspace_id, file_ref)` while the file ref is active; index `(thread_id, created_at)`. Share unique `public_id`; index `(thread_id, status)`. Transfer ticket unique keys are `public_id` and `token_hash`; index `(workspace_id, status, expires_at)`. Token text never enters the database; only `token_hash` is stored. Artifacts use a local signed file ref until a transfer creates `object_key`; share stores only a redacted snapshot.
 
-Transfer bearer uses the same HMAC-SHA-256 derivation scheme with ticket purpose/domain, ticket public ID, `principal_id`/device/workspace/direction and expiry; DB stores only `token_hash`, `derivation_key_version` and immutable ticket fields. On every transfer command send or replay, dispatcher rebuilds the bearer, verifies `token_hash`, and puts it only in the ephemeral WSS execute envelope. Bridge validates the envelope and first writes a sanitized incoming record with `serverSeq`, command ID and ticket/public/source refs, with no bearer. It then calls the separately authenticated claim route using its device identity, command ID, ticket ref and in-memory bearer. The typed claim validates principal/device/workspace/direction and CAS-updates `status=issued AND consumed_at IS NULL AND expires_at > now` to `consuming`, recording `claim_command_id` and returning durable `claim_receipt_ref` bound to that Principal, device, command and ticket. A retry of that same device and command returns the same receipt; another command or device does not acquire the claim. Bridge persists this non-secret receipt before advancing/acking `serverSeq`, then zeroes bearer. Authenticated directional streaming uses Bridge device authentication plus the persisted receipt with `PUT .../data` for upload and `GET .../data` for download, never the transfer bearer, while that claim is `consuming`. Before and during streaming, Bridge and server validate Principal ownership, device, workspace, direction, SHA-256, byte size, MIME type, canonical root and file ref. A verified terminal transfer CAS-moves `consuming -> consumed` with `consumed_at`; hash mismatch or transport failure CAS-moves it to `failed`. A crash before durable claim receipt/ack leaves the command unacknowledged, so server redelivery re-derives the same bearer; a crash after durable receipt/ack resumes the transfer from the receipt with no bearer and no second consumption. Bridge keeps bearer out of durable WAL/result-cache payloads and zeroes it after receipt persistence; only redacted receipt metadata remains after terminal result. Retention marks elapsed issued/consuming rows `expired` and cleans temporary staging/object data. Thread deletion schedules artifact ticket expiry/object cleanup and share revocation, then follows aggregate retention. Canonical local path is never stored.
+Transfer bearer uses the same HMAC-SHA-256 derivation scheme with ticket purpose/domain, ticket public ID, `user_id`/device/workspace/direction and expiry; DB stores only `token_hash`, `derivation_key_version` and immutable ticket fields. On every transfer command send or replay, dispatcher rebuilds the bearer, verifies `token_hash`, and puts it only in the ephemeral WSS execute envelope. Bridge validates the envelope and first writes a sanitized incoming record with `serverSeq`, command ID and ticket/public/source refs, with no bearer. It then calls the separately authenticated claim route using its device identity, command ID, ticket ref and in-memory bearer. The typed claim validates user/device/workspace/direction and CAS-updates `status=issued AND consumed_at IS NULL AND expires_at > now` to `consuming`, recording `claim_command_id` and returning durable `claim_receipt_ref` bound to that User, device, command and ticket. A retry of that same device and command returns the same receipt; another command or device does not acquire the claim. Bridge persists this non-secret receipt before advancing/acking `serverSeq`, then zeroes bearer. Authenticated directional streaming uses Bridge device authentication plus the persisted receipt with `PUT .../data` for upload and `GET .../data` for download, never the transfer bearer, while that claim is `consuming`. Before and during streaming, Bridge and server validate User ownership, device, workspace, direction, SHA-256, byte size, MIME type, canonical root and file ref. A verified terminal transfer CAS-moves `consuming -> consumed` with `consumed_at`; hash mismatch or transport failure CAS-moves it to `failed`. A crash before durable claim receipt/ack leaves the command unacknowledged, so server redelivery re-derives the same bearer; a crash after durable receipt/ack resumes the transfer from the receipt with no bearer and no second consumption. Bridge keeps bearer out of durable WAL/result-cache payloads and zeroes it after receipt persistence; only redacted receipt metadata remains after terminal result. Retention marks elapsed issued/consuming rows `expired` and cleans temporary staging/object data. Thread deletion schedules artifact ticket expiry/object cleanup and share revocation, then follows aggregate retention. Canonical local path is never stored.
 
 ### 5.12 `agent_cleanup_jobs`
 
@@ -372,14 +372,14 @@ lease_owner NULL, leased_at NULL, leased_until NULL, completed_at NULL, created_
 
 1. Authenticate, complete pure DTO validation, normalize request and calculate `request_hash`.
 2. Under transaction, claim/read idempotency record. Matching committed record returns its saved response; differing hash returns conflict.
-3. New record validates Principal/device/profile/workspace ownership and ready capability, inserts provisional AgentThread `queued`, and, when browser supplied initial input, inserts one AgentTurn `awaiting_thread` with encrypted input/settings. It allocates only `thread.create` `server_seq`, inserts its command/audit/idempotent response, and does not serialize input into that command.
+3. New record validates User/device/profile/workspace ownership and ready capability, inserts provisional AgentThread `queued`, and, when browser supplied initial input, inserts one AgentTurn `awaiting_thread` with encrypted input/settings. It allocates only `thread.create` `server_seq`, inserts its command/audit/idempotent response, and does not serialize input into that command.
 4. Commit, publish Hub wake-up, return thread plus command status. On the first Bridge `thread/start` result/event, projector locks the thread and provisional turn, binds `source_thread_ref`, conditionally changes `awaiting_thread -> queued`, allocates the next device `server_seq`, inserts exactly one `turn.start(initial_thread_create=true)` with stored input, and commits the projection together. Recovery first reconciles provider thread/turn state and source mappings; a recovered binding takes this same conditional-transition/partial-unique path. Duplicate result/event or restart creates none, and ambiguous acceptance is `outcome_unknown` rather than another provider thread or turn. A terminal thread-create failure, cancellation or expiry terminalizes its awaiting turn with matching normalized code/time.
 
 ### 6.2 `StartAgentTurn`
 
 1. Authenticate, complete pure DTO validation, normalize request and calculate `request_hash`.
 2. Transactionally claim/read idempotency record. Matching committed record returns saved response before thread status, ownership or active-turn validation; differing hash returns conflict.
-3. New record validates thread status, Principal ownership, matching workspace/profile, capability and no conflicting active turn; it inserts AgentTurn `queued`, updates thread summary, allocates command sequence, inserts linked typed command, audit and saved response.
+3. New record validates thread status, User ownership, matching workspace/profile, capability and no conflicting active turn; it inserts AgentTurn `queued`, updates thread summary, allocates command sequence, inserts linked typed command, audit and saved response.
 4. Commit then notify dispatcher. Provider event makes turn `in_progress`; terminal provider event decides completed/interrupted/failed.
 
 ### 6.3 command dispatcher
@@ -398,18 +398,18 @@ Business state flow for normal commands is `queued -> dispatched -> completed`; 
 
 1. Authenticate, complete pure response-shape/size/enum validation, normalize response and calculate `request_hash`.
 2. In a transaction claim/read idempotency record. Matching committed record returns the first response even when the interaction is already `responding`; differing hash returns conflict.
-3. New record validates Principal/thread/device/profile relation and `status=pending` with unexpired deadline. Turn scope also validates the supplied turn relation; thread scope validates thread/profile/request ID and permits no turn. It then CAS updates `pending -> responding`, allocates `server_seq`, inserts linked `interaction.respond` command, audit and saved response.
+3. New record validates User/thread/device/profile relation and `status=pending` with unexpired deadline. Turn scope also validates the supplied turn relation; thread scope validates thread/profile/request ID and permits no turn. It then CAS updates `pending -> responding`, allocates `server_seq`, inserts linked `interaction.respond` command, audit and saved response.
 4. Commit and dispatch. Provider resolved/cleared event may close a pending or responding interaction, but a late provider event never regresses a terminal row. Expiry worker expires `pending`; for `responding`, it atomically expires command/interaction and emits a tombstone only before first delivery attempt. After delivery starts it leaves the interaction `responding`; Bridge checks the command deadline before invocation/recovery and settles resolved, failed, or expired through its terminal frame. Cloud cancellation/revoke follows the same pre-delivery boundary; retryable pre-write delivery failure keeps it responding.
 
 ### 6.6 Browser replay, restart and revoke
 
-With a mounted reducer, Browser opens the Redis notifier subscription first and replays `thread_seq > lastAppliedSeq` strictly from its existing cursor; it never replaces that cursor from a thread header. On cold load, cursor gap or compaction recovery, Browser subscribes first, fetches one atomic aggregate snapshot of thread plus included turns/items/interactions and `snapshotSeq` from one PostgreSQL read snapshot, replaces reducer state, sets `lastAppliedSeq=snapshotSeq`, then replays events `> snapshotSeq`. Notifier payload is wake-up only, so every wake queries again. The HTTP snapshot DTO carries `snapshotSeq`; tests commit events between subscribe, snapshot and replay. API restart restores commands from PostgreSQL; Bridge reconnect resends WAL frames and receives commands above contiguous ack. Provider restart reconciles current thread/turn state before marking a missing active turn interrupted. Device revoke uses `revoking` settlement: it blocks new commands and ordinary credential issuance, terminalizes only never-delivered work and pending interactions, and keeps an authenticated bounded settlement-only connection for delivery-started work until Bridge result/recovery settles it. It then finalizes `revoked`, rotates credential and closes connection; offline unsettled devices remain `revoking`. `DeleteAccountHard` first writes an independent `sub2_revocation_cleanup` record containing deletion-specific encrypted refresh-token material/ref, immutable `not_after`, and no Principal/account foreign key. `not_after` is calculated from conservative receipt time plus startup-mandatory pinned-Sub2 `sub2_refresh_token_max_ttl` and safety margin. The same transaction revokes DEEIX local access/session, accepts no late frame, and deletes DEEIX Principal/key/device/content aggregates without removing that retry material. After commit, only the cleanup worker may call Sub2 `POST /auth/logout`; its response is audit evidence only, so cleanup remains `pending` and retains the token/ref until `not_after` passes, then securely erases it and marks `completed`. It never calls `/auth/revoke-all-sessions`, does not invalidate unrelated Sub2 client sessions, does not delete the Sub2 account, and does not claim to cancel local provider activity. Late provider frames remain non-regressing.
+With a mounted reducer, Browser opens the Redis notifier subscription first and replays `thread_seq > lastAppliedSeq` strictly from its existing cursor; it never replaces that cursor from a thread header. On cold load, cursor gap or compaction recovery, Browser subscribes first, fetches one atomic aggregate snapshot of thread plus included turns/items/interactions and `snapshotSeq` from one PostgreSQL read snapshot, replaces reducer state, sets `lastAppliedSeq=snapshotSeq`, then replays events `> snapshotSeq`. Notifier payload is wake-up only, so every wake queries again. The HTTP snapshot DTO carries `snapshotSeq`; tests commit events between subscribe, snapshot and replay. API restart restores commands from PostgreSQL; Bridge reconnect resends WAL frames and receives commands above contiguous ack. Provider restart reconciles current thread/turn state before marking a missing active turn interrupted. Device revoke uses `revoking` settlement: it blocks new commands and ordinary credential issuance, terminalizes only never-delivered work and pending interactions, and keeps an authenticated bounded settlement-only connection for delivery-started work until Bridge result/recovery settles it. It then finalizes `revoked`, rotates credential and closes connection; offline unsettled devices remain `revoking`. `DeleteAccountHard` first writes an independent `sub2_revocation_cleanup` record containing deletion-specific encrypted refresh-token material/ref, immutable `not_after`, and no User/account foreign key. `not_after` is calculated from conservative receipt time plus startup-mandatory pinned-Sub2 `sub2_refresh_token_max_ttl` and safety margin. The same transaction revokes DEEIX local access/session, accepts no late frame, and deletes DEEIX User/key/device/content aggregates without removing that retry material. After commit, only the cleanup worker may call Sub2 `POST /auth/logout`; its response is audit evidence only, so cleanup remains `pending` and retains the token/ref until `not_after` passes, then securely erases it and marks `completed`. It never calls `/auth/revoke-all-sessions`, does not invalidate unrelated Sub2 client sessions, does not delete the Sub2 account, and does not claim to cancel local provider activity. Late provider frames remain non-regressing.
 
-Deletion status is operation-scoped: a Principal-independent barrier links all current, pending and late candidate cleanup rows for the stable Sub2 account; only after every member's immutable `not_after` and the operation `deletion_not_after` pass does the receipt report `completed`.
+Deletion status is operation-scoped: a User-independent barrier links all current, pending and late candidate cleanup rows for the stable Sub2 account; only after every member's immutable `not_after` and the operation `deletion_not_after` pass does the receipt report `completed`.
 
-Workspace deletion and retained sensitive account mutations first consume a short-lived, single-use `principal_session_step_up_grant` bound to the current Principal session, exact purpose and current account/token version in the same transaction. Cross-session, wrong-purpose, expired, replayed, session-revoked or token-rotated grants fail; unsupported factors have no fallback mutation path.
+Workspace deletion and retained sensitive account mutations first consume a short-lived, single-use `user_session_step_up_grant` bound to the current User session, exact purpose and current account/token version in the same transaction. Cross-session, wrong-purpose, expired, replayed, session-revoked or token-rotated grants fail; unsupported factors have no fallback mutation path.
 
-Protected Browser route authentication is Principal-session cookie only: middleware validates the hashed opaque session, expiry/revocation, active Principal and local role before handler; legacy Browser Bearer and caller-provided role claims fail. Bridge and deletion-receipt verifiers remain separate.
+Protected Browser route authentication is User-session cookie only: middleware validates the hashed opaque session, expiry/revocation, active User and local role before handler; legacy Browser Bearer and caller-provided role claims fail. Bridge and deletion-receipt verifiers remain separate.
 
 ### 6.7 Aggregate state machines
 

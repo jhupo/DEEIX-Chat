@@ -3,6 +3,8 @@ package middleware
 const (
 	// ContextKeyUserID 当前登录用户ID。
 	ContextKeyUserID = "ctx_user_id"
+	// ContextKeyUserPublicID is the current user's browser-safe public ID.
+	ContextKeyUserPublicID = "ctx_user_public_id"
 	// ContextKeyUsername 当前登录用户名。
 	ContextKeyUsername = "ctx_username"
 	// ContextKeyUserRole 当前登录用户角色。

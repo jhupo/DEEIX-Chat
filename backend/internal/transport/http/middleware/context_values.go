@@ -15,6 +15,19 @@ func MustUserID(c *gin.Context) uint {
 	return userID
 }
 
+// MustUserPublicID returns the current user's browser-safe public ID.
+func MustUserPublicID(c *gin.Context) string {
+	value, ok := c.Get(ContextKeyUserPublicID)
+	if !ok {
+		return ""
+	}
+	publicID, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return publicID
+}
+
 // MustUsername 获取登录用户名。
 func MustUsername(c *gin.Context) string {
 	value, ok := c.Get(ContextKeyUsername)

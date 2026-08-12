@@ -83,12 +83,16 @@ func TestAuthMiddlewareProtectsMeValidationFailures(t *testing.T) {
 func TestAuthMiddlewareUsesCurrentPrincipalRole(t *testing.T) {
 	response := executeAuthenticatedRequest(t, authTestSessionValidator{principal: &domainuser.User{
 		ID:       1,
+		PublicID: "f6f910e920934def9a5cda479fc25251",
 		Username: "remote-admin",
 		Role:     domainuser.RoleSuperAdmin,
 		Status:   domainuser.StatusActive,
 	}}, func(c *gin.Context) {
 		if got := MustUserRole(c); got != domainuser.RoleSuperAdmin {
 			t.Fatalf("role = %q, want %q", got, domainuser.RoleSuperAdmin)
+		}
+		if got := MustUserPublicID(c); got != "f6f910e920934def9a5cda479fc25251" {
+			t.Fatalf("public ID = %q", got)
 		}
 		c.Status(http.StatusNoContent)
 	})

@@ -85,6 +85,7 @@ func AuthMiddleware(jwtSecret string, validator SessionValidator) gin.HandlerFun
 		if principal != nil {
 			username = principal.Username
 			role = principal.Role
+			c.Set(ContextKeyUserPublicID, principal.PublicID)
 		}
 		c.Set(ContextKeyUsername, username)
 		c.Set(ContextKeyUserRole, role)

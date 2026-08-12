@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 )
 
@@ -23,6 +25,40 @@ type EmailRegistrationStartResult struct {
 // refresh and validation path used by authenticated identity operations.
 func (s *Service) Sub2AccessTokenForSession(ctx context.Context, userID uint, sessionID string) (string, error) {
 	return s.sub2AccessTokenForSession(ctx, userID, sessionID)
+}
+
+// Sub2AccessTokensForUser returns currently usable upstream sessions for a
+// device-authenticated flow that has no browser session of its own.
+func (s *Service) Sub2AccessTokensForUser(ctx context.Context, userID uint) ([]string, error) {
+	sessions, err := s.repo.ListActiveSessionsByUserID(ctx, userID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	tokens := make([]string, 0, len(sessions))
+	for i := range sessions {
+		token, resolveErr := s.sub2AccessTokenForSession(ctx, userID, sessions[i].SessionID)
+		if resolveErr == nil {
+			tokens = append(tokens, token)
+		}
+	}
+	if len(tokens) == 0 {
+		return nil, ErrSessionRevoked
+	}
+	return tokens, nil
+}
+
+// RuntimeUser resolves the same local identity used by browser authentication.
+// Internal relations use ID; the bridge challenge exposes only PublicID.
+func (s *Service) RuntimeUser(ctx context.Context, userID uint) (string, int64, error) {
+	user, err := s.repo.GetByID(ctx, userID)
+	if err != nil {
+		return "", 0, err
+	}
+	if user.Status != domainuser.StatusActive || user.Sub2UserID <= 0 ||
+		user.Sub2InstanceID != s.sub2.InstanceID() || user.PublicID == "" {
+		return "", 0, repository.ErrNotFound
+	}
+	return user.PublicID, user.Sub2UserID, nil
 }
 
 func (s *Service) GetLoginOptions(ctx context.Context) (*LoginOptions, error) {

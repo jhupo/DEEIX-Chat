@@ -21,7 +21,7 @@ Chat remains `/chat?conversation_id=...`. Each route mounts its own runtime: cha
 
 `NavAgentThreads`:
 
-- loads only Agent thread summaries, grouped by selected device/workspace and respecting Principal ownership;
+- loads only Agent thread summaries, grouped by selected device/workspace and respecting User ownership;
 - renders recent and pinned AgentThread records with device status indicator;
 - links to `/agent?thread_id=<public_id>`;
 - has an accessible heading, empty state and retry state;

@@ -15,6 +15,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
+	agentgatewayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgateway"
 	announcementhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/announcement"
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
@@ -51,6 +52,7 @@ type HealthChecker interface {
 
 // Modules 聚合可注册的业务模块。
 type Modules struct {
+	AgentGateway *agentgatewayhttp.Module
 	Auth         *authhttp.Module
 	AuthService  middleware.SessionValidator
 	Channel      *channelhttp.Module
@@ -114,9 +116,12 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		c.Header("Pragma", "no-cache")
 		c.JSON(http.StatusOK, buildinfo.Snapshot())
 	})
-	if modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil {
+	if modules.AgentGateway != nil || modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil {
 		publicAuth := api.Group("")
 		publicAuth.Use(middleware.PublicAuthRateLimit(limiter, cfg))
+		if modules.AgentGateway != nil {
+			modules.AgentGateway.RegisterBridgeRoutes(publicAuth)
+		}
 		if modules.Auth != nil {
 			modules.Auth.RegisterPublicRoutes(publicAuth)
 		}
@@ -138,6 +143,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	authRequired.Use(middleware.AuthMiddleware(snapshot.JWTSecret, modules.AuthService))
 	authRequired.Use(middleware.RateLimit(limiter, cfg))
 
+	if modules.AgentGateway != nil {
+		modules.AgentGateway.RegisterRoutes(authRequired)
+	}
 	if modules.Auth != nil {
 		modules.Auth.RegisterProtectedRoutes(authRequired)
 	}

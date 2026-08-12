@@ -36,6 +36,10 @@ type TokenResolver interface {
 	Sub2AccessTokenForSession(context.Context, uint, string) (string, error)
 }
 
+type UserTokenResolver interface {
+	Sub2AccessTokensForUser(context.Context, uint) ([]string, error)
+}
+
 type BindingView struct {
 	PublicID        string
 	RemoteKeyID     int64
@@ -108,6 +112,59 @@ func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, 
 		repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey,
 		remoteCache: make(map[string]remoteKeyCacheEntry), groupCache: make(map[string]groupCacheEntry),
 	}
+}
+
+// MatchRuntimeProof validates a proof against live keys from the fixed Sub2
+// instance. Raw keys and the proof are kept in this call only.
+func (s *Service) MatchRuntimeProof(
+	ctx context.Context,
+	userID uint,
+	expectedRemoteUserID int64,
+	challenge []byte,
+	proof []byte,
+) (int64, string, error) {
+	resolver, ok := s.tokens.(UserTokenResolver)
+	if !ok || userID == 0 || expectedRemoteUserID <= 0 || len(challenge) == 0 || len(proof) != sha256.Size {
+		return 0, "", ErrInvalidBinding
+	}
+	tokens, err := resolver.Sub2AccessTokensForUser(ctx, userID)
+	if err != nil {
+		return 0, "", err
+	}
+	matchedID := int64(0)
+	for _, token := range tokens {
+		profile, profileErr := s.client.UserProfile(ctx, token)
+		if profileErr != nil || profile.ID != expectedRemoteUserID {
+			continue
+		}
+		keys, keysErr := s.remoteKeys(ctx, token, profile.ID)
+		if keysErr != nil {
+			continue
+		}
+		for i := range keys {
+			if !active(keys[i], time.Now()) || strings.TrimSpace(keys[i].Key) == "" {
+				continue
+			}
+			mac := hmac.New(sha256.New, []byte(keys[i].Key))
+			_, _ = mac.Write(challenge)
+			if hmac.Equal(mac.Sum(nil), proof) {
+				if matchedID != 0 && matchedID != keys[i].ID {
+					return 0, "", ErrInvalidBinding
+				}
+				matchedID = keys[i].ID
+			}
+		}
+	}
+	if matchedID == 0 {
+		return 0, "", ErrBindingUnavailable
+	}
+	return matchedID, runtimeCredentialFingerprint(s.encryptionKey, matchedID), nil
+}
+
+func runtimeCredentialFingerprint(secret string, remoteKeyID int64) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = fmt.Fprintf(mac, "deeix-runtime-key-v1\n%d", remoteKeyID)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *Service) List(ctx context.Context, principalID uint, sessionID string) ([]BindingView, error) {
