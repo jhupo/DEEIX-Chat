@@ -432,7 +432,7 @@ profile 状态并调度 device command；它不读取 Chat `sub2_key_bindings`�
 | 页面 | 数据源 | 选择状态 |
 | --- | --- | --- |
 | `/setting/subscription` | `/billing/*` BFF -> Sub2 profile/payment/redeem/subscriptions/usage | 套餐购买、余额充值、兑换、订单/兑换/用量记录；通过既有页面刷新/重载控件手动刷新；无 local commerce mutation |
-| `/chat` | DEEIX 管理员发布的模型目录 + 服务端默认 Sub2 key binding | 对话页只选择管理员配置的模型与展示分组；默认 key 仅在对话设置中选择，发送时静默使用；Run 固定实际 model/binding/version |
+| `/chat` | DEEIX 管理员发布的模型目录 + 服务端默认 Sub2 key binding | 对话页只选择管理员配置的模型与展示分组；默认 key 仅在对话设置中选择，发送时静默使用；Run 固定实际 model/binding/version。Sub2 Chat 模型无需创建 DEEIX 本地上游路由：有显式路由时使用其协议，否则由管理员设置的平台模型 vendor 推导网关协议。 |
 | `/agent` | Agent device/profile/workspace + app-server projection | 无 key selector；turn UI 选择 runtime/model/permission |
 | `/setting/account` | `GET /api/v1/me` composite、`/api/v1/auth/sessions`、Sub2 password-change BFF route | Principal projection、DEEIX browser sessions 和 password change |
 | `/setting/general` and chat preferences | DEEIX Principal/user-settings routes | displayName/avatar/timezone/locale/appearance/notification/conversation preferences；Sub2 profile 仅可在新 Principal 创建时提供初始投影，不进行写回 |

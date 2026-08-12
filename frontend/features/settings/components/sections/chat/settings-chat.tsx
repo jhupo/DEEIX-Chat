@@ -461,12 +461,7 @@ export function SettingsChat() {
     ],
     [modelGroups, t],
   );
-  const selectedRemoteKey = React.useMemo(() => {
-    const remoteKeyID = chatKeyBindings.bindings.find(
-      (binding) => binding.publicID === chatKeyBindings.selectedKeyBindingID,
-    )?.remoteKeyID;
-    return chatKeyBindings.remoteKeys.find((key) => key.remoteKeyID === remoteKeyID) ?? null;
-  }, [chatKeyBindings.bindings, chatKeyBindings.remoteKeys, chatKeyBindings.selectedKeyBindingID]);
+  const selectedRemoteKey = chatKeyBindings.selectedRemoteKey;
   const availableProtocols = React.useMemo(
     () => chatProtocolsForGroupPlatform(selectedRemoteKey?.groupPlatform ?? ""),
     [selectedRemoteKey?.groupPlatform],
@@ -513,11 +508,8 @@ export function SettingsChat() {
                 <Skeleton className="h-8 w-[min(260px,55vw)] rounded-md" />
               ) : (
                 <Select
-                  value={String(
-                    chatKeyBindings.bindings.find(
-                      (binding) => binding.publicID === chatKeyBindings.selectedKeyBindingID,
-                    )?.remoteKeyID ?? "",
-                  )}
+                  key={selectedRemoteKey?.remoteKeyID ?? "empty"}
+                  value={selectedRemoteKey ? String(selectedRemoteKey.remoteKeyID) : ""}
                   onValueChange={(value) => void chatKeyBindings.select(Number(value))}
                   disabled={chatKeyBindings.remoteKeys.length === 0}
                 >

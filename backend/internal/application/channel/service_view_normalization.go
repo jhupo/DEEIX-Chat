@@ -92,11 +92,32 @@ func toModelView(item repository.ChannelModelListRow) ModelView {
 		SortOrder:          item.SortOrder,
 		SourceCount:        item.SourceCount,
 		ActiveSourceCount:  item.ActiveSourceCount,
-		ProtocolsJSON:      item.ProtocolsJSON,
+		ProtocolsJSON:      resolveModelProtocolsJSON(item.ProtocolsJSON, item.Vendor),
 		UpstreamNamesJSON:  item.UpstreamNamesJSON,
 		CreatedAt:          item.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:          item.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+func resolveModelProtocolsJSON(routeProtocolsJSON string, vendor string) string {
+	var routeProtocols []string
+	if json.Unmarshal([]byte(strings.TrimSpace(routeProtocolsJSON)), &routeProtocols) == nil && len(routeProtocols) > 0 {
+		return routeProtocolsJSON
+	}
+
+	var protocols []string
+	switch strings.TrimSpace(strings.ToLower(vendor)) {
+	case "openai", "grok", "xai":
+		protocols = []string{llm.AdapterOpenAIChatCompletions, llm.AdapterOpenAIResponses}
+	case "anthropic", "claude":
+		protocols = []string{llm.AdapterAnthropicMessages}
+	case "gemini", "google", "antigravity":
+		protocols = []string{llm.AdapterOpenAIChatCompletions}
+	default:
+		return "[]"
+	}
+	payload, _ := json.Marshal(protocols)
+	return string(payload)
 }
 
 func toUpstreamModelView(item repository.ChannelUpstreamModelListRow) UpstreamModelView {
