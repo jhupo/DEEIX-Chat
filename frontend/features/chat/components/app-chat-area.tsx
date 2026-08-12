@@ -61,6 +61,7 @@ import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
+import { CHAT_PROTOCOL } from "@/shared/model/chat-protocol";
 import { cn } from "@/lib/utils";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
@@ -332,7 +333,6 @@ export function AppChatArea() {
     conversationPublicID: conversationID,
     conversationModel: currentConversation?.model ?? null,
     resetToken: newConversationRevision,
-    protocol: chatKeyBindings.selectedProtocol,
   });
   const {
     conversationKey,
@@ -1146,6 +1146,7 @@ export function AppChatArea() {
     attachments,
     uploadingAttachments,
     modelOptions,
+    requestProtocol: CHAT_PROTOCOL,
     selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
     selectedPlatformModelName,
     availableTools,

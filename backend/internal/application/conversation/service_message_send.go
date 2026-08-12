@@ -26,7 +26,6 @@ import (
 
 const (
 	reasoningContentPassbackSettingKey = "chat.reasoning_content_passback"
-	defaultProtocolSettingKey          = "chat.default_protocol"
 	maxRequestRouteAttempts            = 3
 )
 
@@ -86,12 +85,8 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 		}
 		return nil, nil, ErrKeyBindingUnavailable
 	}
-	configuredProtocol := ""
-	if s.repo != nil {
-		configuredProtocol, _ = s.getUserSettingCached(ctx, userID, defaultProtocolSettingKey)
-	}
-	protocol := resolveSub2ChatProtocol(execution.GroupPlatform, configuredProtocol)
-	if !sub2ChatModelSupportsProtocol(chatModel.ProtocolsJSON, protocol) {
+	protocol := llm.AdapterOpenAIResponses
+	if !sub2ChatModelSupportsKind(chatModel.KindsJSON, "chat") {
 		return nil, nil, ErrModelAccessDenied
 	}
 	return &channel.ResolvedRoute{
@@ -110,41 +105,18 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 	}, execution, nil
 }
 
-func sub2ChatModelSupportsProtocol(raw, protocol string) bool {
-	var protocols []string
-	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &protocols) != nil {
+func sub2ChatModelSupportsKind(raw, kind string) bool {
+	var kinds []string
+	if json.Unmarshal([]byte(strings.TrimSpace(raw)), &kinds) != nil {
 		return false
 	}
-	want := llm.NormalizeAdapter(protocol)
-	for _, candidate := range protocols {
-		if llm.NormalizeAdapter(candidate) == want {
+	want := strings.ToLower(strings.TrimSpace(kind))
+	for _, candidate := range kinds {
+		if strings.ToLower(strings.TrimSpace(candidate)) == want {
 			return true
 		}
 	}
 	return false
-}
-
-func resolveSub2ChatProtocol(groupPlatform, configured string) string {
-	platform := strings.ToLower(strings.TrimSpace(groupPlatform))
-	if strings.TrimSpace(configured) == "" {
-		configured = llm.AdapterOpenAIChatCompletions
-	}
-	protocol := llm.NormalizeAdapter(configured)
-	switch platform {
-	case "anthropic":
-		return llm.AdapterAnthropicMessages
-	case "composite":
-		if protocol == llm.AdapterOpenAIChatCompletions || protocol == llm.AdapterOpenAIResponses || protocol == llm.AdapterAnthropicMessages {
-			return protocol
-		}
-	case "openai", "grok":
-		if protocol == llm.AdapterOpenAIChatCompletions || protocol == llm.AdapterOpenAIResponses {
-			return protocol
-		}
-	default:
-		return llm.AdapterOpenAIChatCompletions
-	}
-	return llm.AdapterOpenAIChatCompletions
 }
 
 func pinSub2ChatRouteToRun(run *model.Run, route *channel.ResolvedRoute, execution *appsub2key.Execution) {

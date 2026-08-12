@@ -185,16 +185,6 @@
       "empty": "No available API key",
       "loadFailed": "Failed to load API keys"
     },
-    "defaultProtocol": {
-      "title": "Chat protocol",
-      "description": "This key belongs to {group}; only protocols supported by that group are shown.",
-      "noKey": "Select a default API key before choosing a protocol.",
-      "options": {
-        "openai_chat_completions": "Chat Completions",
-        "openai_responses": "Responses",
-        "anthropic_messages": "Claude Messages"
-      }
-    },
     "defaultModel": {
       "sectionTitle": "Conversation basics",
       "title": "Default model for new chats",

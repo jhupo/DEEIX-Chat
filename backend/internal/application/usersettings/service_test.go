@@ -102,20 +102,14 @@ func TestDefaultSub2KeyBindingIDSettingIsAllowed(t *testing.T) {
 	}
 }
 
-func TestDefaultChatProtocolSettingIsAllowed(t *testing.T) {
+func TestChatProtocolSettingIsRejected(t *testing.T) {
 	t.Parallel()
 
-	const key = "chat.default_protocol"
-	if got := allowedKeys[key]; got != "openai_chat_completions" {
-		t.Fatalf("expected %s default to be openai_chat_completions, got %q", key, got)
-	}
-	for _, value := range []string{"openai_chat_completions", "openai_responses", "anthropic_messages"} {
-		if err := validateValue(key, value); err != nil {
-			t.Fatalf("expected %s=%s to be accepted, got %v", key, value, err)
-		}
-	}
-	if err := validateValue(key, "custom_protocol"); err == nil {
-		t.Fatal("expected unknown chat protocol to be rejected")
+	service := NewService(&userSettingsRepoStub{})
+	if _, err := service.PatchSettings(t.Context(), 1, map[string]string{
+		"chat.default_protocol": "openai_responses",
+	}); !IsValidationError(err) {
+		t.Fatalf("expected removed chat protocol setting to be rejected, got %v", err)
 	}
 }
 
@@ -128,7 +122,7 @@ func TestPatchSettingsInvalidatesConversationSettingCache(t *testing.T) {
 	})
 
 	settings, err := service.PatchSettings(t.Context(), 7, map[string]string{
-		"chat.default_protocol": "openai_responses",
+		"chat.content_width": "wide",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +130,8 @@ func TestPatchSettingsInvalidatesConversationSettingCache(t *testing.T) {
 	if invalidatedUserID != 7 {
 		t.Fatalf("cache invalidated for user %d, want 7", invalidatedUserID)
 	}
-	if got := settings["chat.default_protocol"]; got != "openai_responses" {
-		t.Fatalf("saved protocol = %q, want openai_responses", got)
+	if got := settings["chat.content_width"]; got != "wide" {
+		t.Fatalf("saved content width = %q, want wide", got)
 	}
 }
 

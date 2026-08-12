@@ -4,7 +4,6 @@ import * as React from "react";
 
 import {
   dispatchUserSettingsUpdated,
-  USER_SETTINGS_UPDATED_EVENT,
 } from "@/features/settings/events/user-settings-events";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 import {
@@ -21,17 +20,14 @@ import {
   resolveDefaultChatKeyBinding,
 } from "@/features/chat/hooks/chat-key-binding-validity";
 import { createIdempotencyKey } from "@/shared/lib/idempotency-key";
-import { resolveChatProtocol } from "@/shared/model/chat-protocol";
 
 const DEFAULT_KEY_SETTING = "chat.default_sub2_key_binding_id";
-const DEFAULT_PROTOCOL_SETTING = "chat.default_protocol";
 
 export function useChatKeyBindings() {
   const { accessToken } = useAuthSession();
   const [remoteKeys, setRemoteKeys] = React.useState<Sub2RemoteKeyDTO[]>([]);
   const [bindings, setBindings] = React.useState<Sub2KeyBindingDTO[]>([]);
   const [selectedKeyBindingID, setSelectedKeyBindingID] = React.useState("");
-  const [configuredProtocol, setConfiguredProtocol] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
   const requestRef = React.useRef(0);
@@ -72,7 +68,6 @@ export function useChatKeyBindings() {
       setRemoteKeys(nextRemoteKeys);
       setBindings(nextBindings);
       const configured = settings[DEFAULT_KEY_SETTING]?.trim() ?? "";
-      setConfiguredProtocol(settings[DEFAULT_PROTOCOL_SETTING]?.trim() ?? "");
       const resolved = resolveDefaultChatKeyBinding(nextBindings, configured);
       if (resolved !== configured) {
         await persistSelection(resolved);
@@ -87,17 +82,6 @@ export function useChatKeyBindings() {
   }, [accessToken, applySelection, persistSelection]);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
-
-  React.useEffect(() => {
-    const handleSettingsUpdated = (event: Event) => {
-      const settings = (event as CustomEvent<Record<string, string>>).detail;
-      if (settings && typeof settings === "object") {
-        setConfiguredProtocol(settings[DEFAULT_PROTOCOL_SETTING]?.trim() ?? "");
-      }
-    };
-    window.addEventListener(USER_SETTINGS_UPDATED_EVENT, handleSettingsUpdated);
-    return () => window.removeEventListener(USER_SETTINGS_UPDATED_EVENT, handleSettingsUpdated);
-  }, []);
 
   const select = React.useCallback(async (remoteKeyID: number) => {
     if (!accessToken) return;
@@ -144,7 +128,5 @@ export function useChatKeyBindings() {
     const remoteKeyID = bindings.find((binding) => binding.publicID === selectedKeyBindingID)?.remoteKeyID;
     return remoteKeys.find((key) => key.remoteKeyID === remoteKeyID) ?? null;
   }, [bindings, remoteKeys, selectedKeyBindingID]);
-  const selectedProtocol = resolveChatProtocol(selectedRemoteKey?.groupPlatform ?? "", configuredProtocol);
-
-  return { remoteKeys, bindings, selectedKeyBindingID, selectedRemoteKey, selectedProtocol, loading, error, refresh, select, remove };
+  return { remoteKeys, bindings, selectedKeyBindingID, selectedRemoteKey, loading, error, refresh, select, remove };
 }

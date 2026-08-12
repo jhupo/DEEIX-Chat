@@ -185,16 +185,6 @@
       "empty": "暂无可用 API 密钥",
       "loadFailed": "API 密钥加载失败"
     },
-    "defaultProtocol": {
-      "title": "对话协议",
-      "description": "当前密钥属于 {group} 分组，仅显示该分组支持的协议。",
-      "noKey": "选择默认 API 密钥后可设置协议。",
-      "options": {
-        "openai_chat_completions": "Chat Completions",
-        "openai_responses": "Responses",
-        "anthropic_messages": "Claude Messages"
-      }
-    },
     "defaultModel": {
       "sectionTitle": "基础会话",
       "title": "新会话默认模型",

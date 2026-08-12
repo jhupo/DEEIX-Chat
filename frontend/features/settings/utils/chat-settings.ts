@@ -4,7 +4,6 @@ import type { UserSettingsMap } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
 import { platformSendShortcut } from "@/shared/lib/platform-shortcuts";
 import { resolveModelPresentationGroup } from "@/shared/lib/model-presentation";
-import { DEFAULT_CHAT_PROTOCOL, parseChatProtocol } from "@/shared/model/chat-protocol";
 
 const FILE_MODES: FileMode[] = ["auto", "full_context", "rag"];
 const INPUT_HEIGHTS: ChatInputHeight[] = ["compact", "standard", "loose"];
@@ -12,7 +11,6 @@ const SEND_SHORTCUTS: SendShortcut[] = ["enter", "ctrl_enter", "meta_enter"];
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   defaultModel: "",
-  defaultProtocol: DEFAULT_CHAT_PROTOCOL,
   sendShortcut: "enter",
   showTokenUsage: true,
   showModelInfo: true,
@@ -39,7 +37,6 @@ export function parseChatSettings(map: UserSettingsMap): ChatSettings {
 
   return {
     defaultModel: map["chat.default_model"] ?? "",
-    defaultProtocol: parseChatProtocol(map["chat.default_protocol"]),
     sendShortcut: parseSendShortcut(sendShortcut),
     showTokenUsage: map["chat.show_token_usage"] !== "false",
     showModelInfo: map["chat.show_model_info"] !== "false",

@@ -79,16 +79,17 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 		BindingVersion:  3,
 		RemoteKeyID:     42,
 		APIKey:          "secret",
-		GroupPlatform:   "openai",
+		GroupPlatform:   "anthropic",
 	}}
 	service := &Service{
 		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			ID:                9,
 			PlatformModelName: "catalog-model",
-			Vendor:            "openai",
-			Icon:              "openai",
-			ProtocolsJSON:     `["openai_chat_completions"]`,
+			Vendor:            "anthropic",
+			Icon:              "anthropic",
+			KindsJSON:         `["chat"]`,
+			ProtocolsJSON:     `["anthropic_messages"]`,
 		}},
 		sub2Resolver: binding,
 	}
@@ -102,12 +103,15 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 	if route.PlatformModelID != 9 || route.PlatformModelName != "catalog-model" || route.UpstreamModel != "catalog-model" {
 		t.Fatalf("route did not use administrator catalog identity: %#v", route)
 	}
+	if route.Protocol != llm.AdapterOpenAIResponses {
+		t.Fatalf("route protocol = %q, want Responses", route.Protocol)
+	}
 	if run.PlatformModelName != "catalog-model" || run.RoutedBindingCode != binding.execution.BindingPublicID || run.KeyBindingVersion != 3 || run.RemoteKeyID != 42 {
 		t.Fatalf("run did not pin catalog route and binding: %#v", run)
 	}
 }
 
-func TestResolveSub2ChatRouteRejectsModelProtocolMismatch(t *testing.T) {
+func TestResolveSub2ChatRouteRejectsNonChatModel(t *testing.T) {
 	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
 		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
 		APIKey:          "secret",
@@ -117,32 +121,13 @@ func TestResolveSub2ChatRouteRejectsModelProtocolMismatch(t *testing.T) {
 		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			PlatformModelName: "openai-only-model",
-			ProtocolsJSON:     `["openai_chat_completions","openai_responses"]`,
+			KindsJSON:         `["image_gen"]`,
 		}},
 		sub2Resolver: binding,
 	}
 
 	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "openai-only-model", binding.execution.BindingPublicID); !errors.Is(err, ErrModelAccessDenied) {
 		t.Fatalf("resolveSub2ChatRoute() error = %v, want ErrModelAccessDenied", err)
-	}
-}
-
-func TestResolveSub2ChatProtocolFollowsKeyPlatform(t *testing.T) {
-	tests := []struct {
-		name, platform, configured, want string
-	}{
-		{name: "OpenAI defaults to chat completions", platform: "openai", want: llm.AdapterOpenAIChatCompletions},
-		{name: "OpenAI responses", platform: "openai", configured: llm.AdapterOpenAIResponses, want: llm.AdapterOpenAIResponses},
-		{name: "Anthropic forces messages", platform: "anthropic", configured: llm.AdapterOpenAIResponses, want: llm.AdapterAnthropicMessages},
-		{name: "Composite accepts messages", platform: "composite", configured: llm.AdapterAnthropicMessages, want: llm.AdapterAnthropicMessages},
-		{name: "Gemini uses compatible chat endpoint", platform: "gemini", configured: llm.AdapterOpenAIResponses, want: llm.AdapterOpenAIChatCompletions},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveSub2ChatProtocol(tt.platform, tt.configured); got != tt.want {
-				t.Fatalf("resolveSub2ChatProtocol(%q, %q) = %q, want %q", tt.platform, tt.configured, got, tt.want)
-			}
-		})
 	}
 }
 

@@ -9,7 +9,6 @@ import type {
   ModelOptionControlType,
 } from "@/features/chat/types/chat-runtime";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { parseProtocolsJSON } from "@/shared/lib/model-protocols";
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
 import {
   DEFAULT_CHAT_CONTENT_WIDTH,
@@ -310,7 +309,6 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupName: item.displayGroupName,
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
-    protocols: parseProtocolsJSON(item.protocolsJSON),
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),
@@ -323,12 +321,10 @@ export function useChatModelOptions({
   conversationPublicID,
   conversationModel,
   resetToken,
-  protocol,
 }: {
   conversationPublicID: string | null;
   conversationModel?: string | null;
   resetToken?: number;
-  protocol?: string;
 }) {
   const t = useTranslations("chat.models");
   const [availableModels, setAvailableModels] = React.useState<PublicModelDTO[]>([]);
@@ -352,8 +348,8 @@ export function useChatModelOptions({
   const runModelRequestRef = React.useRef(0);
   const modelCatalogRequestRef = React.useRef<Promise<ModelCatalogRefreshResult> | null>(null);
   const compatibleModels = React.useMemo(
-    () => availableModels.filter((model) => parseProtocolsJSON(model.protocolsJSON).includes(protocol?.trim() ?? "")),
-    [availableModels, protocol],
+    () => availableModels.filter((model) => parseKindsJSON(model.kindsJSON).includes("chat")),
+    [availableModels],
   );
 
   const selectPlatformModelName = React.useCallback((platformModelName: string) => {
@@ -404,10 +400,10 @@ export function useChatModelOptions({
 
     const nextModels = await refreshModelCatalog();
     const nextModel = nextModels.find(
-      (item) => item.platformModelName === normalizedName && parseProtocolsJSON(item.protocolsJSON).includes(protocol?.trim() ?? ""),
+      (item) => item.platformModelName === normalizedName && parseKindsJSON(item.kindsJSON).includes("chat"),
     );
     return nextModel ? toChatModelOption(nextModel) : null;
-  }, [protocol, refreshModelCatalog]);
+  }, [refreshModelCatalog]);
 
   React.useEffect(() => {
     let cancelled = false;

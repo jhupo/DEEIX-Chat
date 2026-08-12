@@ -59,12 +59,6 @@ type VisualOption = {
 
 type ModelOptionFilterStatus = "inactive" | "passed" | "filtered" | "unknown";
 
-type OptionValueEntry = {
-  key: string;
-  path: string[];
-  value: unknown;
-};
-
 type NativeToolVisualOption = {
   definition: NativeToolDefinition;
   protocols: string[];
@@ -436,29 +430,6 @@ function parseOptionsDraft(value: string): {
   }
 }
 
-function collectOptionValueEntries(value: unknown, path: string[]): OptionValueEntry[] {
-  if (path.length === 0) {
-    return [];
-  }
-  if (!isPlainOptionObject(value)) {
-    return [{ key: optionPathKey(path), path, value }];
-  }
-  const entries = Object.entries(value).flatMap(([key, nestedValue]) => collectOptionValueEntries(nestedValue, [...path, key]));
-  if (entries.length === 0) {
-    return [{ key: optionPathKey(path), path, value }];
-  }
-  return entries;
-}
-
-function optionValueEntriesFromOptions(options: ConversationOptions): OptionValueEntry[] {
-  return Object.entries(options).flatMap(([key, value]) => {
-    if (key === "tools") {
-      return [{ key, path: [key], value }];
-    }
-    return collectOptionValueEntries(value, [key]);
-  });
-}
-
 function formatVisualOptionValue(value: unknown): string {
   if (typeof value === "string") {
     return value;
@@ -591,29 +562,6 @@ function nativeToolDefinitionsFromConfigs(
   });
 }
 
-function providerToolMatchesAnyDefinition(
-  value: unknown,
-  definitions: NativeToolDefinition[],
-): boolean {
-  if (!isPlainOptionObject(value)) {
-    return false;
-  }
-  return definitions.some((definition) => providerToolMatchesDefinition(value, definition));
-}
-
-function ignoredProviderToolValues(
-  value: unknown,
-  definitions: NativeToolDefinition[],
-): unknown[] {
-  if (value === undefined) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    return [value];
-  }
-  return value.filter((item) => !providerToolMatchesAnyDefinition(item, definitions));
-}
-
 function hasProviderTool(options: ConversationOptions, definition: NativeToolDefinition): boolean {
   return providerToolObjectsFromOptions(options).some((tool) => providerToolMatchesDefinition(tool, definition));
 }
@@ -654,17 +602,6 @@ function isIgnoredOptionPath(
     return true;
   }
   return Boolean(policy && isModelOptionPathFiltered({ policy, protocol, path: key }));
-}
-
-function ignoredVisualOption(entry: OptionValueEntry, value: unknown): VisualOption {
-  return {
-    key: entry.key,
-    path: entry.path,
-    value,
-    active: true,
-    editable: false,
-    forcedFilterStatus: "filtered",
-  };
 }
 
 function getOptionAtPath(options: ConversationOptions, path: string[]): unknown {
@@ -726,7 +663,6 @@ function visualOptionsFromOptions(
   options: ConversationOptions,
   policy: ModelOptionPolicy | null,
   protocol: string,
-  nativeToolDefinitions: NativeToolDefinition[],
 ): VisualOption[] {
   const nestedOptions = NESTED_VISUAL_OPTION_PATHS.flatMap((path): VisualOption[] => {
     if (isReservedConversationOptionKey(path[0] ?? "")) {
@@ -749,22 +685,8 @@ function visualOptionsFromOptions(
   });
   const editableOptions = [...nestedOptions, ...topLevelOptions]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.key === item.key) === index);
-  const visibleKeys = new Set(editableOptions.map((item) => item.key));
-  const ignoredOptions = optionValueEntriesFromOptions(options).flatMap((entry): VisualOption[] => {
-    if (visibleKeys.has(entry.key)) {
-      return [];
-    }
-    if (entry.key === "tools") {
-      const ignoredTools = ignoredProviderToolValues(entry.value, nativeToolDefinitions);
-      return ignoredTools.length > 0 ? [ignoredVisualOption(entry, ignoredTools)] : [];
-    }
-    if (!isIgnoredOptionPath(policy, protocol, entry.key, entry.path)) {
-      return [];
-    }
-    return [ignoredVisualOption(entry, entry.value)];
-  });
-  return [...editableOptions, ...ignoredOptions]
-    .filter((item, index, items) => items.findIndex((candidate) => candidate.key === item.key) === index)
+  return editableOptions
+    .filter((item) => !isIgnoredOptionPath(policy, protocol, item.key, item.path))
     .sort((left, right) => compareOptionKeys(left.key, right.key));
 }
 
@@ -804,6 +726,8 @@ function visualOptionsFromControls(
   controls: ModelOptionControl[],
   options: ConversationOptions,
   defaultOptions: ConversationOptions = {},
+  policy: ModelOptionPolicy | null = null,
+  protocol = "",
 ): VisualOption[] {
   return controls.flatMap((control): VisualOption[] => {
     const path = optionPathFromControl(control.path);
@@ -811,6 +735,9 @@ function visualOptionsFromControls(
       return [];
     }
     const key = optionPathKey(path);
+    if (isIgnoredOptionPath(policy, protocol, key, path)) {
+      return [];
+    }
     const hasLockedDefault = Boolean(control.locked && hasOptionAtPath(defaultOptions, path));
     const value = hasLockedDefault
       ? resolveControlEditableValue(defaultOptions, path)
@@ -849,12 +776,12 @@ function hasVisualConfigurationContent({
   if (nativeToolDefinitions.length > 0) {
     return true;
   }
-  const configuredOptions = visualOptionsFromControls(optionControls, options);
+  const configuredOptions = visualOptionsFromControls(optionControls, options, {}, policy, protocol);
   if (configuredOptions.length > 0) {
     return true;
   }
   const configuredKeys = new Set(configuredOptions.map((item) => item.key));
-  return visualOptionsFromOptions(options, policy, protocol, nativeToolDefinitions)
+  return visualOptionsFromOptions(options, policy, protocol)
     .some((item) => !configuredKeys.has(item.key));
 }
 
@@ -1023,7 +950,12 @@ export function ChatModelConfig({
   const effectiveDefaultOptions = restoredDefaultOptions ?? defaultOptions;
   const selectedProtocolLabel = selectedProtocol ? resolveProtocolLabel(selectedProtocol) : "";
   const nativeToolVisualOptions = React.useMemo(
-    () => nativeToolDefinitionsFromConfigs(nativeTools, nativeToolKeys, modelOptionPolicy?.nativeTools ?? [], selectedProtocol),
+    () => nativeToolDefinitionsFromConfigs(
+      nativeTools,
+      nativeToolKeys,
+      modelOptionPolicy?.nativeTools ?? [],
+      selectedProtocol,
+    ).filter((item) => item.protocolMatched),
     [modelOptionPolicy?.nativeTools, nativeToolKeys, nativeTools, selectedProtocol],
   );
   const nativeToolDefinitions = React.useMemo(
@@ -1031,17 +963,23 @@ export function ChatModelConfig({
     [nativeToolVisualOptions],
   );
   const configuredOptions = React.useMemo(
-    () => visualOptionsFromControls(optionControls, optionsObject, effectiveDefaultOptions),
-    [effectiveDefaultOptions, optionControls, optionsObject],
+    () => visualOptionsFromControls(
+      optionControls,
+      optionsObject,
+      effectiveDefaultOptions,
+      modelOptionPolicy,
+      selectedProtocol,
+    ),
+    [effectiveDefaultOptions, modelOptionPolicy, optionControls, optionsObject, selectedProtocol],
   );
   const configuredOptionKeys = React.useMemo(
     () => new Set(configuredOptions.map((item) => item.key)),
     [configuredOptions],
   );
   const editableOptions = React.useMemo(
-    () => visualOptionsFromOptions(optionsObject, modelOptionPolicy, selectedProtocol, nativeToolDefinitions)
+    () => visualOptionsFromOptions(optionsObject, modelOptionPolicy, selectedProtocol)
       .filter((item) => !configuredOptionKeys.has(item.key)),
-    [configuredOptionKeys, modelOptionPolicy, nativeToolDefinitions, optionsObject, selectedProtocol],
+    [configuredOptionKeys, modelOptionPolicy, optionsObject, selectedProtocol],
   );
   const nativeToolGroup = React.useMemo(() => {
     if (nativeToolVisualOptions.length === 0) {

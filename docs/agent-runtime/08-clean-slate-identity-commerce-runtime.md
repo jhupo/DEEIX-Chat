@@ -262,6 +262,10 @@ binding ID；默认值写入 DEEIX 用户设置 `chat.default_sub2_key_binding_i
 
 DEEIX 用户设置保存 `chat.default_sub2_key_binding_id`；普通对话发送时静默读取该默认 binding。每个 Run 在任何 route/network 前固定：
 
+普通文本对话只使用 Sub2 `/v1/responses` 作为统一入口。DEEIX 不保存用户协议偏好，也不按密钥分组切换请求 DTO；Sub2 根据 API key
+所属分组完成实际的上游路由和协议转换。管理员发布的模型能力配置因此使用 Responses 字段，例如 `reasoning.effort`、
+`reasoning.summary` 和 `text.verbosity`，不混入 Chat Completions 的同义字段。
+
 ```text
 principal_id
 sub2_key_binding_id

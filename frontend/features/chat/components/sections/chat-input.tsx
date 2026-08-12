@@ -100,6 +100,7 @@ type ChatInputProps = {
   attachments: PendingAttachment[];
   uploadingAttachments: UploadingAttachment[];
   modelOptions: ChatModelOption[];
+  requestProtocol: string;
   selectedKeyBindingID: string;
   selectedPlatformModelName: string;
   availableTools: MCPToolDTO[];
@@ -239,6 +240,7 @@ function ChatInputComponent({
   attachments,
   uploadingAttachments,
   modelOptions,
+  requestProtocol,
   selectedKeyBindingID,
   selectedPlatformModelName,
   availableTools,
@@ -387,7 +389,7 @@ function ChatInputComponent({
     () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
     [modelOptions, selectedPlatformModelName],
   );
-  const selectedProtocol = selectedModel?.protocols[0]?.trim() ?? "";
+  const selectedProtocol = requestProtocol.trim();
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
