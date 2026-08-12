@@ -447,7 +447,7 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 				return err
 			}
 			if existing.Kind != "terminal" || existing.CommandID == nil || *existing.CommandID != command.ID ||
-				existing.PayloadHash != payloadHash || existing.PayloadJSON != payloadJSON {
+				existing.PayloadHash != payloadHash {
 				return repository.ErrConflict
 			}
 			return nil

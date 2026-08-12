@@ -3,6 +3,7 @@ package agentgateway
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -162,7 +163,8 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
 	}
 	snapshot, err := repo.GetResourceSnapshot(context.Background(), 7, device.PublicID, "", workspace.PublicID, "sessions")
-	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID || snapshot.DataJSON != `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session"}]}` {
+	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID ||
+		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session"}]}`) {
 		t.Fatalf("resource snapshot mismatch: %#v %v", snapshot, err)
 	}
 
@@ -220,4 +222,11 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.First(&storedFork, forked.ID).Error; err != nil || storedFork.SourceThreadRef == nil || *storedFork.SourceThreadRef != "source-thread-fork" || storedFork.Status != "active" {
 		t.Fatalf("fork final state: %#v %v", storedFork, err)
 	}
+}
+
+func jsonEqual(left, right string) bool {
+	var leftValue, rightValue any
+	return json.Unmarshal([]byte(left), &leftValue) == nil &&
+		json.Unmarshal([]byte(right), &rightValue) == nil &&
+		reflect.DeepEqual(leftValue, rightValue)
 }
