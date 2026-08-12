@@ -66,13 +66,18 @@ export function useChatKeyBindings() {
       setRemoteKeys(nextRemoteKeys);
       setBindings(nextBindings);
       const configured = settings[DEFAULT_KEY_SETTING]?.trim() ?? "";
-      applySelection(resolveDefaultChatKeyBinding(nextBindings, configured));
+      const resolved = resolveDefaultChatKeyBinding(nextBindings, configured);
+      if (resolved !== configured) {
+        await persistSelection(resolved);
+      } else {
+        applySelection(resolved);
+      }
     } catch (caught) {
       if (requestID === requestRef.current) setError(caught instanceof Error ? caught.message : "load failed");
     } finally {
       if (requestID === requestRef.current) setLoading(false);
     }
-  }, [accessToken, applySelection]);
+  }, [accessToken, applySelection, persistSelection]);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
 
