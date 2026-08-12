@@ -103,7 +103,13 @@ func (r *messageSendRunState) finalize(ctx context.Context, retErr error) {
 	}
 	r.finalizeAssistantMessage(finalizeCtx, retErr)
 	if r.runCreated {
-		_ = r.createRun(finalizeCtx)
+		if err := r.service.repo.UpdateConversationRun(finalizeCtx, r.run); err != nil {
+			r.service.logger.Error("update_conversation_run_failed",
+				zap.String("trace_id", traceid.FromContext(r.traceContext)),
+				zap.String("run_id", r.run.RunID),
+				zap.Error(err),
+			)
+		}
 	}
 }
 

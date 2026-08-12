@@ -1369,7 +1369,6 @@ func (r *Repo) CompleteAssistantMessageWithGeneratedAttachments(
 	}))
 }
 
-
 // SumMessageTokens 统计会话 token 消耗总量。
 func (r *Repo) SumMessageTokens(ctx context.Context, conversationID uint) (int64, error) {
 	var total int64
@@ -1662,6 +1661,32 @@ func (r *Repo) CreateConversationRun(ctx context.Context, item *domainconversati
 		return translateError(err)
 	}
 	*item = toConversationRunDomain(entity)
+	return nil
+}
+
+// UpdateConversationRun persists the terminal state of a run created before the upstream call.
+func (r *Repo) UpdateConversationRun(ctx context.Context, item *domainconversation.Run) error {
+	if item == nil || item.ID == 0 {
+		return repository.ErrInvalidInput
+	}
+	entity := toConversationRunModel(item)
+	result := r.db.WithContext(ctx).
+		Model(&models.ConversationRun{}).
+		Where("id = ? AND run_id = ?", item.ID, item.RunID).
+		Select(
+			"request_id", "key_binding_public_id", "key_binding_version", "remote_key_id",
+			"endpoint", "provider", "provider_protocol", "upstream_id", "upstream_model_id", "upstream_name",
+			"requested_model_name", "platform_model_name", "routed_binding_code", "model_vendor", "model_icon", "upstream_model_name",
+			"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens", "tool_calls_count",
+			"first_token_latency_ms", "total_latency_ms", "status", "error_code", "error_message", "ended_at",
+		).
+		Updates(&entity)
+	if result.Error != nil {
+		return translateError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
 	return nil
 }
 
