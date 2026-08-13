@@ -270,9 +270,9 @@ export function resolvePlanFeatures(
   billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY,
 ): string[] {
   const fallback: string[] = [];
-  if (plan.dailyLimitUSD != null) fallback.push(labels.dailyCredit(formatPlanCredit(plan.dailyLimitUSD, billingDisplay)));
-  if (plan.weeklyLimitUSD != null) fallback.push(labels.weeklyCredit(formatPlanCredit(plan.weeklyLimitUSD, billingDisplay)));
-  if (plan.monthlyLimitUSD != null) fallback.push(labels.monthlyCredit(formatPlanCredit(plan.monthlyLimitUSD, billingDisplay)));
+  if ((plan.dailyLimitUSD ?? 0) > 0) fallback.push(labels.dailyCredit(formatPlanCredit(plan.dailyLimitUSD ?? 0, billingDisplay)));
+  if ((plan.weeklyLimitUSD ?? 0) > 0) fallback.push(labels.weeklyCredit(formatPlanCredit(plan.weeklyLimitUSD ?? 0, billingDisplay)));
+  if ((plan.monthlyLimitUSD ?? 0) > 0) fallback.push(labels.monthlyCredit(formatPlanCredit(plan.monthlyLimitUSD ?? 0, billingDisplay)));
   if (fallback.length === 0 && plan.periodCreditUSD > 0) fallback.push(labels.monthlyCredit(formatPlanCredit(plan.periodCreditUSD, billingDisplay)));
   fallback.push(labels.freeModelsNotIncluded);
   try {
