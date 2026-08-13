@@ -153,3 +153,16 @@ func TestCheckRejectsCandidateRefreshDuringInstall(t *testing.T) {
 		t.Fatalf("Check() error = %v, want conflict", err)
 	}
 }
+
+func TestCanInstallVersionAllowsSameVersionOnlyFromImageRelease(t *testing.T) {
+	imageTarget := "releases/image-0.3.9-" + strings.Repeat("a", 64)
+	if !installableVersion("0.3.9", "0.4.0", "") || installableVersion("0.3.9", "0.3.8", imageTarget) || installableVersion("0.3.9", "0.3.9", "") {
+		t.Fatal("semantic version ordering is incorrect")
+	}
+	if !installableVersion("0.3.9", "0.3.9", imageTarget) {
+		t.Fatal("same-version stable bundle was rejected for an image release")
+	}
+	if installableVersion("0.3.9", "0.3.9", "releases/0.3.9") || installableVersion("0.3.9", "0.3.9", "releases/image-0.3.9-not-a-digest") {
+		t.Fatal("same-version stable bundle was accepted twice")
+	}
+}

@@ -35,13 +35,14 @@ const (
 )
 
 var (
-	versionPattern     = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)$`)
-	tagPattern         = regexp.MustCompile(`^v([0-9]+)\.([0-9]+)\.([0-9]+)$`)
-	digestPattern      = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	repositoryPattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	idempotencyPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{16,128}$`)
-	commitPattern      = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	platformPattern    = regexp.MustCompile(`^linux/(amd64|arm64)$`)
+	versionPattern            = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)$`)
+	tagPattern                = regexp.MustCompile(`^v([0-9]+)\.([0-9]+)\.([0-9]+)$`)
+	digestPattern             = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	repositoryPattern         = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	idempotencyPattern        = regexp.MustCompile(`^[A-Za-z0-9._~-]{16,128}$`)
+	commitPattern             = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	platformPattern           = regexp.MustCompile(`^linux/(amd64|arm64)$`)
+	imageReleaseTargetPattern = regexp.MustCompile(`^releases/image-([0-9]+\.){2}[0-9]+-[0-9a-f]{64}$`)
 )
 
 type Config struct {
@@ -218,9 +219,24 @@ func (u *Updater) statusLocked() Status {
 	return Status{
 		InstalledVersion: u.cfg.CurrentVersion,
 		Candidate:        u.journal.Candidate,
-		UpdateAvailable:  u.journal.Candidate != nil && compareVersions(u.journal.Candidate.Version, u.cfg.CurrentVersion) > 0,
+		UpdateAvailable:  u.journal.Candidate != nil && u.canInstallVersion(u.journal.Candidate.Version),
 		Job:              job,
 	}
+}
+
+func (u *Updater) canInstallVersion(version string) bool {
+	target, _ := os.Readlink(filepath.Join(u.cfg.RuntimeDir, "current"))
+	return installableVersion(u.cfg.CurrentVersion, version, target)
+}
+
+func installableVersion(currentVersion, candidateVersion, currentTarget string) bool {
+	switch compareVersions(candidateVersion, currentVersion) {
+	case 1:
+		return true
+	case -1:
+		return false
+	}
+	return imageReleaseTargetPattern.MatchString(currentTarget) && strings.HasPrefix(currentTarget, "releases/image-"+candidateVersion+"-")
 }
 
 func (u *Updater) Check(ctx context.Context) (Status, error) {
@@ -348,7 +364,7 @@ func (u *Updater) Install(ctx context.Context, in InstallRequest) (Job, error) {
 			return old.Job, nil
 		}
 	}
-	if u.journal.Candidate == nil || *candidate != *u.journal.Candidate || candidate.Version != in.Version || candidate.ManifestDigest != in.ManifestDigest || compareVersions(candidate.Version, u.cfg.CurrentVersion) <= 0 {
+	if u.journal.Candidate == nil || *candidate != *u.journal.Candidate || candidate.Version != in.Version || candidate.ManifestDigest != in.ManifestDigest || !u.canInstallVersion(candidate.Version) {
 		u.mu.Unlock()
 		return Job{}, ErrConflict
 	}
