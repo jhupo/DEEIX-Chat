@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,6 +13,112 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+// ListExecutionEvents godoc
+// @Summary List conversation execution events
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Conversation public ID"
+// @Param after query int false "Last applied sequence"
+// @Success 200 {object} ExecutionEventListResponseDoc
+// @Failure 404 {object} ErrorDoc
+// @Router /conversations/{id}/events [get]
+func (h *Handler) ListExecutionEvents(c *gin.Context) {
+	var after uint64
+	rawAfter := strings.TrimSpace(c.Query("after"))
+	if rawAfter != "" {
+		parsed, err := strconv.ParseUint(rawAfter, 10, 64)
+		if err != nil {
+			response.Error(c, http.StatusBadRequest, "invalid event cursor")
+			return
+		}
+		after = parsed
+	}
+	items, err := h.service.ListExecutionEvents(c.Request.Context(), middleware.MustUserID(c), c.Param("id"), after)
+	if err != nil {
+		if errors.Is(err, appconversation.ErrConversationNotFound) {
+			response.Error(c, http.StatusNotFound, "conversation not found")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, "load execution events failed")
+		return
+	}
+	result := make([]ExecutionEventResponse, 0, len(items))
+	for _, item := range items {
+		var payload interface{}
+		if json.Unmarshal([]byte(item.PayloadJSON), &payload) != nil {
+			payload = map[string]interface{}{}
+		}
+		result = append(result, ExecutionEventResponse{
+			RunID: item.RunID, Seq: item.Seq, Kind: item.Kind, Payload: payload, OccurredAt: item.OccurredAt,
+		})
+	}
+	response.Success(c, result)
+}
+
+// ListInteractions godoc
+// @Summary List pending and completed conversation interactions
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Conversation public ID"
+// @Param status query string false "Interaction status"
+// @Success 200 {object} InteractionListResponseDoc
+// @Failure 400,404 {object} ErrorDoc
+// @Router /conversations/{id}/interactions [get]
+func (h *Handler) ListInteractions(c *gin.Context) {
+	items, err := h.service.ListInteractions(c.Request.Context(), middleware.MustUserID(c), c.Param("id"), c.Query("status"))
+	if err != nil {
+		handleSendMessageError(c, err)
+		return
+	}
+	result := make([]InteractionResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, toInteractionResponse(item))
+	}
+	response.Success(c, result)
+}
+
+// RespondInteraction godoc
+// @Summary Respond to a conversation execution interaction
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param interaction_id path string true "Interaction public ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Param body body RespondInteractionRequest true "Interaction response"
+// @Success 200 {object} InteractionResponseDoc
+// @Failure 400,404,409 {object} ErrorDoc
+// @Router /conversation-interactions/{interaction_id}/respond [post]
+func (h *Handler) RespondInteraction(c *gin.Context) {
+	var request RespondInteractionRequest
+	if err := bindConversationJSON(c, &request, 1024*1024); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	item, err := h.service.RespondInteraction(c.Request.Context(), middleware.MustUserID(c), appconversation.GatewayInteractionResponse{
+		InteractionID:  strings.TrimSpace(c.Param("interaction_id")),
+		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")), Response: request.Response,
+	})
+	if err != nil {
+		handleSendMessageError(c, err)
+		return
+	}
+	response.Success(c, toInteractionResponse(*item))
+}
+
+func toInteractionResponse(item appconversation.GatewayInteraction) InteractionResponse {
+	var request interface{}
+	if json.Unmarshal(item.Request, &request) != nil {
+		request = map[string]interface{}{}
+	}
+	return InteractionResponse{
+		InteractionID: item.InteractionID, RunID: item.RunID, Kind: item.Kind,
+		Status: item.Status, Request: request, CreatedAt: item.CreatedAt,
+	}
+}
 
 // UpdateMessage godoc
 // @Summary 更新消息内容

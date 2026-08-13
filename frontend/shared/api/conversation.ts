@@ -858,7 +858,7 @@ export async function sendMessage(
   payload: SendMessageRequest,
 ): Promise<SendMessageResult> {
   return authedRequest<SendMessageResult>(
-    `/api/v1/conversations/${pathParam(conversationPublicID)}/messages`,
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/turns`,
     {
       method: "POST",
       accessToken,
@@ -873,7 +873,7 @@ export async function cancelMessageGeneration(
   runID: string,
 ): Promise<{ canceled: boolean }> {
   return authedRequest<{ canceled: boolean }>(
-    `/api/v1/conversation-runs/${pathParam(runID)}/cancel`,
+    `/api/v1/conversation-runs/${pathParam(runID)}/interrupt`,
     {
       method: "POST",
       accessToken,
@@ -1054,7 +1054,7 @@ export async function streamMessage(
   payload: SendMessageRequest,
   options: ConversationStreamOptions = {},
 ): Promise<SendMessageResult> {
-  return postConversationStream(accessToken, conversationPublicID, "/messages/stream", payload, options);
+  return postConversationStream(accessToken, conversationPublicID, "/turns/stream", payload, options);
 }
 
 export async function streamImageGeneration(

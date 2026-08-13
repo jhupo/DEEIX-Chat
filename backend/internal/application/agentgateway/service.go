@@ -53,6 +53,8 @@ type ArtifactContentStore interface {
 	OpenAgentArtifact(context.Context, uint, string) (*ArtifactContent, error)
 }
 
+type ConversationEventProjector func(context.Context, domainagent.AppliedEventFrame) error
+
 type ArtifactContent struct {
 	Reader      io.ReadCloser
 	ContentType string
@@ -66,6 +68,7 @@ type Service struct {
 	users     RuntimeUserResolver
 	proofs    RuntimeProofVerifier
 	artifacts ArtifactContentStore
+	projector ConversationEventProjector
 	notify    func(uint)
 }
 
@@ -187,12 +190,6 @@ type CommandView struct {
 	Status    string
 }
 
-type ReviewTargetInput struct {
-	Kind   string
-	Branch string
-	SHA    string
-}
-
 type WorkspaceRegistration struct {
 	WorkspaceID string
 	Name        string
@@ -205,9 +202,6 @@ type ThreadView struct {
 	WorkspaceID  string
 	Title        string
 	Status       string
-	IsPinned     bool
-	Labels       []string
-	SharePolicy  string
 	GitSHA       *string
 	GitBranch    *string
 	GitOriginURL *string
@@ -224,32 +218,11 @@ type TurnView struct {
 	UpdatedAt time.Time
 }
 
-type EventView struct {
-	EventID    string
-	ThreadID   string
-	TurnID     string
-	Seq        uint64
-	Kind       string
-	Payload    json.RawMessage
-	OccurredAt time.Time
-}
-
-type ItemView struct {
-	ItemID       string
-	ThreadID     string
-	TurnID       string
-	Kind         string
-	Status       string
-	Data         json.RawMessage
-	LastEventSeq uint64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
 type InteractionView struct {
 	InteractionID string
 	ThreadID      string
 	TurnID        string
+	RunID         string
 	Kind          string
 	Status        string
 	Request       json.RawMessage
@@ -258,14 +231,17 @@ type InteractionView struct {
 
 type StartThreadInput struct {
 	DeviceID, ProfileID, WorkspaceID string
+	ConversationID                   uint
 	Title                            string
 	Settings                         json.RawMessage
 	InitialInput                     json.RawMessage
+	InitialRunID                     string
 	IdempotencyKey                   string
 }
 
 type StartTurnInput struct {
 	ThreadID, IdempotencyKey string
+	RunID                    string
 	Input, Settings          json.RawMessage
 }
 
@@ -277,14 +253,6 @@ type RespondInteractionInput struct {
 type StartThreadResult struct {
 	Thread ThreadView
 	Turn   *TurnView
-}
-
-type ThreadSnapshotView struct {
-	Thread       ThreadView
-	Turns        []TurnView
-	Items        []ItemView
-	Interactions []InteractionView
-	SnapshotSeq  uint64
 }
 
 func NewService(repo repository.AgentGatewayRepository, secret string) (*Service, error) {
@@ -300,6 +268,10 @@ func (s *Service) SetRuntimeAuth(users RuntimeUserResolver, proofs RuntimeProofV
 }
 
 func (s *Service) SetArtifactContentStore(store ArtifactContentStore) { s.artifacts = store }
+
+func (s *Service) SetConversationEventProjector(projector ConversationEventProjector) {
+	s.projector = projector
+}
 
 func (s *Service) SetNotifier(notify func(uint)) { s.notify = notify }
 
@@ -527,114 +499,25 @@ func (s *Service) GetResourceSnapshot(ctx context.Context, userID uint, devicePu
 	}, nil
 }
 
-func (s *Service) RenameThread(ctx context.Context, userID uint, threadID, name, idempotencyKey string) (*CommandView, error) {
-	name = strings.TrimSpace(name)
-	if name == "" || utf8.RuneCountInString(name) > 256 {
-		return nil, ErrInvalidInput
+func (s *Service) ResolveExecutionTarget(ctx context.Context, userID uint, deviceID, profileID, workspaceID string) (string, error) {
+	deviceID, profileID, workspaceID = strings.TrimSpace(deviceID), strings.TrimSpace(profileID), strings.TrimSpace(workspaceID)
+	if userID == 0 || !validPublicID(deviceID, "agd") || !validOpaqueRef(profileID) || !validOpaqueRef(workspaceID) {
+		return "", ErrInvalidInput
 	}
-	return s.queueThreadCommand(ctx, userID, threadID, "", "thread.rename", map[string]any{"name": name}, idempotencyKey)
-}
-
-func (s *Service) ChangeThreadLifecycle(ctx context.Context, userID uint, threadID, action, idempotencyKey string) (*CommandView, error) {
-	if !contains([]string{"resume", "archive", "unarchive", "delete"}, action) {
-		return nil, ErrInvalidInput
-	}
-	return s.queueThreadCommand(ctx, userID, threadID, "", "thread.lifecycle", map[string]any{"action": action}, idempotencyKey)
-}
-
-func (s *Service) ForkThread(ctx context.Context, userID uint, threadID, idempotencyKey string) (*ThreadView, error) {
-	if userID == 0 || !validPublicID(threadID, "agth") || !validIdempotencyKey(idempotencyKey) {
-		return nil, ErrInvalidInput
-	}
-	request := struct{ ThreadID string }{threadID}
-	fork := &domainagent.Thread{PublicID: newPublicID("agth"), UserID: userID, Status: "queued"}
-	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "thread.lifecycle"}
-	created, err := s.repo.ForkThread(ctx, idempotencyKey, requestHash(request), userID, threadID, fork, command, s.now().UTC())
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	s.notifyUser(userID)
-	view := threadView(*created, created.DevicePublicID, created.ProfilePublicID, created.WorkspacePublicID)
-	return &view, nil
-}
-
-func (s *Service) CompactThread(ctx context.Context, userID uint, threadID, idempotencyKey string) (*CommandView, error) {
-	return s.queueThreadCommand(ctx, userID, threadID, "", "thread.compact", struct{}{}, idempotencyKey)
-}
-
-func (s *Service) StartReview(ctx context.Context, userID uint, threadID string, target ReviewTargetInput, idempotencyKey string) (*CommandView, error) {
-	target.Kind, target.Branch, target.SHA = strings.TrimSpace(target.Kind), strings.TrimSpace(target.Branch), strings.TrimSpace(target.SHA)
-	switch target.Kind {
-	case "working-tree":
-		if target.Branch != "" || target.SHA != "" {
-			return nil, ErrInvalidInput
-		}
-	case "base-branch":
-		if !validReviewRef(target.Branch) || target.SHA != "" {
-			return nil, ErrInvalidInput
-		}
-	case "commit":
-		if target.Branch != "" || !validCommitSHA(target.SHA) {
-			return nil, ErrInvalidInput
-		}
-	default:
-		return nil, ErrInvalidInput
-	}
-	encodedTarget := map[string]string{"kind": target.Kind}
-	if target.Branch != "" {
-		encodedTarget["branch"] = target.Branch
-	}
-	if target.SHA != "" {
-		encodedTarget["sha"] = target.SHA
-	}
-	return s.queueThreadCommand(ctx, userID, threadID, "", "review.start", map[string]any{"target": encodedTarget}, idempotencyKey)
-}
-
-func (s *Service) SteerTurn(ctx context.Context, userID uint, turnID string, input json.RawMessage, idempotencyKey string) (*CommandView, error) {
-	if !validInput(input) {
-		return nil, ErrInvalidInput
-	}
-	return s.queueThreadCommand(ctx, userID, "", turnID, "turn.steer", map[string]any{"input": input}, idempotencyKey)
-}
-
-func (s *Service) InterruptTurn(ctx context.Context, userID uint, turnID, idempotencyKey string) (*CommandView, error) {
-	return s.queueThreadCommand(ctx, userID, "", turnID, "turn.interrupt", struct{}{}, idempotencyKey)
-}
-
-func (s *Service) queueThreadCommand(ctx context.Context, userID uint, threadID, turnID, kind string, parameters any, idempotencyKey string) (*CommandView, error) {
-	if userID == 0 || !validIdempotencyKey(idempotencyKey) ||
-		(threadID != "" && !validPublicID(threadID, "agth")) ||
-		(turnID != "" && !validPublicID(turnID, "agturn")) ||
-		(threadID == "") == (turnID == "") {
-		return nil, ErrInvalidInput
-	}
-	encoded, err := json.Marshal(parameters)
-	if err != nil {
-		return nil, ErrInvalidInput
-	}
-	request := struct {
-		ThreadID, TurnID, Kind string
-		Parameters             json.RawMessage
-	}{threadID, turnID, kind, encoded}
-	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: kind}
-	created, err := s.repo.QueueThreadCommand(ctx, idempotencyKey, requestHash(request), userID, threadID, turnID, encoded, command, s.now().UTC())
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	s.notifyUser(userID)
-	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+	provider, err := s.repo.ResolveExecutionTarget(ctx, userID, deviceID, profileID, workspaceID, s.now().UTC())
+	return provider, mapResourceError(err)
 }
 
 func (s *Service) StartThread(ctx context.Context, userID uint, input StartThreadInput) (*StartThreadResult, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.DeviceID, input.ProfileID, input.WorkspaceID = strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.ProfileID), strings.TrimSpace(input.WorkspaceID)
-	if userID == 0 || !validPublicID(input.DeviceID, "agd") || len(input.ProfileID) > 64 || !validOpaqueRef(input.ProfileID) ||
+	if userID == 0 || input.ConversationID == 0 || !validPublicID(input.DeviceID, "agd") || len(input.ProfileID) > 64 || !validOpaqueRef(input.ProfileID) ||
 		len(input.WorkspaceID) > 64 || !validOpaqueRef(input.WorkspaceID) || utf8.RuneCountInString(input.Title) > 256 ||
 		!validIdempotencyKey(input.IdempotencyKey) || !validSettings(input.Settings) ||
-		(len(input.InitialInput) > 0 && !validInput(input.InitialInput)) {
+		(len(input.InitialInput) > 0 && (!validInput(input.InitialInput) || normalizeAgentRunID(input.InitialRunID) == "")) {
 		return nil, ErrInvalidInput
 	}
-	thread := &domainagent.Thread{PublicID: newPublicID("agth"), UserID: userID, Title: input.Title, Status: "queued"}
+	thread := &domainagent.Thread{PublicID: newPublicID("agth"), UserID: userID, ConversationID: input.ConversationID, Title: input.Title, Status: "queued"}
 	commandPayload, _ := json.Marshal(map[string]any{
 		"kind": "thread.create", "deviceId": input.DeviceID, "profileId": input.ProfileID,
 		"workspaceId": input.WorkspaceID, "settings": json.RawMessage(input.Settings),
@@ -642,7 +525,7 @@ func (s *Service) StartThread(ctx context.Context, userID uint, input StartThrea
 	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "thread.create", PayloadJSON: string(commandPayload)}
 	var turn *domainagent.Turn
 	if len(input.InitialInput) > 0 {
-		turn = &domainagent.Turn{PublicID: newPublicID("agturn"), UserID: userID, Status: "awaiting_thread", InputJSON: string(input.InitialInput), SettingsJSON: string(input.Settings)}
+		turn = &domainagent.Turn{PublicID: newPublicID("agturn"), UserID: userID, RunID: input.InitialRunID, Status: "awaiting_thread", InputJSON: string(input.InitialInput), SettingsJSON: string(input.Settings)}
 	}
 	createdThread, createdTurn, err := s.repo.StartThread(ctx, input.IdempotencyKey, requestHash(input), thread, turn, command, s.now().UTC())
 	if err != nil {
@@ -657,144 +540,24 @@ func (s *Service) StartThread(ctx context.Context, userID uint, input StartThrea
 	return result, nil
 }
 
-func (s *Service) ListThreads(ctx context.Context, userID uint) ([]ThreadView, error) {
-	items, err := s.repo.ListThreads(ctx, userID, 100)
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	result := make([]ThreadView, 0, len(items))
-	for _, item := range items {
-		result = append(result, threadView(item, item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID))
-	}
-	return result, nil
-}
-
-func (s *Service) GetThread(ctx context.Context, userID uint, threadPublicID string) (*ThreadView, error) {
-	if !validPublicID(threadPublicID, "agth") {
+func (s *Service) GetThreadByConversation(ctx context.Context, userID, conversationID uint) (*ThreadView, error) {
+	if userID == 0 || conversationID == 0 {
 		return nil, ErrInvalidInput
 	}
-	item, err := s.repo.GetThread(ctx, userID, threadPublicID)
+	item, err := s.repo.GetThreadByConversation(ctx, userID, conversationID)
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
 	view := threadView(*item, item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID)
 	return &view, nil
-}
-
-func (s *Service) GetThreadSnapshot(ctx context.Context, userID uint, threadPublicID string) (*ThreadSnapshotView, error) {
-	if userID == 0 || !validPublicID(threadPublicID, "agth") {
-		return nil, ErrInvalidInput
-	}
-	item, err := s.repo.GetThreadSnapshot(ctx, userID, threadPublicID)
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	result := &ThreadSnapshotView{
-		Thread:      threadView(item.Thread, item.Thread.DevicePublicID, item.Thread.ProfilePublicID, item.Thread.WorkspacePublicID),
-		SnapshotSeq: item.SnapshotSeq,
-		Turns:       make([]TurnView, 0, len(item.Turns)), Items: make([]ItemView, 0, len(item.Items)),
-		Interactions: make([]InteractionView, 0, len(item.Interactions)),
-	}
-	for _, row := range item.Turns {
-		result.Turns = append(result.Turns, turnView(row, threadPublicID))
-	}
-	for _, row := range item.Items {
-		if json.Valid([]byte(row.DataJSON)) {
-			result.Items = append(result.Items, ItemView{ItemID: row.PublicID, ThreadID: threadPublicID, TurnID: row.TurnPublicID, Kind: row.Kind, Status: row.Status, Data: json.RawMessage(row.DataJSON), LastEventSeq: row.LastEventSeq, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
-		}
-	}
-	for _, row := range item.Interactions {
-		if json.Valid([]byte(row.RequestJSON)) {
-			result.Interactions = append(result.Interactions, InteractionView{InteractionID: row.PublicID, ThreadID: threadPublicID, TurnID: row.TurnPublicID, Kind: row.Kind, Status: row.Status, Request: json.RawMessage(row.RequestJSON), CreatedAt: row.CreatedAt})
-		}
-	}
-	return result, nil
-}
-
-func (s *Service) UpdateThreadMetadata(ctx context.Context, userID uint, threadID, idempotencyKey string, isPinned *bool, labels *[]string, sharePolicy *string) (*ThreadView, error) {
-	if userID == 0 || !validPublicID(threadID, "agth") || !validIdempotencyKey(idempotencyKey) || (isPinned == nil && labels == nil && sharePolicy == nil) {
-		return nil, ErrInvalidInput
-	}
-	patch := domainagent.ThreadMetadataPatch{IsPinned: isPinned}
-	if labels != nil {
-		if len(*labels) > 20 {
-			return nil, ErrInvalidInput
-		}
-		normalized, seen := make([]string, 0, len(*labels)), make(map[string]struct{}, len(*labels))
-		for _, label := range *labels {
-			label = strings.TrimSpace(label)
-			if label == "" || utf8.RuneCountInString(label) > 64 {
-				return nil, ErrInvalidInput
-			}
-			if _, exists := seen[label]; exists {
-				continue
-			}
-			seen[label], normalized = struct{}{}, append(normalized, label)
-		}
-		encoded, _ := json.Marshal(normalized)
-		value := string(encoded)
-		patch.LabelsJSON = &value
-	}
-	if sharePolicy != nil {
-		value := strings.TrimSpace(*sharePolicy)
-		if !contains([]string{"private", "link"}, value) {
-			return nil, ErrInvalidInput
-		}
-		patch.SharePolicy = &value
-	}
-	request := struct {
-		ThreadID    string
-		IsPinned    *bool
-		LabelsJSON  *string
-		SharePolicy *string
-	}{threadID, patch.IsPinned, patch.LabelsJSON, patch.SharePolicy}
-	item, err := s.repo.UpdateThreadMetadata(ctx, idempotencyKey, requestHash(request), userID, threadID, patch, s.now().UTC())
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	s.notifyUser(userID)
-	view := threadView(*item, item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID)
-	return &view, nil
-}
-
-func (s *Service) UpdateProviderMetadata(ctx context.Context, userID uint, threadID string, gitInfo json.RawMessage, idempotencyKey string) (*CommandView, error) {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(gitInfo, &fields) != nil || len(fields) == 0 || len(fields) > 3 {
-		return nil, ErrInvalidInput
-	}
-	limits := map[string]int{"sha": 64, "branch": 256, "originUrl": 2048}
-	normalized := make(map[string]any, len(fields))
-	for name, raw := range fields {
-		limit, ok := limits[name]
-		if !ok {
-			return nil, ErrInvalidInput
-		}
-		if string(raw) == "null" {
-			normalized[name] = nil
-			continue
-		}
-		var value string
-		if json.Unmarshal(raw, &value) != nil {
-			return nil, ErrInvalidInput
-		}
-		value = strings.TrimSpace(value)
-		if value == "" || len(value) > limit || strings.ContainsAny(value, "\r\n\x00") {
-			return nil, ErrInvalidInput
-		}
-		if name == "sha" && !validGitSHA(value) {
-			return nil, ErrInvalidInput
-		}
-		normalized[name] = value
-	}
-	return s.queueThreadCommand(ctx, userID, threadID, "", "thread.metadata.update", map[string]any{"gitInfo": normalized}, idempotencyKey)
 }
 
 func (s *Service) StartTurn(ctx context.Context, userID uint, input StartTurnInput) (*TurnView, error) {
-	if userID == 0 || !validPublicID(input.ThreadID, "agth") || !validIdempotencyKey(input.IdempotencyKey) ||
+	if userID == 0 || normalizeAgentRunID(input.RunID) == "" || !validPublicID(input.ThreadID, "agth") || !validIdempotencyKey(input.IdempotencyKey) ||
 		!validInput(input.Input) || !validSettings(input.Settings) {
 		return nil, ErrInvalidInput
 	}
-	turn := &domainagent.Turn{PublicID: newPublicID("agturn"), UserID: userID, ThreadPublicID: input.ThreadID, Status: "queued", InputJSON: string(input.Input), SettingsJSON: string(input.Settings)}
+	turn := &domainagent.Turn{PublicID: newPublicID("agturn"), UserID: userID, ThreadPublicID: input.ThreadID, RunID: input.RunID, Status: "queued", InputJSON: string(input.Input), SettingsJSON: string(input.Settings)}
 	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "turn.start"}
 	created, err := s.repo.StartTurn(ctx, input.IdempotencyKey, requestHash(input), turn, command, s.now().UTC())
 	if err != nil {
@@ -805,59 +568,22 @@ func (s *Service) StartTurn(ctx context.Context, userID uint, input StartTurnInp
 	return &view, nil
 }
 
-func (s *Service) ListTurns(ctx context.Context, userID uint, threadPublicID string) ([]TurnView, error) {
-	if !validPublicID(threadPublicID, "agth") {
+func (s *Service) InterruptRun(ctx context.Context, userID uint, runID, idempotencyKey string) (*CommandView, error) {
+	if userID == 0 || normalizeAgentRunID(runID) == "" || !validIdempotencyKey(idempotencyKey) {
 		return nil, ErrInvalidInput
 	}
-	items, err := s.repo.ListTurns(ctx, userID, threadPublicID, 200)
+	turn, err := s.repo.GetTurnByRunID(ctx, userID, runID)
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	result := make([]TurnView, 0, len(items))
-	for _, item := range items {
-		result = append(result, turnView(item, threadPublicID))
-	}
-	return result, nil
-}
-
-func (s *Service) ListEvents(ctx context.Context, userID uint, threadPublicID string, after uint64) ([]EventView, error) {
-	if !validPublicID(threadPublicID, "agth") {
-		return nil, ErrInvalidInput
-	}
-	items, err := s.repo.ListEvents(ctx, userID, threadPublicID, after, 500)
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "turn.interrupt"}
+	request := struct{ RunID string }{RunID: runID}
+	created, err := s.repo.QueueTurnInterrupt(ctx, idempotencyKey, requestHash(request), userID, turn.PublicID, command, s.now().UTC())
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	result := make([]EventView, 0, len(items))
-	for _, item := range items {
-		if item.ThreadSeq == nil || !json.Valid([]byte(item.PayloadJSON)) {
-			continue
-		}
-		result = append(result, EventView{EventID: item.PublicID, ThreadID: threadPublicID, TurnID: item.TurnPublicID, Seq: *item.ThreadSeq, Kind: item.Kind, Payload: json.RawMessage(item.PayloadJSON), OccurredAt: item.OccurredAt})
-	}
-	return result, nil
-}
-
-func (s *Service) ListItems(ctx context.Context, userID uint, threadPublicID string) ([]ItemView, error) {
-	if !validPublicID(threadPublicID, "agth") {
-		return nil, ErrInvalidInput
-	}
-	items, err := s.repo.ListItems(ctx, userID, threadPublicID, 500)
-	if err != nil {
-		return nil, mapResourceError(err)
-	}
-	result := make([]ItemView, 0, len(items))
-	for _, item := range items {
-		if !json.Valid([]byte(item.DataJSON)) {
-			continue
-		}
-		result = append(result, ItemView{
-			ItemID: item.PublicID, ThreadID: threadPublicID, TurnID: item.TurnPublicID,
-			Kind: item.Kind, Status: item.Status, Data: json.RawMessage(item.DataJSON),
-			LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
-		})
-	}
-	return result, nil
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
 }
 
 func (s *Service) ListInteractions(ctx context.Context, userID uint, threadPublicID, status string) ([]InteractionView, error) {
@@ -871,7 +597,7 @@ func (s *Service) ListInteractions(ctx context.Context, userID uint, threadPubli
 	}
 	result := make([]InteractionView, 0, len(items))
 	for _, item := range items {
-		result = append(result, InteractionView{InteractionID: item.PublicID, ThreadID: threadPublicID, TurnID: item.TurnPublicID, Kind: item.Kind, Status: item.Status, Request: json.RawMessage(item.RequestJSON), CreatedAt: item.CreatedAt})
+		result = append(result, InteractionView{InteractionID: item.PublicID, ThreadID: threadPublicID, TurnID: item.TurnPublicID, RunID: item.RunID, Kind: item.Kind, Status: item.Status, Request: json.RawMessage(item.RequestJSON), CreatedAt: item.CreatedAt})
 	}
 	return result, nil
 }
@@ -886,7 +612,7 @@ func (s *Service) RespondInteraction(ctx context.Context, userID uint, input Res
 		return nil, mapResourceError(err)
 	}
 	s.notifyUser(userID)
-	view := InteractionView{InteractionID: item.PublicID, ThreadID: item.ThreadPublicID, TurnID: item.TurnPublicID, Kind: item.Kind, Status: item.Status, Request: json.RawMessage(item.RequestJSON), CreatedAt: item.CreatedAt}
+	view := InteractionView{InteractionID: item.PublicID, ThreadID: item.ThreadPublicID, TurnID: item.TurnPublicID, RunID: item.RunID, Kind: item.Kind, Status: item.Status, Request: json.RawMessage(item.RequestJSON), CreatedAt: item.CreatedAt}
 	return &view, nil
 }
 
@@ -1109,32 +835,6 @@ func (s *Service) AuthenticateConnection(ctx context.Context, token string) (*Co
 	}, nil
 }
 
-func (s *Service) EnqueueCommand(ctx context.Context, userID uint, devicePublicID string, command json.RawMessage) (*DeliveryCommand, error) {
-	if userID == 0 || !validPublicID(devicePublicID, "agd") || len(command) == 0 || len(command) > 2*1024*1024 || !json.Valid(command) {
-		return nil, ErrInvalidInput
-	}
-	var header struct {
-		Kind     string `json:"kind"`
-		DeviceID string `json:"deviceId"`
-	}
-	if err := json.Unmarshal(command, &header); err != nil || header.DeviceID != devicePublicID || !validCommandKind(header.Kind) {
-		return nil, ErrInvalidInput
-	}
-	item := domainagent.Command{PublicID: newPublicID("agcmd"), Kind: header.Kind, PayloadJSON: string(command)}
-	created, err := s.repo.EnqueueCommand(ctx, userID, devicePublicID, &item)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrDeviceNotFound
-		}
-		if errors.Is(err, repository.ErrConflict) {
-			return nil, ErrDeviceRevoked
-		}
-		return nil, err
-	}
-	s.notifyUser(userID)
-	return &DeliveryCommand{InternalID: created.ID, CommandID: created.PublicID, ServerSeq: created.ServerSeq, Command: json.RawMessage(created.PayloadJSON)}, nil
-}
-
 func (s *Service) CommandsForDelivery(ctx context.Context, identity *ConnectionIdentity, after uint64) ([]DeliveryCommand, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || after > uint64(^uint(0)>>1) {
 		return nil, ErrInvalidInput
@@ -1246,6 +946,9 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 		}
 		return 0, err
 	}
+	if err := s.flushPendingConversationEvents(ctx, identity.InternalDeviceID); err != nil {
+		return 0, err
+	}
 	s.notifyUser(identity.UserID)
 	return acknowledged, nil
 }
@@ -1268,7 +971,7 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		return 0, ErrInvalidInput
 	}
 	payloadHash := sha256.Sum256(event)
-	acknowledged, err := s.repo.ApplyEventFrame(
+	applied, err := s.repo.ApplyEventFrame(
 		ctx, identity.InternalDeviceID, runtimeProfileID, bridgeSeq,
 		hex.EncodeToString(payloadHash[:]), &domainagent.Event{
 			PublicID: newPublicID("agev"), UserID: identity.UserID, DeviceID: identity.InternalDeviceID,
@@ -1283,8 +986,36 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		}
 		return 0, err
 	}
+	if applied.ConversationID != 0 && applied.RunID != "" {
+		if err := s.projectConversationEvent(ctx, *applied); err != nil {
+			return 0, err
+		}
+	}
 	s.notifyUser(identity.UserID)
-	return acknowledged, nil
+	return applied.Acknowledged, nil
+}
+
+func (s *Service) flushPendingConversationEvents(ctx context.Context, deviceID uint) error {
+	items, err := s.repo.ListPendingConversationEvents(ctx, deviceID, 1000)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := s.projectConversationEvent(ctx, item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) projectConversationEvent(ctx context.Context, item domainagent.AppliedEventFrame) error {
+	if s.projector == nil {
+		return ErrStateConflict
+	}
+	if err := s.projector(ctx, item); err != nil {
+		return err
+	}
+	return s.repo.MarkConversationEventProjected(ctx, item.Event.ID, s.now().UTC())
 }
 
 func validProviderEvent(value json.RawMessage) bool {
@@ -1340,6 +1071,21 @@ func validIdempotencyKey(value string) bool {
 	value = strings.TrimSpace(value)
 	parsed, err := uuid.Parse(value)
 	return err == nil && parsed.String() == strings.ToLower(value)
+}
+
+func normalizeAgentRunID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) < len("run_")+1 || len(value) > 64 || !strings.HasPrefix(value, "run_") {
+		return ""
+	}
+	for _, character := range value[len("run_"):] {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || character == '_' || character == '-' {
+			continue
+		}
+		return ""
+	}
+	return value
 }
 
 func validSettings(value json.RawMessage) bool {
@@ -1511,21 +1257,7 @@ func requestHash(value any) string {
 }
 
 func threadView(item domainagent.Thread, deviceID, profileID, workspaceID string) ThreadView {
-	labels := []string{}
-	_ = json.Unmarshal([]byte(item.LabelsJSON), &labels)
-	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, IsPinned: item.IsPinned, Labels: labels, SharePolicy: item.SharePolicy, GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
-}
-
-func validGitSHA(value string) bool {
-	if len(value) < 7 || len(value) > 64 {
-		return false
-	}
-	for _, character := range value {
-		if (character < '0' || character > '9') && (character < 'a' || character > 'f') && (character < 'A' || character > 'F') {
-			return false
-		}
-	}
-	return true
+	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 
 func turnView(item domainagent.Turn, threadID string) TurnView {
@@ -1623,34 +1355,12 @@ func validPlatform(value string) bool {
 	}
 }
 
-func validCommandKind(value string) bool {
-	switch value {
-	case "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "review.start",
-		"turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh":
-		return true
-	default:
-		return false
-	}
-}
-
 func validProfileResource(value string) bool {
 	return contains([]string{"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status"}, value)
 }
 
 func validWorkspaceResource(value string) bool {
 	return contains([]string{"sessions", "skills", "hooks"}, value)
-}
-
-func validReviewRef(value string) bool {
-	return value != "" && len(value) <= 256 && utf8.ValidString(value) && !strings.ContainsAny(value, "\r\n\x00")
-}
-
-func validCommitSHA(value string) bool {
-	if len(value) < 7 || len(value) > 64 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }
 
 func validUserPublicID(value string) bool {

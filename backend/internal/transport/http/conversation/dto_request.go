@@ -1,10 +1,20 @@
 package conversation
 
+import "encoding/json"
+
 // CreateConversationRequest 创建会话请求。
 type CreateConversationRequest struct {
-	Title     string `json:"title,omitempty" binding:"max=255"`
-	Model     string `json:"model,omitempty" binding:"max=128"`
-	ProjectID string `json:"projectID,omitempty" binding:"omitempty,max=32"`
+	Title     string                       `json:"title,omitempty" binding:"max=255"`
+	Model     string                       `json:"model,omitempty" binding:"max=128"`
+	ProjectID string                       `json:"projectID,omitempty" binding:"omitempty,max=32"`
+	Execution ConversationExecutionRequest `json:"execution" binding:"required"`
+}
+
+type ConversationExecutionRequest struct {
+	Type        string `json:"type" binding:"required,oneof=cloud gateway"`
+	DeviceID    string `json:"deviceID,omitempty" binding:"omitempty,max=64"`
+	ProfileID   string `json:"profileID,omitempty" binding:"omitempty,max=64"`
+	WorkspaceID string `json:"workspaceID,omitempty" binding:"omitempty,max=64"`
 }
 
 // CreateConversationProjectRequest 创建会话项目请求。
@@ -91,7 +101,7 @@ type UpdateFileRequest struct {
 
 // SendMessageRequest 发送消息请求。
 type SendMessageRequest struct {
-	KeyBindingID            string                 `json:"keyBindingID" binding:"required,max=64"`
+	KeyBindingID            string                 `json:"keyBindingID,omitempty" binding:"omitempty,max=64"`
 	ContentType             string                 `json:"contentType" binding:"required,oneof=text markdown image file mixed"`
 	Content                 string                 `json:"content" binding:"required"`
 	Model                   string                 `json:"model,omitempty" binding:"omitempty,max=128"`
@@ -134,6 +144,10 @@ type MediaVideoRequest struct {
 // SetMessageFeedbackRequest 设置消息反馈请求。
 type SetMessageFeedbackRequest struct {
 	Feedback string `json:"feedback,omitempty" binding:"omitempty,oneof=up down"`
+}
+
+type RespondInteractionRequest struct {
+	Response json.RawMessage `json:"response" binding:"required"`
 }
 
 // UpdateMessageRequest 更新消息内容请求。

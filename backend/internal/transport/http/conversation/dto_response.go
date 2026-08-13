@@ -15,28 +15,33 @@ import (
 
 // ConversationResponse 对外会话响应 DTO。
 type ConversationResponse struct {
-	PublicID            string     `json:"publicID"`
-	UserID              uint       `json:"userID"`
-	ProjectID           string     `json:"projectID"`
-	ProjectName         string     `json:"projectName"`
-	Title               string     `json:"title"`
-	LabelsJSON          string     `json:"labelsJSON"`
-	Model               string     `json:"model"`
-	Provider            string     `json:"provider"`
-	SessionKey          string     `json:"sessionKey"`
-	IsStarred           bool       `json:"isStarred"`
-	StarredAt           *time.Time `json:"starredAt" extensions:"x-nullable,!x-omitempty"`
-	MessageCount        int        `json:"messageCount"`
-	Status              string     `json:"status"`
-	ContextPolicy       string     `json:"contextPolicyJSON"`
-	LastCompactedAt     *time.Time `json:"lastCompactedAt" extensions:"x-nullable,!x-omitempty"`
-	LastResponseID      string     `json:"lastResponseID"`
-	ShareStatus         string     `json:"shareStatus"`
-	ShareID             string     `json:"shareID"`
-	SharedAt            *time.Time `json:"sharedAt" extensions:"x-nullable,!x-omitempty"`
-	LastShareAccessedAt *time.Time `json:"lastShareAccessedAt" extensions:"x-nullable,!x-omitempty"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	PublicID             string     `json:"publicID"`
+	UserID               uint       `json:"userID"`
+	ProjectID            string     `json:"projectID"`
+	ProjectName          string     `json:"projectName"`
+	Title                string     `json:"title"`
+	LabelsJSON           string     `json:"labelsJSON"`
+	Model                string     `json:"model"`
+	Provider             string     `json:"provider"`
+	ExecutionType        string     `json:"executionType" enums:"cloud,gateway"`
+	ExecutionDeviceID    string     `json:"executionDeviceID"`
+	ExecutionProfileID   string     `json:"executionProfileID"`
+	ExecutionWorkspaceID string     `json:"executionWorkspaceID"`
+	ExecutionEventSeq    uint64     `json:"executionEventSeq"`
+	SessionKey           string     `json:"sessionKey"`
+	IsStarred            bool       `json:"isStarred"`
+	StarredAt            *time.Time `json:"starredAt" extensions:"x-nullable,!x-omitempty"`
+	MessageCount         int        `json:"messageCount"`
+	Status               string     `json:"status"`
+	ContextPolicy        string     `json:"contextPolicyJSON"`
+	LastCompactedAt      *time.Time `json:"lastCompactedAt" extensions:"x-nullable,!x-omitempty"`
+	LastResponseID       string     `json:"lastResponseID"`
+	ShareStatus          string     `json:"shareStatus"`
+	ShareID              string     `json:"shareID"`
+	SharedAt             *time.Time `json:"sharedAt" extensions:"x-nullable,!x-omitempty"`
+	LastShareAccessedAt  *time.Time `json:"lastShareAccessedAt" extensions:"x-nullable,!x-omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 
 // ConversationSearchResultResponse 会话搜索结果 DTO。
@@ -101,28 +106,33 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 		shareStatus = "none"
 	}
 	return ConversationResponse{
-		PublicID:            item.PublicID,
-		UserID:              item.UserID,
-		ProjectID:           item.ProjectPublicID,
-		ProjectName:         item.ProjectName,
-		Title:               item.Title,
-		LabelsJSON:          labelsJSON,
-		Model:               item.Model,
-		Provider:            item.Provider,
-		SessionKey:          item.SessionKey,
-		IsStarred:           item.IsStarred,
-		StarredAt:           item.StarredAt,
-		MessageCount:        item.MessageCount,
-		Status:              item.Status,
-		ContextPolicy:       item.ContextPolicy,
-		LastCompactedAt:     item.LastCompactedAt,
-		LastResponseID:      item.LastResponseID,
-		ShareStatus:         shareStatus,
-		ShareID:             item.ShareID,
-		SharedAt:            item.SharedAt,
-		LastShareAccessedAt: item.LastShareAccessedAt,
-		CreatedAt:           item.CreatedAt,
-		UpdatedAt:           item.UpdatedAt,
+		PublicID:             item.PublicID,
+		UserID:               item.UserID,
+		ProjectID:            item.ProjectPublicID,
+		ProjectName:          item.ProjectName,
+		Title:                item.Title,
+		LabelsJSON:           labelsJSON,
+		Model:                item.Model,
+		Provider:             item.Provider,
+		ExecutionType:        item.ExecutionType,
+		ExecutionDeviceID:    item.ExecutionDeviceID,
+		ExecutionProfileID:   item.ExecutionProfileID,
+		ExecutionWorkspaceID: item.ExecutionWorkspaceID,
+		ExecutionEventSeq:    item.ExecutionEventSeq,
+		SessionKey:           item.SessionKey,
+		IsStarred:            item.IsStarred,
+		StarredAt:            item.StarredAt,
+		MessageCount:         item.MessageCount,
+		Status:               item.Status,
+		ContextPolicy:        item.ContextPolicy,
+		LastCompactedAt:      item.LastCompactedAt,
+		LastResponseID:       item.LastResponseID,
+		ShareStatus:          shareStatus,
+		ShareID:              item.ShareID,
+		SharedAt:             item.SharedAt,
+		LastShareAccessedAt:  item.LastShareAccessedAt,
+		CreatedAt:            item.CreatedAt,
+		UpdatedAt:            item.UpdatedAt,
 	}
 }
 
@@ -983,6 +993,38 @@ type SendMessageResponse struct {
 
 type CancelMessageGenerationResponse struct {
 	Canceled bool `json:"canceled"`
+}
+
+type ExecutionEventResponse struct {
+	RunID      string      `json:"runID"`
+	Seq        uint64      `json:"seq"`
+	Kind       string      `json:"kind"`
+	Payload    interface{} `json:"payload"`
+	OccurredAt time.Time   `json:"occurredAt"`
+}
+
+type InteractionResponse struct {
+	InteractionID string      `json:"interactionID"`
+	RunID         string      `json:"runID"`
+	Kind          string      `json:"kind"`
+	Status        string      `json:"status"`
+	Request       interface{} `json:"request"`
+	CreatedAt     time.Time   `json:"createdAt"`
+}
+
+type ExecutionEventListResponseDoc struct {
+	ErrorMsg string                   `json:"errorMsg"`
+	Data     []ExecutionEventResponse `json:"data"`
+}
+
+type InteractionListResponseDoc struct {
+	ErrorMsg string                `json:"errorMsg"`
+	Data     []InteractionResponse `json:"data"`
+}
+
+type InteractionResponseDoc struct {
+	ErrorMsg string              `json:"errorMsg"`
+	Data     InteractionResponse `json:"data"`
 }
 
 func toSendMessageResponse(r *appconversation.SendMessageResult) SendMessageResponse {

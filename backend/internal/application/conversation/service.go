@@ -44,6 +44,53 @@ type sub2ExecutionResolver interface {
 	ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error)
 }
 
+type gatewayExecutor interface {
+	ResolveExecutionTarget(context.Context, uint, string, string, string) (string, error)
+	CreateArtifact(context.Context, uint, string, string) (*GatewayArtifact, error)
+	StartThread(context.Context, uint, GatewayStartThreadInput) error
+	GetThreadByConversation(context.Context, uint, uint) (*GatewayThread, error)
+	StartTurn(context.Context, uint, GatewayStartTurnInput) error
+	InterruptRun(context.Context, uint, string, string) error
+	ListInteractions(context.Context, uint, uint, string) ([]GatewayInteraction, error)
+	RespondInteraction(context.Context, uint, GatewayInteractionResponse) (*GatewayInteraction, error)
+}
+
+type GatewayArtifact struct{ ArtifactID string }
+type GatewayThread struct{ ThreadID string }
+type GatewayStartThreadInput struct {
+	DeviceID, ProfileID, WorkspaceID string
+	ConversationID                   uint
+	Title                            string
+	Settings, InitialInput           []byte
+	InitialRunID, IdempotencyKey     string
+}
+type GatewayStartTurnInput struct {
+	ThreadID, RunID, IdempotencyKey string
+	Input, Settings                 []byte
+}
+type GatewayExecutionEvent struct {
+	SourceKey      string
+	UserID         uint
+	ConversationID uint
+	RunID          string
+	Kind           string
+	Payload        []byte
+	OccurredAt     time.Time
+}
+type GatewayInteraction struct {
+	InteractionID string
+	RunID         string
+	Kind          string
+	Status        string
+	Request       []byte
+	CreatedAt     time.Time
+}
+type GatewayInteractionResponse struct {
+	InteractionID  string
+	IdempotencyKey string
+	Response       []byte
+}
+
 // defaultRouteResolver 表示按任务类型解析默认路由的可选能力。
 // conversation 只依赖这个窄接口，不直接感知 channel.Service 的具体实现。
 type defaultRouteResolver interface {
@@ -108,6 +155,7 @@ type Service struct {
 	ragSvc            *apprag.Service
 	skillResolver     skillResolver
 	sub2Resolver      sub2ExecutionResolver
+	gatewayExecutor   gatewayExecutor
 	auditWriter       auditWriter
 	storeProvider     appstorage.Provider
 	logger            *zap.Logger
@@ -207,6 +255,7 @@ type SendMessageResult struct {
 	DurationSeconds     int64
 	StartedAt           time.Time
 	postSendCompaction  *postSendCompactionTask
+	ExecutionType       string
 }
 
 // MessageFeedbackResult 返回反馈后的当前状态（内部传输，不携带序列化标记）。
@@ -337,6 +386,10 @@ func (s *Service) InvalidateMemoryCache(userID uint) {
 // SetSub2ExecutionResolver injects the authenticated user's selected key resolver.
 func (s *Service) SetSub2ExecutionResolver(resolver sub2ExecutionResolver) {
 	s.sub2Resolver = resolver
+}
+
+func (s *Service) SetGatewayExecutor(executor gatewayExecutor) {
+	s.gatewayExecutor = executor
 }
 
 // SetAuditWriter 注入会话域审计写入器。

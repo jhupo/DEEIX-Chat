@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,6 +35,7 @@ import (
 	appsystemevent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
+	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
@@ -105,6 +107,126 @@ type avatarContentOpener struct {
 
 type agentArtifactStore struct {
 	conversationService *conversation.Service
+}
+
+type localGatewayAdapter struct{ service *appagentgateway.Service }
+
+func mapLocalGatewayError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, appagentgateway.ErrInvalidInput):
+		return conversation.ErrInvalidExecutionTarget
+	case errors.Is(err, appagentgateway.ErrResourceNotFound), errors.Is(err, appagentgateway.ErrDeviceNotFound):
+		return conversation.ErrExecutionBindingNotFound
+	case errors.Is(err, appagentgateway.ErrStateConflict):
+		return conversation.ErrExecutionConflict
+	default:
+		return err
+	}
+}
+
+func (a localGatewayAdapter) ResolveExecutionTarget(ctx context.Context, userID uint, deviceID, profileID, workspaceID string) (string, error) {
+	provider, err := a.service.ResolveExecutionTarget(ctx, userID, deviceID, profileID, workspaceID)
+	return provider, mapLocalGatewayError(err)
+}
+
+func (a localGatewayAdapter) CreateArtifact(ctx context.Context, userID uint, workspaceID, fileID string) (*conversation.GatewayArtifact, error) {
+	item, err := a.service.CreateArtifact(ctx, userID, workspaceID, fileID)
+	if err != nil {
+		return nil, mapLocalGatewayError(err)
+	}
+	return &conversation.GatewayArtifact{ArtifactID: item.ArtifactID}, nil
+}
+
+func (a localGatewayAdapter) StartThread(ctx context.Context, userID uint, input conversation.GatewayStartThreadInput) error {
+	_, err := a.service.StartThread(ctx, userID, appagentgateway.StartThreadInput{
+		DeviceID: input.DeviceID, ProfileID: input.ProfileID, WorkspaceID: input.WorkspaceID,
+		ConversationID: input.ConversationID, Title: input.Title, Settings: input.Settings,
+		InitialInput: input.InitialInput, InitialRunID: input.InitialRunID, IdempotencyKey: input.IdempotencyKey,
+	})
+	return mapLocalGatewayError(err)
+}
+
+func (a localGatewayAdapter) GetThreadByConversation(ctx context.Context, userID, conversationID uint) (*conversation.GatewayThread, error) {
+	item, err := a.service.GetThreadByConversation(ctx, userID, conversationID)
+	if err != nil {
+		if errors.Is(err, appagentgateway.ErrResourceNotFound) {
+			return nil, conversation.ErrExecutionBindingNotFound
+		}
+		return nil, mapLocalGatewayError(err)
+	}
+	return &conversation.GatewayThread{ThreadID: item.ThreadID}, nil
+}
+
+func (a localGatewayAdapter) StartTurn(ctx context.Context, userID uint, input conversation.GatewayStartTurnInput) error {
+	_, err := a.service.StartTurn(ctx, userID, appagentgateway.StartTurnInput{
+		ThreadID: input.ThreadID, RunID: input.RunID, IdempotencyKey: input.IdempotencyKey,
+		Input: input.Input, Settings: input.Settings,
+	})
+	return mapLocalGatewayError(err)
+}
+
+func (a localGatewayAdapter) InterruptRun(ctx context.Context, userID uint, runID, idempotencyKey string) error {
+	_, err := a.service.InterruptRun(ctx, userID, runID, idempotencyKey)
+	return mapLocalGatewayError(err)
+}
+
+func (a localGatewayAdapter) ListInteractions(ctx context.Context, userID, conversationID uint, status string) ([]conversation.GatewayInteraction, error) {
+	thread, err := a.service.GetThreadByConversation(ctx, userID, conversationID)
+	if err != nil {
+		if errors.Is(err, appagentgateway.ErrResourceNotFound) {
+			return []conversation.GatewayInteraction{}, nil
+		}
+		return nil, mapLocalGatewayError(err)
+	}
+	items, err := a.service.ListInteractions(ctx, userID, thread.ThreadID, status)
+	if err != nil {
+		if errors.Is(err, appagentgateway.ErrInvalidInput) {
+			return nil, conversation.ErrInvalidInteraction
+		}
+		return nil, mapLocalGatewayError(err)
+	}
+	result := make([]conversation.GatewayInteraction, 0, len(items))
+	for _, item := range items {
+		result = append(result, conversation.GatewayInteraction{
+			InteractionID: item.InteractionID, RunID: item.RunID, Kind: item.Kind,
+			Status: item.Status, Request: item.Request, CreatedAt: item.CreatedAt,
+		})
+	}
+	return result, nil
+}
+
+func (a localGatewayAdapter) RespondInteraction(ctx context.Context, userID uint, input conversation.GatewayInteractionResponse) (*conversation.GatewayInteraction, error) {
+	item, err := a.service.RespondInteraction(ctx, userID, appagentgateway.RespondInteractionInput{
+		InteractionID: input.InteractionID, IdempotencyKey: input.IdempotencyKey, Response: input.Response,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, appagentgateway.ErrInvalidInput):
+			return nil, conversation.ErrInvalidInteraction
+		case errors.Is(err, appagentgateway.ErrResourceNotFound):
+			return nil, conversation.ErrInteractionNotFound
+		case errors.Is(err, appagentgateway.ErrStateConflict):
+			return nil, conversation.ErrExecutionConflict
+		default:
+			return nil, err
+		}
+	}
+	return &conversation.GatewayInteraction{
+		InteractionID: item.InteractionID, RunID: item.RunID, Kind: item.Kind,
+		Status: item.Status, Request: item.Request, CreatedAt: item.CreatedAt,
+	}, nil
+}
+
+func projectLocalGatewayEvent(target *conversation.Service) appagentgateway.ConversationEventProjector {
+	return func(ctx context.Context, item domainagent.AppliedEventFrame) error {
+		return target.ProjectGatewayEvent(ctx, conversation.GatewayExecutionEvent{
+			SourceKey: "agent:" + item.Event.PublicID, UserID: item.Event.UserID,
+			ConversationID: item.ConversationID, RunID: item.RunID, Kind: item.Event.Kind,
+			Payload: []byte(item.Event.PayloadJSON), OccurredAt: item.Event.OccurredAt,
+		})
+	}
 }
 
 func (s agentArtifactStore) OpenAgentArtifact(ctx context.Context, userID uint, fileID string) (*appagentgateway.ArtifactContent, error) {
@@ -280,6 +402,8 @@ func NewApp() (*App, error) {
 		log,
 	)
 	conversationService.SetSub2ExecutionResolver(sub2KeyService)
+	conversationService.SetGatewayExecutor(localGatewayAdapter{service: agentGatewayService})
+	agentGatewayService.SetConversationEventProjector(projectLocalGatewayEvent(conversationService))
 	conversationService.SetAuditWriter(auditService)
 	conversationService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetMCPRepository(mcpRepo)

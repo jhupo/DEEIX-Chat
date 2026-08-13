@@ -47,6 +47,7 @@ func Models() []interface{} {
 		&model.FileObject{},
 		&model.UserStorageQuota{},
 		&model.ConversationRun{},
+		&model.ConversationExecutionEvent{},
 		&model.ChatRunEvent{},
 		&model.ChatContextRecord{},
 		&model.UserMemory{},
@@ -181,6 +182,9 @@ func CleanupRemovedColumns(db *gorm.DB) error {
 		return err
 	}
 	if err := dropColumns(db, &model.Skill{}, []string{"content", "sections_json"}); err != nil {
+		return err
+	}
+	if err := dropColumns(db, &model.AgentThread{}, []string{"is_pinned", "labels_json", "share_policy"}); err != nil {
 		return err
 	}
 	return nil

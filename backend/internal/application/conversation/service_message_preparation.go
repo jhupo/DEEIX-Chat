@@ -74,6 +74,18 @@ func (s *Service) createMessagePair(
 	resolvedAttachments []AttachmentInput,
 	rejected *rejectedMessageState,
 ) (*messagePair, error) {
+	return s.createMessagePairWithRun(ctx, input, runID, preparation, resolvedAttachments, rejected, nil)
+}
+
+func (s *Service) createMessagePairWithRun(
+	ctx context.Context,
+	input SendMessageInput,
+	runID string,
+	preparation *messageSendBranchPreparation,
+	resolvedAttachments []AttachmentInput,
+	rejected *rejectedMessageState,
+	run *model.Run,
+) (*messagePair, error) {
 	if preparation == nil || preparation.branchState == nil {
 		return nil, ErrInvalidMessageBranch
 	}
@@ -116,6 +128,9 @@ func (s *Service) createMessagePair(
 	}
 
 	if preparation.reuseUserMessage {
+		if run != nil {
+			return nil, ErrInvalidMessageBranch
+		}
 		reused := *preparation.branchState.ReuseUserMessage
 		userMessage := &reused
 		assistantMessage.ParentMessageID = &userMessage.ID
@@ -166,7 +181,13 @@ func (s *Service) createMessagePair(
 		})
 	}
 
-	if err := s.repo.CreateMessagePairWithUserAttachments(ctx, userMessage, assistantMessage, attachmentRows); err != nil {
+	var err error
+	if run == nil {
+		err = s.repo.CreateMessagePairWithUserAttachments(ctx, userMessage, assistantMessage, attachmentRows)
+	} else {
+		err = s.repo.CreateGatewayTurn(ctx, userMessage, assistantMessage, attachmentRows, run)
+	}
+	if err != nil {
 		return nil, err
 	}
 	userMessage.ParentPublicID = preparation.branchState.ParentPublicID

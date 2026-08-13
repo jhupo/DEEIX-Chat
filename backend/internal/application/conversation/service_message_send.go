@@ -29,23 +29,6 @@ const (
 	maxRequestRouteAttempts            = 3
 )
 
-// SendMessage 发送消息并调用上游渠道对话接口，支持多模态附件。
-func (s *Service) SendMessage(ctx context.Context, input SendMessageInput) (result *SendMessageResult, retErr error) {
-	return s.sendMessageInternal(ctx, input, nil, false)
-}
-
-// StreamMessage 发送消息并按增量回调返回 assistant 文本。
-// onDelta 接收流式文本增量；input.OnEvent 接收中间事件（如 rag_search）。
-func (s *Service) StreamMessage(
-	ctx context.Context,
-	input SendMessageInput,
-	onDelta func(string) error,
-) (result *SendMessageResult, retErr error) {
-	input.Cancelable = true
-	ctx = context.WithoutCancel(ctx)
-	return s.sendMessageInternal(ctx, input, onDelta, true)
-}
-
 func (s *Service) reasoningContentPassbackEnabled(ctx context.Context, userID uint, route *channel.ResolvedRoute) bool {
 	if route == nil || !route.ReasoningContentPassback {
 		return false

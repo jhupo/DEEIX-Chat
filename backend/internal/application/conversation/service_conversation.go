@@ -40,18 +40,45 @@ type ConversationSearchResult struct {
 	Conversation model.Conversation
 }
 
+type CreateConversationInput struct {
+	UserID                            uint
+	Title, ModelName, ProjectPublicID string
+	ExecutionType                     string
+	DeviceID, ProfileID, WorkspaceID  string
+}
+
 // CreateConversation 创建用户新会话。
-func (s *Service) CreateConversation(ctx context.Context, userID uint, title string, modelName string, projectPublicID string) (*model.Conversation, error) {
-	normalizedTitle := strings.TrimSpace(title)
+func (s *Service) CreateConversation(ctx context.Context, input CreateConversationInput) (*model.Conversation, error) {
+	normalizedTitle := strings.TrimSpace(input.Title)
 	if normalizedTitle == "" {
 		normalizedTitle = "新对话"
 	}
 
-	normalizedModel := strings.TrimSpace(modelName)
+	normalizedModel := strings.TrimSpace(input.ModelName)
+	executionType := strings.TrimSpace(input.ExecutionType)
+	deviceID, profileID, workspaceID := strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.ProfileID), strings.TrimSpace(input.WorkspaceID)
+	provider := inferProvider(normalizedModel)
+	switch executionType {
+	case model.ExecutionTypeCloud:
+		if deviceID != "" || profileID != "" || workspaceID != "" {
+			return nil, ErrInvalidExecutionTarget
+		}
+	case model.ExecutionTypeGateway:
+		if s.gatewayExecutor == nil {
+			return nil, ErrExecutionUnavailable
+		}
+		resolvedProvider, err := s.gatewayExecutor.ResolveExecutionTarget(ctx, input.UserID, deviceID, profileID, workspaceID)
+		if err != nil || strings.TrimSpace(resolvedProvider) == "" {
+			return nil, ErrInvalidExecutionTarget
+		}
+		provider = strings.TrimSpace(resolvedProvider)
+	default:
+		return nil, ErrInvalidExecutionTarget
+	}
 	var projectID *uint
 	var project *model.ConversationProject
-	if normalizedProjectID := strings.TrimSpace(projectPublicID); normalizedProjectID != "" {
-		resolvedProject, err := s.repo.GetConversationProjectByPublicID(ctx, userID, normalizedProjectID)
+	if normalizedProjectID := strings.TrimSpace(input.ProjectPublicID); normalizedProjectID != "" {
+		resolvedProject, err := s.repo.GetConversationProjectByPublicID(ctx, input.UserID, normalizedProjectID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				return nil, ErrConversationProjectNotFound
@@ -63,19 +90,23 @@ func (s *Service) CreateConversation(ctx context.Context, userID uint, title str
 	}
 
 	item := &model.Conversation{
-		UserID:          userID,
-		ProjectID:       projectID,
-		PublicID:        normalizePublicID(uuid.NewString()),
-		Title:           normalizedTitle,
-		LabelsJSON:      "[]",
-		Model:           normalizedModel,
-		Provider:        inferProvider(normalizedModel),
-		SessionKey:      uuid.NewString(),
-		MessageCount:    0,
-		Status:          "active",
-		ContextPolicy:   buildContextPolicyJSON(s.cfg.Snapshot()),
-		LastCompactedAt: nil,
-		LastResponseID:  "",
+		UserID:               input.UserID,
+		ProjectID:            projectID,
+		PublicID:             normalizePublicID(uuid.NewString()),
+		Title:                normalizedTitle,
+		LabelsJSON:           "[]",
+		Model:                normalizedModel,
+		Provider:             provider,
+		ExecutionType:        executionType,
+		ExecutionDeviceID:    deviceID,
+		ExecutionProfileID:   profileID,
+		ExecutionWorkspaceID: workspaceID,
+		SessionKey:           uuid.NewString(),
+		MessageCount:         0,
+		Status:               "active",
+		ContextPolicy:        buildContextPolicyJSON(s.cfg.Snapshot()),
+		LastCompactedAt:      nil,
+		LastResponseID:       "",
 	}
 	if err := s.repo.CreateConversation(ctx, item); err != nil {
 		return nil, err

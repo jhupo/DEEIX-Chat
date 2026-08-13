@@ -308,6 +308,7 @@ func (s *Service) CloneSharedConversation(ctx context.Context, userID uint, shar
 		LabelsJSON:      "[]",
 		Model:           platformModel,
 		Provider:        inferProvider(platformModel),
+		ExecutionType:   model.ExecutionTypeCloud,
 		SessionKey:      uuid.NewString(),
 		MessageCount:    0,
 		Status:          "active",

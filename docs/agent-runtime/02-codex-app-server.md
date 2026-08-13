@@ -1,5 +1,7 @@
 # Codex app-server 接入
 
+> 本文的 method matrix 与 schema pin 仍是 Bridge 实现依据；Web/API 拓扑以 [统一会话架构](./01-architecture.md) 和 [当前协议](./03-protocol-and-data-model.md) 为准。
+
 ## 1. 接入规则与 schema pin
 
 Bridge launches `codex app-server` with stdio JSONL. The provider protocol is JSON-RPC 2.0 without a header; each line is one object. WebSocket and Unix transports exist upstream, but Bridge uses stdio because it binds process lifecycle locally and keeps app-server off the network. Upstream WebSocket transport is experimental and is not the Bridge transport.
@@ -185,13 +187,13 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 `collaborationMode/list`, `environment/info`, process client requests, `thread/turns/list`, `thread/items/list`, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.147.0` schema.
 
-## 4. Native actions and DEEIX metadata
+## 4. Native actions and Conversation ownership
 
-Native Codex thread actions map only where the pinned schema has an equivalent method. `AgentThread.title` is the provider `thread/name` projection. The separate idempotent `PATCH /api/v1/agent/threads/:thread_id/name` accepts only bounded normalized `name`, resolves `sourceThreadRef`, and queues typed `thread.rename`; Bridge resolves raw ID/cwd and calls `thread/name/set`, whose provider result/event updates title. `PATCH /api/v1/agent/threads/:thread_id/provider-metadata` validates generated `gitInfo` only, with optional nullable `sha`, `branch`, and `originUrl`, claims idempotency, and queues typed `thread.metadata.update`; provider result/event updates Git projection. `PATCH /api/v1/agent/threads/:thread_id` remains DEEIX cloud metadata only: `preview` is derived, layout preference belongs in user settings, and pin/labels/share never enter either provider command. Archive/unarchive has a native call where upstream supports it, plus a projection state transition; the server waits for provider result before treating native archive as final.
+Native Codex thread actions只在 pinned schema 存在等价 method 时由 Bridge Adapter 实现。底层能力不直接形成 Web Thread API；产品动作必须先进入 Conversation 用例，再由强类型 Gateway command 调用对应 method。`AgentThread` 只保存 provider source ref、运行状态和必要投影，标题、置顶、标签、分享与项目归属都由 Conversation 持有。
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 
-`is_pinned` is DEEIX-owned cloud metadata, updated locally in the browser mutation's idempotent transaction with no app-server call. Other DEEIX-owned metadata includes labels, share policy, device/workspace association and product-specific audit references.
+Conversation-owned metadata includes title, pin, labels, share policy, project association and product audit references; it不进入 provider command。Device/Profile/Workspace 是 Conversation 的 immutable execution binding。
 
 At initialize, the initial stable profile does not set `experimentalApi=true`; it advertises only implemented stable capabilities with a generated-schema mapper and acceptance fixture, such as `optOutNotificationMethods` and `mcpServerOpenaiFormElicitation` when implemented. `experimentalApi` may be enabled only after a separate experimental generated, hashed and exhaustive lock and its fixtures exist. `requestAttestation` remains absent from the advertised manifest until its disabled `attestation/generate` server-request handler is promoted with policy and fixtures. The manifest ties each declared capability to the exact generated schema version and local policy before Web exposes a control.
 

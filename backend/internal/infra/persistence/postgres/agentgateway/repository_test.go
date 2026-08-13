@@ -78,10 +78,10 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := validateCommandArtifacts(database, 7, workspace.ID, `[{"kind":"artifact","artifactRef":"agart_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]`); err == nil {
 		t.Fatal("unknown command artifact accepted")
 	}
-	threadInput := &domainagent.Thread{PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, Title: "Agent work", Status: "queued"}
+	threadInput := &domainagent.Thread{PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, ConversationID: 41, Title: "Agent work", Status: "queued"}
 	turnInput := &domainagent.Turn{
 		PublicID: "agturn_0123456789abcdef0123456789abcdef", UserID: 7,
-		Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{}`,
+		RunID: "run_0123456789abcdef0123456789abcdef", Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{}`,
 	}
 	createCommand := &domainagent.Command{
 		PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.create",
@@ -105,8 +105,8 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1",
 		PayloadJSON: `{}`, OccurredAt: now.Add(time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("2", 64), earlyCompleted, now.Add(time.Second)); err != nil || ack != 1 {
-		t.Fatalf("apply early event: ack=%d err=%v", ack, err)
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("2", 64), earlyCompleted, now.Add(time.Second)); err != nil || ack.Acknowledged != 1 {
+		t.Fatalf("apply early event: ack=%v err=%v", ack, err)
 	}
 	threadTerminal := `{"kind":"result","result":{"kind":"thread-created","sourceThreadRef":"source-thread-1"}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 2, 1, createCommand.PublicID, strings.Repeat("3", 64), threadTerminal, now.Add(2*time.Second)); err != nil || ack != 2 {
@@ -156,8 +156,8 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceRequestRef: "request-1",
 		PayloadJSON: `{"method":"item/commandExecution/requestApproval"}`, OccurredAt: now.Add(4 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 4, strings.Repeat("5", 64), interactionEvent, now.Add(4*time.Second)); err != nil || ack != 4 {
-		t.Fatalf("apply interaction event: ack=%d err=%v", ack, err)
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 4, strings.Repeat("5", 64), interactionEvent, now.Add(4*time.Second)); err != nil || ack.Acknowledged != 4 {
+		t.Fatalf("apply interaction event: ack=%v err=%v", ack, err)
 	}
 	var interaction model.AgentInteraction
 	if err := database.First(&interaction, "source_request_ref = ?", "request-1").Error; err != nil {
@@ -203,127 +203,36 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		t.Fatalf("resource snapshot mismatch: %#v %v", snapshot, err)
 	}
 
-	renameCommand := &domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "thread.rename"}
-	queuedRename, err := repo.QueueThreadCommand(
-		context.Background(), "31234567-89ab-4def-8123-456789abcdef", strings.Repeat("a", 64), 7,
-		thread.PublicID, "", json.RawMessage(`{"name":"Renamed thread"}`), renameCommand, now.Add(9*time.Second),
-	)
-	if err != nil || queuedRename.ServerSeq != 5 {
-		t.Fatalf("queue thread rename: %#v %v", queuedRename, err)
-	}
-	if err := database.First(&storedThread, thread.ID).Error; err != nil || storedThread.Title == "Renamed thread" {
-		t.Fatalf("rename applied before provider result: %q %v", storedThread.Title, err)
-	}
-	renameTerminal := `{"kind":"result","result":{"kind":"accepted"}}`
-	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 7, 5, renameCommand.PublicID, strings.Repeat("b", 64), renameTerminal, now.Add(10*time.Second)); err != nil || ack != 7 {
-		t.Fatalf("apply rename terminal: ack=%d err=%v", ack, err)
-	}
-	if err := database.First(&storedThread, thread.ID).Error; err != nil || storedThread.Title != "Renamed thread" {
-		t.Fatalf("rename final state: %q %v", storedThread.Title, err)
-	}
-	failedRename := &domainagent.Command{PublicID: "agcmd_abababababababababababababababab", Kind: "thread.rename"}
-	queuedFailedRename, err := repo.QueueThreadCommand(
-		context.Background(), "36234567-89ab-4def-8123-456789abcdef", strings.Repeat("e", 64), 7,
-		thread.PublicID, "", json.RawMessage(`{"name":"Must not apply"}`), failedRename, now.Add(10*time.Second),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	failedTerminal := `{"kind":"error","error":{"code":"provider_error","message":"rename failed"}}`
-	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 8, queuedFailedRename.ServerSeq, failedRename.PublicID, strings.Repeat("f", 64), failedTerminal, now.Add(11*time.Second)); err != nil || ack != 8 {
-		t.Fatalf("apply failed rename terminal: ack=%d err=%v", ack, err)
-	}
-	if err := database.First(&storedThread, thread.ID).Error; err != nil || storedThread.Status != "active" || storedThread.Title != "Renamed thread" {
-		t.Fatalf("failed rename damaged thread: %#v %v", storedThread, err)
-	}
-
-	forkCommand := &domainagent.Command{PublicID: "agcmd_ffffffffffffffffffffffffffffffff", Kind: "thread.lifecycle"}
-	forked, err := repo.ForkThread(
-		context.Background(), "41234567-89ab-4def-8123-456789abcdef", strings.Repeat("c", 64), 7,
-		thread.PublicID, &domainagent.Thread{PublicID: "agth_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", UserID: 7}, forkCommand, now.Add(11*time.Second),
-	)
-	if err != nil || forked.SourceThreadRef != nil || forked.Status != "queued" {
-		t.Fatalf("queue thread fork: %#v %v", forked, err)
-	}
-	var forkRow model.AgentCommand
-	if err := database.First(&forkRow, "public_id = ?", forkCommand.PublicID).Error; err != nil || forkRow.ServerSeq != 7 || forkRow.ThreadID == nil || *forkRow.ThreadID != forked.ID {
-		t.Fatalf("fork command ownership: %#v %v", forkRow, err)
-	}
-	forkTerminal := `{"kind":"result","result":{"kind":"thread-forked","sourceThreadRef":"source-thread-fork"}}`
-	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 9, 7, forkCommand.PublicID, strings.Repeat("d", 64), forkTerminal, now.Add(12*time.Second)); err != nil || ack != 9 {
-		t.Fatalf("apply fork terminal: ack=%d err=%v", ack, err)
-	}
-	var storedFork model.AgentThread
-	if err := database.First(&storedFork, forked.ID).Error; err != nil || storedFork.SourceThreadRef == nil || *storedFork.SourceThreadRef != "source-thread-fork" || storedFork.Status != "active" {
-		t.Fatalf("fork final state: %#v %v", storedFork, err)
-	}
-
 	itemStarted := &domainagent.Event{
 		PublicID: "agev_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "item/started",
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
 		PayloadJSON: `{"item":{"type":"agentMessage","text":""},"startedAtMs":1}`, OccurredAt: now.Add(13 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 10, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack != 10 {
-		t.Fatalf("apply item start: ack=%d err=%v", ack, err)
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 7, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack.Acknowledged != 7 {
+		t.Fatalf("apply item start: ack=%v err=%v", ack, err)
 	}
 	itemCompleted := &domainagent.Event{
 		PublicID: "agev_cccccccccccccccccccccccccccccccc", Kind: "item/completed",
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
 		PayloadJSON: `{"item":{"type":"agentMessage","text":"done"},"completedAtMs":2}`, OccurredAt: now.Add(14 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 11, strings.Repeat("1", 64), itemCompleted, now.Add(14*time.Second)); err != nil || ack != 11 {
-		t.Fatalf("apply item completion: ack=%d err=%v", ack, err)
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 8, strings.Repeat("1", 64), itemCompleted, now.Add(14*time.Second)); err != nil || ack.Acknowledged != 8 {
+		t.Fatalf("apply item completion: ack=%v err=%v", ack, err)
 	}
-	items, err := repo.ListItems(context.Background(), 7, thread.PublicID, 100)
-	if err != nil || len(items) != 1 || items[0].Status != "completed" || items[0].Kind != "agentMessage" ||
-		items[0].LastEventSeq != 4 || items[0].TurnPublicID != turn.PublicID ||
-		!jsonEqual(items[0].DataJSON, itemCompleted.PayloadJSON) {
-		t.Fatalf("item projection mismatch: %#v %v", items, err)
+	var storedItem model.AgentItem
+	if err := database.Where("thread_id = ? AND source_item_ref = ?", thread.ID, "source-item-1").First(&storedItem).Error; err != nil ||
+		storedItem.Status != "completed" || storedItem.Kind != "agentMessage" || storedItem.LastEventSeq != 4 ||
+		storedItem.TurnID == nil || *storedItem.TurnID != turn.ID || !jsonEqual(storedItem.DataJSON, itemCompleted.PayloadJSON) {
+		t.Fatalf("item projection mismatch: %#v %v", storedItem, err)
 	}
-	otherItems, err := repo.ListItems(context.Background(), 8, thread.PublicID, 100)
-	if err != nil || len(otherItems) != 0 {
-		t.Fatalf("item projection crossed user boundary: %#v %v", otherItems, err)
+	pending, err := repo.ListPendingConversationEvents(context.Background(), device.ID, 100)
+	if err != nil || len(pending) != 4 {
+		t.Fatalf("conversation outbox mismatch: %#v %v", pending, err)
 	}
-
-	threadSnapshot, err := repo.GetThreadSnapshot(context.Background(), 7, thread.PublicID)
-	if err != nil || threadSnapshot.SnapshotSeq != 4 || len(threadSnapshot.Turns) != 1 ||
-		len(threadSnapshot.Items) != 1 || len(threadSnapshot.Interactions) != 1 ||
-		threadSnapshot.Thread.DevicePublicID != device.PublicID || threadSnapshot.Thread.ProfilePublicID != profile.PublicID ||
-		threadSnapshot.Thread.WorkspacePublicID != workspace.PublicID {
-		t.Fatalf("thread snapshot mismatch: %#v %v", threadSnapshot, err)
-	}
-
-	pinned, labelsJSON, sharePolicy := true, `["work","urgent"]`, "link"
-	metadataPatch := domainagent.ThreadMetadataPatch{IsPinned: &pinned, LabelsJSON: &labelsJSON, SharePolicy: &sharePolicy}
-	metadataKey, metadataHash := "51234567-89ab-4def-8123-456789abcdef", strings.Repeat("2", 64)
-	updated, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, metadataHash, 7, thread.PublicID, metadataPatch, now.Add(15*time.Second))
-	if err != nil || !updated.IsPinned || updated.LabelsJSON != labelsJSON || updated.SharePolicy != sharePolicy {
-		t.Fatalf("update cloud thread metadata: %#v %v", updated, err)
-	}
-	replayedMetadata, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, metadataHash, 7, thread.PublicID, domainagent.ThreadMetadataPatch{}, now.Add(16*time.Second))
-	if err != nil || replayedMetadata.LabelsJSON != labelsJSON {
-		t.Fatalf("cloud metadata replay changed result: %#v %v", replayedMetadata, err)
-	}
-	if _, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, strings.Repeat("3", 64), 7, thread.PublicID, metadataPatch, now.Add(16*time.Second)); err == nil {
-		t.Fatal("cloud metadata accepted idempotency key with a different request")
-	}
-
-	providerMetadata := &domainagent.Command{PublicID: "agcmd_12121212121212121212121212121212", Kind: "thread.metadata.update"}
-	queuedMetadata, err := repo.QueueThreadCommand(
-		context.Background(), "61234567-89ab-4def-8123-456789abcdef", strings.Repeat("4", 64), 7,
-		thread.PublicID, "", json.RawMessage(`{"gitInfo":{"sha":null,"branch":"main","originUrl":"https://example.test/repo.git"}}`), providerMetadata, now.Add(17*time.Second),
-	)
-	if err != nil || queuedMetadata.ServerSeq != 8 || !strings.Contains(queuedMetadata.PayloadJSON, `"deviceId":"`+device.PublicID+`"`) {
-		t.Fatalf("queue provider metadata: %#v %v", queuedMetadata, err)
-	}
-	metadataTerminal := `{"kind":"result","result":{"kind":"accepted"}}`
-	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 12, queuedMetadata.ServerSeq, providerMetadata.PublicID, strings.Repeat("5", 64), metadataTerminal, now.Add(18*time.Second)); err != nil || ack != 12 {
-		t.Fatalf("apply provider metadata terminal: ack=%d err=%v", ack, err)
-	}
-	projected, err := repo.GetThread(context.Background(), 7, thread.PublicID)
-	if err != nil || projected.GitSHA != nil || projected.GitBranch == nil || *projected.GitBranch != "main" ||
-		projected.GitOriginURL == nil || *projected.GitOriginURL != "https://example.test/repo.git" {
-		t.Fatalf("provider metadata projection mismatch: %#v %v", projected, err)
+	for _, event := range pending {
+		if event.ConversationID != threadInput.ConversationID || event.RunID != turnInput.RunID {
+			t.Fatalf("conversation binding was lost: %#v", event)
+		}
 	}
 }
 

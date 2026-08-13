@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
 )
@@ -55,6 +56,19 @@ func EnsureMessageGenerationRunID(raw string) string {
 // CancelMessageGeneration 取消用户显式停止的流式生成；浏览器刷新不会走这个路径。
 func (s *Service) CancelMessageGeneration(ctx context.Context, userID uint, runID string) bool {
 	normalizedRunID := normalizeRunID(runID)
+	conversation, err := s.repo.GetConversationExecutionByRunID(ctx, userID, normalizedRunID)
+	if err != nil {
+		return false
+	}
+	if conversation.ExecutionType == model.ExecutionTypeGateway {
+		if s.gatewayExecutor == nil {
+			return false
+		}
+		if err := s.gatewayExecutor.InterruptRun(ctx, userID, normalizedRunID, uuid.NewString()); err != nil {
+			return false
+		}
+		return s.generationStreams.cancel(ctx, userID, normalizedRunID)
+	}
 	canceled := s.generationStreams.cancel(ctx, userID, normalizedRunID)
 	if !canceled || s == nil || s.repo == nil {
 		return canceled

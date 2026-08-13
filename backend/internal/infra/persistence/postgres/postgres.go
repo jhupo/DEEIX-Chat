@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/schema"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -103,6 +104,9 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := ensureCleanSlateSchema(db); err != nil {
 		return err
 	}
+	if err := prepareUnifiedConversationExecution(db); err != nil {
+		return err
+	}
 	if err := applySchemaBaseline(db); err != nil {
 		return err
 	}
@@ -171,6 +175,9 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := applyConversationBaselineIndexes(db); err != nil {
 		return err
 	}
+	if err := applyConversationExecutionConstraints(db); err != nil {
+		return err
+	}
 	if err := applyLLMBaselineIndexes(db); err != nil {
 		return err
 	}
@@ -188,6 +195,83 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	}
 
 	return nil
+}
+
+func applyConversationExecutionConstraints(db *gorm.DB) error {
+	for _, statement := range []string{
+		`DO $migration$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_chat_conversations_execution_type') THEN
+				ALTER TABLE chat_conversations ADD CONSTRAINT chk_chat_conversations_execution_type CHECK (execution_type IN ('cloud', 'gateway'));
+			END IF;
+		END $migration$`,
+		`DO $migration$ BEGIN
+			IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_chat_conversations_execution_target') THEN
+				ALTER TABLE chat_conversations ADD CONSTRAINT chk_chat_conversations_execution_target CHECK (
+					(execution_type = 'cloud' AND execution_device_id = '' AND execution_profile_id = '' AND execution_workspace_id = '')
+					OR
+					(execution_type = 'gateway' AND execution_device_id <> '' AND execution_profile_id <> '' AND execution_workspace_id <> '')
+				);
+			END IF;
+		END $migration$`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func prepareUnifiedConversationExecution(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&model.AgentThread{}) && !tx.Migrator().HasColumn(&model.AgentThread{}, "conversation_id") {
+			hasRows, err := tableHasRows(tx, model.AgentThread{}.TableName())
+			if err != nil {
+				return err
+			}
+			if hasRows {
+				return fmt.Errorf("unified conversation cutover requires empty agent_threads before adding conversation ownership")
+			}
+		}
+		if tx.Migrator().HasTable(&model.AgentTurn{}) && !tx.Migrator().HasColumn(&model.AgentTurn{}, "run_id") {
+			hasRows, err := tableHasRows(tx, model.AgentTurn{}.TableName())
+			if err != nil {
+				return err
+			}
+			if hasRows {
+				return fmt.Errorf("unified conversation cutover requires empty agent_turns before adding run ownership")
+			}
+		}
+		if !tx.Migrator().HasTable(&model.Conversation{}) {
+			return nil
+		}
+		for _, statement := range []string{
+			`ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS execution_type varchar(16)`,
+			`ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS execution_device_id varchar(64)`,
+			`ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS execution_profile_id varchar(64)`,
+			`ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS execution_workspace_id varchar(64)`,
+			`ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS execution_event_seq bigint`,
+			`UPDATE chat_conversations SET execution_type = 'cloud' WHERE execution_type IS NULL OR execution_type = ''`,
+			`UPDATE chat_conversations SET execution_device_id = '' WHERE execution_device_id IS NULL`,
+			`UPDATE chat_conversations SET execution_profile_id = '' WHERE execution_profile_id IS NULL`,
+			`UPDATE chat_conversations SET execution_workspace_id = '' WHERE execution_workspace_id IS NULL`,
+			`UPDATE chat_conversations SET execution_event_seq = 0 WHERE execution_event_seq IS NULL`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_type DROP DEFAULT`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_type SET NOT NULL`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_device_id SET DEFAULT ''`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_device_id SET NOT NULL`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_profile_id SET DEFAULT ''`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_profile_id SET NOT NULL`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_workspace_id SET DEFAULT ''`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_workspace_id SET NOT NULL`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_event_seq SET DEFAULT 0`,
+			`ALTER TABLE chat_conversations ALTER COLUMN execution_event_seq SET NOT NULL`,
+		} {
+			if err := tx.Exec(statement).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 var removedCleanSlateTables = []string{

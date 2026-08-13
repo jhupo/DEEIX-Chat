@@ -958,47 +958,141 @@ func (r *Repo) CreateMessagePairWithUserAttachments(
 	userAttachmentSnapshot := userMessage.Attachments
 	assistantAttachmentSnapshot := assistantMessage.Attachments
 	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		userEntity := toMessageModel(userMessage)
-		if err := tx.Create(&userEntity).Error; err != nil {
+		return createMessagePair(tx, userMessage, assistantMessage, userAttachments, userAttachmentSnapshot, assistantAttachmentSnapshot)
+	}))
+}
+
+func (r *Repo) CreateGatewayTurn(
+	ctx context.Context,
+	userMessage *domainconversation.Message,
+	assistantMessage *domainconversation.Message,
+	userAttachments []domainconversation.Attachment,
+	run *domainconversation.Run,
+) error {
+	if userMessage == nil || assistantMessage == nil || run == nil || strings.TrimSpace(run.RunID) == "" {
+		return repository.ErrInvalidInput
+	}
+	userAttachmentSnapshot := userMessage.Attachments
+	assistantAttachmentSnapshot := assistantMessage.Attachments
+	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := createMessagePair(tx, userMessage, assistantMessage, userAttachments, userAttachmentSnapshot, assistantAttachmentSnapshot); err != nil {
 			return err
 		}
-		*userMessage = toMessageDomain(userEntity)
-		userMessage.Attachments = userAttachmentSnapshot
-
-		if len(userAttachments) > 0 {
-			if err := lockActiveFileObjectsForAttachments(tx, userMessage.UserID, userAttachments); err != nil {
-				return err
-			}
-			entities := make([]models.Attachment, 0, len(userAttachments))
-			for i := range userAttachments {
-				item := userAttachments[i]
-				item.ConversationID = userMessage.ConversationID
-				item.MessageID = userMessage.ID
-				item.UserID = userMessage.UserID
-				entities = append(entities, toAttachmentModel(&item))
-			}
-			if err := tx.Create(&entities).Error; err != nil {
-				return err
-			}
-		}
-
-		parentMessageID := userMessage.ID
-		assistantMessage.ParentMessageID = &parentMessageID
-		assistantEntity := toMessageModel(assistantMessage)
-		if err := tx.Create(&assistantEntity).Error; err != nil {
+		entity := toConversationRunModel(run)
+		if err := tx.Create(&entity).Error; err != nil {
 			return err
 		}
-		*assistantMessage = toMessageDomain(assistantEntity)
-		assistantMessage.Attachments = assistantAttachmentSnapshot
+		*run = toConversationRunDomain(entity)
+		return nil
+	}))
+}
 
-		result := tx.Model(&models.Conversation{}).
-			Where("id = ?", userMessage.ConversationID).
-			Update("message_count", gorm.Expr("message_count + ?", 2))
+func createMessagePair(
+	tx *gorm.DB,
+	userMessage *domainconversation.Message,
+	assistantMessage *domainconversation.Message,
+	userAttachments []domainconversation.Attachment,
+	userAttachmentSnapshot string,
+	assistantAttachmentSnapshot string,
+) error {
+	userEntity := toMessageModel(userMessage)
+	if err := tx.Create(&userEntity).Error; err != nil {
+		return err
+	}
+	*userMessage = toMessageDomain(userEntity)
+	userMessage.Attachments = userAttachmentSnapshot
+
+	if len(userAttachments) > 0 {
+		if err := lockActiveFileObjectsForAttachments(tx, userMessage.UserID, userAttachments); err != nil {
+			return err
+		}
+		entities := make([]models.Attachment, 0, len(userAttachments))
+		for i := range userAttachments {
+			item := userAttachments[i]
+			item.ConversationID = userMessage.ConversationID
+			item.MessageID = userMessage.ID
+			item.UserID = userMessage.UserID
+			entities = append(entities, toAttachmentModel(&item))
+		}
+		if err := tx.Create(&entities).Error; err != nil {
+			return err
+		}
+	}
+
+	parentMessageID := userMessage.ID
+	assistantMessage.ParentMessageID = &parentMessageID
+	assistantEntity := toMessageModel(assistantMessage)
+	if err := tx.Create(&assistantEntity).Error; err != nil {
+		return err
+	}
+	*assistantMessage = toMessageDomain(assistantEntity)
+	assistantMessage.Attachments = assistantAttachmentSnapshot
+
+	result := tx.Model(&models.Conversation{}).
+		Where("id = ?", userMessage.ConversationID).
+		Update("message_count", gorm.Expr("message_count + ?", 2))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
+}
+
+func (r *Repo) GetMessagePairByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Message, *domainconversation.Message, error) {
+	if userID == 0 || strings.TrimSpace(runID) == "" {
+		return nil, nil, repository.ErrInvalidInput
+	}
+	var rows []models.Message
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND run_id = ? AND role IN ?", userID, strings.TrimSpace(runID), []string{"user", "assistant"}).
+		Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, nil, translateError(err)
+	}
+	if len(rows) != 2 {
+		return nil, nil, repository.ErrNotFound
+	}
+	if err := r.hydrateMessageRefs(ctx, rows); err != nil {
+		return nil, nil, err
+	}
+	if err := r.hydrateMessageAttachments(ctx, rows); err != nil {
+		return nil, nil, err
+	}
+	var userMessage, assistantMessage *domainconversation.Message
+	for _, row := range rows {
+		item := toMessageDomain(row)
+		if item.Role == "user" {
+			userMessage = &item
+		} else if item.Role == "assistant" {
+			assistantMessage = &item
+		}
+	}
+	if userMessage == nil || assistantMessage == nil {
+		return nil, nil, repository.ErrNotFound
+	}
+	return userMessage, assistantMessage, nil
+}
+
+func (r *Repo) FailGatewayTurn(ctx context.Context, userID uint, runID, errorCode, errorMessage string, endedAt time.Time) error {
+	if userID == 0 || strings.TrimSpace(runID) == "" || endedAt.IsZero() {
+		return repository.ErrInvalidInput
+	}
+	return translateError(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Message{}).Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, runID, "user", "pending").
+			Updates(map[string]any{"status": "error", "error_code": errorCode, "error_message": truncateText(errorMessage, 255)}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Message{}).Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, runID, "assistant", "pending").
+			Updates(map[string]any{"status": "error", "error_code": errorCode, "error_message": truncateText(errorMessage, 255)}).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&models.ConversationRun{}).Where("user_id = ? AND run_id = ? AND status IN ?", userID, runID, []string{"queued", "running"}).
+			Updates(map[string]any{"status": "error", "error_code": errorCode, "error_message": truncateText(errorMessage, 255), "ended_at": endedAt})
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected == 0 {
-			return repository.ErrNotFound
+		if result.RowsAffected != 1 {
+			return repository.ErrConflict
 		}
 		return nil
 	}))
@@ -3305,6 +3399,11 @@ func toConversationDomain(item models.Conversation) domainconversation.Conversat
 		LabelsManuallyManaged: item.LabelsManuallyManaged,
 		Model:                 item.Model,
 		Provider:              item.Provider,
+		ExecutionType:         item.ExecutionType,
+		ExecutionDeviceID:     item.ExecutionDeviceID,
+		ExecutionProfileID:    item.ExecutionProfileID,
+		ExecutionWorkspaceID:  item.ExecutionWorkspaceID,
+		ExecutionEventSeq:     item.ExecutionEventSeq,
 		SessionKey:            item.SessionKey,
 		IsStarred:             item.IsStarred,
 		StarredAt:             item.StarredAt,
@@ -3363,6 +3462,11 @@ func toConversationModel(item *domainconversation.Conversation) models.Conversat
 		LabelsManuallyManaged: item.LabelsManuallyManaged,
 		Model:                 item.Model,
 		Provider:              item.Provider,
+		ExecutionType:         item.ExecutionType,
+		ExecutionDeviceID:     item.ExecutionDeviceID,
+		ExecutionProfileID:    item.ExecutionProfileID,
+		ExecutionWorkspaceID:  item.ExecutionWorkspaceID,
+		ExecutionEventSeq:     item.ExecutionEventSeq,
 		SessionKey:            item.SessionKey,
 		IsStarred:             item.IsStarred,
 		StarredAt:             item.StarredAt,

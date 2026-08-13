@@ -61,7 +61,7 @@ func (h *Handler) parseSendMessageInput(c *gin.Context) (appconversation.SendMes
 	}
 
 	var req SendMessageRequest
-	if err = c.ShouldBindJSON(&req); err != nil {
+	if err = bindConversationJSON(c, &req, 1024*1024+128*1024); err != nil {
 		response.InvalidRequestBody(c, err)
 		return appconversation.SendMessageInput{}, nil, nil, err
 	}
@@ -172,6 +172,16 @@ func handleSendMessageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, appconversation.ErrConversationNotFound):
 		response.Error(c, http.StatusNotFound, "conversation not found")
+	case errors.Is(err, appconversation.ErrInteractionNotFound):
+		response.Error(c, http.StatusNotFound, "interaction not found")
+	case errors.Is(err, appconversation.ErrInvalidExecutionTarget), errors.Is(err, appconversation.ErrInvalidInteraction):
+		response.Error(c, http.StatusBadRequest, "invalid execution request")
+	case errors.Is(err, appconversation.ErrExecutionBindingNotFound):
+		response.Error(c, http.StatusNotFound, "execution binding not found")
+	case errors.Is(err, appconversation.ErrExecutionConflict):
+		response.Error(c, http.StatusConflict, "execution state conflict")
+	case errors.Is(err, appconversation.ErrExecutionUnavailable):
+		response.Error(c, http.StatusServiceUnavailable, "execution adapter unavailable")
 	case errors.Is(err, appconversation.ErrInvalidFileReference):
 		response.Error(c, http.StatusBadRequest, "invalid file reference")
 	case errors.Is(err, appconversation.ErrFileNotFound):
@@ -234,14 +244,14 @@ func handleSendMessageError(c *gin.Context, err error) {
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
-// @Router /conversations/{id}/messages [post]
-// SendMessage 发送消息。
-func (h *Handler) SendMessage(c *gin.Context) {
+// @Router /conversations/{id}/turns [post]
+// StartTurn starts one conversation turn through its bound execution adapter.
+func (h *Handler) StartTurn(c *gin.Context) {
 	input, conversation, req, err := h.parseSendMessageInput(c)
 	if err != nil {
 		return
 	}
-	result, err := h.service.SendMessage(c.Request.Context(), input)
+	result, err := h.service.ExecuteTurn(c.Request.Context(), input)
 	if err != nil {
 		if result != nil {
 			h.recordSendMessageAudit(c, conversation, req, result, "send_message")
@@ -255,7 +265,7 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	response.Success(c, toSendMessageResponse(result))
 }
 
-// StreamMessage godoc
+// StreamTurn godoc
 // @Summary 流式发送消息
 // @Description 在会话中发送消息并以 NDJSON 流式返回 assistant 增量文本
 // @Tags chat
@@ -268,8 +278,8 @@ func (h *Handler) SendMessage(c *gin.Context) {
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
-// @Router /conversations/{id}/messages/stream [post]
-func (h *Handler) StreamMessage(c *gin.Context) {
+// @Router /conversations/{id}/turns/stream [post]
+func (h *Handler) StreamTurn(c *gin.Context) {
 	input, conversation, req, err := h.parseSendMessageInput(c)
 	if err != nil {
 		return
@@ -312,7 +322,7 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 		return nil
 	}
 
-	result, err := h.service.StreamMessage(c.Request.Context(), input, func(delta string) error {
+	result, err := h.service.StreamTurn(c.Request.Context(), input, func(delta string) error {
 		_ = flushStreamEvent(map[string]interface{}{
 			"type":  "delta",
 			"delta": delta,
@@ -348,7 +358,7 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 	h.recordStreamSendMessageAuditAsync(c, conversation, req, result, "stream_message")
 }
 
-// CancelMessageGeneration godoc
+// InterruptTurn godoc
 // @Summary 取消流式生成
 // @Description 仅在用户显式点击暂停时取消对应 run；浏览器刷新或断开连接不会调用此接口
 // @Tags chat
@@ -357,8 +367,8 @@ func (h *Handler) StreamMessage(c *gin.Context) {
 // @Param run_id path string true "运行 ID"
 // @Success 200 {object} response.SuccessDoc
 // @Failure 400 {object} ErrorDoc
-// @Router /conversation-runs/{run_id}/cancel [post]
-func (h *Handler) CancelMessageGeneration(c *gin.Context) {
+// @Router /conversation-runs/{run_id}/interrupt [post]
+func (h *Handler) InterruptTurn(c *gin.Context) {
 	runID, err := stringParam(c, "run_id")
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid run id")
@@ -415,6 +425,17 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 	}
 	terminalWritten := false
 	writeEvent := func(payload map[string]interface{}) bool {
+		if eventType, _ := payload["type"].(string); eventType == "gateway_completed" {
+			result, resultErr := h.service.GetTurnResult(c.Request.Context(), userID, runID)
+			if resultErr != nil {
+				payload = streamErrorPayload(resultErr)
+				if result != nil {
+					payload["data"] = toSendMessageResponse(result)
+				}
+			} else {
+				payload = map[string]interface{}{"type": "completed", "data": toSendMessageResponse(result)}
+			}
+		}
 		encoded, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
 			return true

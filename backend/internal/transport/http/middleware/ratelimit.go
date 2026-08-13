@@ -188,7 +188,7 @@ func normalizedRoutePath(c *gin.Context) string {
 
 func isMessageGenerationRoute(method string, route string) bool {
 	return method == http.MethodPost && (strings.HasSuffix(route, "/messages") ||
-		strings.HasSuffix(route, "/messages/stream") ||
+		strings.HasSuffix(route, "/turns/stream") ||
 		strings.HasSuffix(route, "/cancel"))
 }
 

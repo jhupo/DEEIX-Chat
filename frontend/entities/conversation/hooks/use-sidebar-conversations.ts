@@ -486,6 +486,7 @@ export function useSidebarConversationsController({
       title: newConversationTitle,
       model: modelName,
       projectID: projectID?.trim() || "",
+      execution: { type: "cloud" },
     });
     setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
     publishChange({ type: "upsert", publicID: item.publicID, item });

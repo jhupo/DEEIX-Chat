@@ -110,27 +110,6 @@ export interface AdminUserResponse {
   username: string;
 }
 
-export interface AgentInputDoc {
-  artifactRef?: string;
-  kind: "text" | "artifact";
-  text?: string;
-}
-
-export interface AgentSettingsDoc {
-  approvalPolicy?: "untrusted" | "on-request" | "never";
-  model?: string;
-  reasoningEffort?: "low" | "medium" | "high" | "xhigh";
-  sandboxPolicy?: "read-only" | "workspace-write";
-}
-
-export interface AgentgatewayErrorDoc {
-  data: any;
-  details?: any;
-  errorCode?: string;
-  errorMsg: string;
-  requestId?: string;
-}
-
 export interface AnnouncementCloseDataResponse {
   closed: boolean;
 }
@@ -548,6 +527,16 @@ export interface ConversationEventResponse {
   username: string;
 }
 
+export interface ConversationExecutionRequest {
+  /** @maxLength 64 */
+  deviceID?: string;
+  /** @maxLength 64 */
+  profileID?: string;
+  type: "cloud" | "gateway";
+  /** @maxLength 64 */
+  workspaceID?: string;
+}
+
 export interface ConversationExportCompatibilityResponse {
   format: string;
   notes: string;
@@ -620,6 +609,11 @@ export interface ConversationProjectResponseDoc {
 export interface ConversationResponse {
   contextPolicyJSON: string;
   createdAt: string;
+  executionDeviceID: string;
+  executionEventSeq: number;
+  executionProfileID: string;
+  executionType: "cloud" | "gateway";
+  executionWorkspaceID: string;
   isStarred: boolean;
   labelsJSON: string;
   lastCompactedAt: string | null;
@@ -713,7 +707,7 @@ export interface CreateAnnouncementRequest {
   type?: "critical" | "warning" | "info" | "normal" | "general";
 }
 
-export interface CreateArtifactRequestDoc {
+export interface CreateArtifactRequest {
   fileId: string;
 }
 
@@ -736,6 +730,7 @@ export interface CreateConversationProjectRequest {
 }
 
 export interface CreateConversationRequest {
+  execution: ConversationExecutionRequest;
   /** @maxLength 128 */
   model?: string;
   /** @maxLength 32 */
@@ -881,10 +876,29 @@ export interface DeleteServerResponseDoc {
   errorMsg: string;
 }
 
-export interface DeviceDoc {
+export interface DeviceListResponseDoc {
+  data: DeviceResponseDocData[];
+  errorMsg: string;
+}
+
+export interface DeviceResponseDoc {
+  data: {
+    createdAt: string;
+    deviceId: string;
+    lastSeenAt: string;
+    name: string;
+    platform: string;
+    status: string;
+    updatedAt: string;
+    userId: string;
+  };
+  errorMsg: string;
+}
+
+export interface DeviceResponseDocData {
   createdAt: string;
   deviceId: string;
-  lastSeenAt: string | null;
+  lastSeenAt: string;
   name: string;
   platform: string;
   status: string;
@@ -892,22 +906,10 @@ export interface DeviceDoc {
   userId: string;
 }
 
-export interface DeviceListResponseDoc {
-  data: DeviceDoc[];
-  errorMsg: string;
-}
-
-export interface DeviceResponseDoc {
-  data: DeviceDoc;
-  errorMsg: string;
-}
-
-export interface DeviceRevokeDoc {
-  revoked: boolean;
-}
-
 export interface DeviceRevokeResponseDoc {
-  data: DeviceRevokeDoc;
+  data: {
+    revoked: boolean;
+  };
   errorMsg: string;
 }
 
@@ -941,13 +943,11 @@ export interface EmailRegistrationStartResponseDoc {
   errorMsg: string;
 }
 
-export interface EnrollmentDataDoc {
-  enrollmentCode: string;
-  expiresAt: string;
-}
-
 export interface EnrollmentResponseDoc {
-  data: EnrollmentDataDoc;
+  data: {
+    enrollmentCode: string;
+    expiresAt: string;
+  };
   errorMsg: string;
 }
 
@@ -959,19 +959,17 @@ export interface Envelope {
   requestId?: string;
 }
 
-export interface EventDoc {
-  eventId: string;
+export interface ExecutionEventListResponseDoc {
+  data: ExecutionEventResponse[];
+  errorMsg: string;
+}
+
+export interface ExecutionEventResponse {
   kind: string;
   occurredAt: string;
   payload: any;
+  runID: string;
   seq: number;
-  threadId: string;
-  turnId?: string;
-}
-
-export interface EventListResponseDoc {
-  data: EventDoc[];
-  errorMsg: string;
 }
 
 export interface FileListResponse {
@@ -1019,12 +1017,6 @@ export interface FileUploadResponse {
   file: FileObjectResponse;
   quota: StorageQuotaResponse;
   reused: boolean;
-}
-
-export interface GitInfoUpdateDoc {
-  branch?: string | null;
-  originUrl?: string | null;
-  sha?: string | null;
 }
 
 export interface GroupModelsResponseDoc {
@@ -1090,40 +1082,22 @@ export interface ImportUpstreamModelsResponseDoc {
   errorMsg: string;
 }
 
-export interface InteractionDoc {
-  createdAt: string;
-  interactionId: string;
-  kind: string;
-  request: any;
-  status: string;
-  threadId: string;
-  turnId?: string;
+export interface InteractionListResponseDoc {
+  data: InteractionResponse[];
+  errorMsg: string;
 }
 
-export interface InteractionListResponseDoc {
-  data: InteractionDoc[];
-  errorMsg: string;
+export interface InteractionResponse {
+  createdAt: string;
+  interactionID: string;
+  kind: string;
+  request: any;
+  runID: string;
+  status: string;
 }
 
 export interface InteractionResponseDoc {
-  data: InteractionDoc;
-  errorMsg: string;
-}
-
-export interface ItemDoc {
-  createdAt: string;
-  data: any;
-  itemId: string;
-  kind: string;
-  lastEventSeq: number;
-  status: string;
-  threadId: string;
-  turnId?: string;
-  updatedAt: string;
-}
-
-export interface ItemListResponseDoc {
-  data: ItemDoc[];
+  data: InteractionResponse;
   errorMsg: string;
 }
 
@@ -1759,10 +1733,6 @@ export interface RenameDeviceRequest {
   name: string;
 }
 
-export interface RenameThreadRequestDoc {
-  name: string;
-}
-
 export interface ReorderConversationProjectsRequest {
   /** @maxItems 200 */
   projectIDs: string[];
@@ -1793,7 +1763,7 @@ export interface ResourceSnapshotDoc {
   profileId: string;
   refreshedAt: string;
   resource: string;
-  scope: "profile" | "workspace";
+  scope: string;
   workspaceId?: string;
 }
 
@@ -1802,26 +1772,8 @@ export interface ResourceSnapshotResponseDoc {
   errorMsg: string;
 }
 
-export interface RespondInteractionRequestDoc {
-  response: {
-    answers?: Record<string, string>;
-    content?: any;
-    decision?: "accept" | "decline";
-    kind:
-      | "approval"
-      | "user-input"
-      | "permission"
-      | "mcp-elicitation"
-      | "dynamic-tool";
-    scope?: "turn" | "session";
-    success?: boolean;
-  };
-}
-
-export interface ReviewTargetDoc {
-  branch?: string;
-  kind: "working-tree" | "base-branch" | "commit";
-  sha?: string;
+export interface RespondInteractionRequest {
+  response: number[];
 }
 
 export interface RevokeConversationSharesRequest {
@@ -1884,11 +1836,11 @@ export interface RunResponse {
 
 export interface RuntimeProfileDoc {
   deviceId: string;
-  leaseExpiresAt: string | null;
+  leaseExpiresAt: string;
   profileId: string;
   provider: string;
   status: string;
-  verifiedAt: string | null;
+  verifiedAt: string;
 }
 
 export interface RuntimeProfileListResponseDoc {
@@ -1906,7 +1858,7 @@ export interface SendMessageRequest {
   fileIDs?: string[];
   htmlVisualPrompt?: boolean;
   /** @maxLength 64 */
-  keyBindingID: string;
+  keyBindingID?: string;
   /** @maxLength 128 */
   model?: string;
   options?: Record<string, any>;
@@ -2086,38 +2038,6 @@ export interface SkillSummaryResponse {
   title: string;
   trigger: string;
   updatedAt: string;
-}
-
-export interface StartReviewRequestDoc {
-  target: ReviewTargetDoc;
-}
-
-export interface StartThreadDataDoc {
-  thread: ThreadDoc;
-  turn?: TurnDoc | null;
-}
-
-export interface StartThreadRequestDoc {
-  deviceId: string;
-  input?: AgentInputDoc[];
-  profileId: string;
-  settings: AgentSettingsDoc;
-  title?: string;
-  workspaceId: string;
-}
-
-export interface StartThreadResponseDoc {
-  data: StartThreadDataDoc;
-  errorMsg: string;
-}
-
-export interface StartTurnRequestDoc {
-  input: AgentInputDoc[];
-  settings: AgentSettingsDoc;
-}
-
-export interface SteerTurnRequestDoc {
-  input: AgentInputDoc[];
 }
 
 export interface StorageQuotaResponse {
@@ -2525,47 +2445,6 @@ export interface SystemEventResponse {
   updatedAt: string;
 }
 
-export interface ThreadDoc {
-  createdAt: string;
-  deviceId: string;
-  gitBranch: string | null;
-  gitOriginUrl: string | null;
-  gitSha: string | null;
-  isPinned: boolean;
-  labels: string[];
-  lastEventSeq: number;
-  profileId: string;
-  sharePolicy: string;
-  status: string;
-  threadId: string;
-  title: string;
-  updatedAt: string;
-  workspaceId: string;
-}
-
-export interface ThreadListResponseDoc {
-  data: ThreadDoc[];
-  errorMsg: string;
-}
-
-export interface ThreadResponseDoc {
-  data: ThreadDoc;
-  errorMsg: string;
-}
-
-export interface ThreadSnapshotDoc {
-  interactions: InteractionDoc[];
-  items: ItemDoc[];
-  snapshotSeq: number;
-  thread: ThreadDoc;
-  turns: TurnDoc[];
-}
-
-export interface ThreadSnapshotResponseDoc {
-  data: ThreadSnapshotDoc;
-  errorMsg: string;
-}
-
 export interface ToolListResponse {
   results: ToolResponse[];
 }
@@ -2595,24 +2474,6 @@ export interface ToolResponse {
 
 export interface ToolResponseDoc {
   data: ToolResponse;
-  errorMsg: string;
-}
-
-export interface TurnDoc {
-  createdAt: string;
-  status: string;
-  threadId: string;
-  turnId: string;
-  updatedAt: string;
-}
-
-export interface TurnListResponseDoc {
-  data: TurnDoc[];
-  errorMsg: string;
-}
-
-export interface TurnResponseDoc {
-  data: TurnDoc;
   errorMsg: string;
 }
 
@@ -2758,19 +2619,9 @@ export interface UpdatePermissionGroupRequest {
   name: string;
 }
 
-export interface UpdateProviderMetadataRequestDoc {
-  gitInfo: GitInfoUpdateDoc;
-}
-
 export interface UpdateServerToolsStatusRequest {
   status: string;
   toolIDs: number[];
-}
-
-export interface UpdateThreadMetadataRequestDoc {
-  isPinned?: boolean;
-  labels?: string[];
-  sharePolicy?: "private" | "link";
 }
 
 export interface UpdateToolRequest {
@@ -4930,9 +4781,9 @@ export namespace Admin {
 export namespace Agent {
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesList
-   * @summary 获取当前用户的 Agent 设备
+   * @summary List gateway devices
    * @request GET:/agent/devices
    * @secure
    */
@@ -4946,9 +4797,9 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesEnrollmentsCreate
-   * @summary 创建本地 Agent 设备配对码
+   * @summary Create a gateway device enrollment code
    * @request POST:/agent/devices/enrollments
    * @secure
    */
@@ -4962,15 +4813,15 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesDetail
-   * @summary 获取 Agent 设备
+   * @summary Get a gateway device
    * @request GET:/agent/devices/{device_id}
    * @secure
    */
   export namespace DevicesDetail {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
     };
     export type RequestQuery = {};
@@ -4981,15 +4832,15 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesDelete
-   * @summary 撤销 Agent 设备
+   * @summary Revoke a gateway device
    * @request DELETE:/agent/devices/{device_id}
    * @secure
    */
   export namespace DevicesDelete {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
     };
     export type RequestQuery = {};
@@ -5000,15 +4851,15 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesPartialUpdate
-   * @summary 重命名 Agent 设备
+   * @summary Rename a gateway device
    * @request PATCH:/agent/devices/{device_id}
    * @secure
    */
   export namespace DevicesPartialUpdate {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
     };
     export type RequestQuery = {};
@@ -5019,15 +4870,15 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesProfilesList
-   * @summary 获取设备 Runtime Profile
+   * @summary List device runtime profiles
    * @request GET:/agent/devices/{device_id}/profiles
    * @secure
    */
   export namespace DevicesProfilesList {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
     };
     export type RequestQuery = {};
@@ -5038,27 +4889,20 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesProfilesResourcesDetail
-   * @summary 获取 Profile 本地资源快照
+   * @summary Get a runtime profile resource
    * @request GET:/agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}
    * @secure
    */
   export namespace DevicesProfilesResourcesDetail {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
       /** Profile ID */
       profileId: string;
-      /** 资源 */
-      resource:
-        | "models"
-        | "model-capabilities"
-        | "permission-profiles"
-        | "apps"
-        | "mcp"
-        | "plugins"
-        | "auth-status";
+      /** Resource name */
+      resource: string;
     };
     export type RequestQuery = {};
     export type RequestBody = never;
@@ -5068,32 +4912,25 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesProfilesResourcesRefreshCreate
-   * @summary 刷新 Profile 本地资源快照
+   * @summary Refresh a runtime profile resource
    * @request POST:/agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}/refresh
    * @secure
    */
   export namespace DevicesProfilesResourcesRefreshCreate {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
       /** Profile ID */
       profileId: string;
-      /** 资源 */
-      resource:
-        | "models"
-        | "model-capabilities"
-        | "permission-profiles"
-        | "apps"
-        | "mcp"
-        | "plugins"
-        | "auth-status";
+      /** Resource name */
+      resource: string;
     };
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {
-      /** UUID */
+      /** Idempotency key */
       "Idempotency-Key": string;
     };
     export type ResponseBody = CommandResponseDoc;
@@ -5101,15 +4938,15 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesWorkspacesList
-   * @summary 获取设备工作区
+   * @summary List device workspaces
    * @request GET:/agent/devices/{device_id}/workspaces
    * @secure
    */
   export namespace DevicesWorkspacesList {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
     };
     export type RequestQuery = {};
@@ -5120,18 +4957,18 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesWorkspacesResourcesDetail
-   * @summary 获取 Workspace 本地资源快照
+   * @summary Get a workspace resource
    * @request GET:/agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}
    * @secure
    */
   export namespace DevicesWorkspacesResourcesDetail {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
-      /** 资源 */
-      resource: "sessions" | "skills" | "hooks";
+      /** Resource name */
+      resource: string;
       /** Workspace ID */
       workspaceId: string;
     };
@@ -5143,25 +4980,25 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name DevicesWorkspacesResourcesRefreshCreate
-   * @summary 刷新 Workspace 本地资源快照
+   * @summary Refresh a workspace resource
    * @request POST:/agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}/refresh
    * @secure
    */
   export namespace DevicesWorkspacesResourcesRefreshCreate {
     export type RequestParams = {
-      /** 设备公开 ID */
+      /** Device public ID */
       deviceId: string;
-      /** 资源 */
-      resource: "sessions" | "skills" | "hooks";
+      /** Resource name */
+      resource: string;
       /** Workspace ID */
       workspaceId: string;
     };
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {
-      /** UUID */
+      /** Idempotency key */
       "Idempotency-Key": string;
     };
     export type ResponseBody = CommandResponseDoc;
@@ -5169,491 +5006,9 @@ export namespace Agent {
 
   /**
    * No description
-   * @tags agent
-   * @name InteractionsRespondCreate
-   * @summary 响应 Agent 交互请求
-   * @request POST:/agent/interactions/{interaction_id}/respond
-   * @secure
-   */
-  export namespace InteractionsRespondCreate {
-    export type RequestParams = {
-      /** Interaction ID */
-      interactionId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = RespondInteractionRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = InteractionResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsList
-   * @summary 获取 Agent Thread
-   * @request GET:/agent/threads
-   * @secure
-   */
-  export namespace ThreadsList {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = ThreadListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsCreate
-   * @summary 创建 Agent Thread
-   * @request POST:/agent/threads
-   * @secure
-   */
-  export namespace ThreadsCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = StartThreadRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = StartThreadResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsDetail
-   * @summary 获取 Agent Thread 详情
-   * @request GET:/agent/threads/{thread_id}
-   * @secure
-   */
-  export namespace ThreadsDetail {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = ThreadResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsDelete
-   * @summary 删除 Agent Thread
-   * @request DELETE:/agent/threads/{thread_id}
-   * @secure
-   */
-  export namespace ThreadsDelete {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsPartialUpdate
-   * @summary 更新 Agent Thread 云端元数据
-   * @request PATCH:/agent/threads/{thread_id}
-   * @secure
-   */
-  export namespace ThreadsPartialUpdate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpdateThreadMetadataRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = ThreadResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsArchiveCreate
-   * @summary 归档 Agent Thread
-   * @request POST:/agent/threads/{thread_id}/archive
-   * @secure
-   */
-  export namespace ThreadsArchiveCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsCompactCreate
-   * @summary 压缩 Agent Thread 上下文
-   * @request POST:/agent/threads/{thread_id}/compact
-   * @secure
-   */
-  export namespace ThreadsCompactCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsEventsList
-   * @summary 重放 Agent Thread 事件
-   * @request GET:/agent/threads/{thread_id}/events
-   * @secure
-   */
-  export namespace ThreadsEventsList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {
-      /** 已消费的 Thread 事件序号 */
-      after_seq?: number;
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = EventListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsForkCreate
-   * @summary Fork Agent Thread
-   * @request POST:/agent/threads/{thread_id}/fork
-   * @secure
-   */
-  export namespace ThreadsForkCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = ThreadResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsInteractionsList
-   * @summary 获取 Agent 交互请求
-   * @request GET:/agent/threads/{thread_id}/interactions
-   * @secure
-   */
-  export namespace ThreadsInteractionsList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {
-      /** 状态 */
-      status?: "pending" | "responding" | "resolved" | "failed";
-    };
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = InteractionListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsItemsList
-   * @summary 获取 Agent Thread 条目快照
-   * @request GET:/agent/threads/{thread_id}/items
-   * @secure
-   */
-  export namespace ThreadsItemsList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = ItemListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsNamePartialUpdate
-   * @summary 重命名 Agent Thread
-   * @request PATCH:/agent/threads/{thread_id}/name
-   * @secure
-   */
-  export namespace ThreadsNamePartialUpdate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = RenameThreadRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsNotificationsList
-   * @summary 订阅 Agent Thread 变更唤醒
-   * @request GET:/agent/threads/{thread_id}/notifications
-   * @secure
-   */
-  export namespace ThreadsNotificationsList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = string;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsProviderMetadataPartialUpdate
-   * @summary 更新 Agent Thread Provider Git 元数据
-   * @request PATCH:/agent/threads/{thread_id}/provider-metadata
-   * @secure
-   */
-  export namespace ThreadsProviderMetadataPartialUpdate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = UpdateProviderMetadataRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsResumeCreate
-   * @summary 恢复 Agent Thread
-   * @request POST:/agent/threads/{thread_id}/resume
-   * @secure
-   */
-  export namespace ThreadsResumeCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsReviewsCreate
-   * @summary 启动 Agent 代码审查
-   * @request POST:/agent/threads/{thread_id}/reviews
-   * @secure
-   */
-  export namespace ThreadsReviewsCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = StartReviewRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsSnapshotList
-   * @summary 获取 Agent Thread 一致性快照
-   * @request GET:/agent/threads/{thread_id}/snapshot
-   * @secure
-   */
-  export namespace ThreadsSnapshotList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = ThreadSnapshotResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsTurnsList
-   * @summary 获取 Agent Turn
-   * @request GET:/agent/threads/{thread_id}/turns
-   * @secure
-   */
-  export namespace ThreadsTurnsList {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = TurnListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsTurnsCreate
-   * @summary 启动 Agent Turn
-   * @request POST:/agent/threads/{thread_id}/turns
-   * @secure
-   */
-  export namespace ThreadsTurnsCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = StartTurnRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = TurnResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name ThreadsUnarchiveCreate
-   * @summary 取消归档 Agent Thread
-   * @request POST:/agent/threads/{thread_id}/unarchive
-   * @secure
-   */
-  export namespace ThreadsUnarchiveCreate {
-    export type RequestParams = {
-      /** Thread ID */
-      threadId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name TurnsInterruptCreate
-   * @summary 中断 Agent Turn
-   * @request POST:/agent/turns/{turn_id}/interrupt
-   * @secure
-   */
-  export namespace TurnsInterruptCreate {
-    export type RequestParams = {
-      /** Turn ID */
-      turnId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
-   * @name TurnsSteerCreate
-   * @summary 追加 Agent Turn 输入
-   * @request POST:/agent/turns/{turn_id}/steer
-   * @secure
-   */
-  export namespace TurnsSteerCreate {
-    export type RequestParams = {
-      /** Turn ID */
-      turnId: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = SteerTurnRequestDoc;
-    export type RequestHeaders = {
-      /** UUID */
-      "Idempotency-Key": string;
-    };
-    export type ResponseBody = CommandResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent
+   * @tags agent-gateway
    * @name WorkspacesArtifactsCreate
-   * @summary 创建 Agent workspace artifact
+   * @summary Bind an uploaded file to a gateway workspace
    * @request POST:/agent/workspaces/{workspace_id}/artifacts
    * @secure
    */
@@ -5663,7 +5018,7 @@ export namespace Agent {
       workspaceId: string;
     };
     export type RequestQuery = {};
-    export type RequestBody = CreateArtifactRequestDoc;
+    export type RequestBody = CreateArtifactRequest;
     export type RequestHeaders = {};
     export type ResponseBody = ArtifactResponseDoc;
   }
@@ -6212,6 +5567,30 @@ export namespace ContextArtifacts {
   }
 }
 
+export namespace ConversationInteractions {
+  /**
+   * No description
+   * @tags chat
+   * @name RespondCreate
+   * @summary Respond to a conversation execution interaction
+   * @request POST:/conversation-interactions/{interaction_id}/respond
+   * @secure
+   */
+  export namespace RespondCreate {
+    export type RequestParams = {
+      /** Interaction public ID */
+      interactionId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = RespondInteractionRequest;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = InteractionResponseDoc;
+  }
+}
+
 export namespace ConversationProjects {
   /**
    * @description 查询当前用户的会话项目分组
@@ -6312,12 +5691,12 @@ export namespace ConversationRuns {
   /**
    * @description 仅在用户显式点击暂停时取消对应 run；浏览器刷新或断开连接不会调用此接口
    * @tags chat
-   * @name CancelCreate
+   * @name InterruptCreate
    * @summary 取消流式生成
-   * @request POST:/conversation-runs/{run_id}/cancel
+   * @request POST:/conversation-runs/{run_id}/interrupt
    * @secure
    */
-  export namespace CancelCreate {
+  export namespace InterruptCreate {
     export type RequestParams = {
       /** 运行 ID */
       runId: string;
@@ -6547,6 +5926,28 @@ export namespace Conversations {
   }
 
   /**
+   * No description
+   * @tags chat
+   * @name EventsList
+   * @summary List conversation execution events
+   * @request GET:/conversations/{id}/events
+   * @secure
+   */
+  export namespace EventsList {
+    export type RequestParams = {
+      /** Conversation public ID */
+      id: string;
+    };
+    export type RequestQuery = {
+      /** Last applied sequence */
+      after?: number;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ExecutionEventListResponseDoc;
+  }
+
+  /**
    * @description 导出当前用户单个会话的元信息、消息、运行日志和可见处理轨迹
    * @tags chat
    * @name ExportList2
@@ -6565,6 +5966,28 @@ export namespace Conversations {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationExportResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags chat
+   * @name InteractionsList
+   * @summary List pending and completed conversation interactions
+   * @request GET:/conversations/{id}/interactions
+   * @secure
+   */
+  export namespace InteractionsList {
+    export type RequestParams = {
+      /** Conversation public ID */
+      id: string;
+    };
+    export type RequestQuery = {
+      /** Interaction status */
+      status?: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = InteractionListResponseDoc;
   }
 
   /**
@@ -6611,25 +6034,6 @@ export namespace Conversations {
   }
 
   /**
-   * @description 在会话中发送消息，支持文件/图片等多模态附件
-   * @tags chat
-   * @name MessagesCreate
-   * @summary 发送消息
-   * @request POST:/conversations/{id}/messages
-   * @secure
-   */
-  export namespace MessagesCreate {
-    export type RequestParams = {
-      /** 会话 public_id */
-      id: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = SendMessageRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = SendMessageResponseDoc;
-  }
-
-  /**
    * @description 返回当前用户会话最新分支最近 10 条用户或助手消息
    * @tags chat
    * @name MessagesPreviewList
@@ -6646,25 +6050,6 @@ export namespace Conversations {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationPreviewMessageListResponseDoc;
-  }
-
-  /**
-   * @description 在会话中发送消息并以 NDJSON 流式返回 assistant 增量文本
-   * @tags chat
-   * @name MessagesStreamCreate
-   * @summary 流式发送消息
-   * @request POST:/conversations/{id}/messages/stream
-   * @secure
-   */
-  export namespace MessagesStreamCreate {
-    export type RequestParams = {
-      /** 会话 public_id */
-      id: string;
-    };
-    export type RequestQuery = {};
-    export type RequestBody = SendMessageRequest;
-    export type RequestHeaders = {};
-    export type ResponseBody = string;
   }
 
   /**
@@ -6841,6 +6226,44 @@ export namespace Conversations {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationUpdateResponseDoc;
+  }
+
+  /**
+   * @description 在会话中发送消息，支持文件/图片等多模态附件
+   * @tags chat
+   * @name TurnsCreate
+   * @summary 发送消息
+   * @request POST:/conversations/{id}/turns
+   * @secure
+   */
+  export namespace TurnsCreate {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = SendMessageRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = SendMessageResponseDoc;
+  }
+
+  /**
+   * @description 在会话中发送消息并以 NDJSON 流式返回 assistant 增量文本
+   * @tags chat
+   * @name TurnsStreamCreate
+   * @summary 流式发送消息
+   * @request POST:/conversations/{id}/turns/stream
+   * @secure
+   */
+  export namespace TurnsStreamCreate {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = SendMessageRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = string;
   }
 }
 

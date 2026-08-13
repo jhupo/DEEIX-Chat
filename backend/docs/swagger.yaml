@@ -264,57 +264,6 @@ definitions:
     - updatedAt
     - username
     type: object
-  AgentInputDoc:
-    properties:
-      artifactRef:
-        type: string
-      kind:
-        enum:
-        - text
-        - artifact
-        type: string
-      text:
-        type: string
-    required:
-    - kind
-    type: object
-  AgentSettingsDoc:
-    properties:
-      approvalPolicy:
-        enum:
-        - untrusted
-        - on-request
-        - never
-        type: string
-      model:
-        type: string
-      reasoningEffort:
-        enum:
-        - low
-        - medium
-        - high
-        - xhigh
-        type: string
-      sandboxPolicy:
-        enum:
-        - read-only
-        - workspace-write
-        type: string
-    type: object
-  AgentgatewayErrorDoc:
-    properties:
-      data: {}
-      details: {}
-      errorCode:
-        type: string
-      errorMsg:
-        type: string
-      requestId:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
   AnnouncementCloseDataResponse:
     properties:
       closed:
@@ -1247,6 +1196,25 @@ definitions:
     - userLabel
     - username
     type: object
+  ConversationExecutionRequest:
+    properties:
+      deviceID:
+        maxLength: 64
+        type: string
+      profileID:
+        maxLength: 64
+        type: string
+      type:
+        enum:
+        - cloud
+        - gateway
+        type: string
+      workspaceID:
+        maxLength: 64
+        type: string
+    required:
+    - type
+    type: object
   ConversationExportCompatibilityResponse:
     properties:
       format:
@@ -1433,6 +1401,19 @@ definitions:
         type: string
       createdAt:
         type: string
+      executionDeviceID:
+        type: string
+      executionEventSeq:
+        type: integer
+      executionProfileID:
+        type: string
+      executionType:
+        enum:
+        - cloud
+        - gateway
+        type: string
+      executionWorkspaceID:
+        type: string
       isStarred:
         type: boolean
       labelsJSON:
@@ -1484,6 +1465,11 @@ definitions:
     required:
     - contextPolicyJSON
     - createdAt
+    - executionDeviceID
+    - executionEventSeq
+    - executionProfileID
+    - executionType
+    - executionWorkspaceID
     - isStarred
     - labelsJSON
     - lastCompactedAt
@@ -1670,13 +1656,6 @@ definitions:
     - contentMarkdown
     - title
     type: object
-  CreateArtifactRequestDoc:
-    properties:
-      fileId:
-        type: string
-    required:
-    - fileId
-    type: object
   CreateConversationProjectRequest:
     properties:
       color:
@@ -1714,6 +1693,8 @@ definitions:
     type: object
   CreateConversationRequest:
     properties:
+      execution:
+        $ref: '#/definitions/ConversationExecutionRequest'
       model:
         maxLength: 128
         type: string
@@ -1723,6 +1704,8 @@ definitions:
       title:
         maxLength: 255
         type: string
+    required:
+    - execution
     type: object
   CreateConversationShareRequest:
     properties:
@@ -1969,7 +1952,55 @@ definitions:
     - data
     - errorMsg
     type: object
-  DeviceDoc:
+  DeviceListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/DeviceResponseDocData'
+        type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  DeviceResponseDoc:
+    properties:
+      data:
+        properties:
+          createdAt:
+            type: string
+          deviceId:
+            type: string
+          lastSeenAt:
+            type: string
+          name:
+            type: string
+          platform:
+            type: string
+          status:
+            type: string
+          updatedAt:
+            type: string
+          userId:
+            type: string
+        required:
+        - createdAt
+        - deviceId
+        - lastSeenAt
+        - name
+        - platform
+        - status
+        - updatedAt
+        - userId
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  DeviceResponseDocData:
     properties:
       createdAt:
         type: string
@@ -1977,8 +2008,6 @@ definitions:
         type: string
       lastSeenAt:
         type: string
-        x-nullable: true
-        x-omitempty: false
       name:
         type: string
       platform:
@@ -1999,39 +2028,15 @@ definitions:
     - updatedAt
     - userId
     type: object
-  DeviceListResponseDoc:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/DeviceDoc'
-        type: array
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  DeviceResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/DeviceDoc'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  DeviceRevokeDoc:
-    properties:
-      revoked:
-        type: boolean
-    required:
-    - revoked
-    type: object
   DeviceRevokeResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/DeviceRevokeDoc'
+        properties:
+          revoked:
+            type: boolean
+        required:
+        - revoked
+        type: object
       errorMsg:
         type: string
     required:
@@ -2087,20 +2092,18 @@ definitions:
     - data
     - errorMsg
     type: object
-  EnrollmentDataDoc:
-    properties:
-      enrollmentCode:
-        type: string
-      expiresAt:
-        type: string
-    required:
-    - enrollmentCode
-    - expiresAt
-    type: object
   EnrollmentResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/EnrollmentDataDoc'
+        properties:
+          enrollmentCode:
+            type: string
+          expiresAt:
+            type: string
+        required:
+        - enrollmentCode
+        - expiresAt
+        type: object
       errorMsg:
         type: string
     required:
@@ -2121,40 +2124,35 @@ definitions:
     - data
     - errorMsg
     type: object
-  EventDoc:
-    properties:
-      eventId:
-        type: string
-      kind:
-        type: string
-      occurredAt:
-        type: string
-      payload: {}
-      seq:
-        type: integer
-      threadId:
-        type: string
-      turnId:
-        type: string
-    required:
-    - eventId
-    - kind
-    - occurredAt
-    - payload
-    - seq
-    - threadId
-    type: object
-  EventListResponseDoc:
+  ExecutionEventListResponseDoc:
     properties:
       data:
         items:
-          $ref: '#/definitions/EventDoc'
+          $ref: '#/definitions/ExecutionEventResponse'
         type: array
       errorMsg:
         type: string
     required:
     - data
     - errorMsg
+    type: object
+  ExecutionEventResponse:
+    properties:
+      kind:
+        type: string
+      occurredAt:
+        type: string
+      payload: {}
+      runID:
+        type: string
+      seq:
+        type: integer
+    required:
+    - kind
+    - occurredAt
+    - payload
+    - runID
+    - seq
     type: object
   FileListResponse:
     properties:
@@ -2277,18 +2275,6 @@ definitions:
     - file
     - quota
     - reused
-    type: object
-  GitInfoUpdateDoc:
-    properties:
-      branch:
-        type: string
-        x-nullable: true
-      originUrl:
-        type: string
-        x-nullable: true
-      sha:
-        type: string
-        x-nullable: true
     type: object
   GroupModelsResponseDoc:
     properties:
@@ -2430,86 +2416,43 @@ definitions:
     - data
     - errorMsg
     type: object
-  InteractionDoc:
-    properties:
-      createdAt:
-        type: string
-      interactionId:
-        type: string
-      kind:
-        type: string
-      request: {}
-      status:
-        type: string
-      threadId:
-        type: string
-      turnId:
-        type: string
-    required:
-    - createdAt
-    - interactionId
-    - kind
-    - request
-    - status
-    - threadId
-    type: object
   InteractionListResponseDoc:
     properties:
       data:
         items:
-          $ref: '#/definitions/InteractionDoc'
+          $ref: '#/definitions/InteractionResponse'
         type: array
       errorMsg:
         type: string
     required:
     - data
     - errorMsg
+    type: object
+  InteractionResponse:
+    properties:
+      createdAt:
+        type: string
+      interactionID:
+        type: string
+      kind:
+        type: string
+      request: {}
+      runID:
+        type: string
+      status:
+        type: string
+    required:
+    - createdAt
+    - interactionID
+    - kind
+    - request
+    - runID
+    - status
     type: object
   InteractionResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/InteractionDoc'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  ItemDoc:
-    properties:
-      createdAt:
-        type: string
-      data: {}
-      itemId:
-        type: string
-      kind:
-        type: string
-      lastEventSeq:
-        type: integer
-      status:
-        type: string
-      threadId:
-        type: string
-      turnId:
-        type: string
-      updatedAt:
-        type: string
-    required:
-    - createdAt
-    - data
-    - itemId
-    - kind
-    - lastEventSeq
-    - status
-    - threadId
-    - updatedAt
-    type: object
-  ItemListResponseDoc:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/ItemDoc'
-        type: array
+        $ref: '#/definitions/InteractionResponse'
       errorMsg:
         type: string
     required:
@@ -3990,13 +3933,6 @@ definitions:
     required:
     - title
     type: object
-  RenameThreadRequestDoc:
-    properties:
-      name:
-        type: string
-    required:
-    - name
-    type: object
   ReorderConversationProjectsRequest:
     properties:
       projectIDs:
@@ -4060,9 +3996,6 @@ definitions:
       resource:
         type: string
       scope:
-        enum:
-        - profile
-        - workspace
         type: string
       workspaceId:
         type: string
@@ -4084,55 +4017,14 @@ definitions:
     - data
     - errorMsg
     type: object
-  RespondInteractionRequestDoc:
+  RespondInteractionRequest:
     properties:
       response:
-        properties:
-          answers:
-            additionalProperties:
-              type: string
-            type: object
-          content: {}
-          decision:
-            enum:
-            - accept
-            - decline
-            type: string
-          kind:
-            enum:
-            - approval
-            - user-input
-            - permission
-            - mcp-elicitation
-            - dynamic-tool
-            type: string
-          scope:
-            enum:
-            - turn
-            - session
-            type: string
-          success:
-            type: boolean
-        required:
-        - kind
-        type: object
+        items:
+          type: integer
+        type: array
     required:
     - response
-    type: object
-  ReviewTargetDoc:
-    properties:
-      branch:
-        type: string
-      kind:
-        enum:
-        - working-tree
-        - base-branch
-        - commit
-        type: string
-      sha:
-        type: string
-    required:
-    - kind
     type: object
   RevokeConversationSharesRequest:
     properties:
@@ -4284,8 +4176,6 @@ definitions:
         type: string
       leaseExpiresAt:
         type: string
-        x-nullable: true
-        x-omitempty: false
       profileId:
         type: string
       provider:
@@ -4294,8 +4184,6 @@ definitions:
         type: string
       verifiedAt:
         type: string
-        x-nullable: true
-        x-omitempty: false
     required:
     - deviceId
     - leaseExpiresAt
@@ -4372,7 +4260,6 @@ definitions:
     required:
     - content
     - contentType
-    - keyBindingID
     type: object
   SendMessageResponse:
     properties:
@@ -4744,77 +4631,6 @@ definitions:
     - trigger
     - updatedAt
     type: object
-  StartReviewRequestDoc:
-    properties:
-      target:
-        $ref: '#/definitions/ReviewTargetDoc'
-    required:
-    - target
-    type: object
-  StartThreadDataDoc:
-    properties:
-      thread:
-        $ref: '#/definitions/ThreadDoc'
-      turn:
-        allOf:
-        - $ref: '#/definitions/TurnDoc'
-        x-nullable: true
-    required:
-    - thread
-    type: object
-  StartThreadRequestDoc:
-    properties:
-      deviceId:
-        type: string
-      input:
-        items:
-          $ref: '#/definitions/AgentInputDoc'
-        type: array
-      profileId:
-        type: string
-      settings:
-        $ref: '#/definitions/AgentSettingsDoc'
-      title:
-        type: string
-      workspaceId:
-        type: string
-    required:
-    - deviceId
-    - profileId
-    - settings
-    - workspaceId
-    type: object
-  StartThreadResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/StartThreadDataDoc'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  StartTurnRequestDoc:
-    properties:
-      input:
-        items:
-          $ref: '#/definitions/AgentInputDoc'
-        type: array
-      settings:
-        $ref: '#/definitions/AgentSettingsDoc'
-    required:
-    - input
-    - settings
-    type: object
-  SteerTurnRequestDoc:
-    properties:
-      input:
-        items:
-          $ref: '#/definitions/AgentInputDoc'
-        type: array
-    required:
-    - input
-    type: object
   StorageQuotaResponse:
     properties:
       createdAt:
@@ -5111,120 +4927,6 @@ definitions:
     - traceID
     - updatedAt
     type: object
-  ThreadDoc:
-    properties:
-      createdAt:
-        type: string
-      deviceId:
-        type: string
-      gitBranch:
-        type: string
-        x-nullable: true
-        x-omitempty: false
-      gitOriginUrl:
-        type: string
-        x-nullable: true
-        x-omitempty: false
-      gitSha:
-        type: string
-        x-nullable: true
-        x-omitempty: false
-      isPinned:
-        type: boolean
-      labels:
-        items:
-          type: string
-        type: array
-      lastEventSeq:
-        type: integer
-      profileId:
-        type: string
-      sharePolicy:
-        type: string
-      status:
-        type: string
-      threadId:
-        type: string
-      title:
-        type: string
-      updatedAt:
-        type: string
-      workspaceId:
-        type: string
-    required:
-    - createdAt
-    - deviceId
-    - gitBranch
-    - gitOriginUrl
-    - gitSha
-    - isPinned
-    - labels
-    - lastEventSeq
-    - profileId
-    - sharePolicy
-    - status
-    - threadId
-    - title
-    - updatedAt
-    - workspaceId
-    type: object
-  ThreadListResponseDoc:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/ThreadDoc'
-        type: array
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  ThreadResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/ThreadDoc'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  ThreadSnapshotDoc:
-    properties:
-      interactions:
-        items:
-          $ref: '#/definitions/InteractionDoc'
-        type: array
-      items:
-        items:
-          $ref: '#/definitions/ItemDoc'
-        type: array
-      snapshotSeq:
-        type: integer
-      thread:
-        $ref: '#/definitions/ThreadDoc'
-      turns:
-        items:
-          $ref: '#/definitions/TurnDoc'
-        type: array
-    required:
-    - interactions
-    - items
-    - snapshotSeq
-    - thread
-    - turns
-    type: object
-  ThreadSnapshotResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/ThreadSnapshotDoc'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
   ToolListResponse:
     properties:
       results:
@@ -5304,47 +5006,6 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/ToolResponse'
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  TurnDoc:
-    properties:
-      createdAt:
-        type: string
-      status:
-        type: string
-      threadId:
-        type: string
-      turnId:
-        type: string
-      updatedAt:
-        type: string
-    required:
-    - createdAt
-    - status
-    - threadId
-    - turnId
-    - updatedAt
-    type: object
-  TurnListResponseDoc:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/TurnDoc'
-        type: array
-      errorMsg:
-        type: string
-    required:
-    - data
-    - errorMsg
-    type: object
-  TurnResponseDoc:
-    properties:
-      data:
-        $ref: '#/definitions/TurnDoc'
       errorMsg:
         type: string
     required:
@@ -5577,13 +5238,6 @@ definitions:
     required:
     - name
     type: object
-  UpdateProviderMetadataRequestDoc:
-    properties:
-      gitInfo:
-        $ref: '#/definitions/GitInfoUpdateDoc'
-    required:
-    - gitInfo
-    type: object
   UpdateServerToolsStatusRequest:
     properties:
       status:
@@ -5595,20 +5249,6 @@ definitions:
     required:
     - status
     - toolIDs
-    type: object
-  UpdateThreadMetadataRequestDoc:
-    properties:
-      isPinned:
-        type: boolean
-      labels:
-        items:
-          type: string
-        type: array
-      sharePolicy:
-        enum:
-        - private
-        - link
-        type: string
     type: object
   UpdateToolRequest:
     properties:
@@ -6295,6 +5935,13 @@ definitions:
     - markdown
     - title
     - trigger
+    type: object
+  createArtifactRequest:
+    properties:
+      fileId:
+        type: string
+    required:
+    - fileId
     type: object
   renameDeviceRequest:
     properties:
@@ -10035,23 +9682,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/DeviceListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取当前用户的 Agent 设备
+      summary: List gateway devices
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}:
     delete:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10061,26 +9700,14 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/DeviceRevokeResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 撤销 Agent 设备
+      summary: Revoke a gateway device
       tags:
-      - agent
+      - agent-gateway
     get:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10090,31 +9717,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/DeviceResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取 Agent 设备
+      summary: Get a gateway device
       tags:
-      - agent
+      - agent-gateway
     patch:
+      consumes:
+      - application/json
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
         type: string
-      - description: 设备名称
+      - description: Device name
         in: body
         name: body
         required: true
@@ -10125,27 +9742,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/DeviceResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 重命名 Agent 设备
+      summary: Rename a gateway device
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/profiles:
     get:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10155,27 +9760,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/RuntimeProfileListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取设备 Runtime Profile
+      summary: List device runtime profiles
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}:
     get:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10185,15 +9778,7 @@ paths:
         name: profile_id
         required: true
         type: string
-      - description: 资源
-        enum:
-        - models
-        - model-capabilities
-        - permission-profiles
-        - apps
-        - mcp
-        - plugins
-        - auth-status
+      - description: Resource name
         in: path
         name: resource
         required: true
@@ -10203,27 +9788,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ResourceSnapshotResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取 Profile 本地资源快照
+      summary: Get a runtime profile resource
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/profiles/{profile_id}/resources/{resource}/refresh:
     post:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10233,20 +9806,12 @@ paths:
         name: profile_id
         required: true
         type: string
-      - description: 资源
-        enum:
-        - models
-        - model-capabilities
-        - permission-profiles
-        - apps
-        - mcp
-        - plugins
-        - auth-status
+      - description: Resource name
         in: path
         name: resource
         required: true
         type: string
-      - description: UUID
+      - description: Idempotency key
         in: header
         name: Idempotency-Key
         required: true
@@ -10256,31 +9821,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 刷新 Profile 本地资源快照
+      summary: Refresh a runtime profile resource
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/workspaces:
     get:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10290,27 +9839,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/WorkspaceListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取设备工作区
+      summary: List device workspaces
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}:
     get:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10320,11 +9857,7 @@ paths:
         name: workspace_id
         required: true
         type: string
-      - description: 资源
-        enum:
-        - sessions
-        - skills
-        - hooks
+      - description: Resource name
         in: path
         name: resource
         required: true
@@ -10334,27 +9867,15 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ResourceSnapshotResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 获取 Workspace 本地资源快照
+      summary: Get a workspace resource
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}/refresh:
     post:
       parameters:
-      - description: 设备公开 ID
+      - description: Device public ID
         in: path
         name: device_id
         required: true
@@ -10364,16 +9885,12 @@ paths:
         name: workspace_id
         required: true
         type: string
-      - description: 资源
-        enum:
-        - sessions
-        - skills
-        - hooks
+      - description: Resource name
         in: path
         name: resource
         required: true
         type: string
-      - description: UUID
+      - description: Idempotency key
         in: header
         name: Idempotency-Key
         required: true
@@ -10383,27 +9900,11 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 刷新 Workspace 本地资源快照
+      summary: Refresh a workspace resource
       tags:
-      - agent
+      - agent-gateway
   /agent/devices/enrollments:
     post:
       responses:
@@ -10411,924 +9912,37 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/EnrollmentResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 创建本地 Agent 设备配对码
+      summary: Create a gateway device enrollment code
       tags:
-      - agent
-  /agent/interactions/{interaction_id}/respond:
-    post:
-      parameters:
-      - description: Interaction ID
-        in: path
-        name: interaction_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: 类型化响应
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/RespondInteractionRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/InteractionResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 响应 Agent 交互请求
-      tags:
-      - agent
-  /agent/threads:
-    get:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ThreadListResponseDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent Thread
-      tags:
-      - agent
-    post:
-      parameters:
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: Thread 参数
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/StartThreadRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/StartThreadResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 创建 Agent Thread
-      tags:
-      - agent
-  /agent/threads/{thread_id}:
-    delete:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 删除 Agent Thread
-      tags:
-      - agent
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ThreadResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent Thread 详情
-      tags:
-      - agent
-    patch:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: 元数据补丁
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/UpdateThreadMetadataRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ThreadResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 更新 Agent Thread 云端元数据
-      tags:
-      - agent
-  /agent/threads/{thread_id}/archive:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 归档 Agent Thread
-      tags:
-      - agent
-  /agent/threads/{thread_id}/compact:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 压缩 Agent Thread 上下文
-      tags:
-      - agent
-  /agent/threads/{thread_id}/events:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: 已消费的 Thread 事件序号
-        in: query
-        name: after_seq
-        type: integer
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/EventListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 重放 Agent Thread 事件
-      tags:
-      - agent
-  /agent/threads/{thread_id}/fork:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ThreadResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: Fork Agent Thread
-      tags:
-      - agent
-  /agent/threads/{thread_id}/interactions:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: 状态
-        enum:
-        - pending
-        - responding
-        - resolved
-        - failed
-        in: query
-        name: status
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/InteractionListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent 交互请求
-      tags:
-      - agent
-  /agent/threads/{thread_id}/items:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ItemListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent Thread 条目快照
-      tags:
-      - agent
-  /agent/threads/{thread_id}/name:
-    patch:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: 新名称
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/RenameThreadRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 重命名 Agent Thread
-      tags:
-      - agent
-  /agent/threads/{thread_id}/notifications:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 订阅 Agent Thread 变更唤醒
-      tags:
-      - agent
-  /agent/threads/{thread_id}/provider-metadata:
-    patch:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: Git 元数据补丁
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/UpdateProviderMetadataRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 更新 Agent Thread Provider Git 元数据
-      tags:
-      - agent
-  /agent/threads/{thread_id}/resume:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 恢复 Agent Thread
-      tags:
-      - agent
-  /agent/threads/{thread_id}/reviews:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: 审查目标
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/StartReviewRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 启动 Agent 代码审查
-      tags:
-      - agent
-  /agent/threads/{thread_id}/snapshot:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/ThreadSnapshotResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent Thread 一致性快照
-      tags:
-      - agent
-  /agent/threads/{thread_id}/turns:
-    get:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/TurnListResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 获取 Agent Turn
-      tags:
-      - agent
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: Turn 参数
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/StartTurnRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/TurnResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 启动 Agent Turn
-      tags:
-      - agent
-  /agent/threads/{thread_id}/unarchive:
-    post:
-      parameters:
-      - description: Thread ID
-        in: path
-        name: thread_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 取消归档 Agent Thread
-      tags:
-      - agent
-  /agent/turns/{turn_id}/interrupt:
-    post:
-      parameters:
-      - description: Turn ID
-        in: path
-        name: turn_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 中断 Agent Turn
-      tags:
-      - agent
-  /agent/turns/{turn_id}/steer:
-    post:
-      parameters:
-      - description: Turn ID
-        in: path
-        name: turn_id
-        required: true
-        type: string
-      - description: UUID
-        in: header
-        name: Idempotency-Key
-        required: true
-        type: string
-      - description: 追加输入
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/SteerTurnRequestDoc'
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/CommandResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 追加 Agent Turn 输入
-      tags:
-      - agent
+      - agent-gateway
   /agent/workspaces/{workspace_id}/artifacts:
     post:
+      consumes:
+      - application/json
       parameters:
       - description: Workspace ID
         in: path
         name: workspace_id
         required: true
         type: string
-      - description: 已上传文件
+      - description: File reference
         in: body
         name: body
         required: true
         schema:
-          $ref: '#/definitions/CreateArtifactRequestDoc'
+          $ref: '#/definitions/createArtifactRequest'
       responses:
         "200":
           description: OK
           schema:
             $ref: '#/definitions/ArtifactResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/AgentgatewayErrorDoc'
       security:
       - BearerAuth: []
-      summary: 创建 Agent workspace artifact
+      summary: Bind an uploaded file to a gateway workspace
       tags:
-      - agent
+      - agent-gateway
   /announcements:
     get:
       consumes:
@@ -12159,6 +10773,51 @@ paths:
       summary: 查询上下文证据详情
       tags:
       - chat
+  /conversation-interactions/{interaction_id}/respond:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Interaction public ID
+        in: path
+        name: interaction_id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Interaction response
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/RespondInteractionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/InteractionResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: Respond to a conversation execution interaction
+      tags:
+      - chat
   /conversation-projects:
     get:
       consumes:
@@ -12336,7 +10995,7 @@ paths:
       summary: 调整会话项目顺序
       tags:
       - chat
-  /conversation-runs/{run_id}/cancel:
+  /conversation-runs/{run_id}/interrupt:
     post:
       description: 仅在用户显式点击暂停时取消对应 run；浏览器刷新或断开连接不会调用此接口
       parameters:
@@ -12585,6 +11244,34 @@ paths:
       summary: 设置会话归档
       tags:
       - chat
+  /conversations/{id}/events:
+    get:
+      parameters:
+      - description: Conversation public ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Last applied sequence
+        in: query
+        name: after
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ExecutionEventListResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: List conversation execution events
+      tags:
+      - chat
   /conversations/{id}/export:
     get:
       consumes:
@@ -12618,6 +11305,38 @@ paths:
       security:
       - BearerAuth: []
       summary: 导出会话 JSON
+      tags:
+      - chat
+  /conversations/{id}/interactions:
+    get:
+      parameters:
+      - description: Conversation public ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Interaction status
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/InteractionListResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: List pending and completed conversation interactions
       tags:
       - chat
   /conversations/{id}/labels:
@@ -12704,46 +11423,6 @@ paths:
       summary: 查询会话消息
       tags:
       - chat
-    post:
-      consumes:
-      - application/json
-      description: 在会话中发送消息，支持文件/图片等多模态附件
-      parameters:
-      - description: 会话 public_id
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 消息参数
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/SendMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/SendMessageResponseDoc'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 发送消息
-      tags:
-      - chat
   /conversations/{id}/messages/preview:
     get:
       consumes:
@@ -12777,47 +11456,6 @@ paths:
       security:
       - BearerAuth: []
       summary: 查询会话预览消息
-      tags:
-      - chat
-  /conversations/{id}/messages/stream:
-    post:
-      consumes:
-      - application/json
-      description: 在会话中发送消息并以 NDJSON 流式返回 assistant 增量文本
-      parameters:
-      - description: 会话 public_id
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 消息参数
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/SendMessageRequest'
-      produces:
-      - application/x-ndjson
-      responses:
-        "200":
-          description: NDJSON stream
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/ConversationErrorDoc'
-      security:
-      - BearerAuth: []
-      summary: 流式发送消息
       tags:
       - chat
   /conversations/{id}/project:
@@ -13167,6 +11805,88 @@ paths:
       security:
       - BearerAuth: []
       summary: 自动重新命名会话
+      tags:
+      - chat
+  /conversations/{id}/turns:
+    post:
+      consumes:
+      - application/json
+      description: 在会话中发送消息，支持文件/图片等多模态附件
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 消息参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/SendMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SendMessageResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 发送消息
+      tags:
+      - chat
+  /conversations/{id}/turns/stream:
+    post:
+      consumes:
+      - application/json
+      description: 在会话中发送消息并以 NDJSON 流式返回 assistant 增量文本
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 消息参数
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/SendMessageRequest'
+      produces:
+      - application/x-ndjson
+      responses:
+        "200":
+          description: NDJSON stream
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 流式发送消息
       tags:
       - chat
   /conversations/default-model-candidate:

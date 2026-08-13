@@ -2,7 +2,6 @@ package agentgateway
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -93,15 +92,15 @@ func toDomainThread(v model.AgentThread) *domainagent.Thread {
 	return &domainagent.Thread{
 		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID,
 		RuntimeProfileID: v.RuntimeProfileID, WorkspaceID: v.WorkspaceID,
+		ConversationID:  v.ConversationID,
 		SourceThreadRef: v.SourceThreadRef, Title: v.Title, Status: v.Status,
-		IsPinned: v.IsPinned, LabelsJSON: v.LabelsJSON, SharePolicy: v.SharePolicy,
 		GitSHA: v.GitSHA, GitBranch: v.GitBranch, GitOriginURL: v.GitOriginURL,
 		LastEventSeq: v.LastEventSeq, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }
 
 func toDomainTurn(v model.AgentTurn) *domainagent.Turn {
-	return &domainagent.Turn{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID, SourceTurnRef: v.SourceTurnRef, Status: v.Status, InputJSON: v.InputJSON, SettingsJSON: v.SettingsJSON, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return &domainagent.Turn{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID, RunID: v.RunID, SourceTurnRef: v.SourceTurnRef, Status: v.Status, InputJSON: v.InputJSON, SettingsJSON: v.SettingsJSON, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 func toDomainItem(v model.AgentItem) *domainagent.Item {
@@ -363,33 +362,6 @@ func (r *Repo) ConsumeConnection(ctx context.Context, tokenHash string, now time
 	}
 	device.LastSeenAt = &now
 	return toDomainDevice(device), nil
-}
-
-func (r *Repo) EnqueueCommand(ctx context.Context, userID uint, devicePublicID string, input *domainagent.Command) (*domainagent.Command, error) {
-	var result model.AgentCommand
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND public_id = ?", userID, devicePublicID).First(&device).Error; err != nil {
-			return err
-		}
-		if device.Status != domainagent.DeviceStatusActive {
-			return repository.ErrConflict
-		}
-		result = model.AgentCommand{
-			PublicID: input.PublicID, UserID: userID, DeviceID: device.ID,
-			ServerSeq: device.NextServerSeq, Kind: input.Kind,
-			PayloadJSON: input.PayloadJSON, State: "queued", TerminalJSON: "{}",
-		}
-		if err := tx.Create(&result).Error; err != nil {
-			return err
-		}
-		return tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error
-	})
-	if err != nil {
-		return nil, errFor(err)
-	}
-	return toDomainCommand(result), nil
 }
 
 func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after uint64, limit int) ([]domainagent.Command, error) {
@@ -785,14 +757,14 @@ func validRepoRef(value string) bool {
 	return true
 }
 
-func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID uint, bridgeSeq uint64, payloadHash string, event *domainagent.Event, now time.Time) (uint64, error) {
-	var acknowledged uint64
+func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID uint, bridgeSeq uint64, payloadHash string, event *domainagent.Event, now time.Time) (*domainagent.AppliedEventFrame, error) {
+	var applied domainagent.AppliedEventFrame
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, deviceID).Error; err != nil {
 			return err
 		}
-		acknowledged = device.LastAckedBridgeSeq
+		applied.Acknowledged = device.LastAckedBridgeSeq
 		if bridgeSeq <= device.LastAckedBridgeSeq {
 			var existing model.AgentBridgeFrame
 			if err := tx.Where("device_id = ? AND bridge_seq = ?", deviceID, bridgeSeq).First(&existing).Error; err != nil {
@@ -801,7 +773,7 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 			if existing.Kind != "event" || existing.PayloadHash != payloadHash {
 				return repository.ErrConflict
 			}
-			return nil
+			return loadAppliedEventFrame(tx, existing.ID, device.LastAckedBridgeSeq, &applied)
 		}
 		if bridgeSeq != device.LastAckedBridgeSeq+1 {
 			return repository.ErrConflict
@@ -828,10 +800,88 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 		if err := tx.Model(&device).Update("last_acked_bridge_seq", bridgeSeq).Error; err != nil {
 			return err
 		}
-		acknowledged = bridgeSeq
-		return nil
+		return loadAppliedEventFrame(tx, frame.ID, bridgeSeq, &applied)
 	})
-	return acknowledged, errFor(err)
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return &applied, nil
+}
+
+func loadAppliedEventFrame(tx *gorm.DB, bridgeFrameID uint, acknowledged uint64, result *domainagent.AppliedEventFrame) error {
+	var event model.AgentEvent
+	if err := tx.Where("bridge_frame_id = ?", bridgeFrameID).First(&event).Error; err != nil {
+		return err
+	}
+	result.Acknowledged = acknowledged
+	result.Event = *toDomainEvent(event)
+	if event.ThreadID == nil {
+		return nil
+	}
+	var thread model.AgentThread
+	if err := tx.Select("conversation_id").First(&thread, *event.ThreadID).Error; err != nil {
+		return err
+	}
+	result.ConversationID = thread.ConversationID
+	if event.TurnID == nil {
+		return nil
+	}
+	var turn model.AgentTurn
+	if err := tx.Select("run_id").First(&turn, *event.TurnID).Error; err != nil {
+		return err
+	}
+	result.RunID = turn.RunID
+	return nil
+}
+
+func (r *Repo) ListPendingConversationEvents(ctx context.Context, deviceID uint, limit int) ([]domainagent.AppliedEventFrame, error) {
+	if deviceID == 0 || limit < 1 || limit > 1000 {
+		return nil, repository.ErrInvalidInput
+	}
+	type row struct {
+		model.AgentEvent
+		ConversationID uint
+		RunID          string
+	}
+	rows := make([]row, 0)
+	err := r.db.WithContext(ctx).Table("agent_events AS events").
+		Select("events.*, threads.conversation_id, turns.run_id").
+		Joins("JOIN agent_threads AS threads ON threads.id = events.thread_id").
+		Joins("JOIN agent_turns AS turns ON turns.id = events.turn_id").
+		Where("events.device_id = ? AND events.conversation_projected_at IS NULL AND threads.conversation_id > 0 AND turns.run_id <> ''", deviceID).
+		Order("events.id ASC").Limit(limit).Scan(&rows).Error
+	if err != nil {
+		return nil, errFor(err)
+	}
+	result := make([]domainagent.AppliedEventFrame, 0, len(rows))
+	for _, item := range rows {
+		result = append(result, domainagent.AppliedEventFrame{
+			Event: *toDomainEvent(item.AgentEvent), ConversationID: item.ConversationID, RunID: item.RunID,
+		})
+	}
+	return result, nil
+}
+
+func (r *Repo) MarkConversationEventProjected(ctx context.Context, eventID uint, projectedAt time.Time) error {
+	if eventID == 0 || projectedAt.IsZero() {
+		return repository.ErrInvalidInput
+	}
+	result := r.db.WithContext(ctx).Model(&model.AgentEvent{}).
+		Where("id = ? AND conversation_projected_at IS NULL", eventID).
+		Update("conversation_projected_at", projectedAt)
+	if result.Error != nil {
+		return errFor(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		var count int64
+		if err := r.db.WithContext(ctx).Model(&model.AgentEvent{}).Where("id = ? AND conversation_projected_at IS NOT NULL", eventID).Count(&count).Error; err != nil {
+			return errFor(err)
+		}
+		if count == 0 {
+			return repository.ErrNotFound
+		}
+	}
+	return nil
 }
 
 func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
@@ -1078,6 +1128,25 @@ func (r *Repo) ListWorkspaces(ctx context.Context, userID uint, devicePublicID s
 	return result, errFor(err)
 }
 
+func (r *Repo) ResolveExecutionTarget(ctx context.Context, userID uint, devicePublicID, profilePublicID, workspacePublicID string, now time.Time) (string, error) {
+	var target struct{ Provider string }
+	result := r.db.WithContext(ctx).Table("agent_workspaces AS workspaces").
+		Select("profiles.provider AS provider").
+		Joins("JOIN agent_devices AS devices ON devices.id = workspaces.device_id").
+		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = workspaces.runtime_profile_id").
+		Where("workspaces.user_id = ? AND devices.public_id = ? AND devices.status = ?", userID, devicePublicID, domainagent.DeviceStatusActive).
+		Where("profiles.public_id = ? AND profiles.status = ? AND profiles.lease_expires_at > ?", profilePublicID, domainagent.RuntimeStatusReady, now).
+		Where("workspaces.public_id = ? AND workspaces.status = ?", workspacePublicID, "available").
+		Limit(1).Scan(&target)
+	if result.Error != nil {
+		return "", errFor(result.Error)
+	}
+	if result.RowsAffected != 1 || strings.TrimSpace(target.Provider) == "" {
+		return "", repository.ErrNotFound
+	}
+	return target.Provider, nil
+}
+
 func (r *Repo) CreateArtifact(ctx context.Context, userID uint, workspacePublicID, fileID string, input *domainagent.Artifact) (*domainagent.Artifact, error) {
 	var artifact model.AgentArtifact
 	var workspaceID uint
@@ -1294,12 +1363,11 @@ func (r *Repo) GetResourceSnapshot(ctx context.Context, userID uint, devicePubli
 	return result, nil
 }
 
-func (r *Repo) QueueThreadCommand(
+func (r *Repo) QueueTurnInterrupt(
 	ctx context.Context,
 	idempotencyKey, requestHash string,
 	userID uint,
-	threadPublicID, turnPublicID string,
-	parameters json.RawMessage,
+	turnPublicID string,
 	command *domainagent.Command,
 	now time.Time,
 ) (*domainagent.Command, error) {
@@ -1318,59 +1386,16 @@ func (r *Repo) QueueThreadCommand(
 			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
 		}
 
+		var turn model.AgentTurn
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, turnPublicID).First(&turn).Error; err != nil {
+			return err
+		}
 		var thread model.AgentThread
-		var turn *model.AgentTurn
-		if threadPublicID != "" {
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, threadPublicID).First(&thread).Error; err != nil {
-				return err
-			}
-		} else {
-			var existingTurn model.AgentTurn
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, turnPublicID).First(&existingTurn).Error; err != nil {
-				return err
-			}
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&thread, existingTurn.ThreadID).Error; err != nil {
-				return err
-			}
-			turn = &existingTurn
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&thread, turn.ThreadID).Error; err != nil {
+			return err
 		}
-		if thread.SourceThreadRef == nil {
+		if thread.SourceThreadRef == nil || turn.SourceTurnRef == nil || thread.Status != "active" || turn.Status != "running" {
 			return repository.ErrConflict
-		}
-		var typed map[string]any
-		if json.Unmarshal(parameters, &typed) != nil {
-			return repository.ErrInvalidInput
-		}
-		if turn != nil && (thread.Status != "active" || turn.SourceTurnRef == nil || turn.Status != "running") {
-			return repository.ErrConflict
-		}
-		if turn == nil {
-			switch command.Kind {
-			case "review.start", "thread.compact":
-				if thread.Status != "active" {
-					return repository.ErrConflict
-				}
-				var activeTurns int64
-				if err := tx.Model(&model.AgentTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"awaiting_thread", "queued", "running"}).Count(&activeTurns).Error; err != nil {
-					return err
-				}
-				if activeTurns > 0 {
-					return repository.ErrConflict
-				}
-			case "thread.rename", "thread.metadata.update":
-				if thread.Status == "failed" || thread.Status == "deleted" {
-					return repository.ErrConflict
-				}
-			case "thread.lifecycle":
-				action, _ := typed["action"].(string)
-				validState := (action == "archive" && thread.Status == "active") ||
-					(action == "unarchive" && thread.Status == "archived") ||
-					(action == "resume" && thread.Status == "active") ||
-					(action == "delete" && (thread.Status == "active" || thread.Status == "archived"))
-				if !validState {
-					return repository.ErrConflict
-				}
-			}
 		}
 		var profile model.AgentRuntimeProfile
 		if err := tx.Where("id = ? AND status = ? AND lease_expires_at > ?", thread.RuntimeProfileID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
@@ -1380,41 +1405,14 @@ func (r *Repo) QueueThreadCommand(
 		if err := tx.Where("id = ? AND status = ?", thread.WorkspaceID, "available").First(&workspace).Error; err != nil {
 			return err
 		}
-		if command.Kind == "turn.steer" {
-			var turnInput struct {
-				Input json.RawMessage `json:"input"`
-			}
-			if json.Unmarshal(parameters, &turnInput) != nil {
-				return repository.ErrInvalidInput
-			}
-			if err := validateCommandArtifacts(tx, userID, workspace.ID, string(turnInput.Input)); err != nil {
-				return err
-			}
-		}
 		var device model.AgentDevice
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", thread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		payload := map[string]any{
-			"kind": command.Kind, "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"kind": "turn.interrupt", "deviceId": device.PublicID, "profileId": profile.PublicID,
 			"workspaceId": workspace.PublicID, "threadId": thread.PublicID, "sourceThreadRef": *thread.SourceThreadRef,
-		}
-		for key, value := range typed {
-			payload[key] = value
-		}
-		var turnID *uint
-		if turn != nil {
-			turnID = &turn.ID
-			payload["turnId"], payload["sourceTurnRef"] = turn.PublicID, *turn.SourceTurnRef
-		} else if command.Kind == "review.start" {
-			reviewTurn := model.AgentTurn{
-				PublicID: newRepoPublicID("agturn"), UserID: userID, ThreadID: thread.ID,
-				Status: "queued", InputJSON: "[]", SettingsJSON: "{}",
-			}
-			if err := tx.Create(&reviewTurn).Error; err != nil {
-				return err
-			}
-			turnID = &reviewTurn.ID
+			"turnId": turn.PublicID, "sourceTurnRef": *turn.SourceTurnRef,
 		}
 		encoded, err := json.Marshal(payload)
 		if err != nil {
@@ -1422,8 +1420,8 @@ func (r *Repo) QueueThreadCommand(
 		}
 		created = model.AgentCommand{
 			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
-			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID, TurnID: turnID,
-			ServerSeq: device.NextServerSeq, Kind: command.Kind, PayloadJSON: string(encoded), State: "queued", TerminalJSON: "{}",
+			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID, TurnID: &turn.ID,
+			ServerSeq: device.NextServerSeq, Kind: "turn.interrupt", PayloadJSON: string(encoded), State: "queued", TerminalJSON: "{}",
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return err
@@ -1437,94 +1435,6 @@ func (r *Repo) QueueThreadCommand(
 		return nil, errFor(err)
 	}
 	return toDomainCommand(created), nil
-}
-
-func (r *Repo) ForkThread(
-	ctx context.Context,
-	idempotencyKey, requestHash string,
-	userID uint,
-	parentThreadPublicID string,
-	input *domainagent.Thread,
-	command *domainagent.Command,
-	now time.Time,
-) (*domainagent.Thread, error) {
-	var child model.AgentThread
-	var devicePublicID, profilePublicID, workspacePublicID string
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		const operationName = "thread.fork"
-		var operation model.AgentIdempotencyRecord
-		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: operationName, Key: idempotencyKey, RequestHash: requestHash}
-		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, operationName, idempotencyKey).
-			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
-			return err
-		}
-		if operation.RequestHash != requestHash {
-			return repository.ErrConflict
-		}
-		if operation.ResultPublicID != "" {
-			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&child).Error
-		}
-		var parent model.AgentThread
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, parentThreadPublicID).First(&parent).Error; err != nil {
-			return err
-		}
-		if parent.SourceThreadRef == nil || parent.Status == "failed" || parent.Status == "deleted" {
-			return repository.ErrConflict
-		}
-		var profile model.AgentRuntimeProfile
-		if err := tx.Where("id = ? AND status = ? AND lease_expires_at > ?", parent.RuntimeProfileID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
-			return err
-		}
-		var workspace model.AgentWorkspace
-		if err := tx.Where("id = ? AND status = ?", parent.WorkspaceID, "available").First(&workspace).Error; err != nil {
-			return err
-		}
-		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", parent.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
-			return err
-		}
-		child = model.AgentThread{
-			PublicID: input.PublicID, UserID: userID, DeviceID: device.ID, RuntimeProfileID: profile.ID,
-			WorkspaceID: workspace.ID, Title: parent.Title, Status: "queued",
-		}
-		if err := tx.Create(&child).Error; err != nil {
-			return err
-		}
-		payload, err := json.Marshal(map[string]any{
-			"kind": "thread.lifecycle", "action": "fork", "deviceId": device.PublicID,
-			"profileId": profile.PublicID, "workspaceId": workspace.PublicID,
-			"threadId": parent.PublicID, "sourceThreadRef": *parent.SourceThreadRef,
-		})
-		if err != nil {
-			return err
-		}
-		created := model.AgentCommand{
-			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
-			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &child.ID,
-			ServerSeq: device.NextServerSeq, Kind: "thread.lifecycle", PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
-		}
-		if err := tx.Create(&created).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
-			return err
-		}
-		devicePublicID, profilePublicID, workspacePublicID = device.PublicID, profile.PublicID, workspace.PublicID
-		return tx.Model(&operation).Update("result_public_id", child.PublicID).Error
-	})
-	if err != nil {
-		return nil, errFor(err)
-	}
-	if devicePublicID == "" {
-		item, err := r.GetThread(ctx, userID, child.PublicID)
-		if err != nil {
-			return nil, err
-		}
-		return item, nil
-	}
-	result := toDomainThread(child)
-	result.DevicePublicID, result.ProfilePublicID, result.WorkspacePublicID = devicePublicID, profilePublicID, workspacePublicID
-	return result, nil
 }
 
 func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash string, input *domainagent.Thread, initialTurn *domainagent.Turn, command *domainagent.Command, now time.Time) (*domainagent.Thread, *domainagent.Turn, error) {
@@ -1577,12 +1487,12 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 				return err
 			}
 		}
-		thread = model.AgentThread{PublicID: input.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, Title: input.Title, Status: input.Status}
+		thread = model.AgentThread{PublicID: input.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: input.ConversationID, Title: input.Title, Status: input.Status}
 		if err := tx.Create(&thread).Error; err != nil {
 			return err
 		}
 		if initialTurn != nil {
-			createdTurn := model.AgentTurn{PublicID: initialTurn.PublicID, UserID: input.UserID, ThreadID: thread.ID, Status: initialTurn.Status, InputJSON: initialTurn.InputJSON, SettingsJSON: initialTurn.SettingsJSON}
+			createdTurn := model.AgentTurn{PublicID: initialTurn.PublicID, UserID: input.UserID, ThreadID: thread.ID, RunID: initialTurn.RunID, Status: initialTurn.Status, InputJSON: initialTurn.InputJSON, SettingsJSON: initialTurn.SettingsJSON}
 			if err := tx.Create(&createdTurn).Error; err != nil {
 				return err
 			}
@@ -1670,28 +1580,7 @@ func validArtifactRef(value string) bool {
 	return true
 }
 
-func (r *Repo) ListThreads(ctx context.Context, userID uint, limit int) ([]domainagent.Thread, error) {
-	type row struct {
-		model.AgentThread
-		DevicePublicID, ProfilePublicID, WorkspacePublicID string
-	}
-	var rows []row
-	err := r.db.WithContext(ctx).Table("agent_threads AS threads").
-		Select("threads.*, devices.public_id AS device_public_id, profiles.public_id AS profile_public_id, workspaces.public_id AS workspace_public_id").
-		Joins("JOIN agent_devices AS devices ON devices.id = threads.device_id").
-		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = threads.runtime_profile_id").
-		Joins("JOIN agent_workspaces AS workspaces ON workspaces.id = threads.workspace_id").
-		Where("threads.user_id = ?", userID).Order("threads.updated_at DESC").Limit(limit).Scan(&rows).Error
-	result := make([]domainagent.Thread, 0, len(rows))
-	for _, row := range rows {
-		item := toDomainThread(row.AgentThread)
-		item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID = row.DevicePublicID, row.ProfilePublicID, row.WorkspacePublicID
-		result = append(result, *item)
-	}
-	return result, errFor(err)
-}
-
-func (r *Repo) GetThread(ctx context.Context, userID uint, publicID string) (*domainagent.Thread, error) {
+func (r *Repo) GetThreadByConversation(ctx context.Context, userID, conversationID uint) (*domainagent.Thread, error) {
 	type row struct {
 		model.AgentThread
 		DevicePublicID, ProfilePublicID, WorkspacePublicID string
@@ -1702,140 +1591,13 @@ func (r *Repo) GetThread(ctx context.Context, userID uint, publicID string) (*do
 		Joins("JOIN agent_devices AS devices ON devices.id = threads.device_id").
 		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = threads.runtime_profile_id").
 		Joins("JOIN agent_workspaces AS workspaces ON workspaces.id = threads.workspace_id").
-		Where("threads.user_id = ? AND threads.public_id = ?", userID, publicID).First(&value).Error
+		Where("threads.user_id = ? AND threads.conversation_id = ?", userID, conversationID).First(&value).Error
 	if err != nil {
 		return nil, errFor(err)
 	}
 	item := toDomainThread(value.AgentThread)
 	item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID = value.DevicePublicID, value.ProfilePublicID, value.WorkspacePublicID
 	return item, nil
-}
-
-func (r *Repo) GetThreadSnapshot(ctx context.Context, userID uint, publicID string) (*domainagent.ThreadSnapshot, error) {
-	result := &domainagent.ThreadSnapshot{}
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		type threadRow struct {
-			model.AgentThread
-			DevicePublicID, ProfilePublicID, WorkspacePublicID string
-		}
-		var thread threadRow
-		if err := tx.Table("agent_threads AS threads").
-			Select("threads.*, devices.public_id AS device_public_id, profiles.public_id AS profile_public_id, workspaces.public_id AS workspace_public_id").
-			Joins("JOIN agent_devices AS devices ON devices.id = threads.device_id").
-			Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = threads.runtime_profile_id").
-			Joins("JOIN agent_workspaces AS workspaces ON workspaces.id = threads.workspace_id").
-			Where("threads.user_id = ? AND threads.public_id = ?", userID, publicID).First(&thread).Error; err != nil {
-			return err
-		}
-		item := toDomainThread(thread.AgentThread)
-		item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID = thread.DevicePublicID, thread.ProfilePublicID, thread.WorkspacePublicID
-		result.Thread, result.SnapshotSeq = *item, item.LastEventSeq
-
-		var turns []model.AgentTurn
-		if err := tx.Where("user_id = ? AND thread_id = ?", userID, item.ID).Order("id ASC").Find(&turns).Error; err != nil {
-			return err
-		}
-		result.Turns = make([]domainagent.Turn, 0, len(turns))
-		for _, row := range turns {
-			turn := toDomainTurn(row)
-			turn.ThreadPublicID = publicID
-			result.Turns = append(result.Turns, *turn)
-		}
-
-		type itemRow struct {
-			model.AgentItem
-			TurnPublicID string `gorm:"column:turn_public_id"`
-		}
-		var items []itemRow
-		if err := tx.Table("agent_items AS items").
-			Select("items.*, COALESCE(turns.public_id, '') AS turn_public_id").
-			Joins("LEFT JOIN agent_turns AS turns ON turns.id = items.turn_id").
-			Where("items.user_id = ? AND items.thread_id = ? AND items.last_event_seq <= ?", userID, item.ID, result.SnapshotSeq).
-			Order("items.last_event_seq ASC").Find(&items).Error; err != nil {
-			return err
-		}
-		result.Items = make([]domainagent.Item, 0, len(items))
-		for _, row := range items {
-			projected := toDomainItem(row.AgentItem)
-			projected.ThreadPublicID, projected.TurnPublicID = publicID, row.TurnPublicID
-			result.Items = append(result.Items, *projected)
-		}
-
-		type interactionRow struct {
-			model.AgentInteraction
-			TurnPublicID string `gorm:"column:turn_public_id"`
-		}
-		var interactions []interactionRow
-		if err := tx.Table("agent_interactions AS interactions").
-			Select("interactions.*, COALESCE(turns.public_id, '') AS turn_public_id").
-			Joins("LEFT JOIN agent_turns AS turns ON turns.id = interactions.turn_id").
-			Where("interactions.user_id = ? AND interactions.thread_id = ?", userID, item.ID).
-			Order("interactions.id ASC").Find(&interactions).Error; err != nil {
-			return err
-		}
-		result.Interactions = make([]domainagent.Interaction, 0, len(interactions))
-		for _, row := range interactions {
-			projected := toDomainInteraction(row.AgentInteraction)
-			projected.ThreadPublicID, projected.TurnPublicID = publicID, row.TurnPublicID
-			result.Interactions = append(result.Interactions, *projected)
-		}
-		return nil
-	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return nil, errFor(err)
-	}
-	return result, nil
-}
-
-func (r *Repo) UpdateThreadMetadata(
-	ctx context.Context,
-	idempotencyKey, requestHash string,
-	userID uint,
-	threadPublicID string,
-	patch domainagent.ThreadMetadataPatch,
-	now time.Time,
-) (*domainagent.Thread, error) {
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		const operationName = "thread.metadata.update.cloud"
-		var operation model.AgentIdempotencyRecord
-		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: operationName, Key: idempotencyKey, RequestHash: requestHash}
-		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, operationName, idempotencyKey).
-			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
-			return err
-		}
-		if operation.RequestHash != requestHash {
-			return repository.ErrConflict
-		}
-		if operation.ResultPublicID != "" {
-			return nil
-		}
-		var thread model.AgentThread
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND public_id = ?", userID, threadPublicID).First(&thread).Error; err != nil {
-			return err
-		}
-		if thread.Status == "deleted" {
-			return repository.ErrConflict
-		}
-		updates := map[string]any{"updated_at": now}
-		if patch.IsPinned != nil {
-			updates["is_pinned"] = *patch.IsPinned
-		}
-		if patch.LabelsJSON != nil {
-			updates["labels_json"] = *patch.LabelsJSON
-		}
-		if patch.SharePolicy != nil {
-			updates["share_policy"] = *patch.SharePolicy
-		}
-		if err := tx.Model(&thread).Updates(updates).Error; err != nil {
-			return err
-		}
-		return tx.Model(&operation).Update("result_public_id", thread.PublicID).Error
-	})
-	if err != nil {
-		return nil, errFor(err)
-	}
-	return r.GetThread(ctx, userID, threadPublicID)
 }
 
 func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string, input *domainagent.Turn, command *domainagent.Command, now time.Time) (*domainagent.Turn, error) {
@@ -1881,7 +1643,7 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		if err := validateCommandArtifacts(tx, input.UserID, workspace.ID, input.InputJSON); err != nil {
 			return err
 		}
-		turn = model.AgentTurn{PublicID: input.PublicID, UserID: input.UserID, ThreadID: thread.ID, Status: input.Status, InputJSON: input.InputJSON, SettingsJSON: input.SettingsJSON}
+		turn = model.AgentTurn{PublicID: input.PublicID, UserID: input.UserID, ThreadID: thread.ID, RunID: input.RunID, Status: input.Status, InputJSON: input.InputJSON, SettingsJSON: input.SettingsJSON}
 		if err := tx.Create(&turn).Error; err != nil {
 			return err
 		}
@@ -1909,71 +1671,23 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 	return toDomainTurn(turn), nil
 }
 
-func (r *Repo) ListTurns(ctx context.Context, userID uint, threadPublicID string, limit int) ([]domainagent.Turn, error) {
-	var rows []model.AgentTurn
-	err := r.db.WithContext(ctx).Table("agent_turns AS turns").
-		Joins("JOIN agent_threads AS threads ON threads.id = turns.thread_id").
-		Select("turns.*").Where("turns.user_id = ? AND threads.public_id = ?", userID, threadPublicID).
-		Order("turns.id ASC").Limit(limit).Find(&rows).Error
-	result := make([]domainagent.Turn, 0, len(rows))
-	for _, row := range rows {
-		item := toDomainTurn(row)
-		item.ThreadPublicID = threadPublicID
-		result = append(result, *item)
+func (r *Repo) GetTurnByRunID(ctx context.Context, userID uint, runID string) (*domainagent.Turn, error) {
+	var row model.AgentTurn
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND run_id = ?", userID, runID).First(&row).Error; err != nil {
+		return nil, errFor(err)
 	}
-	return result, errFor(err)
-}
-
-func (r *Repo) ListEvents(ctx context.Context, userID uint, threadPublicID string, after uint64, limit int) ([]domainagent.Event, error) {
-	type row struct {
-		model.AgentEvent
-		TurnPublicID string `gorm:"column:turn_public_id"`
-	}
-	var rows []row
-	err := r.db.WithContext(ctx).Table("agent_events AS events").
-		Select("events.*, COALESCE(turns.public_id, '') AS turn_public_id").
-		Joins("JOIN agent_threads AS threads ON threads.id = events.thread_id").
-		Joins("LEFT JOIN agent_turns AS turns ON turns.id = events.turn_id").
-		Where("events.user_id = ? AND threads.public_id = ? AND events.thread_seq > ?", userID, threadPublicID, after).
-		Order("events.thread_seq ASC").Limit(limit).Find(&rows).Error
-	result := make([]domainagent.Event, 0, len(rows))
-	for _, row := range rows {
-		item := toDomainEvent(row.AgentEvent)
-		item.TurnPublicID = row.TurnPublicID
-		result = append(result, *item)
-	}
-	return result, errFor(err)
-}
-
-func (r *Repo) ListItems(ctx context.Context, userID uint, threadPublicID string, limit int) ([]domainagent.Item, error) {
-	type row struct {
-		model.AgentItem
-		TurnPublicID string `gorm:"column:turn_public_id"`
-	}
-	var rows []row
-	err := r.db.WithContext(ctx).Table("agent_items AS items").
-		Select("items.*, COALESCE(turns.public_id, '') AS turn_public_id").
-		Joins("JOIN agent_threads AS threads ON threads.id = items.thread_id").
-		Joins("LEFT JOIN agent_turns AS turns ON turns.id = items.turn_id").
-		Where("items.user_id = ? AND threads.public_id = ?", userID, threadPublicID).
-		Order("items.last_event_seq ASC").Limit(limit).Find(&rows).Error
-	result := make([]domainagent.Item, 0, len(rows))
-	for _, row := range rows {
-		item := toDomainItem(row.AgentItem)
-		item.ThreadPublicID, item.TurnPublicID = threadPublicID, row.TurnPublicID
-		result = append(result, *item)
-	}
-	return result, errFor(err)
+	return toDomainTurn(row), nil
 }
 
 func (r *Repo) ListInteractions(ctx context.Context, userID uint, threadPublicID, status string, limit int) ([]domainagent.Interaction, error) {
 	type row struct {
 		model.AgentInteraction
 		TurnPublicID string `gorm:"column:turn_public_id"`
+		RunID        string `gorm:"column:run_id"`
 	}
 	var rows []row
 	query := r.db.WithContext(ctx).Table("agent_interactions AS interactions").
-		Select("interactions.*, COALESCE(turns.public_id, '') AS turn_public_id").
+		Select("interactions.*, COALESCE(turns.public_id, '') AS turn_public_id, COALESCE(turns.run_id, '') AS run_id").
 		Joins("JOIN agent_threads AS threads ON threads.id = interactions.thread_id").
 		Joins("LEFT JOIN agent_turns AS turns ON turns.id = interactions.turn_id").
 		Where("interactions.user_id = ? AND threads.public_id = ?", userID, threadPublicID)
@@ -1984,7 +1698,7 @@ func (r *Repo) ListInteractions(ctx context.Context, userID uint, threadPublicID
 	result := make([]domainagent.Interaction, 0, len(rows))
 	for _, row := range rows {
 		item := toDomainInteraction(row.AgentInteraction)
-		item.TurnPublicID = row.TurnPublicID
+		item.TurnPublicID, item.RunID = row.TurnPublicID, row.RunID
 		result = append(result, *item)
 	}
 	return result, errFor(err)
@@ -2082,5 +1796,12 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 	}
 	result := toDomainInteraction(interaction)
 	result.ThreadPublicID, result.TurnPublicID = thread.PublicID, turnPublicID
+	if interaction.TurnID != nil {
+		var turn model.AgentTurn
+		if err := r.db.WithContext(ctx).Select("run_id").First(&turn, *interaction.TurnID).Error; err != nil {
+			return nil, errFor(err)
+		}
+		result.RunID = turn.RunID
+	}
 	return result, nil
 }

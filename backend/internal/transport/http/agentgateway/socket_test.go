@@ -251,9 +251,6 @@ func (*socketRepo) GetCredential(context.Context, string, string) (*domainagent.
 func (*socketRepo) ConsumeChallengeAndCreateConnection(context.Context, uint, uint, *domainagent.Credential, time.Time) (*domainagent.Credential, error) {
 	return nil, repository.ErrNotFound
 }
-func (*socketRepo) EnqueueCommand(context.Context, uint, string, *domainagent.Command) (*domainagent.Command, error) {
-	return nil, repository.ErrNotFound
-}
 func (r *socketRepo) ListCommandsForDelivery(_ context.Context, _ uint, after uint64, _ int) ([]domainagent.Command, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -294,15 +291,19 @@ func (r *socketRepo) ApplyTerminalFrame(_ context.Context, _ uint, bridgeSeq, se
 	r.bridgeAck = bridgeSeq
 	return r.bridgeAck, nil
 }
-func (r *socketRepo) ApplyEventFrame(_ context.Context, _, _ uint, bridgeSeq uint64, _ string, event *domainagent.Event, _ time.Time) (uint64, error) {
+func (r *socketRepo) ApplyEventFrame(_ context.Context, _, _ uint, bridgeSeq uint64, _ string, event *domainagent.Event, _ time.Time) (*domainagent.AppliedEventFrame, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if bridgeSeq != r.bridgeAck+1 || event == nil || event.PayloadJSON == "" {
-		return r.bridgeAck, repository.ErrConflict
+		return nil, repository.ErrConflict
 	}
 	r.bridgeAck = bridgeSeq
-	return r.bridgeAck, nil
+	return &domainagent.AppliedEventFrame{Acknowledged: r.bridgeAck, Event: *event}, nil
 }
+func (*socketRepo) ListPendingConversationEvents(context.Context, uint, int) ([]domainagent.AppliedEventFrame, error) {
+	return nil, nil
+}
+func (*socketRepo) MarkConversationEventProjected(context.Context, uint, time.Time) error { return nil }
 
 func (r *socketRepo) BeginRuntimeProof(_ context.Context, deviceID uint, profilePublicID string, profile *domainagent.RuntimeProfile, challenge *domainagent.RuntimeProofChallenge, _ time.Time) (*domainagent.RuntimeProfile, *domainagent.RuntimeProofChallenge, error) {
 	r.mu.Lock()
@@ -352,38 +353,23 @@ func (*socketRepo) QueueResourceRefresh(context.Context, string, string, uint, s
 func (*socketRepo) GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error) {
 	return nil, repository.ErrNotFound
 }
-func (*socketRepo) QueueThreadCommand(context.Context, string, string, uint, string, string, json.RawMessage, *domainagent.Command, time.Time) (*domainagent.Command, error) {
-	return nil, repository.ErrNotFound
-}
-func (*socketRepo) ForkThread(context.Context, string, string, uint, string, *domainagent.Thread, *domainagent.Command, time.Time) (*domainagent.Thread, error) {
+func (*socketRepo) QueueTurnInterrupt(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) StartThread(context.Context, string, string, *domainagent.Thread, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Turn, error) {
 	return nil, nil, repository.ErrNotFound
 }
-func (*socketRepo) ListThreads(context.Context, uint, int) ([]domainagent.Thread, error) {
-	return nil, nil
-}
-func (*socketRepo) GetThread(context.Context, uint, string) (*domainagent.Thread, error) {
-	return nil, repository.ErrNotFound
-}
-func (*socketRepo) GetThreadSnapshot(context.Context, uint, string) (*domainagent.ThreadSnapshot, error) {
-	return nil, repository.ErrNotFound
-}
-func (*socketRepo) UpdateThreadMetadata(context.Context, string, string, uint, string, domainagent.ThreadMetadataPatch, time.Time) (*domainagent.Thread, error) {
+func (*socketRepo) GetThreadByConversation(context.Context, uint, uint) (*domainagent.Thread, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error) {
 	return nil, repository.ErrNotFound
 }
-func (*socketRepo) ListTurns(context.Context, uint, string, int) ([]domainagent.Turn, error) {
-	return nil, nil
+func (*socketRepo) GetTurnByRunID(context.Context, uint, string) (*domainagent.Turn, error) {
+	return nil, repository.ErrNotFound
 }
-func (*socketRepo) ListItems(context.Context, uint, string, int) ([]domainagent.Item, error) {
-	return nil, nil
-}
-func (*socketRepo) ListEvents(context.Context, uint, string, uint64, int) ([]domainagent.Event, error) {
-	return nil, nil
+func (*socketRepo) ResolveExecutionTarget(context.Context, uint, string, string, string, time.Time) (string, error) {
+	return "", repository.ErrNotFound
 }
 func (*socketRepo) ListInteractions(context.Context, uint, string, string, int) ([]domainagent.Interaction, error) {
 	return nil, nil

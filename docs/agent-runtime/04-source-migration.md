@@ -1,5 +1,7 @@
 # 源码迁移边界
 
+> 历史实施记录。当前代码已经采用统一 Conversation 执行链路；现行合同见 [01-architecture.md](./01-architecture.md) 与 [03-protocol-and-data-model.md](./03-protocol-and-data-model.md)。下列早期批次和路径不再作为实现要求。
+
 ## 1. Source baseline findings
 
 | Source | Current behavior | Design consequence |

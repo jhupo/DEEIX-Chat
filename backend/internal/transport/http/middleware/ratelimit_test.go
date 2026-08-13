@@ -45,10 +45,10 @@ func TestRateLimitUsesSeparateAuthenticatedBuckets(t *testing.T) {
 	group.Use(testUserContext("user"))
 	group.Use(RateLimit(limiter, config.NewRuntime(config.Config{RateLimitEnabled: true, RateLimitRPM: 60})))
 	group.GET("/models", okHandler)
-	group.POST("/conversations/:id/messages/stream", okHandler)
+	group.POST("/conversations/:id/turns/stream", okHandler)
 
 	performRequest(router, http.MethodGet, "/api/v1/models")
-	performRequest(router, http.MethodPost, "/api/v1/conversations/1/messages/stream")
+	performRequest(router, http.MethodPost, "/api/v1/conversations/1/turns/stream")
 
 	if len(limiter.sliding) != 2 {
 		t.Fatalf("expected 2 sliding-window calls, got %d", len(limiter.sliding))

@@ -82,6 +82,9 @@ type MessageRepository interface {
 	CreateMessage(ctx context.Context, item *domainconversation.Message) error
 	CreateAssistantBranchMessage(ctx context.Context, assistantMessage *domainconversation.Message) error
 	CreateMessagePairWithUserAttachments(ctx context.Context, userMessage *domainconversation.Message, assistantMessage *domainconversation.Message, userAttachments []domainconversation.Attachment) error
+	CreateGatewayTurn(ctx context.Context, userMessage *domainconversation.Message, assistantMessage *domainconversation.Message, userAttachments []domainconversation.Attachment, run *domainconversation.Run) error
+	GetMessagePairByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Message, *domainconversation.Message, error)
+	FailGatewayTurn(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string, endedAt time.Time) error
 	CompleteAssistantMessageWithAttachments(ctx context.Context, userMessageID uint, userUsage MessageUsageUpdate, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	CompleteAssistantMessageWithGeneratedAttachments(ctx context.Context, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	GetMessageByPublicID(ctx context.Context, conversationID uint, userID uint, publicID string) (*domainconversation.Message, error)
@@ -126,8 +129,11 @@ type ConversationTraceRepository interface {
 	CreateConversationToolCalls(ctx context.Context, items []domainconversation.ToolCall) error
 	ListConversationRuns(ctx context.Context, userID uint, conversationID uint, offset int, limit int) ([]domainconversation.Run, int64, error)
 	ListConversationRunsByRunIDs(ctx context.Context, userID uint, conversationID uint, runIDs []string) ([]domainconversation.Run, error)
+	GetConversationExecutionByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Conversation, error)
 	ListConversationEventLogs(ctx context.Context, filter ConversationEventLogListFilter, offset int, limit int) ([]domainconversation.EventLog, int64, error)
 	GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error)
+	ProjectExecutionEvent(ctx context.Context, item *domainconversation.ExecutionEvent) (bool, error)
+	ListExecutionEvents(ctx context.Context, userID uint, conversationID uint, after uint64, limit int) ([]domainconversation.ExecutionEvent, error)
 }
 
 // ConversationEventLogListFilter 描述管理员对话事件列表筛选和排序条件。

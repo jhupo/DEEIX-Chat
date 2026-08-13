@@ -3,8 +3,14 @@ package conversation
 import "errors"
 
 var (
-	ErrInvalidKeyBinding     = errors.New("invalid key binding")
-	ErrKeyBindingUnavailable = errors.New("key binding unavailable")
+	ErrInvalidKeyBinding        = errors.New("invalid key binding")
+	ErrKeyBindingUnavailable    = errors.New("key binding unavailable")
+	ErrInvalidExecutionTarget   = errors.New("invalid execution target")
+	ErrExecutionUnavailable     = errors.New("execution adapter unavailable")
+	ErrExecutionBindingNotFound = errors.New("execution binding not found")
+	ErrInvalidInteraction       = errors.New("invalid execution interaction")
+	ErrInteractionNotFound      = errors.New("execution interaction not found")
+	ErrExecutionConflict        = errors.New("execution state conflict")
 	// ErrConversationNotFound 会话不存在或无权限。
 	ErrConversationNotFound = errors.New("conversation not found")
 	// ErrConversationEventNotFound 对话事件日志不存在。

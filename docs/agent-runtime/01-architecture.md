@@ -1,193 +1,69 @@
-# 目标架构
+# 统一会话架构
 
-> 实现状态：普通 `/chat` 已通过设置页选定的默认 Sub2 key binding 静默执行；对话页不展示 key selector。模型与展示分组只读取 DEEIX 管理员发布目录，不依赖 Sub2 `/v1/models`。`/agent`/Work 不使用 Chat binding。本文其余 Bridge、Work 与 Codex app-server 内容是目标架构。
+## 1. 聚合边界
 
-## 1. 两个执行域
-
-现有 `conversation.Service` 在 `backend/internal/app/app.go:261+` 装配 channel、LLM、MCP、RAG、embedding、文件处理、媒体与 billing。普通聊天以 `Conversation -> Message -> Run` 为聚合，`repository_project.go:137+` 的删除事务会删除 Conversation 或解除其 ConversationProject 归属。Agent 不进入这条关系。clean-slate cutover 保留该聚合和 Web surface，但以 08 的 Sub2 key binding/gateway execution 替换 local billing authorization、reservation 与 settlement。
-
-Agent 使用独立 `AgentThread -> AgentTurn -> AgentItem` 投影，另有 `AgentInteraction`、`AgentEvent`、`AgentCommand`。两个域共享认证、用户、审计、数据库连接、object storage 和页面外壳；它们不共享发送 endpoint、消息 DTO、执行状态机、MCP loop 或 reducer。
+`Conversation` 负责用户可见的标题、项目、消息、Run、分享和执行绑定。Gateway 的 thread/turn/item 是 Adapter 私有状态，不能成为另一套 Web 产品模型。
 
 ```mermaid
 flowchart LR
-  Browser["Browser"]
-  Chat["/chat + Conversation API"]
-  ChatRuntime["LLM / RAG / MCP / Sub2 gateway"]
-  AgentAPI["/agent + Agent API"]
-  Broker["Agent service / command dispatcher"]
-  Hub["single-instance Bridge Hub"]
-  Projector["Bridge frame projector"]
-  DB[("PostgreSQL + pgvector\nsole server Gorm DB")]
-  Notifier["required Redis\ncache/wake notifier"]
-  Bridge["Local Bridge + durable WAL store"]
-  Codex["Codex app-server stdio"]
-  Files["local workspace"]
-
-  Browser --> Chat --> ChatRuntime --> DB
-  Browser --> AgentAPI --> Broker --> DB
-  Broker --> Hub
-  Bridge <-->|outbound WSS| Hub
-  Bridge --> Codex --> Files
-  Bridge --> Projector --> DB
-  DB --> Notifier --> Browser
+  Web["Web conversation"] --> API["Conversation API"]
+  API --> Turn["Turn Service"]
+  Turn --> Router["Execution Router"]
+  Router --> Cloud["Cloud Responses Adapter"]
+  Router --> Gateway["Gateway Adapter"]
+  Cloud --> Sub2["Sub2API"]
+  Gateway --> Queue["Durable command queue"]
+  Queue --> Bridge["Local Bridge"]
+  Bridge --> Codex["Codex app-server"]
+  Cloud --> Events["Conversation events"]
+  Codex --> Bridge --> Projector["Gateway projector"] --> Events
+  Events --> Web
 ```
 
-## 2. 组件责任
+执行绑定在创建 Conversation 时显式提交：
 
-### 2.1 Existing Chat Runtime
+- `cloud`：不允许携带设备、Profile 或 Workspace。
+- `gateway`：三个目标 ID 都必填，并在当前用户下校验设备有效、Profile 已证明、Workspace 可用。
 
-- 保留 `/chat`、`/api/v1/conversations/*`、Conversation/Message/Run 表和现有 LLM/RAG/server-MCP/DB Skill/media/share/export 行为。billing UI/BFF routes 仍保留，但本地商业授权、预留、结算和 ledger 按 08 删除；Run 固定 Chat-only Sub2 key binding 后由 Sub2 gateway 判定执行资格。
-- `generation_stream.go` 的 replay 是 user/run-scoped。Agent 借用其 retained replay、subscriber buffer 和 overflow 处理模式，独立实现 thread-scoped query、cursor 与 notifier key。
-- 聊天故障与已运行的本地 Agent turn 相互隔离；Bridge 离线期间聊天发送保持可用。
+绑定创建后不可修改。需要换设备或工作目录时创建新 Conversation，保证 provider thread、cwd、审批和附件授权只有一种解释。
 
-### 2.2 Agent HTTP API 和 Agent service
+## 2. 应用服务
 
-- 验证 user 对 device、runtime profile、workspace、thread、turn、interaction 和 artifact ref 的关联；所有 mutation 接收 `Idempotency-Key`。
-- 每个 HTTP mutation 先完成 authentication、DTO 语法/大小/枚举校验并计算 request hash，再在同一事务 claim/read `agent_idempotency_records`。同 key/op/hash 直接重放首个 committed response；新 record 才继续 aggregate state 校验、变更、必要 command 与 response 保存。labels 与 share policy 使用同一流程。
-- 创建 `agent_commands` 行并原子分配 `server_seq`，写 command audit，再让 Hub 唤醒连接。
-- 处理 thread/turn/item/interaction/resource 查询、thread-scoped replay 和 workspace 附件登记。
-- 不持有 provider credential、canonical cwd 或 raw provider request ID；也不拼装 chat 模型上下文或执行 server-MCP。
+`Turn Service` 先读取 Conversation，再按 `execution_type` 分发：
 
-### 2.3 Command dispatcher 与 Bridge Gateway
-
-- Hub 只维护当前进程的 device socket、connection epoch、heartbeat 与背压。首版一个应用实例，Hub 数据不承担恢复职责。
-- command dispatcher 以 `server_seq > last_acked_server_seq` 选择每个 device 的下一行。Bridge 先把不含附件 grant 的 typed command 写入 WAL；若命令引用附件，则下载到临时文件，校验声明大小与 SHA-256，原子移动到 workspace 后写 `command.receipt-ready`。只有连续 receipt-ready 序号进入 `ackServerSeq`。执行前写 `invocation_started`，terminal result/error 先缓存再上行；崩溃恢复只重放明确安全的方法，其余返回 `outcome_unknown`。
-- Gateway 在接收上行 durable frame 后调用 projector。只有数据库事务提交成功才发送 `ackBridgeSeq`。
-- WSS control frame 处理 hello/welcome/ping/pong/ack；control frame 不占 durable command sequence。
-
-### 2.4 Event projector
-
-- 所有 Bridge 上行 durable frame 都先以 `(device_id, bridge_seq)` staged inbox evidence 记录，包含 command result、command error、profile snapshot、device state 和 provider event；receipt 与 projection 分离。
-- `last_acked_bridge_seq` 始终是最大连续已 applied/projected cursor，而不是最大已持久化 cursor。若 `bridge_seq > last_acked_bridge_seq + 1`，事务只保存 staged frame 并只 ack 该连续 cursor，不投影且不分配 `thread_seq`。下一个连续 frame 到达时，按 `bridge_seq` 应用它并 bounded-drain 后续连续 staged run；每个 frame 在 PostgreSQL row-lock/upsert/unique-constraint serialization 下原子投影、分配 `thread_seq` 并推进 cursor。staged/applied duplicate 均为 no-op；post-commit Redis wake/worker 可继续 bounded drain。
-- 没有 thread 的 frame 只更新 device/profile/resource/command projection；其 `agent_events.thread_id` 和 `thread_seq` 均为 NULL。这样不增加第二个 cloud inbox 表。
-- item delta、completed 和 interaction event 通过 Bridge-issued source ref upsert 投影。item completed 与 turn completed 是终态来源，旧 delta 不回退终态。
-
-Agent command/projection persistence uses PostgreSQL with pgvector as the sole server Gorm database. Row locks, upserts, unique constraints and partial indexes serialize device `server_seq`, thread `thread_seq`, bridge-frame dedupe/projection and HTTP idempotency claim/replay. Transactions never perform socket, provider, object or other network I/O. PostgreSQL integration tests cover crash rollback without duplicated sequence, command or event. Redis is required for cache/wake behavior, but database replay remains authoritative.
-
-The implemented gateway cardinality is `User 1:N Device`. Credentials, runtime profiles, workspaces, WSS cursors and command sequences are device-scoped. Each device has at most one active socket in the Full application process, while different devices owned by the same user remain concurrently connected. A thread's device/profile/workspace binding is immutable after creation. Command commits emit a coalesced user wake; every awakened socket queries only its own device sequence, so the wake cannot change routing or durability.
-
-### 2.5 Local Bridge
-
-- 管理 device credential、WSS reconnect、private Bridge durable WAL store、incoming command result cache、runtime profiles 和 provider subprocess。该嵌入式本地 store 只承担 Bridge crash/reconnect durability，不定义或替代服务端数据库。启动时先 initialize provider、ingest/reconcile provider state/events 与 source mappings，再严格按 `server_seq` drain incoming commands：tombstone 不调用 provider，`terminal_cached` 重发，`received` 且未开始 invocation 执行；`invocation_started` 但无 cached terminal 绝不盲目重试。带 expiry 的 typed command 携带 allowlisted `expiresAt`/deadline；Bridge 在 invocation 前及 recovery 时检查它。delivery 已发生但 expiry 前尚未 invocation 时，Bridge cache/emit normalized `expired`，不调用 provider；invocation 已开始或被 provider 接受时，deadline 不在 cloud 制造终态，仍由 typed recovery 结算。该 indeterminate state 由 typed per-operation recovery registry 处理：证明 postcondition/source binding 后 synthesize/cache normalized result，证明未应用后允许一次执行，或 cache/emit terminal `outcome_unknown` 并要求 inspection/reconciliation；safe read-only operation 可标为 retryable。恢复结果/error 在 durable up-frame 前持久化，JSON-RPC 不被视为 universal exactly-once，也不承诺 generic cancellation of an accepted provider mutation。
-- 维护持久 raw ID mapping：`(profile_ref, source_kind, source_ref) -> raw provider ID`。首次见到 raw ID 时先写 Bridge durable WAL store/registry mapping，再发送含 source ref 的上行 frame；云端从不接收 raw ID。
-- workspace registry 维护 `workspace_id -> canonical root`，解析 symlink/junction，核验 cwd 和 file ref 位于 root 内。
-- 将 cloud `AgentCommand` 变换为 local `ProviderCommand`，调用 ProviderAdapter；将 notification、server request、result 和 error 归一化为 Bridge frames。
-- provider credential、secret、canonical path、raw config 与 raw app-server ID 停留在本机；云端只存脱敏投影、public ID 或 Bridge-issued source ref。resolver 以 source ref 查询本地 mapping 后才填充 local `ProviderCommand` raw ID 字段。
-
-## 3. 数据所有权与工作区
-
-| 数据 | 事实源 | 云端使用 |
+| 组件 | 输入 | 输出 |
 | --- | --- | --- |
-| Conversation/Message/Run | DEEIX database | 普通聊天执行、恢复、分享、导出，以及 Sub2 request/usage/external-ID audit；不保存本地金融计费事实 |
-| provider thread/session | local app-server/session store | AgentThread projection、历史与审计 |
-| local workspace files | device | Cloud 只保存 workspace metadata 与 opaque artifact ref |
-| provider credentials/config secrets | device | auth/configured status，不存 secret |
-| Agent commands/projections | PostgreSQL + pgvector | durable intent、Web query、replay、audit |
-| bridge outgoing frames/results | private Bridge durable WAL store | 上行续传和 command result de-duplication |
+| Cloud execution | Conversation、消息、Chat key、模型选项 | Sub2API Responses 流和统一 Run/Event |
+| Gateway execution | Conversation、文本、附件、provider 设置 | 强类型 Gateway command 和统一 Run/Event |
+| Conversation projector | 规范化执行事件 | Message、Run、每会话递增事件序列 |
 
-Workspace registry 可由本地 picker 或本地 thread cwd discovery 创建。Web 只传 opaque workspace public ID。Bridge canonicalize 后登记 local ref；一个 AgentThread 固定一个 workspace。云端分组字段是 device、workspace、runtime profile、labels 和 metadata，Thread 表没有 `project_id`。
+Conversation application 只依赖窄接口 `GatewayExecutor`。应用装配层把 Agent Gateway 服务适配到该接口，Conversation 包不引用具体实现。
 
-## 4. 连接与启动时序
+## 3. 多网关
 
-```mermaid
-sequenceDiagram
-  participant B as Bridge
-  participant S as Agent Gateway
-  participant D as PostgreSQL + pgvector
-  participant C as Codex app-server
-  participant W as Web
+关系为 `User 1:N Device 1:N RuntimeProfile 1:N Workspace`。每台设备拥有独立 credential、WSS、下行序列和命令队列。通知按用户唤醒，socket 仍只读取自身 device 队列。
 
-  B->>S: WSS upgrade with Sec-WebSocket-Protocol
-  B->>S: hello(ackServerSeq, ackBridgeSeq, manifests)
-  S->>D: lock device; validate credential; load command cursor
-  S-->>B: welcome(epoch, authoritative bridge cursor, heartbeat)
-  S->>D: claim commands server_seq > ackServerSeq
-  S-->>B: command(serverSeq, commandId)
-  B->>B: WAL received/cache or persist invocation_started
-  B->>C: cache miss: ProviderAdapter.execute
-  C-->>B: notifications / server request / result
-  B->>B: WAL outgoing bridgeSeq frame
-  B->>S: event/result(bridgeSeq)
-  S->>D: stage/dedupe; project only contiguous bridgeSeq run
-  S-->>B: ackBridgeSeq
-  S-->>W: committed thread event notification
-```
+一个 Conversation 只绑定一个设备目标；不同 Conversation 可以同时绑定同一用户的不同设备。数据库用 `AgentThread.conversation_id` 唯一约束保证一个 Gateway Conversation 只有一个内部 provider thread。
 
-Bridge sends profile manifest and workspace/resource snapshot after adapter startup. Before draining incoming commands it initializes provider and reconciles provider state/events plus source mappings. A `schema_mismatch` profile remains diagnosable but command dispatcher does not select it for execution. Commands issued while device is offline remain `queued` and Web shows `waiting_for_device`.
+## 4. 事件可靠性
 
-## 5. Turn 与 interaction 时序
+Gateway 上行事件先和 Agent 投影在同一事务落库，并进入待投影 outbox。投影成功后才标记完成：
 
-```mermaid
-sequenceDiagram
-  participant W as Web
-  participant S as Agent service
-  participant B as Bridge
-  participant C as Codex
+1. Bridge 以连续 `bridge_seq` 上报。
+2. Agent repository 幂等写 `AgentEvent` 和 projection outbox。
+3. Conversation projector 用 `source_key=agent:<event_public_id>` 去重。
+4. 锁定 Conversation，分配严格递增 `execution_event_seq`。
+5. delta/reasoning 更新 assistant message；terminal 更新 Message 与 Run。
+6. 成功后确认 outbox，失败可重试。
 
-  W->>S: POST thread with optional input + Idempotency-Key
-  S->>S: persist AgentThread + optional awaiting_thread turn + thread.create
-  S-->>B: thread.create(serverSeq)
-  B->>C: thread/start (settings only)
-  C-->>B: thread started result/event
-  B-->>S: event(bridgeSeq)
-  S->>S: bind source ref; allocate one turn.start for awaiting turn
-  S-->>B: turn.start(serverSeq)
-  B->>C: turn/start (stored input)
-  C-->>B: turn/item notifications
-  B-->>S: event(bridgeSeq)
-  S-->>W: AgentEvent(thread_seq)
-  C->>B: server request approval/input
-  B-->>S: interaction.requested(bridgeSeq)
-  W->>S: POST interaction response
-  S->>S: pending -> responding CAS; persist command
-  S-->>B: interaction.respond(serverSeq)
-  B->>C: JSON-RPC response with local request ID
-  C-->>B: resolved, item.completed, turn.completed
-```
+Cloud 语义事件使用相同 Conversation event 表。逐 token 文本和推理 delta 只走实时流，不逐条写数据库；有业务意义的 RAG、usage、工具状态与 terminal 事件持久化。
 
-The browser never sends a provider method or JSON-RPC ID. It references Agent public IDs. A one-submit initial-input flow visibly advances through queued `thread.create` then queued `turn.start`; source binding transaction/unique guard ensures duplicate result or restart does not produce another initial turn command. On recovery after `thread.create` or its follow-on `turn.start` reached `invocation_started`, Bridge reconciles provider thread/turn state and source mappings before dispatch. A recovered source binding enters the existing cloud conditional transition plus partial unique, so it creates no second initial turn command; ambiguous provider acceptance produces `outcome_unknown`/inspection rather than another provider thread or turn. Bridge maps interaction public ID to local provider request ID and returns cached result when a command is delivered twice.
+## 5. 信任边界
 
-## 6. 文件与工件传输
-
-### 浏览器到 workspace
-
-1. Browser uses the existing `/files` upload path and receives `fileId`.
-2. `POST /agent/workspaces/:workspace_id/artifacts` validates User/workspace/file ownership, active file status, image/audio MIME, byte size and SHA-256, then returns an opaque `artifactId`.
-3. `turn.start` or `turn.steer` stores only `artifactRef`; its transaction verifies every ref belongs to the same User and workspace.
-4. Command delivery derives a five-minute HMAC grant bound to artifact, command, User, device, workspace and expiry. The grant appears only in the WSS envelope and download authorization header.
-5. Bridge persists the grant-free command, downloads to `.partial`, enforces the declared byte ceiling and SHA-256, atomically moves the file into `.deeix/artifacts`, writes `command.receipt-ready`, then ACKs and maps it to Codex `localImage`/`localAudio`.
-
-### workspace 到浏览器或 share
-
-Workspace output download and share snapshots are outside the current gateway batch. Full workspace mirroring is absent; absolute paths and local config secrets never enter Cloud projections.
-
-## 7. 恢复模型
-
-### Browser reconnect
-
-Browser reconnect with a mounted reducer subscribes to the Redis-backed notifier first, then replays `GET /api/v1/agent/threads/:thread_id/events?after_seq=lastAppliedSeq` strictly from the existing `lastAppliedSeq`; it never overwrites that cursor from a thread header. Cold load, cursor gap or compaction recovery also subscribes first, then fetches one atomic aggregate snapshot containing thread, included turns/items/interactions and `snapshotSeq` from one PostgreSQL read snapshot. It replaces reducer state, sets `lastAppliedSeq=snapshotSeq`, then replays events `> snapshotSeq`. Notifier messages are wake-ups only, so every wake queries again.
-
-### Bridge reconnect and server restart
-
-Bridge hello reports contiguous `ackServerSeq` and `ackBridgeSeq`. `ackServerSeq` advances only through durable `command.receipt-ready` records, so a crash after command WAL but before attachment verification causes normal redelivery with a fresh short-lived grant. `welcome` returns the cloud authoritative `last_acked_bridge_seq`; Bridge resends durable outgoing frames strictly above it. PostgreSQL survives API restart and the same command ID/server sequence is reused after reconnect.
-
-### Provider process restart
-
-Bridge restarts app-server, emits profile state, initializes its adapter, then reads provider thread/turn state to reconcile projections and source mappings before strict `server_seq` incoming-command drain. Completed provider turns receive final events; a projected in-progress turn with no active provider turn becomes `interrupted` with a normalized reason. An `invocation_started` command with no cached terminal uses its typed recovery policy and never blindly executes; cached incoming command results remain until the command retention window closes.
-
-### Device revoke
-
-Device revoke atomically marks the device revoked and rotates its credential version. New enrollment, challenge, connection and command operations then fail ownership/status validation; the active socket is closed when replaced or disconnected. Already accepted provider work is not represented as cancelled by Cloud without a matching Bridge terminal event. Sequence values are never reused.
-
-Before workspace deletion or any retained sensitive account mutation, the current Browser session must atomically consume a short-lived single-use local step-up grant bound to that session, purpose and current account/token version; no upstream refresh-family grant is reused across User sessions.
-
-Protected Browser routes validate the short-lived DEEIX access token against the persisted User session, then use the current database User role instead of the token role claim. The User role is refreshed from Sub2 `/auth/me`: Sub2 `admin` maps to DEEIX `superadmin`, and Sub2 `user` maps to DEEIX `user`.
-
-## 8. 安全、部署与观测
-
-- enrollment code、challenge 与 ordinary connection token 由 Go 标准库 HMAC-SHA-256 按发行字段确定性生成后 Base64URL 编码，DB 只保存 SHA-256 token hash。附件 grant 绑定 artifact/command/User/device/workspace/expiry，只在交付时派生且不持久化。
-- Derivation key ring 的旧 key 保留至其全部 issuance expiry 加 idempotency replay window 结束；key material 仅存在 server secret/KMS 配置。
-- WSS is TLS terminated by a proxy that supports Upgrade, forwards `Sec-WebSocket-Protocol`, enforces frame/message limits and permits heartbeat duration. app-server stays stdio-only.
-- Bridge validates all local paths, file refs, capability requests and interaction ownership. Server validates all public refs, idempotency scope and payload size before queueing.
-- Target deployment has one Full Docker Compose profile containing application, PostgreSQL with pgvector, and Redis. Redis is required for cache/wake behavior; PostgreSQL replay remains the source of truth. The Hub only owns live socket references and is not a persistence or notifier fallback. Multi-instance socket ownership is deferred. See [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md).
-- Trace fields: `request_id`, `command_id`, `device_id`, `bridge_seq`, `server_seq`, `thread_id`, `thread_seq`, `turn_id`, `item_id`, `interaction_id`, `profile_id`, `provider_method`.
+- Browser user ID 只来自登录会话，不接受请求体指定。
+- JSON body 限长、拒绝未知字段、只允许一个 JSON value，并执行 DTO validation。
+- Gateway 设置使用 allowlist；未知选项直接报错。
+- Artifact 由 Cloud 校验 ownership 后生成 opaque ref；命令不携带任意本地路径。
+- Bridge 才能解析 canonical cwd、provider raw ID 和本机授权。
+- 任意 JSON 命令入队入口不存在，只有强类型应用服务方法可以创建命令。
+- `execution_type` 没有数据库默认值；创建方必须明确选择 Cloud 或 Gateway。

@@ -34,13 +34,21 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 
 	var req CreateConversationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := bindConversationJSON(c, &req, 64*1024); err != nil {
 		response.InvalidRequestBody(c, err)
 		return
 	}
 
-	item, err := h.service.CreateConversation(c.Request.Context(), userID, req.Title, req.Model, req.ProjectID)
+	item, err := h.service.CreateConversation(c.Request.Context(), appconversation.CreateConversationInput{
+		UserID: userID, Title: req.Title, ModelName: req.Model, ProjectPublicID: req.ProjectID,
+		ExecutionType: req.Execution.Type, DeviceID: req.Execution.DeviceID,
+		ProfileID: req.Execution.ProfileID, WorkspaceID: req.Execution.WorkspaceID,
+	})
 	if err != nil {
+		if errors.Is(err, appconversation.ErrInvalidExecutionTarget) {
+			response.Error(c, http.StatusBadRequest, "invalid execution target")
+			return
+		}
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation project not found")
 			return

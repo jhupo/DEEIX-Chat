@@ -5,6 +5,8 @@ import "time"
 const (
 	ConversationProjectMCPDefaultModeInherit = "inherit"
 	ConversationProjectMCPDefaultModeCustom  = "custom"
+	ExecutionTypeCloud                       = "cloud"
+	ExecutionTypeGateway                     = "gateway"
 )
 
 // Conversation 表示会话元信息。
@@ -21,6 +23,11 @@ type Conversation struct {
 	LabelsManuallyManaged bool
 	Model                 string
 	Provider              string
+	ExecutionType         string
+	ExecutionDeviceID     string
+	ExecutionProfileID    string
+	ExecutionWorkspaceID  string
+	ExecutionEventSeq     uint64
 	SessionKey            string
 	IsStarred             bool
 	StarredAt             *time.Time
@@ -369,6 +376,23 @@ type Run struct {
 	EndedAt             *time.Time
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type ExecutionEvent struct {
+	ConversationID uint
+	UserID         uint
+	RunID          string
+	SourceKey      string
+	Seq            uint64
+	Kind           string
+	PayloadJSON    string
+	TextDelta      string
+	ReasoningDelta string
+	TerminalStatus string
+	ErrorCode      string
+	ErrorMessage   string
+	LatencyMS      int64
+	OccurredAt     time.Time
 }
 
 // MessageTrace 表示消息处理轨迹。

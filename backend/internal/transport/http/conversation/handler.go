@@ -1,7 +1,10 @@
 package conversation
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -14,7 +17,24 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
+
+func bindConversationJSON(c *gin.Context, destination any, limit int64) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return binding.Validator.ValidateStruct(destination)
+}
 
 // Handler 封装会话 HTTP 处理。
 type Handler struct {

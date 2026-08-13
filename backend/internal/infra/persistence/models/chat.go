@@ -13,6 +13,11 @@ type Conversation struct {
 	LabelsManuallyManaged bool       `gorm:"not null;default:false;comment:会话标签是否已由用户手动管理"`
 	Model                 string     `gorm:"size:128;not null;default:'';comment:模型名称"`
 	Provider              string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_provider;comment:模型提供商"`
+	ExecutionType         string     `gorm:"size:16;not null;index:idx_chat_conversations_execution_type"`
+	ExecutionDeviceID     string     `gorm:"size:64;not null;default:''"`
+	ExecutionProfileID    string     `gorm:"size:64;not null;default:''"`
+	ExecutionWorkspaceID  string     `gorm:"size:64;not null;default:''"`
+	ExecutionEventSeq     uint64     `gorm:"not null;default:0"`
 	SessionKey            string     `gorm:"size:128;not null;default:'';uniqueIndex:idx_chat_conversations_session_key;comment:会话上下文键"`
 	IsStarred             bool       `gorm:"not null;default:false;index:idx_chat_conversations_is_starred;comment:是否星标"`
 	StarredAt             *time.Time `gorm:"index:idx_chat_conversations_starred_at;comment:最近星标时间"`
@@ -293,6 +298,20 @@ type ConversationRun struct {
 func (ConversationRun) TableName() string {
 	return "chat_runs"
 }
+
+type ConversationExecutionEvent struct {
+	ControlPlaneModel
+	ConversationID uint      `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:1;index"`
+	UserID         uint      `gorm:"not null;index"`
+	RunID          string    `gorm:"size:64;not null;index"`
+	SourceKey      string    `gorm:"size:96;not null;uniqueIndex:uk_conversation_execution_events_source"`
+	Seq            uint64    `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:2"`
+	Kind           string    `gorm:"size:128;not null;index"`
+	PayloadJSON    string    `gorm:"type:jsonb;not null"`
+	OccurredAt     time.Time `gorm:"not null;index"`
+}
+
+func (ConversationExecutionEvent) TableName() string { return "conversation_execution_events" }
 
 // ChatRunEvent 存储运行轨迹、事件流和工具调用明细。
 type ChatRunEvent struct {

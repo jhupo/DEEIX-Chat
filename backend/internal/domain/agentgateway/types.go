@@ -115,12 +115,10 @@ type Thread struct {
 	DevicePublicID    string
 	ProfilePublicID   string
 	WorkspacePublicID string
+	ConversationID    uint
 	SourceThreadRef   *string
 	Title             string
 	Status            string
-	IsPinned          bool
-	LabelsJSON        string
-	SharePolicy       string
 	GitSHA            *string
 	GitBranch         *string
 	GitOriginURL      *string
@@ -129,26 +127,13 @@ type Thread struct {
 	UpdatedAt         time.Time
 }
 
-type ThreadMetadataPatch struct {
-	IsPinned    *bool
-	LabelsJSON  *string
-	SharePolicy *string
-}
-
-type ThreadSnapshot struct {
-	Thread       Thread
-	Turns        []Turn
-	Items        []Item
-	Interactions []Interaction
-	SnapshotSeq  uint64
-}
-
 type Turn struct {
 	ID             uint
 	PublicID       string
 	UserID         uint
 	ThreadID       uint
 	ThreadPublicID string
+	RunID          string
 	SourceTurnRef  *string
 	Status         string
 	InputJSON      string
@@ -196,6 +181,14 @@ type Event struct {
 	CreatedAt        time.Time
 }
 
+// AppliedEventFrame carries the durable provider event and its conversation binding.
+type AppliedEventFrame struct {
+	Acknowledged   uint64
+	Event          Event
+	ConversationID uint
+	RunID          string
+}
+
 type Interaction struct {
 	ID               uint
 	PublicID         string
@@ -203,6 +196,7 @@ type Interaction struct {
 	ThreadID         uint
 	TurnID           *uint
 	TurnPublicID     string
+	RunID            string
 	ThreadPublicID   string
 	RuntimeProfileID uint
 	SourceRequestRef string

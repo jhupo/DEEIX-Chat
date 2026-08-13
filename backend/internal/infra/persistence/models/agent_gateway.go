@@ -152,12 +152,10 @@ type AgentThread struct {
 	DeviceID         uint    `gorm:"not null;index"`
 	RuntimeProfileID uint    `gorm:"not null;uniqueIndex:uk_agent_threads_profile_source,priority:1,where:source_thread_ref IS NOT NULL"`
 	WorkspaceID      uint    `gorm:"not null;index"`
+	ConversationID   uint    `gorm:"not null;uniqueIndex:uk_agent_threads_conversation;check:chk_agent_threads_conversation_id,conversation_id > 0"`
 	SourceThreadRef  *string `gorm:"size:256;uniqueIndex:uk_agent_threads_profile_source,priority:2,where:source_thread_ref IS NOT NULL"`
 	Title            string  `gorm:"size:256;not null;default:''"`
 	Status           string  `gorm:"size:32;not null;index"`
-	IsPinned         bool    `gorm:"not null;default:false;index"`
-	LabelsJSON       string  `gorm:"type:jsonb;not null;default:'[]'"`
-	SharePolicy      string  `gorm:"size:32;not null;default:'private';index"`
 	GitSHA           *string `gorm:"size:64"`
 	GitBranch        *string `gorm:"size:256"`
 	GitOriginURL     *string `gorm:"size:2048"`
@@ -171,6 +169,7 @@ type AgentTurn struct {
 	PublicID      string  `gorm:"size:64;not null;uniqueIndex:uk_agent_turns_public_id"`
 	UserID        uint    `gorm:"not null;index"`
 	ThreadID      uint    `gorm:"not null;index:idx_agent_turns_thread_created,priority:1;uniqueIndex:uk_agent_turns_thread_source,priority:1,where:source_turn_ref IS NOT NULL"`
+	RunID         string  `gorm:"size:64;not null;uniqueIndex:uk_agent_turns_run_id;check:chk_agent_turns_run_id,run_id <> ''"`
 	SourceTurnRef *string `gorm:"size:256;uniqueIndex:uk_agent_turns_thread_source,priority:2,where:source_turn_ref IS NOT NULL"`
 	Status        string  `gorm:"size:32;not null;index"`
 	InputJSON     string  `gorm:"type:jsonb;not null"`
@@ -197,22 +196,23 @@ func (AgentItem) TableName() string { return "agent_items" }
 
 type AgentEvent struct {
 	ControlPlaneModel
-	PublicID         string    `gorm:"size:64;not null;uniqueIndex:uk_agent_events_public_id"`
-	BridgeFrameID    uint      `gorm:"not null;uniqueIndex:uk_agent_events_bridge_frame"`
-	UserID           uint      `gorm:"not null;index"`
-	DeviceID         uint      `gorm:"not null;index"`
-	RuntimeProfileID *uint     `gorm:"index"`
-	WorkspaceID      *uint     `gorm:"index"`
-	ThreadID         *uint     `gorm:"uniqueIndex:uk_agent_events_thread_seq,priority:1,where:thread_id IS NOT NULL AND thread_seq IS NOT NULL"`
-	TurnID           *uint     `gorm:"index"`
-	ThreadSeq        *uint64   `gorm:"uniqueIndex:uk_agent_events_thread_seq,priority:2,where:thread_id IS NOT NULL AND thread_seq IS NOT NULL"`
-	Kind             string    `gorm:"size:256;not null;index"`
-	SourceThreadRef  string    `gorm:"size:256;not null;default:'';index"`
-	SourceTurnRef    string    `gorm:"size:256;not null;default:'';index"`
-	SourceItemRef    string    `gorm:"size:256;not null;default:''"`
-	SourceRequestRef string    `gorm:"size:256;not null;default:'';index"`
-	PayloadJSON      string    `gorm:"type:jsonb;not null"`
-	OccurredAt       time.Time `gorm:"not null;index"`
+	PublicID                string     `gorm:"size:64;not null;uniqueIndex:uk_agent_events_public_id"`
+	BridgeFrameID           uint       `gorm:"not null;uniqueIndex:uk_agent_events_bridge_frame"`
+	UserID                  uint       `gorm:"not null;index"`
+	DeviceID                uint       `gorm:"not null;index"`
+	RuntimeProfileID        *uint      `gorm:"index"`
+	WorkspaceID             *uint      `gorm:"index"`
+	ThreadID                *uint      `gorm:"uniqueIndex:uk_agent_events_thread_seq,priority:1,where:thread_id IS NOT NULL AND thread_seq IS NOT NULL"`
+	TurnID                  *uint      `gorm:"index"`
+	ThreadSeq               *uint64    `gorm:"uniqueIndex:uk_agent_events_thread_seq,priority:2,where:thread_id IS NOT NULL AND thread_seq IS NOT NULL"`
+	Kind                    string     `gorm:"size:256;not null;index"`
+	SourceThreadRef         string     `gorm:"size:256;not null;default:'';index"`
+	SourceTurnRef           string     `gorm:"size:256;not null;default:'';index"`
+	SourceItemRef           string     `gorm:"size:256;not null;default:''"`
+	SourceRequestRef        string     `gorm:"size:256;not null;default:'';index"`
+	PayloadJSON             string     `gorm:"type:jsonb;not null"`
+	OccurredAt              time.Time  `gorm:"not null;index"`
+	ConversationProjectedAt *time.Time `gorm:"index"`
 }
 
 func (AgentEvent) TableName() string { return "agent_events" }
