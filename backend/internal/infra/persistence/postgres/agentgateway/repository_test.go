@@ -16,7 +16,7 @@ import (
 
 func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
 	database := testutil.Postgres(t)
-	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentDeviceEnrollmentChallenge{}); err != nil {
+	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentDeviceEnrollmentChallenge{}, &model.AgentCredential{}); err != nil {
 		t.Fatalf("migrate device enrollment tables: %v", err)
 	}
 	repo := NewRepo(database)
