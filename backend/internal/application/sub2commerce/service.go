@@ -329,13 +329,7 @@ func plansFromRemote(plans []sub2api.PaymentPlan, currency string) []Plan {
 }
 func planFromRemote(p sub2api.PaymentPlan, currency string) Plan {
 	active := p.Price > 0
-	interval := "month"
-	if p.ValidityUnit == "year" {
-		interval = "year"
-	}
-	if p.ValidityUnit == "lifetime" {
-		interval = "lifetime"
-	}
+	interval := normalizeValidityInterval(p.ValidityUnit)
 	periodCreditUSD := 0.0
 	if p.MonthlyLimitUSD != nil {
 		periodCreditUSD = *p.MonthlyLimitUSD
@@ -345,6 +339,17 @@ func planFromRemote(p sub2api.PaymentPlan, currency string) Plan {
 		planCurrency = currency
 	}
 	return Plan{ID: p.ID, Code: fmtID(p.ID), Name: p.Name, Description: p.Description, FeatureJSON: featureJSON(p.Features), GroupPlatform: p.GroupPlatform, RateMultiplier: p.RateMultiplier, ModelRateMultiplier: p.ModelRateMultiplier, DailyLimitUSD: p.DailyLimitUSD, WeeklyLimitUSD: p.WeeklyLimitUSD, MonthlyLimitUSD: p.MonthlyLimitUSD, PeriodCreditUSD: periodCreditUSD, ValidityDays: p.ValidityDays, OriginalPriceCents: cents(p.OriginalPrice), ModelScopesJSON: featureJSON(p.ModelScopes), SortOrder: p.SortOrder, IsActive: active, Prices: []PlanPrice{{ID: p.ID, PlanID: p.ID, Code: fmtID(p.ID), BillingInterval: interval, Currency: planCurrency, AmountCents: cents(p.Price), IsActive: active, IsDefault: true}}}
+}
+
+func normalizeValidityInterval(unit string) string {
+	switch strings.TrimSuffix(strings.ToLower(strings.TrimSpace(unit)), "s") {
+	case "week":
+		return "week"
+	case "month":
+		return "month"
+	default:
+		return "day"
+	}
 }
 
 func checkoutPlanCurrency(methods map[string]sub2api.PaymentMethod) string {

@@ -142,6 +142,8 @@ export function SettingsSubscription() {
       lifetime: t("interval.lifetime"),
       year: t("interval.year"),
       month: t("interval.month"),
+      week: t("interval.week"),
+      day: t("interval.day"),
     }),
     [t],
   );
@@ -159,6 +161,8 @@ export function SettingsSubscription() {
   );
   const planFeatureLabels = React.useMemo(
     () => ({
+      dailyCredit: (credit: string) => t("plans.features.dailyCredit", { credit }),
+      weeklyCredit: (credit: string) => t("plans.features.weeklyCredit", { credit }),
       monthlyCredit: (credit: string) => t("plans.features.monthlyCredit", { credit }),
       freeModelsNotIncluded: t("plans.features.freeModelsNotIncluded"),
     }),

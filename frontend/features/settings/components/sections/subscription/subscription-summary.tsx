@@ -34,9 +34,13 @@ type SubscriptionIntervalLabels = {
   lifetime: string;
   year: string;
   month: string;
+  week: string;
+  day: string;
 };
 
 type PlanFeatureLabels = {
+  dailyCredit: (credit: string) => string;
+  weeklyCredit: (credit: string) => string;
   monthlyCredit: (credit: string) => string;
   freeModelsNotIncluded: string;
 };
@@ -284,7 +288,7 @@ export function SubscriptionSummary({
               const buttonVariant = resolvePlanButtonVariant(actionKind);
               const discountPercent = price ? resolvePlanDiscountPercent(plan.originalPriceCents, price.amountCents) : null;
               const originalPrice = price && discountPercent
-                ? formatPlanPrice({ ...price, amountCents: plan.originalPriceCents }, intervalLabels, billingDisplay)
+                ? formatPlanPrice({ ...price, amountCents: plan.originalPriceCents }, intervalLabels, billingDisplay, plan.validityDays)
                 : "";
               return (
                 <article
@@ -299,7 +303,7 @@ export function SubscriptionSummary({
                     {isCurrent ? <Badge variant="secondary">{t("plans.currentBadge")}</Badge> : null}
                   </div>
 
-                  <p className="mt-3 text-base font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay)}</p>
+                  <p className="mt-3 text-base font-semibold">{formatPlanPrice(price, intervalLabels, billingDisplay, plan.validityDays)}</p>
                   <div className="mt-1 flex min-h-5 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     {discountPercent ? (
                       <>
@@ -342,7 +346,7 @@ export function SubscriptionSummary({
             <DialogDescription>
               <span className="block">
                 {selectedPlan && selectedPrice
-                  ? `${selectedPlan.name} · ${formatPlanPrice(selectedPrice, intervalLabels, billingDisplay)}`
+                  ? `${selectedPlan.name} · ${formatPlanPrice(selectedPrice, intervalLabels, billingDisplay, selectedPlan.validityDays)}`
                   : t("payment.description")}
               </span>
               {paymentImpactDescription ? <span className="mt-1 block">{paymentImpactDescription}</span> : null}

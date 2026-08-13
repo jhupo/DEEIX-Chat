@@ -19,8 +19,9 @@ export function resolveDefaultPrice(plan: BillingPlanDTO | null | undefined): Bi
 
 export function formatPlanPrice(
   price: BillingPlanPriceDTO | null,
-  intervalLabels: { lifetime: string; year: string; month: string },
+  intervalLabels: { lifetime: string; year: string; month: string; week: string; day: string },
   billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY,
+  validityDays = 1,
 ): string {
   if (!price) return "-";
   const currency = price.currency.trim().toUpperCase();
@@ -31,8 +32,15 @@ export function formatPlanPrice(
       currency,
     }).format((price.amountCents || 0) / 100) : ((price.amountCents || 0) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
   if (price.billingInterval === "lifetime") return `${amount} / ${intervalLabels.lifetime}`;
-  if (price.billingInterval === "year") return `${amount} / ${intervalLabels.year}`;
-  return `${amount} / ${intervalLabels.month}`;
+  const count = Number.isFinite(validityDays) && validityDays > 0 ? validityDays : 1;
+  const unit = price.billingInterval === "year"
+    ? intervalLabels.year
+    : price.billingInterval === "month"
+      ? intervalLabels.month
+      : price.billingInterval === "week"
+        ? intervalLabels.week
+        : intervalLabels.day;
+  return `${amount} / ${count === 1 && (price.billingInterval === "year" || price.billingInterval === "month") ? "" : `${count} `}${unit}`;
 }
 
 export function billingDisplayInputCurrency(billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY): "USD" | "CNY" {
@@ -253,13 +261,20 @@ export function resolvePlanButtonVariant(action: PlanActionKind): "default" | "o
 
 export function resolvePlanFeatures(
   plan: BillingPlanDTO,
-  labels: { monthlyCredit: (credit: string) => string; freeModelsNotIncluded: string },
+  labels: {
+    dailyCredit: (credit: string) => string;
+    weeklyCredit: (credit: string) => string;
+    monthlyCredit: (credit: string) => string;
+    freeModelsNotIncluded: string;
+  },
   billingDisplay: BillingDisplayOptions = DEFAULT_BILLING_DISPLAY,
 ): string[] {
-  const fallback = [
-    labels.monthlyCredit(formatPlanCredit(plan.periodCreditUSD, billingDisplay)),
-    labels.freeModelsNotIncluded,
-  ];
+  const fallback: string[] = [];
+  if (plan.dailyLimitUSD != null) fallback.push(labels.dailyCredit(formatPlanCredit(plan.dailyLimitUSD, billingDisplay)));
+  if (plan.weeklyLimitUSD != null) fallback.push(labels.weeklyCredit(formatPlanCredit(plan.weeklyLimitUSD, billingDisplay)));
+  if (plan.monthlyLimitUSD != null) fallback.push(labels.monthlyCredit(formatPlanCredit(plan.monthlyLimitUSD, billingDisplay)));
+  if (fallback.length === 0 && plan.periodCreditUSD > 0) fallback.push(labels.monthlyCredit(formatPlanCredit(plan.periodCreditUSD, billingDisplay)));
+  fallback.push(labels.freeModelsNotIncluded);
   try {
     const parsed = JSON.parse(plan.featureJSON || "null") as unknown;
     if (Array.isArray(parsed)) {

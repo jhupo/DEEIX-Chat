@@ -334,7 +334,9 @@
     "interval": {
       "lifetime": "lifetime",
       "year": "year",
-      "month": "month"
+      "month": "month",
+      "week": "week",
+      "day": "day"
     },
     "periodUsage": {
       "title": "Plan usage",
@@ -428,6 +430,8 @@
         "freeBlocked": "Base plan"
       },
       "features": {
+        "dailyCredit": "{credit} daily credit",
+        "weeklyCredit": "{credit} weekly credit",
         "monthlyCredit": "{credit} monthly credit",
         "freeModelsNotIncluded": "Free models do not count toward the credit."
       }

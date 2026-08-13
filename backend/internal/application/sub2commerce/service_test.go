@@ -386,7 +386,8 @@ func TestPlansPreservePerPlanCurrency(t *testing.T) {
 			},
 			"plans": []any{
 				map[string]any{"id": 1, "group_id": 3, "name": "Monthly", "price": 68, "currency": "CNY", "validity_unit": "month"},
-				map[string]any{"id": 2, "group_id": 3, "name": "Annual", "price": 99, "currency": "USD", "validity_unit": "year"},
+				map[string]any{"id": 2, "group_id": 3, "name": "Weekly", "price": 99, "currency": "USD", "validity_unit": "weeks"},
+				map[string]any{"id": 3, "group_id": 3, "name": "Daily", "price": 10, "currency": "USD", "validity_unit": "day"},
 			},
 		})
 	})
@@ -401,8 +402,11 @@ func TestPlansPreservePerPlanCurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Plans) != 2 || result.Plans[0].Prices[0].Currency != "CNY" || result.Plans[1].Prices[0].Currency != "USD" {
+	if len(result.Plans) != 3 || result.Plans[0].Prices[0].Currency != "CNY" || result.Plans[1].Prices[0].Currency != "USD" {
 		t.Fatalf("plan currencies = %#v", result.Plans)
+	}
+	if result.Plans[0].Prices[0].BillingInterval != "month" || result.Plans[1].Prices[0].BillingInterval != "week" || result.Plans[2].Prices[0].BillingInterval != "day" {
+		t.Fatalf("plan intervals = %#v", result.Plans)
 	}
 }
 

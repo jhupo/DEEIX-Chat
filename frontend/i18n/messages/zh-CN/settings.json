@@ -334,7 +334,9 @@
     "interval": {
       "lifetime": "永久",
       "year": "年",
-      "month": "月"
+      "month": "月",
+      "week": "周",
+      "day": "天"
     },
     "periodUsage": {
       "title": "套餐使用情况",
@@ -428,6 +430,8 @@
         "freeBlocked": "基础方案"
       },
       "features": {
+        "dailyCredit": "{credit} 日额度",
+        "weeklyCredit": "{credit} 周额度",
         "monthlyCredit": "{credit} 月额度",
         "freeModelsNotIncluded": "免费模型不计入额度"
       }
