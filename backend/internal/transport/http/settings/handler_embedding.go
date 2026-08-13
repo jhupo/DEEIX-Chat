@@ -17,7 +17,7 @@ import (
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/embedding/runtime [get]
 func (h *Handler) GetEmbeddingRuntime(c *gin.Context) {
 	cfg := h.runtime.Snapshot()
@@ -73,7 +73,7 @@ func (h *Handler) GetEmbeddingRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/embedding/status [get]
 func (h *Handler) GetEmbeddingStatus(c *gin.Context) {
 	if h.embeddingSvc == nil {
@@ -95,7 +95,7 @@ func (h *Handler) GetEmbeddingStatus(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/embedding/reindex [post]
 func (h *Handler) TriggerReindex(c *gin.Context) {
 	if h.embeddingSvc == nil {

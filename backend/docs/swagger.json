@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.24"
+        "version": "0.4.25"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -478,7 +478,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -944,7 +944,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -995,7 +995,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1050,7 +1050,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1490,7 +1490,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "500": {
@@ -1545,7 +1545,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1772,7 +1772,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1889,7 +1889,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2415,7 +2415,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2477,7 +2477,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2598,7 +2598,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2657,7 +2657,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -10293,7 +10293,7 @@
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     }
                 }
@@ -10336,13 +10336,13 @@
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     }
                 }
@@ -11572,6 +11572,26 @@
                     "$ref": "#/definitions/ChangePasswordResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ChannelActionResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
                     "type": "string"
                 }
             }
@@ -18670,6 +18690,26 @@
                     "type": "integer"
                 },
                 "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "UserSettingsErrorDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
                     "type": "string"
                 }
             }

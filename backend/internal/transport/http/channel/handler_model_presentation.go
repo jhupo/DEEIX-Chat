@@ -189,7 +189,7 @@ func (h *Handler) UpdateModelDisplayGroup(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param body body SetModelsDisplayGroupRequest true "批量归组参数"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Router /admin/llm/models/display-group [patch]
@@ -213,7 +213,7 @@ func (h *Handler) SetModelsDisplayGroup(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "展示分组 ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Router /admin/llm/model-display-groups/{id} [delete]

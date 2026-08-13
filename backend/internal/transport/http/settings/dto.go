@@ -55,6 +55,15 @@ type BrandingResponseDoc struct {
 	Data     BrandingResponse `json:"data"`
 }
 
+// Envelope 通用响应文档。
+type Envelope struct {
+	ErrorMsg  string      `json:"errorMsg"`
+	ErrorCode string      `json:"errorCode,omitempty"`
+	Details   interface{} `json:"details,omitempty"`
+	RequestID string      `json:"requestId,omitempty"`
+	Data      interface{} `json:"data"`
+}
+
 type BrandingManifestResponse struct {
 	Name            string                 `json:"name"`
 	ShortName       string                 `json:"short_name"`

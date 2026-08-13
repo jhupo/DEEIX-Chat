@@ -55,6 +55,7 @@
       "installFailed": "更新请求未能启动；重试会保留同一请求标识。",
       "restartFailed": "应用未能在预期时间内恢复，请检查容器状态。",
       "jobTitle": "正在更新",
+      "jobDescription": "正在安装版本 {version}，请等待当前阶段完成。",
       "reconnecting": "正在等待应用重新连接",
       "reload": "重启并应用",
       "retryInstall": "重试更新",

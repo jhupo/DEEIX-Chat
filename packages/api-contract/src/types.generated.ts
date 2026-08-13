@@ -376,6 +376,14 @@ export interface ChangePasswordResponseDoc {
   errorMsg: string;
 }
 
+export interface ChannelActionResponseDoc {
+  data: any;
+  details?: any;
+  errorCode?: string;
+  errorMsg: string;
+  requestId?: string;
+}
+
 export interface ChannelErrorDoc {
   data: any;
   details?: any;
@@ -2889,6 +2897,14 @@ export interface UserMemoryResponse {
   value: string;
 }
 
+export interface UserSettingsErrorDoc {
+  data: any;
+  details?: any;
+  errorCode?: string;
+  errorMsg: string;
+  requestId?: string;
+}
+
 export interface UserSettingsPatchSettingsRequest {
   settings: Record<string, string>;
 }
@@ -3148,7 +3164,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3310,7 +3326,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = SetModelsDisplayGroupRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3326,7 +3342,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = ReorderModelsRequest;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3345,7 +3361,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3482,7 +3498,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3501,7 +3517,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = Record<string, string>;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3581,7 +3597,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3619,7 +3635,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3788,7 +3804,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3809,7 +3825,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3851,7 +3867,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**
@@ -3872,7 +3888,7 @@ export namespace Admin {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
-    export type ResponseBody = SuccessDoc;
+    export type ResponseBody = ChannelActionResponseDoc;
   }
 
   /**

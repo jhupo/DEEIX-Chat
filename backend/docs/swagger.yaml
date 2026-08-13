@@ -867,6 +867,20 @@ definitions:
     - data
     - errorMsg
     type: object
+  ChannelActionResponseDoc:
+    properties:
+      data: {}
+      details: {}
+      errorCode:
+        type: string
+      errorMsg:
+        type: string
+      requestId:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   ChannelErrorDoc:
     properties:
       data: {}
@@ -5837,6 +5851,20 @@ definitions:
     - userID
     - value
     type: object
+  UserSettingsErrorDoc:
+    properties:
+      data: {}
+      details: {}
+      errorCode:
+        type: string
+      errorMsg:
+        type: string
+      requestId:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   UserSettingsPatchSettingsRequest:
     properties:
       settings:
@@ -6640,7 +6668,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.24"
+  version: "0.4.25"
 paths:
   /admin/announcements:
     get:
@@ -6933,7 +6961,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7200,7 +7228,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7517,7 +7545,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7549,7 +7577,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7578,7 +7606,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "500":
           description: Internal Server Error
           schema:
@@ -7613,7 +7641,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7729,7 +7757,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7804,7 +7832,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -7986,7 +8014,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -8026,7 +8054,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -8104,7 +8132,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -8142,7 +8170,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/SuccessDoc'
+            $ref: '#/definitions/ChannelActionResponseDoc'
         "400":
           description: Bad Request
           schema:
@@ -13147,7 +13175,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/Envelope'
+            $ref: '#/definitions/UserSettingsErrorDoc'
       security:
       - BearerAuth: []
       summary: 获取当前用户的配置
@@ -13174,11 +13202,11 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/Envelope'
+            $ref: '#/definitions/UserSettingsErrorDoc'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/Envelope'
+            $ref: '#/definitions/UserSettingsErrorDoc'
       security:
       - BearerAuth: []
       summary: 更新当前用户的配置

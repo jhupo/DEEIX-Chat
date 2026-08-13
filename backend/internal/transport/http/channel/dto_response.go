@@ -783,6 +783,15 @@ func toPublicModelResponse(v appchannel.ModelView) PublicModelResponse {
 	}
 }
 
+// ChannelActionResponseDoc 通用操作成功响应文档。
+type ChannelActionResponseDoc struct {
+	ErrorMsg  string      `json:"errorMsg"`
+	ErrorCode string      `json:"errorCode,omitempty"`
+	Details   interface{} `json:"details,omitempty"`
+	RequestID string      `json:"requestId,omitempty"`
+	Data      interface{} `json:"data"`
+}
+
 // ErrorDoc 错误响应文档。
 type ErrorDoc struct {
 	ErrorMsg  string      `json:"errorMsg"`

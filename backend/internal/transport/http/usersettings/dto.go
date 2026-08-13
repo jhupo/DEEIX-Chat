@@ -15,3 +15,12 @@ type UserSettingsResponseDoc struct {
 	ErrorMsg string               `json:"errorMsg"`
 	Data     UserSettingsResponse `json:"data"`
 }
+
+// UserSettingsErrorDoc 用户配置错误响应文档。
+type UserSettingsErrorDoc struct {
+	ErrorMsg  string      `json:"errorMsg"`
+	ErrorCode string      `json:"errorCode,omitempty"`
+	Details   interface{} `json:"details,omitempty"`
+	RequestID string      `json:"requestId,omitempty"`
+	Data      interface{} `json:"data"`
+}

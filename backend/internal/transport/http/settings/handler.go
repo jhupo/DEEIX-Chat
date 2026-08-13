@@ -60,7 +60,7 @@ func (h *Handler) SetNativeToolCatalogProvider(provider nativeToolCatalogProvide
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings [get]
 func (h *Handler) ListAll(c *gin.Context) {
 	data, err := h.service.ListAll(c.Request.Context())
@@ -78,7 +78,7 @@ func (h *Handler) ListAll(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param namespace path string true "命名空间"
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/{namespace} [get]
 func (h *Handler) ListByNamespace(c *gin.Context) {
 	ns := c.Param("namespace")
@@ -99,7 +99,7 @@ func (h *Handler) ListByNamespace(c *gin.Context) {
 // @Summary 查询公开登录页配置
 // @Tags settings
 // @Produce json
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /settings/login-page [get]
 func (h *Handler) GetLoginPageSettings(c *gin.Context) {
 	items, err := h.service.ListByNamespace(c.Request.Context(), "auth")
@@ -202,7 +202,7 @@ func brandingResponse(cfg config.Config) BrandingResponse {
 // @Tags settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /settings/model-option-policy [get]
 func (h *Handler) GetModelOptionPolicy(c *gin.Context) {
 	items, err := h.service.RuntimeValuesByNamespace(c.Request.Context(), "chat")
@@ -244,7 +244,7 @@ func (h *Handler) GetModelOptionPolicy(c *gin.Context) {
 // @Tags settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /settings/mcp-policy [get]
 func (h *Handler) GetMCPPolicy(c *gin.Context) {
 	cfg := h.runtime.Snapshot()
@@ -263,7 +263,7 @@ func (h *Handler) GetMCPPolicy(c *gin.Context) {
 // @Tags settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /settings/chat-context-policy [get]
 func (h *Handler) GetChatContextPolicy(c *gin.Context) {
 	cfg := h.runtime.Snapshot()
@@ -278,7 +278,7 @@ func (h *Handler) GetChatContextPolicy(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param body body PatchSettingsRequest true "更新项"
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings [patch]
 func (h *Handler) Patch(c *gin.Context) {
 	var req PatchSettingsRequest
@@ -345,7 +345,7 @@ func (h *Handler) Patch(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/tika/runtime [get]
 func (h *Handler) GetTikaRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -360,7 +360,7 @@ func (h *Handler) GetTikaRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/docling/runtime [get]
 func (h *Handler) GetDoclingRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -375,7 +375,7 @@ func (h *Handler) GetDoclingRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/tesseract/runtime [get]
 func (h *Handler) GetTesseractRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -390,7 +390,7 @@ func (h *Handler) GetTesseractRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/rapidocr/runtime [get]
 func (h *Handler) GetRapidOCRRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -405,7 +405,7 @@ func (h *Handler) GetRapidOCRRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/mineru/runtime [get]
 func (h *Handler) GetMinerURuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -420,7 +420,7 @@ func (h *Handler) GetMinerURuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/tika/runtime/start [post]
 func (h *Handler) StartTikaRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -435,7 +435,7 @@ func (h *Handler) StartTikaRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/rapidocr/runtime/start [post]
 func (h *Handler) StartRapidOCRRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -450,7 +450,7 @@ func (h *Handler) StartRapidOCRRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/tika/runtime/stop [post]
 func (h *Handler) StopTikaRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -465,7 +465,7 @@ func (h *Handler) StopTikaRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/rapidocr/runtime/stop [post]
 func (h *Handler) StopRapidOCRRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -480,7 +480,7 @@ func (h *Handler) StopRapidOCRRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/tika/runtime/restart [post]
 func (h *Handler) RestartTikaRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {
@@ -495,7 +495,7 @@ func (h *Handler) RestartTikaRuntime(c *gin.Context) {
 // @Tags admin/settings
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.Envelope
+// @Success 200 {object} Envelope
 // @Router /admin/settings/rapidocr/runtime/restart [post]
 func (h *Handler) RestartRapidOCRRuntime(c *gin.Context) {
 	if h.runtimeSvc == nil {

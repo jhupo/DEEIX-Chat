@@ -55,6 +55,7 @@
       "installFailed": "The update request did not start. Retry uses the same request key.",
       "restartFailed": "The application did not recover in time. Check the container status.",
       "jobTitle": "Update in progress",
+      "jobDescription": "Installing version {version}. Wait for the current stage to complete.",
       "reconnecting": "Waiting for the application to reconnect",
       "reload": "Restart and apply",
       "retryInstall": "Retry update",

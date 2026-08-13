@@ -26,7 +26,7 @@ func NewHandler(service *appusersettings.Service) *Handler {
 // @Produce json
 // @Security BearerAuth
 // @Success 200 {object} UserSettingsResponseDoc
-// @Failure 500 {object} response.Envelope
+// @Failure 500 {object} UserSettingsErrorDoc
 // @Router /user/settings [get]
 func (h *Handler) GetSettings(c *gin.Context) {
 	userID := middleware.MustUserID(c)
@@ -47,8 +47,8 @@ func (h *Handler) GetSettings(c *gin.Context) {
 // @Security BearerAuth
 // @Param body body PatchSettingsRequest true "更新项"
 // @Success 200 {object} UserSettingsResponseDoc
-// @Failure 400 {object} response.Envelope
-// @Failure 500 {object} response.Envelope
+// @Failure 400 {object} UserSettingsErrorDoc
+// @Failure 500 {object} UserSettingsErrorDoc
 // @Router /user/settings [patch]
 func (h *Handler) PatchSettings(c *gin.Context) {
 	var req PatchSettingsRequest

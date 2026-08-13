@@ -261,11 +261,13 @@ function AdminUpdateCheck() {
                 ? t("updateDialog.failedDescription")
                 : state === "checking"
                   ? t("updateDialog.checkingDescription")
-                : state === "confirming"
-                  ? t("updateDialog.confirmDescription", { version: candidate?.version ?? "" })
-                  : state === "available"
-                    ? t("updateDialog.availableDescription", { current, latest: candidate?.version ?? "" })
-                    : t("updateDialog.currentDescription", { current })}
+                  : state === "job"
+                    ? t("updateDialog.jobDescription", { version: candidate?.version ?? job?.version ?? "" })
+                    : state === "confirming"
+                      ? t("updateDialog.confirmDescription", { version: candidate?.version ?? "" })
+                      : state === "available"
+                        ? t("updateDialog.availableDescription", { current, latest: candidate?.version ?? "" })
+                        : t("updateDialog.currentDescription", { current })}
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2" aria-live="polite">

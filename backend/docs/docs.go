@@ -485,7 +485,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -951,7 +951,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1002,7 +1002,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1057,7 +1057,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1497,7 +1497,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "500": {
@@ -1552,7 +1552,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1779,7 +1779,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -1896,7 +1896,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2422,7 +2422,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2484,7 +2484,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2605,7 +2605,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -2664,7 +2664,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/SuccessDoc"
+                            "$ref": "#/definitions/ChannelActionResponseDoc"
                         }
                     },
                     "400": {
@@ -10300,7 +10300,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     }
                 }
@@ -10343,13 +10343,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/Envelope"
+                            "$ref": "#/definitions/UserSettingsErrorDoc"
                         }
                     }
                 }
@@ -11579,6 +11579,26 @@ const docTemplate = `{
                     "$ref": "#/definitions/ChangePasswordResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ChannelActionResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
                     "type": "string"
                 }
             }
@@ -18681,6 +18701,26 @@ const docTemplate = `{
                 }
             }
         },
+        "UserSettingsErrorDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {},
+                "details": {},
+                "errorCode": {
+                    "type": "string"
+                },
+                "errorMsg": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                }
+            }
+        },
         "UserSettingsPatchSettingsRequest": {
             "type": "object",
             "required": [
@@ -19824,7 +19864,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.24",
+	Version:          "0.4.25",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

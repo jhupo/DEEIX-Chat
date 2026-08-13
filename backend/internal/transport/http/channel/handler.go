@@ -250,7 +250,7 @@ func (h *Handler) UpdateUpstream(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "上游ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -302,7 +302,7 @@ func (h *Handler) BatchDeleteUpstreams(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "上游ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -490,7 +490,7 @@ func (h *Handler) UpsertUpstreamModel(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path int true "上游ID"
 // @Param route_id path int true "路由绑定ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -526,7 +526,7 @@ func (h *Handler) DeleteUpstreamModel(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path int true "上游ID"
 // @Param route_id path int true "路由绑定ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -562,7 +562,7 @@ func (h *Handler) DisableUpstreamModel(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path int true "上游ID"
 // @Param route_id path int true "路由绑定ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -627,7 +627,7 @@ func (h *Handler) BatchDeleteUpstreamModels(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path int true "上游ID"
 // @Param route_id path int true "路由绑定ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -1089,7 +1089,7 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param body body ReorderModelsRequest true "模型 ID 顺序"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -1123,7 +1123,7 @@ func (h *Handler) ReorderModels(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path int true "模型ID"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -1424,7 +1424,7 @@ func (h *Handler) UpdateModelUpstreamSource(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /admin/llm/settings [get]
 func (h *Handler) ListLLMSettings(c *gin.Context) {
@@ -1449,7 +1449,7 @@ func (h *Handler) ListLLMSettings(c *gin.Context) {
 // @Security BearerAuth
 // @Param key path string true "设置键"
 // @Param body body map[string]string true "设置值 {\"value\": \"...\"}"
-// @Success 200 {object} response.SuccessDoc
+// @Success 200 {object} ChannelActionResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 404 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
