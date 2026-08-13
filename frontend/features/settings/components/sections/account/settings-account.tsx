@@ -2,6 +2,8 @@
 
 import { ChangePasswordDialog } from "@/features/settings/components/sections/account/account-password-dialog";
 import { AccountActiveSessionsSection } from "@/features/settings/components/sections/account/account-active-sessions";
+import { AccountActiveDevicesSection } from "@/features/settings/components/sections/account/account-active-devices";
+import { AccountAddDeviceDialog } from "@/features/settings/components/sections/account/account-add-device-dialog";
 import { AccountOverviewSection } from "@/features/settings/components/sections/account/account-overview";
 import { useSettingsAccount } from "@/features/settings/hooks/use-settings-account";
 import { SettingsPage, SettingsSectionSeparator } from "@/shared/components/settings-layout";
@@ -10,15 +12,21 @@ export function SettingsAccount() {
   const {
     viewer,
     sessions,
+    devices,
+    devicesLoading,
     loading,
     loggingOut,
     changingPassword,
     revokingSessionID,
     passwordDialogOpen,
+    addDeviceDialogOpen,
+    revokingDeviceID,
     setPasswordDialogOpen,
+    setAddDeviceDialogOpen,
     handleChangePassword,
     handleLogoutAll,
     handleLogoutSession,
+    handleRevokeDevice,
   } = useSettingsAccount();
 
   return (
@@ -32,6 +40,15 @@ export function SettingsAccount() {
         onLogoutAll={() => void handleLogoutAll()}
       />
       <SettingsSectionSeparator />
+      <AccountActiveDevicesSection
+        devices={devices}
+        loading={devicesLoading}
+        revokingDeviceId={revokingDeviceID}
+        addDisabled={loading || devicesLoading || !viewer?.publicID}
+        onAdd={() => setAddDeviceDialogOpen(true)}
+        onRevoke={(device) => void handleRevokeDevice(device)}
+      />
+      <SettingsSectionSeparator />
       <AccountActiveSessionsSection
         sessions={sessions}
         loading={loading}
@@ -43,6 +60,11 @@ export function SettingsAccount() {
         onOpenChange={setPasswordDialogOpen}
         pending={changingPassword}
         onSubmit={handleChangePassword}
+      />
+      <AccountAddDeviceDialog
+        open={addDeviceDialogOpen}
+        onOpenChange={setAddDeviceDialogOpen}
+        publicUserID={viewer?.publicID || ""}
       />
     </SettingsPage>
   );

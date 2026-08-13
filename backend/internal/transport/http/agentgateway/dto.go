@@ -44,11 +44,12 @@ type CommandDoc struct {
 	Status    string `json:"status"`
 }
 
-type EnrollmentResponseDoc struct {
+type EnrollmentChallengeResponseDoc struct {
 	ErrorMsg string `json:"errorMsg"`
 	Data     struct {
-		EnrollmentCode string `json:"enrollmentCode"`
-		ExpiresAt      string `json:"expiresAt"`
+		ChallengeID string `json:"challengeId"`
+		Canonical   string `json:"canonical"`
+		ExpiresAt   string `json:"expiresAt"`
 	} `json:"data"`
 }
 
@@ -60,6 +61,7 @@ type DeviceResponseDoc struct {
 		Name       string  `json:"name"`
 		Platform   string  `json:"platform"`
 		Status     string  `json:"status"`
+		Online     bool    `json:"online"`
 		CreatedAt  string  `json:"createdAt"`
 		UpdatedAt  string  `json:"updatedAt"`
 		LastSeenAt *string `json:"lastSeenAt"`
@@ -77,6 +79,7 @@ type DeviceResponseDocData struct {
 	Name       string  `json:"name"`
 	Platform   string  `json:"platform"`
 	Status     string  `json:"status"`
+	Online     bool    `json:"online"`
 	CreatedAt  string  `json:"createdAt"`
 	UpdatedAt  string  `json:"updatedAt"`
 	LastSeenAt *string `json:"lastSeenAt"`

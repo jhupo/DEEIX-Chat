@@ -285,7 +285,7 @@ Sub2 base URL 请求模型端点。
 ## 6. 本地连接的 Codex Runtime
 
 远程 Web 控制本地 Codex 时，本地 Bridge 主动建立到 DEEIX 的 WSS，不要求公网入站访问用户机器。绑定流程继续使用
-01-05 文档定义的 enrollment code、device public key、challenge、短时 connection token 和 durable Bridge WAL。
+01-05 文档定义的用户公开 ID 注册挑战、device public key、短时 connection token 和 durable Bridge WAL。
 
 资源关系：
 
@@ -439,7 +439,7 @@ profile 状态并调度 device command；它不读取 Chat `sub2_key_bindings`�
 | `/agent` | Agent device/profile/workspace + app-server projection | 无 key selector；turn UI 选择 runtime/model/permission |
 | `/setting/account` | `GET /api/v1/me` composite、`/api/v1/auth/sessions`、Sub2 password-change BFF route | User projection、DEEIX browser sessions 和 password change |
 | `/setting/general` and chat preferences | DEEIX User/user-settings routes | displayName/avatar/timezone/locale/appearance/notification/conversation preferences；Sub2 profile 仅可在新 User 创建时提供初始投影，不进行写回 |
-| Runtime connections | Agent device APIs | pairing、revoke、online/schema/auth-proof status；不提供 auth 编辑 |
+| Runtime connections | Agent device APIs | enrollment、revoke、online/schema/auth-proof status；不提供 auth 编辑 |
 
 Sub2 key 加载失败时保留设置页的 disabled/error 状态，不静默切 key。对话页不展示 key selector，模型目录也不依赖 key；
 模型名称、展示分组、能力和可见范围由 DEEIX 管理员目录决定。运行中的 stream 使用 Run pin，不响应另一个 tab 的默认 key 或模型变化。

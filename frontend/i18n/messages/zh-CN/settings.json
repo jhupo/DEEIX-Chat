@@ -114,6 +114,27 @@
     "logoutAllDevices": "登出您的所有在线设备",
     "publicID": "用户公开 ID",
     "copyPublicID": "复制用户公开 ID",
+    "device": {
+      "title": "活跃设备",
+      "add": "添加设备",
+      "name": "设备",
+      "status": "状态",
+      "platform": "系统",
+      "lastSeen": "最后活跃",
+      "online": "在线",
+      "offline": "离线",
+      "empty": "还没有添加设备。",
+      "actions": "设备操作",
+      "revoke": "移除设备",
+      "platforms": { "windows": "Windows", "darwin": "macOS", "linux": "Linux" },
+      "install": {
+        "title": "添加设备",
+        "description": "请在需要用于工作对话的项目目录中运行此命令。",
+        "copy": "复制安装命令",
+        "copied": "安装命令已复制",
+        "copyFailed": "复制失败"
+      }
+    },
     "actions": {
       "update": "更新",
       "logOut": "登出",
@@ -175,7 +196,9 @@
       "passwordChangedDescription": "请使用新密码重新登录。",
       "changePasswordFailed": "修改密码失败",
       "sessionLoggedOut": "会话已登出",
-      "logoutSessionFailed": "登出会话失败"
+      "logoutSessionFailed": "登出会话失败",
+      "deviceRevoked": "设备已移除",
+      "deviceRevokeFailed": "移除设备失败"
     }
   },
   "chatPage": {

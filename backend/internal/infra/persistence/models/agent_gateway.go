@@ -4,26 +4,44 @@ import "time"
 
 type AgentDevice struct {
 	ControlPlaneModel
-	PublicID               string     `gorm:"size:64;not null;uniqueIndex:uk_agent_devices_public_id"`
-	UserID                 uint       `gorm:"not null;index:idx_agent_devices_user_status,priority:1"`
-	EnrollmentCredentialID uint       `gorm:"not null;uniqueIndex:uk_agent_devices_enrollment_credential"`
-	Name                   string     `gorm:"size:128;not null"`
-	Platform               string     `gorm:"size:32;not null"`
-	PublicKey              []byte     `gorm:"type:bytea;not null"`
-	PublicKeyFingerprint   string     `gorm:"size:64;not null;uniqueIndex:uk_agent_devices_public_key_fingerprint"`
-	CredentialVersion      uint       `gorm:"not null;default:1"`
-	Status                 string     `gorm:"size:32;not null;index:idx_agent_devices_user_status,priority:2"`
-	NextServerSeq          uint64     `gorm:"not null;default:1"`
-	LastAckedServerSeq     uint64     `gorm:"not null;default:0"`
-	LastAckedBridgeSeq     uint64     `gorm:"not null;default:0"`
-	LastSeenAt             *time.Time `gorm:"index"`
-	RevokedAt              *time.Time `gorm:"index"`
+	PublicID             string     `gorm:"size:64;not null;uniqueIndex:uk_agent_devices_public_id"`
+	UserID               uint       `gorm:"not null;index:idx_agent_devices_user_status,priority:1"`
+	Name                 string     `gorm:"size:128;not null"`
+	Platform             string     `gorm:"size:32;not null"`
+	PublicKey            []byte     `gorm:"type:bytea;not null"`
+	PublicKeyFingerprint string     `gorm:"size:64;not null;uniqueIndex:uk_agent_devices_public_key_fingerprint"`
+	CredentialVersion    uint       `gorm:"not null;default:1"`
+	Status               string     `gorm:"size:32;not null;index:idx_agent_devices_user_status,priority:2"`
+	NextServerSeq        uint64     `gorm:"not null;default:1"`
+	LastAckedServerSeq   uint64     `gorm:"not null;default:0"`
+	LastAckedBridgeSeq   uint64     `gorm:"not null;default:0"`
+	LastSeenAt           *time.Time `gorm:"index"`
+	RevokedAt            *time.Time `gorm:"index"`
 }
 
 func (AgentDevice) TableName() string { return "agent_devices" }
 
-// AgentCredential stores only hashes and derivation inputs. Raw enrollment,
-// challenge, and connection bearer values are never persisted.
+type AgentDeviceEnrollmentChallenge struct {
+	ControlPlaneModel
+	PublicID             string     `gorm:"size:64;not null;uniqueIndex:uk_agent_device_enrollment_challenges_public_id"`
+	UserID               uint       `gorm:"not null;index"`
+	UserPublicID         string     `gorm:"size:64;not null"`
+	RemoteUserID         int64      `gorm:"not null"`
+	Name                 string     `gorm:"size:128;not null"`
+	Platform             string     `gorm:"size:32;not null"`
+	PublicKey            []byte     `gorm:"type:bytea;not null"`
+	PublicKeyFingerprint string     `gorm:"size:64;not null;index"`
+	Nonce                string     `gorm:"size:64;not null"`
+	ExpiresAt            time.Time  `gorm:"not null;index"`
+	ConsumedAt           *time.Time `gorm:"index"`
+}
+
+func (AgentDeviceEnrollmentChallenge) TableName() string {
+	return "agent_device_enrollment_challenges"
+}
+
+// AgentCredential stores only hashes and derivation inputs. Raw challenge and
+// connection bearer values are never persisted.
 type AgentCredential struct {
 	ControlPlaneModel
 	PublicID                string     `gorm:"size:64;not null;uniqueIndex:uk_agent_credentials_public_id"`

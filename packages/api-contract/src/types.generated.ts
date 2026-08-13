@@ -887,6 +887,7 @@ export interface DeviceResponseDoc {
     deviceId: string;
     lastSeenAt: string;
     name: string;
+    online: boolean;
     platform: string;
     status: string;
     updatedAt: string;
@@ -900,6 +901,7 @@ export interface DeviceResponseDocData {
   deviceId: string;
   lastSeenAt: string;
   name: string;
+  online: boolean;
   platform: string;
   status: string;
   updatedAt: string;
@@ -943,9 +945,10 @@ export interface EmailRegistrationStartResponseDoc {
   errorMsg: string;
 }
 
-export interface EnrollmentResponseDoc {
+export interface EnrollmentChallengeResponseDoc {
   data: {
-    enrollmentCode: string;
+    canonical: string;
+    challengeId: string;
     expiresAt: string;
   };
   errorMsg: string;
@@ -4782,6 +4785,21 @@ export namespace Agent {
   /**
    * No description
    * @tags agent-gateway
+   * @name BridgeEnrollmentChallengesCreate
+   * @summary Create a gateway device enrollment challenge
+   * @request POST:/agent/bridge/enrollment-challenges
+   */
+  export namespace BridgeEnrollmentChallengesCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = EnrollmentChallengeResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent-gateway
    * @name DevicesList
    * @summary List gateway devices
    * @request GET:/agent/devices
@@ -4793,22 +4811,6 @@ export namespace Agent {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = DeviceListResponseDoc;
-  }
-
-  /**
-   * No description
-   * @tags agent-gateway
-   * @name DevicesEnrollmentsCreate
-   * @summary Create a gateway device enrollment code
-   * @request POST:/agent/devices/enrollments
-   * @secure
-   */
-  export namespace DevicesEnrollmentsCreate {
-    export type RequestParams = {};
-    export type RequestQuery = {};
-    export type RequestBody = never;
-    export type RequestHeaders = {};
-    export type ResponseBody = EnrollmentResponseDoc;
   }
 
   /**

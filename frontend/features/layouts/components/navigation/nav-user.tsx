@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import {
   Check,
   ChevronDown,
+  Monitor,
 } from "lucide-react";
 
 import {
@@ -39,6 +40,7 @@ import { dispatchUserProfileUpdated } from "@/shared/auth/user-profile-events";
 import { dispatchOpenAnnouncements, getAnnouncementUnread, subscribeAnnouncementUnreadChanged } from "@/shared/events/announcement-events";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { APP_LOCALE_LABELS, APP_LOCALES, type AppLocale } from "@/i18n/config";
+import { useDevices } from "@/features/devices";
 
 export function NavUser({
   user,
@@ -60,6 +62,8 @@ export function NavUser({
   const [hasUnreadAnnouncement, setHasUnreadAnnouncement] = React.useState(() => getAnnouncementUnread());
   const skipTriggerFocusRef = React.useRef(false);
   const isAdmin = user.role === "superadmin";
+  const { devices, defaultDeviceId, selectDefaultDevice } = useDevices();
+  const activeDevices = devices.filter((item) => item.status === "active");
 
   React.useEffect(() => subscribeAnnouncementUnreadChanged(setHasUnreadAnnouncement), []);
 
@@ -194,6 +198,29 @@ export function NavUser({
                     >
                       {APP_LOCALE_LABELS[item]}
                       {locale === item ? <DropdownMenuItemIcon icon={Check} className="ml-auto" /> : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger
+                  className="focus:bg-accent/40 data-[state=open]:bg-accent/40"
+                  disabled={activeDevices.length === 0}
+                >
+                  <Monitor className="mr-2 size-4 stroke-1" />
+                  {t("device")}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="min-w-48 p-1.5">
+                  {activeDevices.map((device) => (
+                    <DropdownMenuItem
+                      key={device.deviceId}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        void selectDefaultDevice(device.deviceId);
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{device.name}</span>
+                      {defaultDeviceId === device.deviceId ? <DropdownMenuItemIcon icon={Check} className="ml-auto" /> : null}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuSubContent>

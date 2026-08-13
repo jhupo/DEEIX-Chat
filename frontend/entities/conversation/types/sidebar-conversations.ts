@@ -36,7 +36,11 @@ export type SidebarConversationsControllerValue = {
   lastChange: SidebarConversationChange | null;
   loadMore: () => Promise<void>;
   retryLoadMore: () => Promise<void>;
-  prependNewConversation: (platformModelName?: string, projectID?: string) => Promise<ConversationDTO | null>;
+  prependNewConversation: (
+    platformModelName?: string,
+    projectID?: string,
+    execution?: { type: "cloud" } | { type: "gateway"; deviceID: string; profileID: string; workspaceID: string },
+  ) => Promise<ConversationDTO | null>;
   touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void;
   renameByPublicID: (publicID: string, title: string) => Promise<ConversationDTO | null>;
   regenerateTitleByPublicID: (publicID: string) => Promise<ConversationDTO | null>;

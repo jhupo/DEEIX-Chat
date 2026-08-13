@@ -120,6 +120,13 @@ func (h *bridgeHub) notifyUser(userID uint) {
 	}
 }
 
+func (h *bridgeHub) connected(deviceID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	_, ok := h.connections[deviceID]
+	return ok
+}
+
 func (h *bridgeHub) subscribeUser(userID uint) (<-chan struct{}, func()) {
 	subscriber := make(chan struct{}, 1)
 	h.mu.Lock()

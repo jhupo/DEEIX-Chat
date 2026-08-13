@@ -40,6 +40,7 @@ var allowedKeys = map[string]string{
 	"chat.input_height":                         "standard",
 	"chat.content_width":                        "compact",
 	"chat.default_mcp_tool_ids":                 "[]",
+	"agent.default_device_id":                   "",
 }
 
 // boolKeys 取值只能是 "true" / "false"。
@@ -74,6 +75,9 @@ func validateValue(key, value string) error {
 	if key == "chat.default_sub2_key_binding_id" {
 		return validateDefaultSub2KeyBindingID(value, key)
 	}
+	if key == "agent.default_device_id" {
+		return validatePublicID(value, key, "agd_")
+	}
 	if boolKeys[key] {
 		if value != "true" && value != "false" {
 			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be 'true' or 'false'", key)}
@@ -86,6 +90,21 @@ func validateValue(key, value string) error {
 				valid = append(valid, "'"+v+"'")
 			}
 			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s: must be one of %s", key, strings.Join(valid, ", "))}
+		}
+	}
+	return nil
+}
+
+func validatePublicID(value, key, prefix string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) != len(prefix)+32 || !strings.HasPrefix(value, prefix) {
+		return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s", key)}
+	}
+	for _, ch := range value[len(prefix):] {
+		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+			return &ErrValidation{Msg: fmt.Sprintf("invalid value for %s", key)}
 		}
 	}
 	return nil

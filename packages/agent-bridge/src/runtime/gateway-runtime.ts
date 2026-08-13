@@ -20,9 +20,6 @@ import { OutgoingFrameJournal } from "../wal/outgoing-frame-journal.js";
 
 export type GatewayRuntimeOptions = {
 	dataDirectory: string;
-	profileId: string;
-	codexExecutable: string;
-	workspaces: ReadonlyArray<{ workspaceId: string; root: string }>;
 	reconnect?: boolean;
 };
 
@@ -30,16 +27,12 @@ export async function runGateway(
 	options: GatewayRuntimeOptions,
 	signal: AbortSignal,
 ): Promise<void> {
-	if (options.profileId.length > 64)
-		throw new TypeError("profileId must not exceed 64 characters");
-	if (options.workspaces.length === 0)
-		throw new TypeError("at least one workspace is required");
 	await mkdir(options.dataDirectory, { recursive: true, mode: 0o700 });
 	const config = await readBridgeConfig(join(options.dataDirectory, "config.json"));
 	const identity = await DeviceIdentity.loadOrCreate(
 		join(options.dataDirectory, "device-identity.json"),
 	);
-	await assertCodexVersion(options.codexExecutable);
+	await assertCodexVersion(config.codexExecutable);
 
 	const commandWal = await DurableWalStore.open(
 		join(options.dataDirectory, "wal", "commands"),
@@ -54,18 +47,18 @@ export async function runGateway(
 	const outgoing = OutgoingFrameJournal.restore(outgoingWal);
 	const sources = SourceRefRegistry.restore(sourceWal);
 	const workspaces = new WorkspaceRegistry();
-	for (const workspace of options.workspaces)
+	for (const workspace of config.workspaces)
 		await workspaces.register(workspace.workspaceId, workspace.root);
 
 	const providers = new ProviderRegistry();
-	const process = startCodexAppServer(options.codexExecutable);
+	const process = startCodexAppServer(config.codexExecutable);
 	const adapter = new CodexAdapter({
-		profileId: options.profileId,
+		profileId: config.profileId,
 		rpc: process.rpc,
 		sources,
 		closeProcess: process.close,
 	});
-	providers.register(options.profileId, adapter);
+	providers.register(config.profileId, adapter);
 	const executor = new GatewayCommandExecutor(
 		commands,
 		workspaces,
@@ -86,8 +79,8 @@ export async function runGateway(
 					config,
 					token,
 					{
-						profileId: options.profileId,
-						workspaces: options.workspaces.map(({ workspaceId }) => ({ workspaceId, name: workspaceId })),
+						profileId: config.profileId,
+						workspaces: config.workspaces.map(({ workspaceId, name }) => ({ workspaceId, name })),
 						proveRuntimeAuth: (challenge, proofSignal) =>
 							adapter.proveRuntimeAuth(challenge, proofSignal),
 						commands, executor, outgoing,

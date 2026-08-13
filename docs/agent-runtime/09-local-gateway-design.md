@@ -27,6 +27,12 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 - Runtime Profile 已完成准入证明且未过期。
 - Workspace 属于同一设备和 Profile，状态可用。
 
+## 2.1 安装、注册与更新
+
+账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Bridge 包一并放入前端静态目录，用户机器不直接连接 GitHub。
+
+Bridge 配置与 Ed25519 设备私钥保存在用户目录。重复运行安装命令会停止原常驻任务、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows 当前用户计划任务重新启动。程序包与身份数据分目录，客户端更新不会改变设备 ID。
+
 ## 3. 强类型命令
 
 Conversation 当前只会创建：

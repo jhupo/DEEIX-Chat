@@ -36,8 +36,7 @@ func newRepoPublicID(prefix string) string {
 func toDomainDevice(v model.AgentDevice) *domainagent.Device {
 	return &domainagent.Device{
 		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID,
-		EnrollmentCredentialID: v.EnrollmentCredentialID,
-		Name:                   v.Name, Platform: v.Platform, PublicKey: append([]byte(nil), v.PublicKey...),
+		Name: v.Name, Platform: v.Platform, PublicKey: append([]byte(nil), v.PublicKey...),
 		PublicKeyFingerprint: v.PublicKeyFingerprint, CredentialVersion: v.CredentialVersion,
 		Status: v.Status, NextServerSeq: v.NextServerSeq,
 		LastAckedServerSeq: v.LastAckedServerSeq, LastAckedBridgeSeq: v.LastAckedBridgeSeq,
@@ -49,11 +48,31 @@ func toDomainDevice(v model.AgentDevice) *domainagent.Device {
 func toModelDevice(v *domainagent.Device) *model.AgentDevice {
 	return &model.AgentDevice{
 		ControlPlaneModel: model.ControlPlaneModel{ID: v.ID},
-		PublicID:          v.PublicID, UserID: v.UserID, EnrollmentCredentialID: v.EnrollmentCredentialID,
+		PublicID:          v.PublicID, UserID: v.UserID,
 		Name: v.Name, Platform: v.Platform, PublicKey: append([]byte(nil), v.PublicKey...),
 		PublicKeyFingerprint: v.PublicKeyFingerprint, CredentialVersion: v.CredentialVersion,
 		Status: v.Status, NextServerSeq: v.NextServerSeq, LastSeenAt: v.LastSeenAt, RevokedAt: v.RevokedAt,
 		LastAckedServerSeq: v.LastAckedServerSeq, LastAckedBridgeSeq: v.LastAckedBridgeSeq,
+	}
+}
+
+func toDomainEnrollmentChallenge(v model.AgentDeviceEnrollmentChallenge) *domainagent.DeviceEnrollmentChallenge {
+	return &domainagent.DeviceEnrollmentChallenge{
+		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, UserPublicID: v.UserPublicID,
+		RemoteUserID: v.RemoteUserID, Name: v.Name, Platform: v.Platform,
+		PublicKey: append([]byte(nil), v.PublicKey...), PublicKeyFingerprint: v.PublicKeyFingerprint,
+		Nonce: v.Nonce, ExpiresAt: v.ExpiresAt, ConsumedAt: v.ConsumedAt,
+		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+	}
+}
+
+func toModelEnrollmentChallenge(v *domainagent.DeviceEnrollmentChallenge) *model.AgentDeviceEnrollmentChallenge {
+	return &model.AgentDeviceEnrollmentChallenge{
+		ControlPlaneModel: model.ControlPlaneModel{ID: v.ID},
+		PublicID:          v.PublicID, UserID: v.UserID, UserPublicID: v.UserPublicID,
+		RemoteUserID: v.RemoteUserID, Name: v.Name, Platform: v.Platform,
+		PublicKey: append([]byte(nil), v.PublicKey...), PublicKeyFingerprint: v.PublicKeyFingerprint,
+		Nonce: v.Nonce, ExpiresAt: v.ExpiresAt, ConsumedAt: v.ConsumedAt,
 	}
 }
 
@@ -157,8 +176,8 @@ func toDomainRuntimeChallenge(v model.AgentRuntimeProofChallenge) *domainagent.R
 	}
 }
 
-func (r *Repo) CreateCredential(ctx context.Context, item *domainagent.Credential) error {
-	entity := toModelCredential(item)
+func (r *Repo) CreateEnrollmentChallenge(ctx context.Context, item *domainagent.DeviceEnrollmentChallenge) error {
+	entity := toModelEnrollmentChallenge(item)
 	if err := errFor(r.db.WithContext(ctx).Create(entity).Error); err != nil {
 		return err
 	}
@@ -166,34 +185,48 @@ func (r *Repo) CreateCredential(ctx context.Context, item *domainagent.Credentia
 	return nil
 }
 
-func (r *Repo) EnrollDevice(ctx context.Context, tokenHash string, input *domainagent.Device, now time.Time) (*domainagent.Device, error) {
+func (r *Repo) GetEnrollmentChallenge(ctx context.Context, publicID string) (*domainagent.DeviceEnrollmentChallenge, error) {
+	var row model.AgentDeviceEnrollmentChallenge
+	if err := r.db.WithContext(ctx).Where("public_id = ?", publicID).First(&row).Error; err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainEnrollmentChallenge(row), nil
+}
+
+func (r *Repo) ConsumeEnrollmentChallengeAndEnroll(ctx context.Context, challengeID uint, input *domainagent.Device, now time.Time) (*domainagent.Device, error) {
 	var result model.AgentDevice
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var credential model.AgentCredential
+		var challenge model.AgentDeviceEnrollmentChallenge
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("kind = ? AND token_hash = ?", domainagent.CredentialKindEnrollment, tokenHash).
-			First(&credential).Error; err != nil {
+			Where("id = ?", challengeID).First(&challenge).Error; err != nil {
 			return err
 		}
-		if credential.ExpiresAt.Before(now) {
+		if challenge.ExpiresAt.Before(now) {
 			return repository.ErrConflict
 		}
-		if credential.ConsumedAt != nil {
-			if err := tx.Where("enrollment_credential_id = ?", credential.ID).First(&result).Error; err != nil {
-				return err
-			}
-			if result.PublicKeyFingerprint != input.PublicKeyFingerprint {
+		lookup := tx.Where("public_key_fingerprint = ?", challenge.PublicKeyFingerprint).First(&result)
+		if lookup.Error == nil {
+			if result.UserID != challenge.UserID || result.PublicKeyFingerprint != input.PublicKeyFingerprint {
 				return repository.ErrConflict
 			}
-			return nil
+			if result.Status != domainagent.DeviceStatusActive {
+				return repository.ErrConflict
+			}
+		} else if !dberror.IsRecordNotFound(lookup.Error) {
+			return lookup.Error
+		} else {
+			result = *toModelDevice(input)
+			result.UserID = challenge.UserID
+			if err := tx.Create(&result).Error; err != nil {
+				return err
+			}
 		}
-		result = *toModelDevice(input)
-		result.UserID = credential.UserID
-		result.EnrollmentCredentialID = credential.ID
-		if err := tx.Create(&result).Error; err != nil {
-			return err
+		if challenge.ConsumedAt == nil {
+			if err := tx.Model(&challenge).Where("consumed_at IS NULL").Update("consumed_at", now).Error; err != nil {
+				return err
+			}
 		}
-		return tx.Model(&credential).Where("consumed_at IS NULL").Update("consumed_at", now).Error
+		return nil
 	})
 	if err != nil {
 		return nil, errFor(err)

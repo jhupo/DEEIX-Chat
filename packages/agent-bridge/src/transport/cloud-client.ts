@@ -13,23 +13,32 @@ export class BridgeCloudClient {
 		this.#fetch = fetchImplementation;
 	}
 
-	async pair(
-		enrollmentCode: string,
+	async enroll(
+		userPublicID: string,
 		deviceName: string,
 		identity: DeviceIdentity,
-	): Promise<BridgeConfig> {
-		if (enrollmentCode.trim().length === 0 || enrollmentCode.length > 128)
-			throw new TypeError("enrollment code is invalid");
+		prove: (canonical: string, signal: AbortSignal) => Promise<string>,
+	): Promise<string> {
+		if (!/^[a-f0-9]{32}$/.test(userPublicID))
+			throw new TypeError("user public ID is invalid");
 		if (deviceName.trim().length === 0 || [...deviceName.trim()].length > 128)
 			throw new TypeError("device name is invalid");
-		const data = await this.#post("/api/v1/agent/bridge/enroll", {
-			enrollmentCode: enrollmentCode.trim(),
+		const challenge = await this.#post("/api/v1/agent/bridge/enrollment-challenges", {
+			userPublicID,
 			name: deviceName.trim(),
 			platform: platformName(),
 			publicKey: identity.publicKeyBase64Url(),
 		});
-		const deviceId = requiredString(data, "deviceId", /^agd_[a-f0-9]{32}$/);
-		return { version: 1, cloudUrl: this.#baseUrl, deviceId };
+		const challengeId = requiredString(challenge, "challengeId", /^age_[a-f0-9]{32}$/);
+		const canonical = requiredString(challenge, "canonical", /^deeix-device-enrollment-v1\n[\s\S]{1,512}$/);
+		const signal = AbortSignal.timeout(30_000);
+		const proof = await prove(canonical, signal);
+		const data = await this.#post("/api/v1/agent/bridge/enrollments", {
+			challengeId,
+			proof,
+			signature: identity.signBase64Url(canonical),
+		});
+		return requiredString(data, "deviceId", /^agd_[a-f0-9]{32}$/);
 	}
 
 	async connectionToken(config: BridgeConfig, identity: DeviceIdentity): Promise<string> {

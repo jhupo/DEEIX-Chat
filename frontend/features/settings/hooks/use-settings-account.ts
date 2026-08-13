@@ -9,6 +9,8 @@ import type { ActiveSessionDTO, UserDTO } from "@/shared/api/auth.types";
 import { clearSessionAndRedirectToLogin } from "@/shared/auth/session";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { revokeAgentDevice, type AgentDeviceDTO } from "@/shared/api/agent-gateway";
+import { useDevices } from "@/features/devices";
 
 export function useSettingsAccount() {
   const t = useTranslations("settings.accountPage.toasts");
@@ -20,6 +22,9 @@ export function useSettingsAccount() {
   const [changingPassword, setChangingPassword] = React.useState(false);
   const [revokingSessionID, setRevokingSessionID] = React.useState("");
   const [passwordDialogOpen, setPasswordDialogOpen] = React.useState(false);
+  const [addDeviceDialogOpen, setAddDeviceDialogOpen] = React.useState(false);
+  const [revokingDeviceID, setRevokingDeviceID] = React.useState("");
+  const { devices, loading: devicesLoading, refresh: refreshDevices } = useDevices();
 
   const loadAccountData = React.useCallback(async () => {
     setLoading(true);
@@ -96,17 +101,39 @@ export function useSettingsAccount() {
     }
   }, [revokingSessionID, t, translateError]);
 
+  const handleRevokeDevice = React.useCallback(async (device: AgentDeviceDTO) => {
+    if (revokingDeviceID) return;
+    setRevokingDeviceID(device.deviceId);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) throw new Error(t("sessionMissing"));
+      await revokeAgentDevice(token, device.deviceId);
+      await refreshDevices();
+      toast.success(t("deviceRevoked"));
+    } catch (error) {
+      toast.error(t("deviceRevokeFailed"), { description: translateError(error, t("retryLater")) });
+    } finally {
+      setRevokingDeviceID("");
+    }
+  }, [refreshDevices, revokingDeviceID, t, translateError]);
+
   return {
     viewer,
     sessions,
+    devices,
+    devicesLoading,
     loading,
     loggingOut,
     changingPassword,
     revokingSessionID,
     passwordDialogOpen,
+    addDeviceDialogOpen,
+    revokingDeviceID,
     setPasswordDialogOpen,
+    setAddDeviceDialogOpen,
     handleChangePassword,
     handleLogoutAll,
     handleLogoutSession,
+    handleRevokeDevice,
   };
 }

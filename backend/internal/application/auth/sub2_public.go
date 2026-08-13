@@ -61,6 +61,20 @@ func (s *Service) RuntimeUser(ctx context.Context, userID uint) (string, int64, 
 	return user.PublicID, user.Sub2UserID, nil
 }
 
+// RuntimeUserByPublicID resolves an external device-enrollment identity without
+// exposing the internal database ID in the client protocol.
+func (s *Service) RuntimeUserByPublicID(ctx context.Context, publicID string) (uint, string, int64, error) {
+	user, err := s.repo.GetByPublicID(ctx, publicID)
+	if err != nil {
+		return 0, "", 0, err
+	}
+	if user.Status != domainuser.StatusActive || user.Sub2UserID <= 0 ||
+		user.Sub2InstanceID != s.sub2.InstanceID() || user.PublicID == "" {
+		return 0, "", 0, repository.ErrNotFound
+	}
+	return user.ID, user.PublicID, user.Sub2UserID, nil
+}
+
 func (s *Service) GetLoginOptions(ctx context.Context) (*LoginOptions, error) {
 	settings, err := s.sub2.Settings(ctx)
 	if err != nil {

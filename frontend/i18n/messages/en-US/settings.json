@@ -114,6 +114,27 @@
     "logoutAllDevices": "Sign out of all active devices",
     "publicID": "Public user ID",
     "copyPublicID": "Copy public user ID",
+    "device": {
+      "title": "Active devices",
+      "add": "Add device",
+      "name": "Device",
+      "status": "Status",
+      "platform": "System",
+      "lastSeen": "Last active",
+      "online": "Online",
+      "offline": "Offline",
+      "empty": "No devices have been added.",
+      "actions": "Device actions",
+      "revoke": "Remove device",
+      "platforms": { "windows": "Windows", "darwin": "macOS", "linux": "Linux" },
+      "install": {
+        "title": "Add device",
+        "description": "Run this command in the project directory you want to use for work conversations.",
+        "copy": "Copy installation command",
+        "copied": "Installation command copied",
+        "copyFailed": "Copy failed"
+      }
+    },
     "actions": {
       "update": "Update",
       "logOut": "Sign out",
@@ -175,7 +196,9 @@
       "passwordChangedDescription": "Please sign in again with your new password.",
       "changePasswordFailed": "Failed to change password",
       "sessionLoggedOut": "Session signed out",
-      "logoutSessionFailed": "Failed to sign out session"
+      "logoutSessionFailed": "Failed to sign out session",
+      "deviceRevoked": "Device removed",
+      "deviceRevokeFailed": "Failed to remove device"
     }
   },
   "chatPage": {

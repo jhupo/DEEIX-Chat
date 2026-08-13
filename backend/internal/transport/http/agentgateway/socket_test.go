@@ -217,10 +217,13 @@ func (r *socketRepo) ConsumeConnection(_ context.Context, tokenHash string, now 
 	return &copy, nil
 }
 
-func (*socketRepo) CreateCredential(context.Context, *domainagent.Credential) error {
+func (*socketRepo) CreateEnrollmentChallenge(context.Context, *domainagent.DeviceEnrollmentChallenge) error {
 	return nil
 }
-func (*socketRepo) EnrollDevice(context.Context, string, *domainagent.Device, time.Time) (*domainagent.Device, error) {
+func (*socketRepo) GetEnrollmentChallenge(context.Context, string) (*domainagent.DeviceEnrollmentChallenge, error) {
+	return nil, repository.ErrNotFound
+}
+func (*socketRepo) ConsumeEnrollmentChallengeAndEnroll(context.Context, uint, *domainagent.Device, time.Time) (*domainagent.Device, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) ListDevices(context.Context, uint) ([]domainagent.Device, error) {
@@ -385,6 +388,10 @@ type socketRuntimeAuth struct {
 
 func (a *socketRuntimeAuth) RuntimeUser(context.Context, uint) (string, int64, error) {
 	return a.userPublicID, 17, nil
+}
+
+func (a *socketRuntimeAuth) RuntimeUserByPublicID(context.Context, string) (uint, string, int64, error) {
+	return 7, a.userPublicID, 17, nil
 }
 
 func (a *socketRuntimeAuth) MatchRuntimeProof(_ context.Context, _ uint, remoteUserID int64, challenge, proof []byte) (int64, string, error) {

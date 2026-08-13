@@ -13,6 +13,7 @@ func Models() []interface{} {
 		&model.UserSession{},
 		&model.UserAuthEvent{},
 		&model.AgentDevice{},
+		&model.AgentDeviceEnrollmentChallenge{},
 		&model.AgentCredential{},
 		&model.AgentCommand{},
 		&model.AgentBridgeFrame{},
@@ -186,6 +187,14 @@ func CleanupRemovedColumns(db *gorm.DB) error {
 	}
 	if err := dropColumns(db, &model.AgentThread{}, []string{"is_pinned", "labels_json", "share_policy"}); err != nil {
 		return err
+	}
+	if err := dropColumns(db, &model.AgentDevice{}, []string{"enrollment_credential_id"}); err != nil {
+		return err
+	}
+	if db.Migrator().HasTable(&model.AgentCredential{}) {
+		if err := db.Where("kind = ?", "enrollment").Delete(&model.AgentCredential{}).Error; err != nil {
+			return err
+		}
 	}
 	return nil
 }

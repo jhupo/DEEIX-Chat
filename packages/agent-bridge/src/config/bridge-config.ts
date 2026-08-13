@@ -1,10 +1,14 @@
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 export type BridgeConfig = {
 	version: 1;
 	cloudUrl: string;
+	userPublicID: string;
 	deviceId: string;
+	profileId: string;
+	codexExecutable: string;
+	workspaces: Array<{ workspaceId: string; root: string; name: string }>;
 };
 
 export async function readBridgeConfig(filePath: string): Promise<BridgeConfig> {
@@ -43,10 +47,40 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
 	if (Reflect.get(value, "version") !== 1)
 		throw new TypeError("bridge config version is unsupported");
 	const cloudUrl = normalizeCloudUrl(Reflect.get(value, "cloudUrl"));
+	const userPublicID = Reflect.get(value, "userPublicID");
 	const deviceId = Reflect.get(value, "deviceId");
+	const profileId = Reflect.get(value, "profileId");
+	const codexExecutable = Reflect.get(value, "codexExecutable");
+	const rawWorkspaces = Reflect.get(value, "workspaces");
+	if (typeof userPublicID !== "string" || !/^[a-f0-9]{32}$/.test(userPublicID))
+		throw new TypeError("bridge userPublicID is invalid");
 	if (typeof deviceId !== "string" || !/^agd_[a-f0-9]{32}$/.test(deviceId))
 		throw new TypeError("bridge deviceId is invalid");
-	return { version: 1, cloudUrl, deviceId };
+	if (typeof profileId !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(profileId))
+		throw new TypeError("bridge profileId is invalid");
+	if (typeof codexExecutable !== "string" || codexExecutable.length === 0 || codexExecutable.length > 2048 || codexExecutable.includes("\0"))
+		throw new TypeError("bridge codexExecutable is invalid");
+	if (!Array.isArray(rawWorkspaces) || rawWorkspaces.length === 0 || rawWorkspaces.length > 128)
+		throw new TypeError("bridge workspaces are invalid");
+	const workspaces = rawWorkspaces.map(parseWorkspace);
+	if (new Set(workspaces.map(({ workspaceId }) => workspaceId)).size !== workspaces.length)
+		throw new TypeError("bridge workspaceId values must be unique");
+	return { version: 1, cloudUrl, userPublicID, deviceId, profileId, codexExecutable, workspaces };
+}
+
+function parseWorkspace(value: unknown): { workspaceId: string; root: string; name: string } {
+	if (typeof value !== "object" || value === null || Array.isArray(value))
+		throw new TypeError("bridge workspace must be an object");
+	const workspaceId = Reflect.get(value, "workspaceId");
+	const root = Reflect.get(value, "root");
+	const name = Reflect.get(value, "name");
+	if (typeof workspaceId !== "string" || !/^[A-Za-z0-9._:-]{1,64}$/.test(workspaceId))
+		throw new TypeError("bridge workspaceId is invalid");
+	if (typeof root !== "string" || !isAbsolute(root) || root.includes("\0"))
+		throw new TypeError("bridge workspace root is invalid");
+	if (typeof name !== "string" || name.trim().length === 0 || [...name.trim()].length > 128)
+		throw new TypeError("bridge workspace name is invalid");
+	return { workspaceId, root, name: name.trim() };
 }
 
 export function normalizeCloudUrl(value: unknown): string {

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
-import { AppLogo } from "@/shared/components/app-logo";
+import { ExecutionModeSwitch } from "@/features/devices";
 
 export function MobileHeader({
   onCreateConversation,
@@ -30,13 +30,8 @@ export function MobileHeader({
         </Button>
       </div>
 
-      <div className="flex min-w-0 justify-center">
-        <AppLogo
-          width={64}
-          height={48}
-          priority
-          className="h-5 w-auto object-contain"
-        />
+      <div className="flex min-w-0 justify-center [&>div]:h-8 [&>div]:w-40">
+        <ExecutionModeSwitch />
       </div>
 
       <div className="flex justify-end">

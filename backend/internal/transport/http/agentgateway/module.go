@@ -7,7 +7,6 @@ type Module struct{ Handler *Handler }
 func NewModule(handler *Handler) *Module { return &Module{Handler: handler} }
 
 func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
-	group.POST("/agent/devices/enrollments", m.Handler.CreateEnrollment)
 	group.GET("/agent/devices", m.Handler.ListDevices)
 	group.GET("/agent/devices/:device_id", m.Handler.GetDevice)
 	group.PATCH("/agent/devices/:device_id", m.Handler.RenameDevice)
@@ -22,7 +21,8 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 }
 
 func (m *Module) RegisterBridgeRoutes(group *gin.RouterGroup) {
-	group.POST("/agent/bridge/enroll", m.Handler.EnrollDevice)
+	group.POST("/agent/bridge/enrollment-challenges", m.Handler.BeginEnrollment)
+	group.POST("/agent/bridge/enrollments", m.Handler.CompleteEnrollment)
 	group.POST("/agent/bridge/token-challenges", m.Handler.CreateChallenge)
 	group.POST("/agent/bridge/tokens", m.Handler.IssueConnection)
 	group.GET("/agent/bridge/connect", m.Handler.ConnectBridge)

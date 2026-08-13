@@ -1976,6 +1976,8 @@ definitions:
             type: string
           name:
             type: string
+          online:
+            type: boolean
           platform:
             type: string
           status:
@@ -1989,6 +1991,7 @@ definitions:
         - deviceId
         - lastSeenAt
         - name
+        - online
         - platform
         - status
         - updatedAt
@@ -2010,6 +2013,8 @@ definitions:
         type: string
       name:
         type: string
+      online:
+        type: boolean
       platform:
         type: string
       status:
@@ -2023,6 +2028,7 @@ definitions:
     - deviceId
     - lastSeenAt
     - name
+    - online
     - platform
     - status
     - updatedAt
@@ -2092,16 +2098,19 @@ definitions:
     - data
     - errorMsg
     type: object
-  EnrollmentResponseDoc:
+  EnrollmentChallengeResponseDoc:
     properties:
       data:
         properties:
-          enrollmentCode:
+          canonical:
+            type: string
+          challengeId:
             type: string
           expiresAt:
             type: string
         required:
-        - enrollmentCode
+        - canonical
+        - challengeId
         - expiresAt
         type: object
       errorMsg:
@@ -6631,7 +6640,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.17"
+  version: "0.4.18"
 paths:
   /admin/announcements:
     get:
@@ -9675,6 +9684,16 @@ paths:
       summary: Revoke local sessions
       tags:
       - admin
+  /agent/bridge/enrollment-challenges:
+    post:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/EnrollmentChallengeResponseDoc'
+      summary: Create a gateway device enrollment challenge
+      tags:
+      - agent-gateway
   /agent/devices:
     get:
       responses:
@@ -9903,18 +9922,6 @@ paths:
       security:
       - BearerAuth: []
       summary: Refresh a workspace resource
-      tags:
-      - agent-gateway
-  /agent/devices/enrollments:
-    post:
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/EnrollmentResponseDoc'
-      security:
-      - BearerAuth: []
-      summary: Create a gateway device enrollment code
       tags:
       - agent-gateway
   /agent/workspaces/{workspace_id}/artifacts:

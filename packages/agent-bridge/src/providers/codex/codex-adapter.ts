@@ -130,8 +130,8 @@ export class CodexAdapter implements ProviderAdapter {
 		if (!this.#started) throw new Error("Codex adapter is not started");
 		if (
 			typeof challenge !== "string" || challenge.length > 1024 ||
-			!challenge.startsWith("deeix-runtime-auth-proof-v1\n") ||
-			challenge.split("\n").length !== 7
+			!(challenge.startsWith("deeix-runtime-auth-proof-v1\n") && challenge.split("\n").length === 7) &&
+			!(challenge.startsWith("deeix-device-enrollment-v1\n") && challenge.split("\n").length === 6)
 		) {
 			throw new TypeError("runtime authentication challenge is invalid");
 		}

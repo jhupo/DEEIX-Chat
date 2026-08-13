@@ -6,12 +6,15 @@ type ChatSessionContextValue = {
   newConversationRevision: number;
   newConversationProjectID: string;
   requestNewConversation: (options?: { projectID?: string }) => void;
+  executionMode: "cloud" | "gateway";
+  setExecutionMode: (mode: "cloud" | "gateway") => void;
 };
 
 const ChatSessionContext = React.createContext<ChatSessionContextValue | null>(null);
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState({ revision: 0, projectID: "" });
+  const [executionMode, setExecutionMode] = React.useState<"cloud" | "gateway">("cloud");
   const requestNewConversation = React.useCallback((options?: { projectID?: string }) => {
     setState((prev) => ({
       revision: prev.revision + 1,
@@ -24,8 +27,10 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
       newConversationRevision: state.revision,
       newConversationProjectID: state.projectID,
       requestNewConversation,
+      executionMode,
+      setExecutionMode,
     }),
-    [requestNewConversation, state.projectID, state.revision],
+    [executionMode, requestNewConversation, state.projectID, state.revision],
   );
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

@@ -274,6 +274,7 @@ export function NavRecents() {
                                 url: `/chat?conversation_id=${publicID}`,
                                 shareActive: item.shareStatus === "active" && Boolean(item.shareID?.trim()),
                                 labelsJSON: item.labelsJSON,
+                                executionType: item.executionType,
                               }}
                               starAction={{
                                 label: item.isStarred ? t("row.unstar") : t("row.star"),

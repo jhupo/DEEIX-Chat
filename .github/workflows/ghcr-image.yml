@@ -186,7 +186,10 @@ jobs:
         with:
           name: agent-bridge-${{ matrix.name }}
           path: |
-            dist/deeix-agent-bridge-${{ matrix.name }}.*
+            dist/deeix-agent-bridge-${{ matrix.name }}.zip
+            dist/deeix-agent-bridge-${{ matrix.name }}.zip.sha256
+            dist/deeix-agent-bridge-${{ matrix.name }}.tar.gz
+            dist/deeix-agent-bridge-${{ matrix.name }}.tar.gz.sha256
           if-no-files-found: error
 
   release_application:
@@ -218,12 +221,21 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter @deeix/web build
+      - name: Download Agent Bridge bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent-bridge-*
+          path: dist
+          merge-multiple: true
       - name: Build application bundles
         shell: bash
         run: |
           mkdir -p dist
           version=$(cat VERSION)
           build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          bridge_dir="frontend/out/agent/releases/current"
+          mkdir -p "$bridge_dir"
+          cp dist/deeix-agent-bridge-*.zip* dist/deeix-agent-bridge-*.tar.gz* "$bridge_dir/"
           for arch in amd64 arm64; do
             root="dist/release-$arch"
             mkdir -p "$root/frontend"
@@ -249,16 +261,10 @@ jobs:
           {"schemaVersion":2,"repository":"$repo","tag":"$GITHUB_REF_NAME","version":"${GITHUB_REF_NAME#v}","commit":"$GITHUB_SHA","publishedAt":"$published","releaseURL":"https://github.com/$repo/releases/tag/$GITHUB_REF_NAME","bundles":[{"platform":"linux/amd64","url":"$base/deeix-chat-linux-amd64.tar.gz","sha256":"sha256:$amd64_sha","size":$amd64_size},{"platform":"linux/arm64","url":"$base/deeix-chat-linux-arm64.tar.gz","sha256":"sha256:$arm64_sha","size":$arm64_size}]}
           EOF
           (cd dist && sha256sum update-manifest.json > update-manifest.json.sha256)
-      - name: Download Agent Bridge bundles
-        uses: actions/download-artifact@v4
-        with:
-          pattern: agent-bridge-*
-          path: dist
-          merge-multiple: true
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 dist/deeix-agent-bridge-* --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 dist/deeix-agent-bridge-*.zip* dist/deeix-agent-bridge-*.tar.gz* --clobber

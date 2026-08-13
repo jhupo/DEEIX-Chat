@@ -1,6 +1,6 @@
 # @deeix/agent-bridge
 
-Local Gateway runtime for DEEIX Agent execution. The package owns device pairing, outbound WSS, local command validation,
+Local Gateway runtime for DEEIX Agent execution. The package owns device enrollment, outbound WSS, local command validation,
 workspace path containment, crash-safe command/event/source journals, verified image/audio downloads, and the pinned Codex
 app-server `0.147.0` adapter. A command becomes receipt-ready only after all referenced artifacts pass size and SHA-256
 validation; short-lived artifact grants are never written to the Bridge WAL.
@@ -14,11 +14,11 @@ pnpm --filter @deeix/agent-bridge build
 pnpm --filter @deeix/agent-bridge check:schema
 ```
 
-After building, pair once with a code created by the signed-in DEEIX user, then run with explicit local registrations:
+After building, enroll with the DEEIX public user ID and current workspace, then start the persisted configuration:
 
 ```bash
-node dist/src/cli.js pair --server https://HOST --code ENROLLMENT_CODE --name DEVICE_NAME
-node dist/src/cli.js run --profile PROFILE_ID --workspace WORKSPACE_ID=/absolute/project/path --codex /path/to/codex
+node dist/src/cli.js install --server https://HOST --user USER_PUBLIC_ID --workspace /absolute/project/path --codex /path/to/codex
+node dist/src/cli.js start
 ```
 
 The Cloud-visible `userId` comes from the existing `identity_users.public_id`; the Bridge stores only opaque device,

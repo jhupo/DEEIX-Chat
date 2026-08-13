@@ -1,6 +1,7 @@
 package agentgateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -12,6 +13,51 @@ import (
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
+
+func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentDeviceEnrollmentChallenge{}); err != nil {
+		t.Fatalf("migrate device enrollment tables: %v", err)
+	}
+	repo := NewRepo(database)
+	now := time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
+	publicKey := bytes.Repeat([]byte("k"), 32)
+	fingerprint := strings.Repeat("a", 64)
+	newChallenge := func(publicID string) *domainagent.DeviceEnrollmentChallenge {
+		return &domainagent.DeviceEnrollmentChallenge{
+			PublicID: publicID, UserID: 7, UserPublicID: strings.Repeat("b", 32), RemoteUserID: 9,
+			Name: "desktop", Platform: "windows", PublicKey: publicKey,
+			PublicKeyFingerprint: fingerprint, Nonce: strings.Repeat("n", 32), ExpiresAt: now.Add(time.Minute),
+		}
+	}
+	challenge := newChallenge("age_0123456789abcdef0123456789abcdef")
+	if err := repo.CreateEnrollmentChallenge(context.Background(), challenge); err != nil {
+		t.Fatalf("create enrollment challenge: %v", err)
+	}
+	input := &domainagent.Device{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: publicKey, PublicKeyFingerprint: fingerprint, CredentialVersion: 1,
+		Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	created, err := repo.ConsumeEnrollmentChallengeAndEnroll(context.Background(), challenge.ID, input, now)
+	if err != nil {
+		t.Fatalf("enroll device: %v", err)
+	}
+	replayed, err := repo.ConsumeEnrollmentChallengeAndEnroll(context.Background(), challenge.ID, input, now)
+	if err != nil || replayed.PublicID != created.PublicID {
+		t.Fatalf("active enrollment replay changed identity: %#v %v", replayed, err)
+	}
+	if err := repo.RevokeDevice(context.Background(), 7, created.PublicID, now); err != nil {
+		t.Fatalf("revoke device: %v", err)
+	}
+	retry := newChallenge("age_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if err := repo.CreateEnrollmentChallenge(context.Background(), retry); err != nil {
+		t.Fatalf("create retry challenge: %v", err)
+	}
+	if _, err := repo.ConsumeEnrollmentChallengeAndEnroll(context.Background(), retry.ID, input, now); err == nil {
+		t.Fatal("revoked device was restored by enrollment")
+	}
+}
 
 func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
@@ -28,7 +74,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 	device := model.AgentDevice{
 		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7,
-		EnrollmentCredentialID: 1, Name: "desktop", Platform: "windows",
+		Name: "desktop", Platform: "windows",
 		PublicKey: []byte(strings.Repeat("k", 32)), PublicKeyFingerprint: strings.Repeat("a", 64),
 		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
 	}

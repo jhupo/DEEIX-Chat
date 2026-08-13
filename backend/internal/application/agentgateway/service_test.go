@@ -72,6 +72,21 @@ func TestRuntimeChallengeBindsExistingUserPublicID(t *testing.T) {
 	}
 }
 
+func TestEnrollmentChallengeBindsPublicIdentityAndDevice(t *testing.T) {
+	expiresAt := time.Unix(123456, 0).UTC()
+	canonical := enrollmentChallengeCanonical(
+		"f6f910e920934def9a5cda479fc25251",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"windows",
+		"nonce",
+		expiresAt,
+	)
+	want := "deeix-device-enrollment-v1\nf6f910e920934def9a5cda479fc25251\n0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nwindows\nnonce\n123456"
+	if canonical != want {
+		t.Fatalf("enrollment challenge canonical = %q, want %q", canonical, want)
+	}
+}
+
 func TestAgentWorkPayloadValidation(t *testing.T) {
 	validSettingsJSON := json.RawMessage(`{"model":"gpt-5.6","reasoningEffort":"high","approvalPolicy":"on-request","sandboxPolicy":"workspace-write"}`)
 	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`)

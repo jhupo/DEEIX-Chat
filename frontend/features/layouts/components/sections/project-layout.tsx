@@ -9,6 +9,7 @@ import { SidebarConversationsProvider } from "@/entities/conversation";
 import { AppSidebar } from "@/features/layouts/components/navigation/app-sidebar";
 import { MobileHeader } from "@/features/layouts/components/sections/mobile-header";
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
+import { DeviceProvider, ExecutionModeSwitch } from "@/features/devices";
 import { AppearancePreferencesSync } from "@/features/settings";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { UserLocaleSync } from "@/i18n/user-locale-sync";
@@ -56,6 +57,9 @@ function ProjectLayoutShell({
       <AppSidebar onCreateConversation={handleCreateConversation} />
       <SidebarInset>
         <MobileHeader onCreateConversation={handleCreateConversation} />
+        <div className="pointer-events-none absolute inset-x-0 top-2 z-30 hidden justify-center md:flex">
+          <ExecutionModeSwitch />
+        </div>
         <div className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden pb-2 md:p-4 md:pt-0">
           {children}
         </div>
@@ -83,9 +87,11 @@ export function ProjectLayout({
           bulkPendingTitle={tRecent("dialogs.bulk.pending")}
           newConversationTitle={tRecent("newChat")}
         >
-          <ChatSessionProvider>
-            <ProjectLayoutShell>{children}</ProjectLayoutShell>
-          </ChatSessionProvider>
+          <DeviceProvider>
+            <ChatSessionProvider>
+              <ProjectLayoutShell>{children}</ProjectLayoutShell>
+            </ChatSessionProvider>
+          </DeviceProvider>
         </SidebarConversationsProvider>
       </SidebarProvider>
     </>

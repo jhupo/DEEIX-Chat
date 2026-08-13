@@ -43,6 +43,7 @@ const (
 
 type RuntimeUserResolver interface {
 	RuntimeUser(context.Context, uint) (string, int64, error)
+	RuntimeUserByPublicID(context.Context, string) (uint, string, int64, error)
 }
 
 type RuntimeProofVerifier interface {
@@ -83,16 +84,23 @@ type DeviceView struct {
 	UpdatedAt  time.Time
 }
 
-type EnrollmentResult struct {
-	EnrollmentCode string
-	ExpiresAt      time.Time
+type EnrollmentChallengeResult struct {
+	ChallengeID string
+	Canonical   string
+	ExpiresAt   time.Time
 }
 
-type EnrollDeviceInput struct {
-	EnrollmentCode string
-	Name           string
-	Platform       string
-	PublicKey      string
+type BeginEnrollmentInput struct {
+	UserPublicID string
+	Name         string
+	Platform     string
+	PublicKey    string
+}
+
+type CompleteEnrollmentInput struct {
+	ChallengeID string
+	Proof       string
+	Signature   string
 }
 
 type EnrollDeviceResult struct {
@@ -634,39 +642,76 @@ func runtimeChallengeCanonical(userPublicID, devicePublicID, profilePublicID, fi
 	}, "\n")
 }
 
-func (s *Service) CreateEnrollment(ctx context.Context, userID uint) (*EnrollmentResult, error) {
-	if userID == 0 {
-		return nil, ErrInvalidInput
-	}
-	now := s.now().UTC()
-	item := domainagent.Credential{
-		PublicID: newPublicID("agc"), UserID: userID,
-		Kind:                 domainagent.CredentialKindEnrollment,
-		DerivationKeyVersion: credentialKeyVersion, ExpiresAt: now.Add(enrollmentTTL),
-	}
-	bearer := s.deriveBearer(&item)
-	item.TokenHash = hashBearer(bearer)
-	if err := s.repo.CreateCredential(ctx, &item); err != nil {
-		return nil, err
-	}
-	return &EnrollmentResult{EnrollmentCode: bearer, ExpiresAt: item.ExpiresAt}, nil
+func enrollmentChallengeCanonical(userPublicID, fingerprint, platform, nonce string, expiresAt time.Time) string {
+	return strings.Join([]string{
+		"deeix-device-enrollment-v1", userPublicID, fingerprint, platform,
+		nonce, fmt.Sprintf("%d", expiresAt.Unix()),
+	}, "\n")
 }
 
-func (s *Service) EnrollDevice(ctx context.Context, input EnrollDeviceInput) (*EnrollDeviceResult, error) {
-	code := strings.TrimSpace(input.EnrollmentCode)
+func (s *Service) BeginEnrollment(ctx context.Context, input BeginEnrollmentInput) (*EnrollmentChallengeResult, error) {
+	userPublicID := strings.TrimSpace(input.UserPublicID)
 	name := strings.TrimSpace(input.Name)
 	platform := strings.ToLower(strings.TrimSpace(input.Platform))
 	publicKey, err := decodePublicKey(input.PublicKey)
-	if err != nil || code == "" || len(code) > 128 || !validDeviceName(name) || !validPlatform(platform) {
+	if err != nil || !validUserPublicID(userPublicID) || !validDeviceName(name) || !validPlatform(platform) ||
+		s.users == nil || s.proofs == nil {
 		return nil, ErrInvalidInput
 	}
+	userID, canonicalUserPublicID, remoteUserID, err := s.users.RuntimeUserByPublicID(ctx, userPublicID)
+	if err != nil || userID == 0 || remoteUserID <= 0 || canonicalUserPublicID != userPublicID {
+		return nil, ErrRuntimeAuth
+	}
+	nonceBytes := make([]byte, 32)
+	if _, err = rand.Read(nonceBytes); err != nil {
+		return nil, err
+	}
 	fingerprint := sha256.Sum256(publicKey)
+	now := s.now().UTC()
+	item := domainagent.DeviceEnrollmentChallenge{
+		PublicID: newPublicID("age"), UserID: userID, UserPublicID: userPublicID,
+		RemoteUserID: remoteUserID, Name: name, Platform: platform, PublicKey: publicKey,
+		PublicKeyFingerprint: hex.EncodeToString(fingerprint[:]),
+		Nonce:                base64.RawURLEncoding.EncodeToString(nonceBytes), ExpiresAt: now.Add(enrollmentTTL),
+	}
+	if err := s.repo.CreateEnrollmentChallenge(ctx, &item); err != nil {
+		return nil, err
+	}
+	return &EnrollmentChallengeResult{
+		ChallengeID: item.PublicID,
+		Canonical:   enrollmentChallengeCanonical(userPublicID, item.PublicKeyFingerprint, platform, item.Nonce, item.ExpiresAt),
+		ExpiresAt:   item.ExpiresAt,
+	}, nil
+}
+
+func (s *Service) CompleteEnrollment(ctx context.Context, input CompleteEnrollmentInput) (*EnrollDeviceResult, error) {
+	challengeID := strings.TrimSpace(input.ChallengeID)
+	proof, proofErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(input.Proof))
+	signature, signatureErr := base64.RawURLEncoding.DecodeString(strings.TrimSpace(input.Signature))
+	if !validPublicID(challengeID, "age") || proofErr != nil || len(proof) != sha256.Size ||
+		signatureErr != nil || len(signature) != ed25519.SignatureSize || s.proofs == nil {
+		return nil, ErrInvalidInput
+	}
+	challenge, err := s.repo.GetEnrollmentChallenge(ctx, challengeID)
+	if err != nil || challenge.ExpiresAt.Before(s.now().UTC()) {
+		return nil, ErrCredential
+	}
+	canonical := enrollmentChallengeCanonical(
+		challenge.UserPublicID, challenge.PublicKeyFingerprint, challenge.Platform,
+		challenge.Nonce, challenge.ExpiresAt,
+	)
+	if !ed25519.Verify(challenge.PublicKey, []byte(canonical), signature) {
+		return nil, ErrInvalidSignature
+	}
+	if _, _, err = s.proofs.MatchRuntimeProof(ctx, challenge.UserID, challenge.RemoteUserID, []byte(canonical), proof); err != nil {
+		return nil, ErrRuntimeAuth
+	}
 	item := domainagent.Device{
-		PublicID: newPublicID("agd"), Name: name, Platform: platform,
-		PublicKey: publicKey, PublicKeyFingerprint: hex.EncodeToString(fingerprint[:]),
+		PublicID: newPublicID("agd"), UserID: challenge.UserID, Name: challenge.Name, Platform: challenge.Platform,
+		PublicKey: challenge.PublicKey, PublicKeyFingerprint: challenge.PublicKeyFingerprint,
 		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
 	}
-	created, err := s.repo.EnrollDevice(ctx, hashBearer(code), &item, s.now().UTC())
+	created, err := s.repo.ConsumeEnrollmentChallengeAndEnroll(ctx, challenge.ID, &item, s.now().UTC())
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) || errors.Is(err, repository.ErrConflict) {
 			return nil, ErrCredential
@@ -1316,8 +1361,6 @@ func (s *Service) deriveBearer(item *domainagent.Credential) string {
 
 func credentialPrefix(kind string) string {
 	switch kind {
-	case domainagent.CredentialKindEnrollment:
-		return "deeix_enroll_"
 	case domainagent.CredentialKindChallenge:
 		return "deeix_challenge_"
 	default:

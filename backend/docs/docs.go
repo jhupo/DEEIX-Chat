@@ -4838,6 +4838,22 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/bridge/enrollment-challenges": {
+            "post": {
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Create a gateway device enrollment challenge",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/EnrollmentChallengeResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/devices": {
             "get": {
                 "security": [
@@ -4854,27 +4870,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/DeviceListResponseDoc"
-                        }
-                    }
-                }
-            }
-        },
-        "/agent/devices/enrollments": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "tags": [
-                    "agent-gateway"
-                ],
-                "summary": "Create a gateway device enrollment code",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/EnrollmentResponseDoc"
                         }
                     }
                 }
@@ -13136,6 +13131,7 @@ const docTemplate = `{
                         "deviceId",
                         "lastSeenAt",
                         "name",
+                        "online",
                         "platform",
                         "status",
                         "updatedAt",
@@ -13153,6 +13149,9 @@ const docTemplate = `{
                         },
                         "name": {
                             "type": "string"
+                        },
+                        "online": {
+                            "type": "boolean"
                         },
                         "platform": {
                             "type": "string"
@@ -13180,6 +13179,7 @@ const docTemplate = `{
                 "deviceId",
                 "lastSeenAt",
                 "name",
+                "online",
                 "platform",
                 "status",
                 "updatedAt",
@@ -13197,6 +13197,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "online": {
+                    "type": "boolean"
                 },
                 "platform": {
                     "type": "string"
@@ -13306,7 +13309,7 @@ const docTemplate = `{
                 }
             }
         },
-        "EnrollmentResponseDoc": {
+        "EnrollmentChallengeResponseDoc": {
             "type": "object",
             "required": [
                 "data",
@@ -13316,11 +13319,15 @@ const docTemplate = `{
                 "data": {
                     "type": "object",
                     "required": [
-                        "enrollmentCode",
+                        "canonical",
+                        "challengeId",
                         "expiresAt"
                     ],
                     "properties": {
-                        "enrollmentCode": {
+                        "canonical": {
+                            "type": "string"
+                        },
+                        "challengeId": {
                             "type": "string"
                         },
                         "expiresAt": {
@@ -19791,7 +19798,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.17",
+	Version:          "0.4.18",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

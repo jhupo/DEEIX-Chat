@@ -102,6 +102,22 @@ func TestDefaultSub2KeyBindingIDSettingIsAllowed(t *testing.T) {
 	}
 }
 
+func TestDefaultAgentDeviceSettingIsAllowed(t *testing.T) {
+	t.Parallel()
+
+	const key = "agent.default_device_id"
+	for _, value := range []string{"", "agd_0123456789abcdef0123456789abcdef"} {
+		if err := validateValue(key, value); err != nil {
+			t.Fatalf("expected %q to be accepted, got %v", value, err)
+		}
+	}
+	for _, value := range []string{"0123456789abcdef0123456789abcdef", "agd_short", "agd_0123456789abcdef0123456789abcdeg"} {
+		if err := validateValue(key, value); err == nil {
+			t.Fatalf("expected %q to be rejected", value)
+		}
+	}
+}
+
 func TestChatProtocolSettingIsRejected(t *testing.T) {
 	t.Parallel()
 

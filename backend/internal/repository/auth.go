@@ -9,6 +9,7 @@ import (
 
 type AuthRepository interface {
 	GetByID(context.Context, uint) (*domainuser.User, error)
+	GetByPublicID(context.Context, string) (*domainuser.User, error)
 	UpsertSub2Principal(context.Context, *domainuser.User) (*domainuser.User, error)
 	UpdateProfile(context.Context, uint, UpdateUserFieldsInput) (*domainuser.User, error)
 	UpdateLastLogin(context.Context, uint) error

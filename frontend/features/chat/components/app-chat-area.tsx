@@ -32,6 +32,7 @@ import { ChatScreenshotPreviewDialog } from "@/features/chat/components/sections
 import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
 import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
+import { useDevices } from "@/features/devices";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -173,7 +174,8 @@ export function AppChatArea() {
   const searchParams = useSearchParams();
   const routeConversationID = searchParams.get("conversation_id")?.trim() || null;
   const routeProjectID = searchParams.get("project_id")?.trim() || null;
-  const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, requestNewConversation } = useChatSession();
+  const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, requestNewConversation, executionMode, setExecutionMode } = useChatSession();
+  const { defaultDevice, defaultWorkspace } = useDevices();
   const [locallyCreatedConversationID, setLocallyCreatedConversationID] = React.useState<string | null>(null);
   const [newConversationOverride, setNewConversationOverride] = React.useState<{
     ignoredConversationID: string | null;
@@ -293,6 +295,16 @@ export function AppChatArea() {
   }, [activeConversation?.publicID, conversationID]);
   const currentConversation =
     activeConversation ?? (loadedConversation?.publicID === conversationID ? loadedConversation : null);
+  const executionModeConversationRef = React.useRef("");
+  React.useEffect(() => {
+    if (!currentConversation) {
+      executionModeConversationRef.current = "";
+      return;
+    }
+    if (executionModeConversationRef.current === currentConversation.publicID) return;
+    executionModeConversationRef.current = currentConversation.publicID;
+    setExecutionMode(currentConversation.executionType);
+  }, [currentConversation, setExecutionMode]);
   const activeRouteProject = React.useMemo(() => {
     if (!routeProjectID || conversationID) {
       return null;
@@ -305,8 +317,19 @@ export function AppChatArea() {
     [newConversationProjectID, projects],
   );
   const prependNewConversationInContext = React.useCallback(
-    (platformModelName?: string) => prependNewConversation(platformModelName, newConversationProjectID || undefined),
-    [newConversationProjectID, prependNewConversation],
+    (platformModelName?: string) => prependNewConversation(
+      platformModelName,
+      newConversationProjectID || undefined,
+      executionMode === "gateway" && defaultDevice && defaultWorkspace
+        ? {
+            type: "gateway",
+            deviceID: defaultDevice.deviceId,
+            profileID: defaultWorkspace.profileId,
+            workspaceID: defaultWorkspace.workspaceId,
+          }
+        : { type: "cloud" },
+    ),
+    [defaultDevice, defaultWorkspace, executionMode, newConversationProjectID, prependNewConversation],
   );
   const chatKeyBindings = useChatKeyBindings();
 

@@ -32,6 +32,7 @@ type SidebarConversationViewModel = {
   url: string;
   shareActive?: boolean;
   labelsJSON?: string;
+  executionType?: "cloud" | "gateway";
 };
 
 type SidebarConversationStarAction = {
@@ -176,6 +177,9 @@ export function SidebarConversationItem({
           className="flex-1"
           textClassName="text-current"
         />
+        <span className="ml-1.5 shrink-0 text-[10px] text-sidebar-foreground/40">
+          {item.executionType === "gateway" ? t("execution.gateway") : t("execution.cloud")}
+        </span>
       </Link>
 
       <DropdownMenu modal={false} open={isMenuOpen} onOpenChange={setIsMenuOpen}>

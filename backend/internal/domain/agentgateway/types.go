@@ -6,7 +6,6 @@ const (
 	DeviceStatusActive  = "active"
 	DeviceStatusRevoked = "revoked"
 
-	CredentialKindEnrollment = "enrollment"
 	CredentialKindChallenge  = "challenge"
 	CredentialKindConnection = "connection"
 
@@ -15,23 +14,39 @@ const (
 )
 
 type Device struct {
-	ID                     uint
-	PublicID               string
-	UserID                 uint
-	EnrollmentCredentialID uint
-	Name                   string
-	Platform               string
-	PublicKey              []byte
-	PublicKeyFingerprint   string
-	CredentialVersion      uint
-	Status                 string
-	NextServerSeq          uint64
-	LastAckedServerSeq     uint64
-	LastAckedBridgeSeq     uint64
-	LastSeenAt             *time.Time
-	RevokedAt              *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                   uint
+	PublicID             string
+	UserID               uint
+	Name                 string
+	Platform             string
+	PublicKey            []byte
+	PublicKeyFingerprint string
+	CredentialVersion    uint
+	Status               string
+	NextServerSeq        uint64
+	LastAckedServerSeq   uint64
+	LastAckedBridgeSeq   uint64
+	LastSeenAt           *time.Time
+	RevokedAt            *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type DeviceEnrollmentChallenge struct {
+	ID                   uint
+	PublicID             string
+	UserID               uint
+	UserPublicID         string
+	RemoteUserID         int64
+	Name                 string
+	Platform             string
+	PublicKey            []byte
+	PublicKeyFingerprint string
+	Nonce                string
+	ExpiresAt            time.Time
+	ConsumedAt           *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type Command struct {

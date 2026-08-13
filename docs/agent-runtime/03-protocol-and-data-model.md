@@ -48,7 +48,6 @@ Turn 请求对两种执行方式相同。Cloud 要求 Chat key binding；Gateway
 设备、Profile、Workspace 与资源选择仍属于控制面，不是第二套会话 API：
 
 ```text
-POST   /api/v1/agent/devices/enrollments
 GET    /api/v1/agent/devices
 GET    /api/v1/agent/devices/:device_id
 PATCH  /api/v1/agent/devices/:device_id
@@ -62,7 +61,11 @@ GET    /api/v1/agent/devices/:device_id/workspaces/:workspace_id/resources/:reso
 POST   /api/v1/agent/devices/:device_id/workspaces/:workspace_id/resources/:resource/refresh
 ```
 
-Bridge 的 enroll、challenge、token、WSS 和 artifact content 路径只供本地进程使用。
+Bridge 的设备注册不使用浏览器令牌或配对码。首次注册先调用
+`POST /api/v1/agent/bridge/enrollment-challenges`，再调用
+`POST /api/v1/agent/bridge/enrollments` 完成注册。请求只包含用户公开 ID、设备公钥与设备展示信息；Bridge 使用本机 Codex 当前 API key 计算 HMAC proof，并用设备 Ed25519 私钥签名同一 canonical challenge。
+
+服务端以公开 ID 定位用户后，用该用户实时 Sub2 key 列表验证 proof。公开 ID 是稳定的外部关联标识，不是凭据；内部外键仍使用数据库 `user_id`。同一设备私钥重复完成注册返回原设备，已移除设备重新通过 proof 后恢复。安装命令不携带浏览器 token、Sub2 token 或 API key。
 
 ## 3. 事件合同
 

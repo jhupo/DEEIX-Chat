@@ -26,15 +26,21 @@ func NewHandler(service *appagent.Service) *Handler {
 	return &Handler{service: service, hub: hub}
 }
 
-type enrollmentResponse struct {
-	EnrollmentCode string `json:"enrollmentCode"`
-	ExpiresAt      string `json:"expiresAt"`
+type enrollmentChallengeRequest struct {
+	UserPublicID string `json:"userPublicID"`
+	Name         string `json:"name"`
+	Platform     string `json:"platform"`
+	PublicKey    string `json:"publicKey"`
 }
-type enrollDeviceRequest struct {
-	EnrollmentCode string `json:"enrollmentCode"`
-	Name           string `json:"name"`
-	Platform       string `json:"platform"`
-	PublicKey      string `json:"publicKey"`
+type enrollmentChallengeResponse struct {
+	ChallengeID string `json:"challengeId"`
+	Canonical   string `json:"canonical"`
+	ExpiresAt   string `json:"expiresAt"`
+}
+type completeEnrollmentRequest struct {
+	ChallengeID string `json:"challengeId"`
+	Proof       string `json:"proof"`
+	Signature   string `json:"signature"`
 }
 type enrollDeviceResponse struct {
 	DeviceID string `json:"deviceId"`
@@ -49,6 +55,7 @@ type deviceResponse struct {
 	Name       string  `json:"name"`
 	Platform   string  `json:"platform"`
 	Status     string  `json:"status"`
+	Online     bool    `json:"online"`
 	CreatedAt  string  `json:"createdAt"`
 	UpdatedAt  string  `json:"updatedAt"`
 	LastSeenAt *string `json:"lastSeenAt"`
@@ -96,29 +103,39 @@ func bindStrictJSON(c *gin.Context, destination any, limit int64) error {
 	return nil
 }
 
-// CreateEnrollment godoc
-// @Summary Create a gateway device enrollment code
+// BeginEnrollment godoc
+// @Summary Create a gateway device enrollment challenge
 // @Tags agent-gateway
-// @Security BearerAuth
-// @Success 200 {object} EnrollmentResponseDoc
-// @Router /agent/devices/enrollments [post]
-func (h *Handler) CreateEnrollment(c *gin.Context) {
-	result, err := h.service.CreateEnrollment(c.Request.Context(), middleware.MustUserID(c))
-	if err != nil {
-		writeError(c, err, "create enrollment failed")
-		return
-	}
-	response.Success(c, enrollmentResponse{EnrollmentCode: result.EnrollmentCode, ExpiresAt: result.ExpiresAt.Format(timeLayout)})
-}
-
-func (h *Handler) EnrollDevice(c *gin.Context) {
-	var request enrollDeviceRequest
+// @Success 200 {object} EnrollmentChallengeResponseDoc
+// @Router /agent/bridge/enrollment-challenges [post]
+func (h *Handler) BeginEnrollment(c *gin.Context) {
+	var request enrollmentChallengeRequest
 	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
 		response.InvalidRequestBody(c, err)
 		return
 	}
-	result, err := h.service.EnrollDevice(c.Request.Context(), appagent.EnrollDeviceInput{
-		EnrollmentCode: request.EnrollmentCode, Name: request.Name, Platform: request.Platform, PublicKey: request.PublicKey,
+	result, err := h.service.BeginEnrollment(c.Request.Context(), appagent.BeginEnrollmentInput{
+		UserPublicID: request.UserPublicID, Name: request.Name,
+		Platform: request.Platform, PublicKey: request.PublicKey,
+	})
+	if err != nil {
+		writeError(c, err, "create enrollment challenge failed")
+		return
+	}
+	response.Success(c, enrollmentChallengeResponse{
+		ChallengeID: result.ChallengeID, Canonical: result.Canonical,
+		ExpiresAt: result.ExpiresAt.Format(timeLayout),
+	})
+}
+
+func (h *Handler) CompleteEnrollment(c *gin.Context) {
+	var request completeEnrollmentRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	result, err := h.service.CompleteEnrollment(c.Request.Context(), appagent.CompleteEnrollmentInput{
+		ChallengeID: request.ChallengeID, Proof: request.Proof, Signature: request.Signature,
 	})
 	if err != nil {
 		writeError(c, err, "enroll device failed")
@@ -141,7 +158,7 @@ func (h *Handler) ListDevices(c *gin.Context) {
 	}
 	result := make([]deviceResponse, 0, len(items))
 	for _, item := range items {
-		result = append(result, toDeviceResponse(item))
+		result = append(result, h.toDeviceResponse(item))
 	}
 	response.Success(c, result)
 }
@@ -159,7 +176,7 @@ func (h *Handler) GetDevice(c *gin.Context) {
 		writeError(c, err, "load device failed")
 		return
 	}
-	response.Success(c, toDeviceResponse(*item))
+	response.Success(c, h.toDeviceResponse(*item))
 }
 
 // RenameDevice godoc
@@ -182,7 +199,7 @@ func (h *Handler) RenameDevice(c *gin.Context) {
 		writeError(c, err, "rename device failed")
 		return
 	}
-	response.Success(c, toDeviceResponse(*item))
+	response.Success(c, h.toDeviceResponse(*item))
 }
 
 // RevokeDevice godoc
@@ -377,7 +394,7 @@ func (h *Handler) IssueConnection(c *gin.Context) {
 
 func (h *Handler) ConnectBridge(c *gin.Context) { h.connect(c.Writer, c.Request) }
 
-func toDeviceResponse(item appagent.DeviceView) deviceResponse {
+func (h *Handler) toDeviceResponse(item appagent.DeviceView) deviceResponse {
 	var lastSeenAt *string
 	if item.LastSeenAt != nil {
 		value := item.LastSeenAt.Format(timeLayout)
@@ -385,7 +402,8 @@ func toDeviceResponse(item appagent.DeviceView) deviceResponse {
 	}
 	return deviceResponse{
 		DeviceID: item.DeviceID, UserID: item.UserID, Name: item.Name, Platform: item.Platform,
-		Status: item.Status, LastSeenAt: lastSeenAt, CreatedAt: item.CreatedAt.Format(timeLayout), UpdatedAt: item.UpdatedAt.Format(timeLayout),
+		Status: item.Status, Online: h.hub.connected(item.DeviceID), LastSeenAt: lastSeenAt,
+		CreatedAt: item.CreatedAt.Format(timeLayout), UpdatedAt: item.UpdatedAt.Format(timeLayout),
 	}
 }
 
@@ -418,7 +436,7 @@ func writeError(c *gin.Context, err error, fallback string) {
 		response.Error(c, http.StatusNotFound, "agent resource not found")
 	case errors.Is(err, appagent.ErrStateConflict), errors.Is(err, appagent.ErrDeviceRevoked):
 		response.Error(c, http.StatusConflict, "agent resource state conflicts with request")
-	case errors.Is(err, appagent.ErrCredential), errors.Is(err, appagent.ErrInvalidSignature):
+	case errors.Is(err, appagent.ErrCredential), errors.Is(err, appagent.ErrInvalidSignature), errors.Is(err, appagent.ErrRuntimeAuth):
 		response.Error(c, http.StatusUnauthorized, "invalid device credential")
 	default:
 		response.Error(c, http.StatusInternalServerError, strings.TrimSpace(fallback))

@@ -9,8 +9,9 @@ import (
 )
 
 type AgentGatewayRepository interface {
-	CreateCredential(context.Context, *domainagent.Credential) error
-	EnrollDevice(context.Context, string, *domainagent.Device, time.Time) (*domainagent.Device, error)
+	CreateEnrollmentChallenge(context.Context, *domainagent.DeviceEnrollmentChallenge) error
+	GetEnrollmentChallenge(context.Context, string) (*domainagent.DeviceEnrollmentChallenge, error)
+	ConsumeEnrollmentChallengeAndEnroll(context.Context, uint, *domainagent.Device, time.Time) (*domainagent.Device, error)
 	ListDevices(context.Context, uint) ([]domainagent.Device, error)
 	GetDevice(context.Context, uint, string) (*domainagent.Device, error)
 	GetDeviceByPublicID(context.Context, string) (*domainagent.Device, error)

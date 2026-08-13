@@ -1,12 +1,19 @@
 #!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
 	readBridgeConfig,
+	normalizeCloudUrl,
 	writeBridgeConfig,
+	type BridgeConfig,
 } from "./config/bridge-config.js";
+import { SourceRefRegistry } from "./commands/resolve-provider-command.js";
 import { DeviceIdentity } from "./identity/device-identity.js";
+import { CodexAdapter } from "./providers/codex/codex-adapter.js";
+import { assertCodexVersion, startCodexAppServer } from "./providers/codex/codex-process.js";
 import { runGateway } from "./runtime/gateway-runtime.js";
 import { BridgeCloudClient } from "./transport/cloud-client.js";
 
@@ -16,23 +23,54 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 	const dataDirectory = resolve(
 		option(options, "data-dir", join(homedir(), ".deeix-agent-bridge")),
 	);
-	if (command === "pair") {
+	if (command === "install") {
 		const identity = await DeviceIdentity.loadOrCreate(
 			join(dataDirectory, "device-identity.json"),
 		);
-		const server = required(options, "server");
-		const enrollmentCode = required(options, "code");
+		const server = normalizeCloudUrl(required(options, "server"));
+		const userPublicID = required(options, "user");
+		if (!/^[a-f0-9]{32}$/.test(userPublicID))
+			throw new TypeError("--user must be a DEEIX public user ID");
+		const configPath = join(dataDirectory, "config.json");
+		const previous = await readOptionalConfig(configPath);
+		if (previous && (previous.cloudUrl !== server || previous.userPublicID !== userPublicID))
+			throw new Error("existing bridge identity belongs to a different server or user");
+		const codexExecutable = option(options, "codex", "codex");
+		await assertCodexVersion(codexExecutable);
+		const workspaceRoot = await realpath(resolve(required(options, "workspace")));
+		const workspaceId = stableOpaqueId("workspace", workspaceRoot);
+		const profileId = "codex-default";
 		const client = new BridgeCloudClient(server);
-		const config = await client.pair(
-			enrollmentCode,
+		const process = startCodexAppServer(codexExecutable);
+		const adapter = new CodexAdapter({
+			profileId,
+			rpc: process.rpc,
+			sources: new SourceRefRegistry(),
+			closeProcess: process.close,
+		});
+		let deviceId: string;
+		try {
+			await adapter.start(async () => undefined, AbortSignal.timeout(30_000));
+			deviceId = await client.enroll(
+				userPublicID,
 			option(options, "name", hostname()),
 			identity,
-		);
-		await writeBridgeConfig(join(dataDirectory, "config.json"), config);
-		console.log(`Paired device ${config.deviceId}`);
+				(challenge, signal) => adapter.proveRuntimeAuth(challenge, signal),
+			);
+		} finally {
+			await adapter.close();
+		}
+		const workspaces = previous?.workspaces.filter((item) => item.workspaceId !== workspaceId) ?? [];
+		workspaces.push({ workspaceId, root: workspaceRoot, name: basename(workspaceRoot) });
+		const config: BridgeConfig = {
+			version: 1, cloudUrl: server, userPublicID, deviceId, profileId,
+			codexExecutable, workspaces,
+		};
+		await writeBridgeConfig(configPath, config);
+		console.log(`Installed device ${config.deviceId} for ${workspaces.length} workspace(s)`);
 		return;
 	}
-	if (command === "run") {
+	if (command === "start") {
 		await readBridgeConfig(join(dataDirectory, "config.json"));
 		const controller = new AbortController();
 		const stop = () => controller.abort(new Error("Gateway stopped"));
@@ -40,12 +78,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		process.once("SIGTERM", stop);
 		try {
 			await runGateway(
-				{
-					dataDirectory,
-					profileId: required(options, "profile"),
-					codexExecutable: option(options, "codex", "codex"),
-					workspaces: workspaces(options),
-				},
+				{ dataDirectory },
 				controller.signal,
 			);
 		} finally {
@@ -55,8 +88,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		return;
 	}
 	throw new TypeError(
-		"usage: deeix-agent-bridge pair --server URL --code CODE [--name NAME] [--data-dir DIR]\n" +
-			"       deeix-agent-bridge run --profile PROFILE --workspace ID=ABSOLUTE_PATH [--workspace ...] [--codex PATH] [--data-dir DIR]",
+		"usage: deeix-agent-bridge install --server URL --user PUBLIC_ID --workspace ABSOLUTE_PATH [--name NAME] [--codex PATH] [--data-dir DIR]\n" +
+			"       deeix-agent-bridge start [--data-dir DIR]",
 	);
 }
 
@@ -92,21 +125,18 @@ function required(options: Map<string, string[]>, name: string): string {
 	return value;
 }
 
-function workspaces(options: Map<string, string[]>): Array<{
-	workspaceId: string;
-	root: string;
-}> {
-	const values = options.get("workspace") ?? [];
-	if (values.length === 0) throw new TypeError("--workspace is required");
-	return values.map((value) => {
-		const separator = value.indexOf("=");
-		if (separator <= 0 || separator === value.length - 1)
-			throw new TypeError("--workspace must be ID=ABSOLUTE_PATH");
-		return {
-			workspaceId: value.slice(0, separator),
-			root: value.slice(separator + 1),
-		};
-	});
+function stableOpaqueId(prefix: string, value: string): string {
+	return `${prefix}-${createHash("sha256").update(value, "utf8").digest("hex").slice(0, 24)}`;
+}
+
+async function readOptionalConfig(filePath: string): Promise<BridgeConfig | undefined> {
+	try {
+		return await readBridgeConfig(filePath);
+	} catch (error) {
+		if (typeof error === "object" && error !== null && Reflect.get(error, "code") === "ENOENT")
+			return undefined;
+		throw error;
+	}
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
