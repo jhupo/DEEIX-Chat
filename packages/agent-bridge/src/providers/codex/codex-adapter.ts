@@ -74,6 +74,7 @@ export class CodexAdapter implements ProviderAdapter {
 	readonly #runtimeVersion: string;
 	readonly #closeProcess?: () => Promise<void>;
 	readonly #pending = new Map<string, PendingInteraction>();
+	readonly #activeThreads = new Set<string>();
 	#onEvent?: (event: ProviderEvent) => Promise<void>;
 	#started = false;
 
@@ -164,6 +165,7 @@ export class CodexAdapter implements ProviderAdapter {
 					},
 					signal,
 				);
+				this.#activeThreads.add(response.thread.id);
 				return {
 					kind: "thread-created",
 					sourceThreadRef: await this.#sources.publish(
@@ -212,11 +214,14 @@ export class CodexAdapter implements ProviderAdapter {
 				};
 			}
 			case "turn.start": {
-				await this.#rpc.request<ThreadResumeResponse>(
-					"thread/resume",
-					{ threadId: command.providerThreadId, cwd: command.canonicalCwd },
-					signal,
-				);
+				if (!this.#activeThreads.has(command.providerThreadId)) {
+					await this.#rpc.request<ThreadResumeResponse>(
+						"thread/resume",
+						{ threadId: command.providerThreadId, cwd: command.canonicalCwd },
+						signal,
+					);
+					this.#activeThreads.add(command.providerThreadId);
+				}
 				const response = await this.#rpc.request<TurnStartResponse>(
 					"turn/start",
 					{
@@ -279,6 +284,7 @@ export class CodexAdapter implements ProviderAdapter {
 				},
 				signal,
 			);
+			this.#activeThreads.add(response.thread.id);
 			return {
 				kind: "thread-forked",
 				sourceThreadRef: await this.#sources.publish(
@@ -298,6 +304,9 @@ export class CodexAdapter implements ProviderAdapter {
 			threadId: command.providerThreadId,
 			...(command.action === "resume" ? { cwd: command.canonicalCwd } : {}),
 		}, signal);
+		if (command.action === "resume") this.#activeThreads.add(command.providerThreadId);
+		if (command.action === "archive" || command.action === "delete")
+			this.#activeThreads.delete(command.providerThreadId);
 		return { kind: "accepted" };
 	}
 
@@ -423,6 +432,15 @@ export class CodexAdapter implements ProviderAdapter {
 		if (disposition === "disabled") return;
 		const params = record(notification.params);
 		const threadId = identity(params, "threadId", "thread");
+		if (threadId && notification.method === "thread/started")
+			this.#activeThreads.add(threadId);
+		if (
+			threadId &&
+			(notification.method === "thread/archived" ||
+				notification.method === "thread/deleted" ||
+				notification.method === "thread/closed")
+		)
+			this.#activeThreads.delete(threadId);
 		const turnId = identity(params, "turnId", "turn");
 		const itemId = identity(params, "itemId", "item");
 		const requestId = stringOrNumber(params.requestId);

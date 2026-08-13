@@ -9,10 +9,10 @@ export type CodexProcess = {
 };
 
 const execFileAsync = promisify(execFile);
+const SUPPORTED_CODEX_VERSIONS = new Set(["0.147.0", "0.147.0-alpha.6.6"]);
 
 export async function assertCodexVersion(
 	executable: string,
-	expected = "0.147.0",
 ): Promise<void> {
 	if (executable.length === 0 || executable.includes("\0"))
 		throw new TypeError("Codex executable is invalid");
@@ -21,9 +21,15 @@ export async function assertCodexVersion(
 		timeout: 10_000,
 		maxBuffer: 64 * 1024,
 	});
-	const actual = /^codex-cli\s+(\d+\.\d+\.\d+)\s*$/.exec(stdout)?.[1];
-	if (actual !== expected)
-		throw new Error(`Codex version mismatch: expected ${expected}, received ${actual ?? "unknown"}`);
+	const actual = parseCodexVersion(stdout);
+	if (!actual || !SUPPORTED_CODEX_VERSIONS.has(actual))
+		throw new Error(
+			`Codex version mismatch: expected ${[...SUPPORTED_CODEX_VERSIONS].join(" or ")}, received ${actual ?? "unknown"}`,
+		);
+}
+
+export function parseCodexVersion(output: string): string | undefined {
+	return /^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$/.exec(output)?.[1];
 }
 
 export function startCodexAppServer(

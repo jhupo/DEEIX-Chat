@@ -201,6 +201,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.17.0
@@ -261,10 +263,55 @@ jobs:
           {"schemaVersion":2,"repository":"$repo","tag":"$GITHUB_REF_NAME","version":"${GITHUB_REF_NAME#v}","commit":"$GITHUB_SHA","publishedAt":"$published","releaseURL":"https://github.com/$repo/releases/tag/$GITHUB_REF_NAME","bundles":[{"platform":"linux/amd64","url":"$base/deeix-chat-linux-amd64.tar.gz","sha256":"sha256:$amd64_sha","size":$amd64_size},{"platform":"linux/arm64","url":"$base/deeix-chat-linux-arm64.tar.gz","sha256":"sha256:$arm64_sha","size":$arm64_size}]}
           EOF
           (cd dist && sha256sum update-manifest.json > update-manifest.json.sha256)
+      - name: Generate release notes
+        shell: bash
+        run: |
+          previous_tag=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          range=${previous_tag:+$previous_tag..}$GITHUB_REF_NAME
+          mapfile -t subjects < <(git log --reverse --format='%s' "$range")
+          features=()
+          fixes=()
+          changes=()
+          docs=()
+          engineering=()
+          for subject in "${subjects[@]}"; do
+            case "$subject" in
+              feat:*|feat\(*\):*) features+=("$subject") ;;
+              fix:*|fix\(*\):*) fixes+=("$subject") ;;
+              perf:*|perf\(*\):*|refactor:*|refactor\(*\):*) changes+=("$subject") ;;
+              docs:*|docs\(*\):*) docs+=("$subject") ;;
+              *) engineering+=("$subject") ;;
+            esac
+          done
+          emit_section() {
+            local title=$1
+            shift
+            [ "$#" -eq 0 ] || {
+              printf '## %s\n\n' "$title"
+              printf -- '- %s\n' "$@"
+              printf '\n'
+            }
+          }
+          {
+            printf 'DEEIX Chat %s 稳定版。\n\n' "${GITHUB_REF_NAME#v}"
+            emit_section '新增' "${features[@]}"
+            emit_section '修复' "${fixes[@]}"
+            emit_section '修改' "${changes[@]}"
+            emit_section '文档' "${docs[@]}"
+            emit_section '工程与测试' "${engineering[@]}"
+            printf '## 发布内容\n\n'
+            printf -- '- Full 应用包：Linux amd64、Linux arm64\n'
+            printf -- '- Agent Bridge：Windows x64、Linux x64、macOS arm64\n'
+            printf -- '- 所有包均附带 SHA-256 校验文件\n'
+            printf -- '- 管理员可在后台检查并在线更新 Docker 中的应用运行时\n\n'
+            if [ -n "$previous_tag" ]; then
+              printf '**完整变更**：https://github.com/%s/compare/%s...%s\n' "$GITHUB_REPOSITORY" "$previous_tag" "$GITHUB_REF_NAME"
+            fi
+          } > dist/release-notes.md
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file dist/release-notes.md
           gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 dist/deeix-agent-bridge-*.zip* dist/deeix-agent-bridge-*.tar.gz* --clobber

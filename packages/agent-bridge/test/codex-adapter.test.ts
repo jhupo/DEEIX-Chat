@@ -194,15 +194,53 @@ test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves app
 		input: [{ kind: "text", text: "continue" }],
 		settings: {},
 	}, AbortSignal.timeout(1000));
-	const resumeRequest = await sent.next();
-	assert.equal(resumeRequest.method, "thread/resume");
-	assert.deepEqual(resumeRequest.params, { threadId: "provider-thread-1", cwd: "/work/project" });
-	respond(output, resumeRequest.id, { thread: { id: "provider-thread-1" } });
 	const turnRequest = await sent.next();
 	assert.equal(turnRequest.method, "turn/start");
 	assert.equal(turnRequest.params.threadId, "provider-thread-1");
 	respond(output, turnRequest.id, { turn: { id: "provider-turn-2" } });
 	assert.equal((await turn).kind, "turn-started");
+
+	const restoredTurn = adapter.execute({
+		kind: "turn.start",
+		commandId: "command_restored_turn",
+		profileRef: "profile_1",
+		canonicalCwd: "/work/project",
+		providerThreadId: "provider-thread-restored",
+		input: [{ kind: "text", text: "continue restored thread" }],
+		settings: {},
+	}, AbortSignal.timeout(1000));
+	const resumeRequest = await sent.next();
+	assert.equal(resumeRequest.method, "thread/resume");
+	assert.deepEqual(resumeRequest.params, { threadId: "provider-thread-restored", cwd: "/work/project" });
+	respond(output, resumeRequest.id, { thread: { id: "provider-thread-restored" } });
+	const restoredTurnRequest = await sent.next();
+	assert.equal(restoredTurnRequest.method, "turn/start");
+	assert.equal(restoredTurnRequest.params.threadId, "provider-thread-restored");
+	respond(output, restoredTurnRequest.id, { turn: { id: "provider-turn-restored" } });
+	assert.equal((await restoredTurn).kind, "turn-started");
+
+	output.write(JSON.stringify({
+		method: "thread/closed",
+		params: { threadId: "provider-thread-1" },
+	}) + "\n");
+	await eventually(() => events.length === 1);
+	assert.equal(events.shift()?.kind, "thread/closed");
+	const resumedAfterClose = adapter.execute({
+		kind: "turn.start",
+		commandId: "command_resumed_after_close",
+		profileRef: "profile_1",
+		canonicalCwd: "/work/project",
+		providerThreadId: "provider-thread-1",
+		input: [{ kind: "text", text: "continue after close" }],
+		settings: {},
+	}, AbortSignal.timeout(1000));
+	const resumeAfterCloseRequest = await sent.next();
+	assert.equal(resumeAfterCloseRequest.method, "thread/resume");
+	respond(output, resumeAfterCloseRequest.id, { thread: { id: "provider-thread-1" } });
+	const resumedTurnRequest = await sent.next();
+	assert.equal(resumedTurnRequest.method, "turn/start");
+	respond(output, resumedTurnRequest.id, { turn: { id: "provider-turn-after-close" } });
+	assert.equal((await resumedAfterClose).kind, "turn-started");
 
 	const challenge = [
 		"deeix-runtime-auth-proof-v1",

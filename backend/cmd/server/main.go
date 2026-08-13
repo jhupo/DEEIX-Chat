@@ -9,7 +9,7 @@ import (
 )
 
 // @title DEEIX Chat API
-// @version 0.4.20
+// @version 0.4.21
 // @description DEEIX Chat 后端 API 文档
 // @BasePath /api/v1
 // @securityDefinitions.apikey BearerAuth
