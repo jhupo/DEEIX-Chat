@@ -75,6 +75,22 @@ func response(code int, body []byte) *http.Response {
 	return &http.Response{StatusCode: code, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header), ContentLength: int64(len(body))}
 }
 
+func testRelease(t *testing.T, version string, manifest, bundle []byte) []byte {
+	t.Helper()
+	raw, err := json.Marshal(githubRelease{
+		TagName: "v" + version,
+		HTMLURL: "https://github.com/owner/repo/releases/tag/v" + version,
+		Assets: []githubAsset{
+			{ID: 1, Name: "update-manifest.json", URL: "https://api.github.com/repos/owner/repo/releases/assets/1", Size: int64(len(manifest))},
+			{ID: 2, Name: "deeix-chat-linux-" + runtime.GOARCH + ".tar.gz", URL: "https://api.github.com/repos/owner/repo/releases/assets/2", Size: int64(len(bundle))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
 func TestExtractBundleRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "bundle.tar.gz")
@@ -96,15 +112,22 @@ func TestCheckInstallAndActivateRelease(t *testing.T) {
 		"frontend/out/index.html": "index",
 	})
 	manifest := testManifest(t, "0.3.9", bundle)
+	release := testRelease(t, "0.3.9", manifest, bundle)
 	runtimeDir := t.TempDir()
 	stateFile := filepath.Join(t.TempDir(), "journal.json")
 	u := &Updater{
 		cfg: Config{Repository: "owner/repo", RuntimeDir: runtimeDir, StateFile: stateFile, CurrentVersion: "0.3.8", DownloadTimeout: time.Minute, Restart: func() {}},
 		http: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-			if strings.HasSuffix(request.URL.Path, "update-manifest.json") {
+			switch request.URL.Path {
+			case "/repos/owner/repo/releases/latest":
+				return response(http.StatusOK, release), nil
+			case "/repos/owner/repo/releases/assets/1":
 				return response(http.StatusOK, manifest), nil
+			case "/repos/owner/repo/releases/assets/2":
+				return response(http.StatusOK, bundle), nil
+			default:
+				return response(http.StatusNotFound, nil), nil
 			}
-			return response(http.StatusOK, bundle), nil
 		})},
 		start: func(fn func()) { fn() },
 	}
@@ -131,6 +154,24 @@ func TestCheckInstallAndActivateRelease(t *testing.T) {
 	current, err := filepath.EvalSymlinks(filepath.Join(runtimeDir, "current"))
 	if err != nil || current != filepath.Join(runtimeDir, "releases", "0.3.9") {
 		t.Fatalf("current=%q error=%v", current, err)
+	}
+}
+
+func TestReleaseAssetRejectsDuplicatesAndUnexpectedURLs(t *testing.T) {
+	valid := githubAsset{ID: 1, Name: "update-manifest.json", URL: "https://api.github.com/repos/owner/repo/releases/assets/1", Size: 100}
+	if _, ok := releaseAsset("owner/repo", []githubAsset{valid}, valid.Name, maxManifestBytes); !ok {
+		t.Fatal("rejected valid GitHub release asset")
+	}
+	duplicate := valid
+	duplicate.ID = 2
+	duplicate.URL = "https://api.github.com/repos/owner/repo/releases/assets/2"
+	if _, ok := releaseAsset("owner/repo", []githubAsset{valid, duplicate}, valid.Name, maxManifestBytes); ok {
+		t.Fatal("accepted duplicate release asset")
+	}
+	invalidURL := valid
+	invalidURL.URL = "https://example.com/asset"
+	if _, ok := releaseAsset("owner/repo", []githubAsset{invalidURL}, valid.Name, maxManifestBytes); ok {
+		t.Fatal("accepted unexpected release asset URL")
 	}
 }
 

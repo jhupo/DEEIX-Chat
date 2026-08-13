@@ -60,11 +60,15 @@ Jobs progress through `queued`, `pulling`, `applying`, then `succeeded`, `failed
 
 ## Release Contract
 
-The only feed is:
+The updater resolves the latest stable Release through GitHub's official API:
 
 ```text
-https://github.com/<repository>/releases/latest/download/update-manifest.json
+https://api.github.com/repos/<repository>/releases/latest
 ```
+
+It downloads `update-manifest.json` and the selected Linux bundle through the
+Release asset API. This avoids depending on direct access to `github.com/releases`
+while retaining GitHub's official asset redirect and the checks below.
 
 Schema v2 fixes the repository, stable `vMAJOR.MINOR.PATCH` tag/version, 40-character commit, UTC publication time, canonical GitHub release URL, and one application bundle per Linux architecture. Each bundle entry includes the canonical GitHub Release asset URL, exact byte size, and `sha256:` digest.
 

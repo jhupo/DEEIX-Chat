@@ -225,7 +225,7 @@ docker build -t deeix-chat:local .
 DEEIX_CHAT_IMAGE=deeix-chat:local docker compose -f compose.yaml up -d
 ```
 
-Stable releases also publish full Linux application bundles. A Superadmin can check, install, and restart into a verified bundle from the About page. The `app_runtime` named volume preserves that release across container restarts and recreation. Set `UPDATE_PROXY_URL` to an `http`, `https`, `socks5`, or `socks5h` forward proxy when the server needs a proxy for GitHub. See [Full deployment and online update](docs/agent-runtime/06-full-deployment-and-online-update.md).
+Stable releases also publish full Linux application bundles. A Superadmin can check, install, and restart into a verified bundle from the About page. The updater resolves and downloads Release assets through GitHub's official API, and the `app_runtime` named volume preserves the release across container restarts and recreation. Set `UPDATE_PROXY_URL` to an `http`, `https`, `socks5`, or `socks5h` forward proxy when the server needs one for GitHub. See [Full deployment and online update](docs/agent-runtime/06-full-deployment-and-online-update.md).
 
 `APP_ENV` accepts `dev`/`development` and `prod`/`production`, normalizes them to `dev` or `prod`, and defaults to `prod` when omitted. Use `dev` only for local development. Public production deployments should keep `APP_ENV=prod` or `APP_ENV=production` and use production secrets.
 

@@ -27,6 +27,7 @@ import (
 
 const (
 	maxManifestBytes = 64 << 10
+	maxReleaseBytes  = 1 << 20
 	maxArchiveBytes  = 512 << 20
 	maxExtractBytes  = 1024 << 20
 	maxArchiveFiles  = 100000
@@ -71,6 +72,21 @@ type manifestBundle struct {
 	URL      string `json:"url"`
 	SHA256   string `json:"sha256"`
 	Size     int64  `json:"size"`
+}
+
+type githubRelease struct {
+	TagName    string        `json:"tag_name"`
+	HTMLURL    string        `json:"html_url"`
+	Draft      bool          `json:"draft"`
+	Prerelease bool          `json:"prerelease"`
+	Assets     []githubAsset `json:"assets"`
+}
+
+type githubAsset struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+	Size int64  `json:"size"`
 }
 
 type journal struct {
@@ -267,8 +283,8 @@ func (u *Updater) Check(ctx context.Context) (Status, error) {
 }
 
 func (u *Updater) fetchManifest(ctx context.Context) (*Candidate, error) {
-	rawURL := "https://github.com/" + u.cfg.Repository + "/releases/latest/download/update-manifest.json"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	releaseURL := "https://api.github.com/repos/" + u.cfg.Repository + "/releases/latest"
+	req, err := githubRequest(ctx, releaseURL, "application/vnd.github+json")
 	if err != nil {
 		return nil, err
 	}
@@ -278,19 +294,96 @@ func (u *Updater) fetchManifest(ctx context.Context) (*Candidate, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("release metadata unavailable")
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxReleaseBytes+1))
+	if err != nil || len(b) > maxReleaseBytes {
+		return nil, errors.New("invalid release metadata")
+	}
+	var release githubRelease
+	if err := json.Unmarshal(b, &release); err != nil || release.Draft || release.Prerelease || release.TagName == "" || release.HTMLURL != "https://github.com/"+u.cfg.Repository+"/releases/tag/"+release.TagName {
+		return nil, errors.New("invalid release metadata")
+	}
+	manifestAsset, ok := releaseAsset(u.cfg.Repository, release.Assets, "update-manifest.json", maxManifestBytes)
+	if !ok {
 		return nil, errors.New("release manifest unavailable")
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxManifestBytes+1))
-	if err != nil || len(b) > maxManifestBytes {
-		return nil, errors.New("invalid release manifest")
+	b, err = u.fetchAsset(ctx, manifestAsset, maxManifestBytes)
+	if err != nil {
+		return nil, err
 	}
 	var m manifest
-	dec := json.NewDecoder(strings.NewReader(string(b)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil || dec.Decode(&struct{}{}) != io.EOF {
+	if err := decodeStrictJSON(b, &m); err != nil {
 		return nil, errors.New("invalid release manifest")
 	}
-	return validateManifest(u.cfg.Repository, m, b)
+	candidate, err := validateManifest(u.cfg.Repository, m, b)
+	if err != nil || candidate.Tag != release.TagName || candidate.ReleaseURL != release.HTMLURL {
+		return nil, errors.New("invalid release manifest")
+	}
+	bundleName := filepath.Base(candidate.BundleURL)
+	bundleAsset, ok := releaseAsset(u.cfg.Repository, release.Assets, bundleName, candidate.BundleSize)
+	if !ok || bundleAsset.Size != candidate.BundleSize {
+		return nil, errors.New("release bundle unavailable")
+	}
+	candidate.BundleURL = bundleAsset.URL
+	return candidate, nil
+}
+
+func githubRequest(ctx context.Context, rawURL, accept string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", accept)
+	req.Header.Set("User-Agent", "DEEIX-Chat-Updater")
+	return req, nil
+}
+
+func decodeStrictJSON(raw []byte, out any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("trailing JSON data")
+	}
+	return nil
+}
+
+func releaseAsset(repository string, assets []githubAsset, name string, maxSize int64) (githubAsset, bool) {
+	var found githubAsset
+	for _, asset := range assets {
+		if asset.Name != name {
+			continue
+		}
+		expectedURL := "https://api.github.com/repos/" + repository + "/releases/assets/" + strconv.FormatInt(asset.ID, 10)
+		if found.ID != 0 || asset.ID <= 0 || asset.Size <= 0 || asset.Size > maxSize || asset.URL != expectedURL {
+			return githubAsset{}, false
+		}
+		found = asset
+	}
+	return found, found.ID != 0
+}
+
+func (u *Updater) fetchAsset(ctx context.Context, asset githubAsset, maxSize int64) ([]byte, error) {
+	req, err := githubRequest(ctx, asset.URL, "application/octet-stream")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := u.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.ContentLength > maxSize {
+		return nil, errors.New("release asset unavailable")
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxSize+1))
+	if err != nil || int64(len(raw)) > maxSize || int64(len(raw)) != asset.Size {
+		return nil, errors.New("invalid release asset")
+	}
+	return raw, nil
 }
 
 func validateManifest(repo string, m manifest, raw []byte) (*Candidate, error) {
@@ -448,7 +541,7 @@ func (u *Updater) apply(id string, candidate *Candidate) {
 }
 
 func (u *Updater) download(ctx context.Context, id string, candidate *Candidate) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, candidate.BundleURL, nil)
+	req, err := githubRequest(ctx, candidate.BundleURL, "application/octet-stream")
 	if err != nil {
 		return "", err
 	}
