@@ -918,7 +918,6 @@ export function NavProjects() {
                                               shareActive:
                                                 conversation.shareStatus === "active" && Boolean(conversation.shareID?.trim()),
                                               labelsJSON: conversation.labelsJSON,
-                                              executionType: conversation.executionType,
                                             }}
                                             starAction={{
                                               label: conversation.isStarred ? tRecent("row.unstar") : tRecent("row.star"),

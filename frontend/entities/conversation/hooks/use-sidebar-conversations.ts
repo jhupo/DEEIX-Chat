@@ -53,6 +53,7 @@ const STARRED_DIALOG_PAGE_SIZE = 100;
 
 type SidebarConversationsCache = {
   accessToken: string;
+  scope: string;
   recentItems: ConversationDTO[];
   starredItems: ConversationDTO[];
   projects: ConversationProjectDTO[];
@@ -63,9 +64,9 @@ type SidebarConversationsCache = {
 
 let sidebarConversationsCache: SidebarConversationsCache | null = null;
 
-function readSidebarConversationsCache(): SidebarConversationsCache | null {
+function readSidebarConversationsCache(scope: string): SidebarConversationsCache | null {
   const accessToken = readAccessToken();
-  if (!accessToken || sidebarConversationsCache?.accessToken !== accessToken) {
+  if (!accessToken || sidebarConversationsCache?.accessToken !== accessToken || sidebarConversationsCache.scope !== scope) {
     return null;
   }
   return sidebarConversationsCache;
@@ -178,25 +179,29 @@ function orderProjectsByPublicIDs(
   return ordered;
 }
 
-async function fetchRecentPage(accessToken: string, page: number) {
+async function fetchRecentPage(accessToken: string, page: number, executionType: "cloud" | "gateway", executionDeviceID: string) {
   return listConversations(accessToken, {
     page,
     pageSize: RECENT_PAGE_SIZE,
     status: "active",
     starred: "unstarred",
+    execution: executionType,
+    deviceId: executionDeviceID,
   });
 }
 
-async function fetchStarredWindow(accessToken: string) {
+async function fetchStarredWindow(accessToken: string, executionType: "cloud" | "gateway", executionDeviceID: string) {
   return listConversations(accessToken, {
     page: 1,
     pageSize: STARRED_WINDOW_SIZE,
     status: "active",
     starred: "starred",
+    execution: executionType,
+    deviceId: executionDeviceID,
   });
 }
 
-async function fetchAllStarred(accessToken: string): Promise<ConversationDTO[]> {
+async function fetchAllStarred(accessToken: string, executionType: "cloud" | "gateway", executionDeviceID: string): Promise<ConversationDTO[]> {
   let page = 1;
   let hasMore = true;
   let items: ConversationDTO[] = [];
@@ -207,6 +212,8 @@ async function fetchAllStarred(accessToken: string): Promise<ConversationDTO[]> 
       pageSize: STARRED_DIALOG_PAGE_SIZE,
       status: "active",
       starred: "starred",
+      execution: executionType,
+      deviceId: executionDeviceID,
     });
 
     const pageItems = data.results ?? [];
@@ -228,12 +235,17 @@ async function fetchActiveProjects(accessToken: string): Promise<ConversationPro
 
 export function useSidebarConversationsController({
   bulkPendingTitle,
+  executionDeviceID,
+  executionType,
   newConversationTitle,
 }: {
   bulkPendingTitle: string;
+  executionDeviceID: string;
+  executionType: "cloud" | "gateway";
   newConversationTitle: string;
 }): SidebarConversationsControllerValue {
-  const initialCache = React.useMemo(() => readSidebarConversationsCache(), []);
+  const scope = `${executionType}:${executionDeviceID}`;
+  const initialCache = React.useMemo(() => readSidebarConversationsCache(scope), [scope]);
   const [recentItems, setRecentItems] = React.useState<ConversationDTO[]>(() => initialCache?.recentItems ?? []);
   const [starredItems, setStarredItems] = React.useState<ConversationDTO[]>(() => initialCache?.starredItems ?? []);
   const [projects, setProjects] = React.useState<ConversationProjectDTO[]>(() => initialCache?.projects ?? []);
@@ -294,6 +306,7 @@ export function useSidebarConversationsController({
 
   React.useEffect(() => {
     writeSidebarConversationsCache({
+      scope,
       recentItems,
       starredItems,
       projects,
@@ -301,7 +314,7 @@ export function useSidebarConversationsController({
       hasMore,
       page: pageRef.current,
     });
-  }, [hasMore, projects, recentItems, starredItems, starredTotal]);
+  }, [hasMore, projects, recentItems, scope, starredItems, starredTotal]);
 
   const items = React.useMemo(
     () => mergeUniqueByPublicID(starredItems, recentItems, sortByUpdatedAtDesc),
@@ -350,7 +363,7 @@ export function useSidebarConversationsController({
       return;
     }
 
-    const data = await fetchStarredWindow(token);
+    const data = await fetchStarredWindow(token, executionType, executionDeviceID);
     if (requestVersion !== starredWindowRequestVersionRef.current) {
       return;
     }
@@ -358,7 +371,7 @@ export function useSidebarConversationsController({
     const nextStarredItems = sortByStarredAtDesc(data.results ?? []);
     setStarredItems(nextStarredItems);
     setStarredTotal(data.total ?? nextStarredItems.length);
-  }, []);
+  }, [executionDeviceID, executionType]);
 
   const loadInitial = React.useCallback(async () => {
     initialRequestVersionRef.current += 1;
@@ -390,9 +403,9 @@ export function useSidebarConversationsController({
 
     try {
       const [recentData, starredData, projectData] = await Promise.all([
-        fetchRecentPage(token, 1),
-        fetchStarredWindow(token),
-        fetchActiveProjects(token),
+        fetchRecentPage(token, 1, executionType, executionDeviceID),
+        fetchStarredWindow(token, executionType, executionDeviceID),
+        executionType === "cloud" ? fetchActiveProjects(token) : Promise.resolve([]),
       ]);
 
       if (requestVersion !== initialRequestVersionRef.current) {
@@ -415,7 +428,7 @@ export function useSidebarConversationsController({
         setLoadingInitial(false);
       }
     }
-  }, [setProjectList]);
+  }, [executionDeviceID, executionType, setProjectList]);
 
   React.useEffect(() => {
     void loadInitial();
@@ -447,7 +460,7 @@ export function useSidebarConversationsController({
 
     try {
       const nextPage = pageRef.current + 1;
-      const data = await fetchRecentPage(token, nextPage);
+      const data = await fetchRecentPage(token, nextPage, executionType, executionDeviceID);
       const nextRecentPageItems = data.results ?? [];
       const loaded = nextRecentPageItems.length;
       const total = data.total ?? 0;
@@ -466,7 +479,7 @@ export function useSidebarConversationsController({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMore, loadingInitial]);
+  }, [executionDeviceID, executionType, hasMore, loadingInitial]);
 
   const retryLoadMore = React.useCallback(async () => {
     loadMoreFailedRef.current = false;
@@ -872,8 +885,8 @@ export function useSidebarConversationsController({
     if (!token) {
       return [];
     }
-    return fetchAllStarred(token);
-  }, []);
+    return fetchAllStarred(token, executionType, executionDeviceID);
+  }, [executionDeviceID, executionType]);
 
   return React.useMemo(
     () => ({
@@ -889,6 +902,7 @@ export function useSidebarConversationsController({
       transferringStarPublicID,
       lastChange,
       loadMore,
+      reload: loadInitial,
       retryLoadMore,
       prependNewConversation,
       touchByPublicID,
@@ -916,6 +930,7 @@ export function useSidebarConversationsController({
       items,
       lastChange,
       loadAllStarred,
+      loadInitial,
       loadMore,
       loadingInitial,
       loadingMore,

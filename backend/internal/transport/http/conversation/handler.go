@@ -328,6 +328,36 @@ func normalizeConversationShareFilter(value string) string {
 	}
 }
 
+func conversationExecutionFilter(c *gin.Context) (string, string, bool) {
+	executionType := strings.ToLower(strings.TrimSpace(c.Query("execution")))
+	deviceID := strings.TrimSpace(c.Query("device"))
+	if executionType != model.ExecutionTypeCloud && executionType != model.ExecutionTypeGateway {
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidQuery, "execution must be cloud or gateway")
+		return "", "", false
+	}
+	if executionType == model.ExecutionTypeCloud && deviceID != "" {
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidQuery, "device is only valid for gateway execution")
+		return "", "", false
+	}
+	if executionType == model.ExecutionTypeGateway && !validAgentDevicePublicID(deviceID) {
+		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidQuery, "device is required for gateway execution")
+		return "", "", false
+	}
+	return executionType, deviceID, true
+}
+
+func validAgentDevicePublicID(value string) bool {
+	if len(value) != 36 || !strings.HasPrefix(value, "agd_") {
+		return false
+	}
+	for _, character := range value[4:] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeConversationProjectQuery(value string) string {
 	normalized := strings.TrimSpace(value)
 	switch normalized {

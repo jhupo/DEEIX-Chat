@@ -154,6 +154,7 @@ export function useLayoutProjectConversations({
           status: "active",
           starred: "all",
           project: projectID,
+          execution: "cloud",
         });
         if (!mountedRef.current || projectConversationRequestVersionRef.current[projectID] !== requestVersion) {
           return;

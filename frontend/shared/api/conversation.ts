@@ -295,12 +295,16 @@ type ListConversationsOptions = {
   starred?: ConversationStarredFilter;
   share?: ConversationShareFilter;
   project?: ConversationProjectFilter;
+  execution: "cloud" | "gateway";
+  deviceId?: string;
   query?: string;
 };
 
 type SearchConversationsOptions = {
   page?: number;
   pageSize?: number;
+  execution: "cloud" | "gateway";
+  deviceId?: string;
   query?: string;
   signal?: AbortSignal;
 };
@@ -326,7 +330,7 @@ type ListConversationRunsOptions = {
 // Conversation metadata
 export async function listConversations(
   accessToken: string,
-  options: ListConversationsOptions = {},
+  options: ListConversationsOptions,
 ): Promise<PagePayload<ConversationDTO>> {
   const page = options.page && options.page > 0 ? options.page : 1;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 20;
@@ -342,7 +346,11 @@ export async function listConversations(
     starred,
     share,
     project,
+    execution: options.execution,
   });
+  if (options.execution === "gateway" && options.deviceId?.trim()) {
+    params.set("device", options.deviceId.trim());
+  }
   if (query) {
     params.set("q", query);
   }
@@ -361,14 +369,18 @@ export async function listConversations(
 
 export async function searchConversations(
   accessToken: string,
-  options: SearchConversationsOptions = {},
+  options: SearchConversationsOptions,
 ): Promise<ConversationSearchPageDTO> {
   const page = options.page && options.page > 0 ? options.page : 1;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : 20;
   const params = new URLSearchParams({
     page: String(page),
     page_size: String(pageSize),
+    execution: options.execution,
   });
+  if (options.execution === "gateway" && options.deviceId?.trim()) {
+    params.set("device", options.deviceId.trim());
+  }
   const query = options.query?.trim() || "";
   if (query) {
     params.set("q", query);

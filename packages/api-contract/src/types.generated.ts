@@ -5744,6 +5744,10 @@ export namespace Conversations {
   export namespace ConversationsList {
     export type RequestParams = {};
     export type RequestQuery = {
+      /** Gateway device public ID */
+      device?: string;
+      /** Execution type: cloud|gateway */
+      execution: string;
       /** 页码 */
       page?: number;
       /** 每页数量 */
@@ -5839,6 +5843,10 @@ export namespace Conversations {
   export namespace SearchList {
     export type RequestParams = {};
     export type RequestQuery = {
+      /** Gateway device public ID */
+      device?: string;
+      /** Execution type: cloud|gateway */
+      execution: string;
       /** 页码 */
       page?: number;
       /** 每页数量 */

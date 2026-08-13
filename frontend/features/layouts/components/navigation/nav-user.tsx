@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl";
 import {
   Check,
   ChevronDown,
-  Monitor,
 } from "lucide-react";
 
 import {
@@ -41,6 +40,7 @@ import { dispatchOpenAnnouncements, getAnnouncementUnread, subscribeAnnouncement
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { APP_LOCALE_LABELS, APP_LOCALES, type AppLocale } from "@/i18n/config";
 import { useDevices } from "@/features/devices";
+import { useChatSession } from "@/features/chat";
 
 export function NavUser({
   user,
@@ -63,6 +63,7 @@ export function NavUser({
   const skipTriggerFocusRef = React.useRef(false);
   const isAdmin = user.role === "superadmin";
   const { devices, defaultDeviceId, selectDefaultDevice } = useDevices();
+  const { executionMode, requestNewConversation } = useChatSession();
   const activeDevices = devices.filter((item) => item.status === "active");
 
   React.useEffect(() => subscribeAnnouncementUnreadChanged(setHasUnreadAnnouncement), []);
@@ -207,7 +208,6 @@ export function NavUser({
                   className="focus:bg-accent/40 data-[state=open]:bg-accent/40"
                   disabled={activeDevices.length === 0}
                 >
-                  <Monitor className="mr-2 size-4 stroke-1" />
                   {t("device")}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-48 p-1.5">
@@ -216,7 +216,13 @@ export function NavUser({
                       key={device.deviceId}
                       onSelect={(event) => {
                         event.preventDefault();
-                        void selectDefaultDevice(device.deviceId);
+                        void (async () => {
+                          await selectDefaultDevice(device.deviceId);
+                          if (executionMode === "gateway") {
+                            requestNewConversation({ projectID: "", workspaceID: "" });
+                            router.push("/chat");
+                          }
+                        })();
                       }}
                     >
                       <span className="min-w-0 flex-1 truncate">{device.name}</span>

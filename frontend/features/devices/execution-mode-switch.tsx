@@ -26,17 +26,17 @@ export function ExecutionModeSwitch() {
   const selectMode = React.useCallback((mode: "cloud" | "gateway") => {
     if (mode === executionMode || (mode === "gateway" && !workAvailable)) return;
     setExecutionMode(mode);
-    requestNewConversation({ projectID: "" });
+    requestNewConversation({ projectID: "", workspaceID: "" });
     if (pathname === "/chat") window.history.pushState(null, "", "/chat");
     else router.push("/chat");
   }, [executionMode, pathname, requestNewConversation, router, setExecutionMode, workAvailable]);
 
   return (
-    <div className="pointer-events-auto inline-grid h-9 w-52 grid-cols-2 rounded-full bg-muted/80 p-0.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/65">
+    <div className="pointer-events-auto inline-grid h-7 w-36 grid-cols-2 rounded-full bg-muted/80 p-0.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-muted/65">
       <button
         type="button"
         className={cn(
-          "rounded-full text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "rounded-full px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           executionMode === "cloud" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
         )}
         onClick={() => selectMode("cloud")}
@@ -46,7 +46,7 @@ export function ExecutionModeSwitch() {
       <button
         type="button"
         className={cn(
-          "rounded-full text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
+          "rounded-full px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
           executionMode === "gateway" ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
         )}
         disabled={!workAvailable}

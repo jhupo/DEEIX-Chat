@@ -229,6 +229,7 @@ export function useRecentPage() {
         share: shareFilter,
         project: projectFilter,
         query: normalizedQuery,
+        execution: "cloud",
       });
       if (requestVersion !== requestVersionRef.current) {
         return;

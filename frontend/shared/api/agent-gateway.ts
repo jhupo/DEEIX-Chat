@@ -10,6 +10,16 @@ export type AgentDeviceDTO = Omit<DeviceResponseDocData, "lastSeenAt" | "platfor
 
 export type AgentWorkspaceDTO = WorkspaceDoc;
 
+export type AgentResourceSnapshotDTO = {
+  resource: string;
+  scope: "profile" | "workspace";
+  deviceId: string;
+  profileId: string;
+  workspaceId?: string;
+  data: unknown;
+  refreshedAt: string;
+};
+
 export async function listAgentDevices(accessToken: string): Promise<AgentDeviceDTO[]> {
   return authedRequest<AgentDeviceDTO[]>("/api/v1/agent/devices", { accessToken }, true);
 }
@@ -27,4 +37,34 @@ export async function revokeAgentDevice(accessToken: string, deviceId: string): 
     accessToken,
     method: "DELETE",
   }, true);
+}
+
+export async function getAgentWorkspaceResource(
+  accessToken: string,
+  deviceId: string,
+  workspaceId: string,
+  resource: string,
+): Promise<AgentResourceSnapshotDTO> {
+  return authedRequest<AgentResourceSnapshotDTO>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/resources/${encodeURIComponent(resource)}`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function refreshAgentWorkspaceResource(
+  accessToken: string,
+  deviceId: string,
+  workspaceId: string,
+  resource: string,
+): Promise<void> {
+  await authedRequest(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}/resources/${encodeURIComponent(resource)}/refresh`,
+    {
+      accessToken,
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
 }

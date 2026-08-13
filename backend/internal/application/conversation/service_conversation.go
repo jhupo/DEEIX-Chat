@@ -67,6 +67,9 @@ func (s *Service) CreateConversation(ctx context.Context, input CreateConversati
 		if s.gatewayExecutor == nil {
 			return nil, ErrExecutionUnavailable
 		}
+		if strings.TrimSpace(input.ProjectPublicID) != "" {
+			return nil, ErrInvalidExecutionTarget
+		}
 		resolvedProvider, err := s.gatewayExecutor.ResolveExecutionTarget(ctx, input.UserID, deviceID, profileID, workspaceID)
 		if err != nil || strings.TrimSpace(resolvedProvider) == "" {
 			return nil, ErrInvalidExecutionTarget
@@ -129,10 +132,12 @@ func (s *Service) ListConversations(
 	starredFilter string,
 	shareFilter string,
 	projectFilter string,
+	executionType string,
+	executionDeviceID string,
 	searchQuery string,
 ) ([]model.Conversation, int64, error) {
 	offset, limit := normalizePage(page, pageSize)
-	return s.repo.ListConversationsByUser(ctx, userID, offset, limit, statusFilter, starredFilter, shareFilter, normalizeConversationProjectFilter(projectFilter), searchQuery)
+	return s.repo.ListConversationsByUser(ctx, userID, offset, limit, statusFilter, starredFilter, shareFilter, normalizeConversationProjectFilter(projectFilter), executionType, executionDeviceID, searchQuery)
 }
 
 // SearchConversations 分页搜索当前用户的会话，并通过前瞻记录判断是否还有下一页。
@@ -141,6 +146,8 @@ func (s *Service) SearchConversations(
 	userID uint,
 	page int,
 	pageSize int,
+	executionType string,
+	executionDeviceID string,
 	searchQuery string,
 ) ([]ConversationSearchResult, bool, error) {
 	offset, limit := normalizePage(page, pageSize)
@@ -149,6 +156,8 @@ func (s *Service) SearchConversations(
 		userID,
 		offset,
 		limit+1,
+		executionType,
+		executionDeviceID,
 		searchQuery,
 	)
 	if err != nil || len(items) == 0 {

@@ -649,7 +649,13 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			Attrs(snapshot).FirstOrCreate(&stored).Error; err != nil {
 			return err
 		}
-		return tx.Model(&stored).Updates(map[string]any{"data_json": snapshot.DataJSON, "refreshed_at": now, "updated_at": now}).Error
+		if err := tx.Model(&stored).Updates(map[string]any{"data_json": snapshot.DataJSON, "refreshed_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if snapshot.Name == "sessions" && command.WorkspaceID != nil {
+			return syncWorkspaceSessions(tx, device, command, outcome.Result.Data, now)
+		}
+		return nil
 	case "thread-created", "thread-forked":
 		if command.ThreadID == nil || command.RuntimeProfileID == nil || command.WorkspaceID == nil || !validRepoRef(outcome.Result.SourceThreadRef) {
 			return repository.ErrConflict
@@ -707,6 +713,190 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 		}
 	}
 	return nil
+}
+
+type workspaceSessionMessage struct {
+	Role             string `json:"role"`
+	Content          string `json:"content"`
+	ReasoningContent string `json:"reasoningContent"`
+	CreatedAt        int64  `json:"createdAt"`
+}
+
+type workspaceSession struct {
+	SourceThreadRef string                    `json:"sourceThreadRef"`
+	Preview         string                    `json:"preview"`
+	Name            string                    `json:"name"`
+	ModelProvider   string                    `json:"modelProvider"`
+	CreatedAt       int64                     `json:"createdAt"`
+	UpdatedAt       int64                     `json:"updatedAt"`
+	Messages        []workspaceSessionMessage `json:"messages"`
+}
+
+type workspaceSessionSnapshot struct {
+	Data []workspaceSession `json:"data"`
+}
+
+func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {
+	if command.RuntimeProfileID == nil || command.WorkspaceID == nil {
+		return repository.ErrConflict
+	}
+	var snapshot workspaceSessionSnapshot
+	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Data) > 30 {
+		return repository.ErrConflict
+	}
+	var profile model.AgentRuntimeProfile
+	if err := tx.First(&profile, *command.RuntimeProfileID).Error; err != nil {
+		return err
+	}
+	var workspace model.AgentWorkspace
+	if err := tx.First(&workspace, *command.WorkspaceID).Error; err != nil {
+		return err
+	}
+	for _, session := range snapshot.Data {
+		if !validWorkspaceSession(session) {
+			return repository.ErrConflict
+		}
+		var existing model.AgentThread
+		err := tx.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, session.SourceThreadRef).First(&existing).Error
+		if err == nil {
+			if err := syncExistingWorkspaceSession(tx, &existing, session, now); err != nil {
+				return err
+			}
+			continue
+		}
+		if !dberror.IsRecordNotFound(err) {
+			return err
+		}
+
+		title := strings.TrimSpace(session.Name)
+		if title == "" {
+			title = strings.TrimSpace(session.Preview)
+		}
+		if title == "" {
+			title = "New conversation"
+		}
+		title = truncateRunes(title, 255)
+		createdAt := validSessionTime(session.CreatedAt, now)
+		updatedAt := validSessionTime(session.UpdatedAt, now)
+		if updatedAt.Before(createdAt) {
+			updatedAt = createdAt
+		}
+		conversation := model.Conversation{
+			UserID: device.UserID, PublicID: newChatPublicID(), Title: title, LabelsJSON: "[]",
+			Provider: profile.Provider, ExecutionType: "gateway", ExecutionDeviceID: device.PublicID,
+			ExecutionProfileID: profile.PublicID, ExecutionWorkspaceID: workspace.PublicID,
+			SessionKey: uuid.NewString(), MessageCount: len(session.Messages), Status: "active", ContextPolicy: "{}",
+			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: updatedAt},
+		}
+		if err := tx.Create(&conversation).Error; err != nil {
+			return err
+		}
+		thread := model.AgentThread{
+			PublicID: newRepoPublicID("agth"), UserID: device.UserID, DeviceID: device.ID,
+			RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: conversation.ID,
+			SourceThreadRef: &session.SourceThreadRef, Title: title, Status: "active",
+		}
+		if err := tx.Create(&thread).Error; err != nil {
+			return err
+		}
+		var parentID *uint
+		for _, source := range session.Messages {
+			createdAt := validSessionTime(source.CreatedAt, conversation.CreatedAt)
+			message := model.Message{
+				ConversationID: conversation.ID, UserID: device.UserID, PublicID: newChatPublicID(),
+				ParentMessageID: parentID, Role: source.Role, ContentType: "text", Content: source.Content,
+				ReasoningContent: source.ReasoningContent, BranchReason: "default", Status: "success",
+				BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: createdAt},
+			}
+			if err := tx.Create(&message).Error; err != nil {
+				return err
+			}
+			parentID = &message.ID
+		}
+	}
+	return nil
+}
+
+func validWorkspaceSession(session workspaceSession) bool {
+	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) || len(session.Messages) > 200 || len(session.Name) > 1024 || len(session.Preview) > 4096 {
+		return false
+	}
+	total := 0
+	for _, message := range session.Messages {
+		if message.Role != "user" && message.Role != "assistant" {
+			return false
+		}
+		total += len(message.Content) + len(message.ReasoningContent)
+		if strings.TrimSpace(message.Content) == "" || total > 64*1024 {
+			return false
+		}
+	}
+	return true
+}
+
+func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, session workspaceSession, now time.Time) error {
+	var conversation model.Conversation
+	if err := tx.Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").First(&conversation).Error; err != nil {
+		if dberror.IsRecordNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	var stored []model.Message
+	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {
+		return err
+	}
+	if len(stored) > len(session.Messages) {
+		return nil
+	}
+	for index := range stored {
+		if stored[index].Role != session.Messages[index].Role || stored[index].Content != session.Messages[index].Content || stored[index].ReasoningContent != session.Messages[index].ReasoningContent {
+			return nil
+		}
+	}
+	var parentID *uint
+	if len(stored) > 0 {
+		parentID = &stored[len(stored)-1].ID
+	}
+	for _, source := range session.Messages[len(stored):] {
+		createdAt := validSessionTime(source.CreatedAt, now)
+		message := model.Message{
+			ConversationID: conversation.ID, UserID: thread.UserID, PublicID: newChatPublicID(),
+			ParentMessageID: parentID, Role: source.Role, ContentType: "text", Content: source.Content,
+			ReasoningContent: source.ReasoningContent, BranchReason: "default", Status: "success",
+			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: createdAt},
+		}
+		if err := tx.Create(&message).Error; err != nil {
+			return err
+		}
+		parentID = &message.ID
+	}
+	updates := map[string]any{"message_count": len(session.Messages), "updated_at": validSessionTime(session.UpdatedAt, now)}
+	if title := strings.TrimSpace(session.Name); title != "" {
+		updates["title"] = truncateRunes(title, 255)
+	}
+	return tx.Model(&conversation).Updates(updates).Error
+}
+
+func newChatPublicID() string { return strings.ReplaceAll(uuid.NewString(), "-", "") }
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit])
+}
+
+func validSessionTime(seconds int64, fallback time.Time) time.Time {
+	if seconds <= 0 {
+		return fallback
+	}
+	value := time.Unix(seconds, 0).UTC()
+	if value.After(fallback.UTC().Add(24 * time.Hour)) {
+		return fallback
+	}
+	return value
 }
 
 func enqueueInitialTurn(tx *gorm.DB, device *model.AgentDevice, thread *model.AgentThread, createCommand *model.AgentCommand, now time.Time) error {

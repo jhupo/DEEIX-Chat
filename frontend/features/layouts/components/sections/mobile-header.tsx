@@ -9,8 +9,10 @@ import { ExecutionModeSwitch } from "@/features/devices";
 
 export function MobileHeader({
   onCreateConversation,
+  showModeSwitch,
 }: {
   onCreateConversation: () => void;
+  showModeSwitch: boolean;
 }) {
   const t = useTranslations("common.navigation");
   const { toggleSidebar } = useSidebar();
@@ -30,8 +32,8 @@ export function MobileHeader({
         </Button>
       </div>
 
-      <div className="flex min-w-0 justify-center [&>div]:h-8 [&>div]:w-40">
-        <ExecutionModeSwitch />
+      <div className="flex min-w-0 justify-center">
+        {showModeSwitch ? <ExecutionModeSwitch /> : null}
       </div>
 
       <div className="flex justify-end">

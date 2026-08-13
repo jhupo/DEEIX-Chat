@@ -27,6 +27,10 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 - Runtime Profile 已完成准入证明且未过期。
 - Workspace 属于同一设备和 Profile，状态可用。
 
+聊天与工作是互斥的数据域。Conversation 列表和搜索必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域只返回 Cloud Conversation 和 Cloud Project，工作域只返回所选设备的 Workspace 与 Gateway Conversation。切换模式或设备会清空当前会话、项目和 Workspace 选择，界面不会同时合并或标注两套数据。
+
+Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurns=true)` 读取最近的 Codex 线程。Bridge 只上传 opaque thread ref、标题、时间以及裁剪后的用户/助手文本；provider raw ID、本地路径、命令输出和凭据留在设备。Cloud 在接收资源终态的同一事务内创建或增量更新 Conversation/Message 投影，并将 `AgentThread` 绑定到原 opaque thread ref。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
+
 ## 2.1 安装、注册与更新
 
 账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Bridge 包一并放入前端静态目录，用户机器不直接连接 GitHub。
@@ -41,7 +45,7 @@ Conversation 当前只会创建：
 - `turn.start`：在已有 thread 上执行。
 - `turn.interrupt`：按 Run 中断活动 Turn。
 - `interaction.respond`：回答 app-server server request。
-- `resource.refresh`：刷新模型、skills、MCP、插件等只读快照。
+- `resource.refresh`：刷新模型、sessions、skills、MCP、插件等只读快照；sessions 终态同时更新工作会话投影。
 
 应用服务没有接受任意 JSON 的通用入队方法。Bridge 内部 adapter 可以覆盖 app-server 更多原生方法，但新增产品能力必须先进入 Conversation 用例和强类型 Cloud command，不能直接开放成 Web provider RPC。
 

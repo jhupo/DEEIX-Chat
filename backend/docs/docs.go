@@ -7070,6 +7070,19 @@ const docTemplate = `{
                         "description": "搜索关键词，匹配会话元数据、项目名称和消息正文",
                         "name": "q",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Execution type: cloud|gateway",
+                        "name": "execution",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Gateway device public ID",
+                        "name": "device",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -7294,6 +7307,19 @@ const docTemplate = `{
                         "type": "string",
                         "description": "搜索关键词；为空时返回最近会话",
                         "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Execution type: cloud|gateway",
+                        "name": "execution",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Gateway device public ID",
+                        "name": "device",
                         "in": "query"
                     }
                 ],
@@ -19798,7 +19824,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.18",
+	Version:          "0.4.19",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

@@ -77,11 +77,18 @@ func (r *Repo) ListConversationsByUser(
 	starredFilter string,
 	shareFilter string,
 	projectFilter string,
+	executionType string,
+	executionDeviceID string,
 	searchQuery string,
 ) ([]domainconversation.Conversation, int64, error) {
 	items := make([]models.Conversation, 0)
 	var total int64
-	query := r.db.WithContext(ctx).Model(&models.Conversation{}).Where("user_id = ?", userID)
+	query := r.db.WithContext(ctx).Model(&models.Conversation{}).
+		Where("user_id = ?", userID).
+		Where("execution_type = ?", executionType)
+	if executionDeviceID != "" {
+		query = query.Where("execution_device_id = ?", executionDeviceID)
+	}
 
 	switch statusFilter {
 	case "archived":
@@ -165,12 +172,18 @@ func (r *Repo) ListConversationsForSearch(
 	userID uint,
 	offset int,
 	limit int,
+	executionType string,
+	executionDeviceID string,
 	searchQuery string,
 ) ([]domainconversation.Conversation, error) {
 	items := make([]models.Conversation, 0, limit)
 	query := r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
-		Where("user_id = ?", userID)
+		Where("user_id = ?", userID).
+		Where("execution_type = ?", executionType)
+	if executionDeviceID != "" {
+		query = query.Where("execution_device_id = ?", executionDeviceID)
+	}
 	query = applyConversationSearchFilter(query, searchQuery)
 	if err := query.
 		Order("updated_at DESC").

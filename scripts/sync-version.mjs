@@ -68,6 +68,7 @@ function syncBackend() {
 function syncWorkspace() {
   syncPackageVersion();
   syncPackageVersion("packages", "api-contract");
+  syncPackageVersion("packages", "agent-bridge");
 }
 
 if (mode === "all") {

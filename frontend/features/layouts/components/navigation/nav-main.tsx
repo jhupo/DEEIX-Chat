@@ -11,6 +11,7 @@ import {
 import { NAVIGATION_ITEMS } from "@/features/layouts/model/navigation-items";
 import { NavigationSearch } from "@/features/layouts/components/navigation/navigation-search";
 import { NavMainItem } from "@/features/layouts/components/navigation/nav-main-item";
+import { useChatSession } from "@/features/chat";
 
 export function NavMain({
   onCreateConversation,
@@ -18,6 +19,7 @@ export function NavMain({
   onCreateConversation: () => void;
 }) {
   const t = useTranslations("common.navigation");
+  const { executionMode } = useChatSession();
   const { state, isMobile, setOpenMobile } = useSidebar();
   const isCollapsed = !isMobile && state === "collapsed";
 
@@ -52,7 +54,7 @@ export function NavMain({
           ))}
         </SidebarMenu>
 
-        <SidebarMenu className="mt-4 gap-0.5">
+        {executionMode === "cloud" ? <SidebarMenu className="mt-4 gap-0.5">
           {NAVIGATION_ITEMS.filter((item) => item.group === "secondary").map((item) => (
             <NavMainItem
               key={item.id}
@@ -65,7 +67,7 @@ export function NavMain({
               onCloseMobileSidebar={onCloseMobileSidebar}
             />
           ))}
-        </SidebarMenu>
+        </SidebarMenu> : null}
       </SidebarGroup>
 
       <NavigationSearch

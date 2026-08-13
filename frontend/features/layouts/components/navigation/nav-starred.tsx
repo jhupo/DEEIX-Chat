@@ -115,7 +115,6 @@ export function NavStarred() {
       title: item.title || t("untitled"),
       url: `/chat?conversation_id=${item.publicID}`,
       labelsJSON: item.labelsJSON,
-      executionType: item.executionType,
     })),
     [starredItems, t],
   );

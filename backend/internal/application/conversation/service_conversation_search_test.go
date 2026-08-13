@@ -20,6 +20,8 @@ func (s *conversationSearchRepositoryStub) ListConversationsForSearch(
 	_ int,
 	limit int,
 	_ string,
+	_ string,
+	_ string,
 ) ([]model.Conversation, error) {
 	s.requestedLimit = limit
 	return append([]model.Conversation(nil), s.items...), nil
@@ -35,7 +37,7 @@ func TestSearchConversationsUsesLookaheadInsteadOfExactCount(t *testing.T) {
 	}
 	service := &Service{repo: repo}
 
-	items, hasMore, err := service.SearchConversations(context.Background(), 7, 1, 2, "query")
+	items, hasMore, err := service.SearchConversations(context.Background(), 7, 1, 2, model.ExecutionTypeCloud, "", "query")
 	if err != nil {
 		t.Fatalf("SearchConversations() error = %v", err)
 	}

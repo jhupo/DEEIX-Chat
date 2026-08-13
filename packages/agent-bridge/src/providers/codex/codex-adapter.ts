@@ -14,7 +14,10 @@ import type { SkillsListResponse } from "../../../generated/codex-app-server-v0.
 import type { HooksListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/HooksListResponse.js";
 import type { ThreadForkResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ThreadForkResponse.js";
 import type { ThreadListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ThreadListResponse.js";
+import type { ThreadReadResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ThreadReadResponse.js";
+import type { ThreadResumeResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ThreadResumeResponse.js";
 import type { ThreadStartResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ThreadStartResponse.js";
+import type { Turn } from "../../../generated/codex-app-server-v0.147.0/ts/v2/Turn.js";
 import type { TurnStartResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/TurnStartResponse.js";
 import type { UserInput } from "../../../generated/codex-app-server-v0.147.0/ts/v2/UserInput.js";
 import type {
@@ -209,6 +212,11 @@ export class CodexAdapter implements ProviderAdapter {
 				};
 			}
 			case "turn.start": {
+				await this.#rpc.request<ThreadResumeResponse>(
+					"thread/resume",
+					{ threadId: command.providerThreadId, cwd: command.canonicalCwd },
+					signal,
+				);
 				const response = await this.#rpc.request<TurnStartResponse>(
 					"turn/start",
 					{
@@ -351,22 +359,34 @@ export class CodexAdapter implements ProviderAdapter {
 				if (!cwd) throw new TypeError("workspace resource requires cwd");
 				const threads = await this.#rpc.request<ThreadListResponse>(
 					"thread/list",
-					{ cwd, limit: 100, archived: false },
+					{ cwd, limit: 30, archived: false },
 					signal,
 				);
 				data = {
-					data: await Promise.all(threads.data.map(async (thread) => ({
-						sourceThreadRef: await this.#sources.publish(this.#profileId, "thread", thread.id),
-						preview: thread.preview,
-						name: thread.name,
-						modelProvider: thread.modelProvider,
-						createdAt: thread.createdAt,
-						updatedAt: thread.updatedAt,
-						recencyAt: thread.recencyAt,
-						status: thread.status,
-						source: projectResourceData(thread.source),
-						threadSource: projectResourceData(thread.threadSource),
-					}))),
+					data: await Promise.all(threads.data.map(async (thread) => {
+						let turns: Turn[] = [];
+						try {
+							const detail = await this.#rpc.request<ThreadReadResponse>(
+								"thread/read",
+								{ threadId: thread.id, includeTurns: true },
+								signal,
+							);
+							turns = detail.thread.turns;
+						} catch {
+							if (signal.aborted) throw signal.reason;
+						}
+						return {
+							sourceThreadRef: await this.#sources.publish(this.#profileId, "thread", thread.id),
+							preview: thread.preview,
+							name: thread.name,
+							modelProvider: thread.modelProvider,
+							createdAt: thread.createdAt,
+							updatedAt: thread.updatedAt,
+							recencyAt: thread.recencyAt,
+							status: "active",
+							messages: projectSessionMessages(turns),
+						};
+					})),
 				};
 				break;
 			}
@@ -387,7 +407,11 @@ export class CodexAdapter implements ProviderAdapter {
 				);
 				break;
 		}
-		return { kind: "resource", resource: name, data: projectResourceData(data) };
+		return {
+			kind: "resource",
+			resource: name,
+			data: name === "sessions" ? data : projectResourceData(data),
+		};
 	}
 
 	async #notification(notification: RpcNotification): Promise<void> {
@@ -481,6 +505,55 @@ export class CodexAdapter implements ProviderAdapter {
 		this.#pending.delete(providerRequestId);
 		pending.resolve(mapped);
 	}
+}
+
+type ProjectedSessionMessage = {
+	role: "user" | "assistant";
+	content: string;
+	reasoningContent?: string;
+	createdAt?: number;
+};
+
+function projectSessionMessages(turns: Turn[]): ProjectedSessionMessage[] {
+	const messages: ProjectedSessionMessage[] = [];
+	for (const turn of turns) {
+		let reasoning = "";
+		for (const item of turn.items) {
+			if (item.type === "userMessage") {
+				const content = item.content
+					.filter((input) => input.type === "text")
+					.map((input) => input.text.trim())
+					.filter(Boolean)
+					.join("\n");
+				if (content) messages.push({ role: "user", content, createdAt: turn.startedAt ?? undefined });
+				continue;
+			}
+			if (item.type === "reasoning") {
+				reasoning = [...item.summary, ...item.content].map((part) => part.trim()).filter(Boolean).join("\n");
+				continue;
+			}
+			if (item.type === "agentMessage" && item.text.trim()) {
+				messages.push({
+					role: "assistant",
+					content: item.text.trim(),
+					...(reasoning ? { reasoningContent: reasoning } : {}),
+					createdAt: turn.completedAt ?? turn.startedAt ?? undefined,
+				});
+				reasoning = "";
+			}
+		}
+	}
+
+	const selected: ProjectedSessionMessage[] = [];
+	let size = 0;
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const message = messages[index]!;
+		const nextSize = Buffer.byteLength(JSON.stringify(message), "utf8");
+		if (selected.length > 0 && size + nextSize > 32 * 1024) break;
+		selected.unshift(message);
+		size += nextSize;
+	}
+	return selected;
 }
 
 function threadSettings(settings: ProviderCommand extends never ? never : {

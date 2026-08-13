@@ -80,6 +80,8 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 // @Param share query string false "分享筛选: all|shared|unshared"
 // @Param project query string false "项目筛选: all|unassigned|项目 public_id"
 // @Param q query string false "搜索关键词，匹配会话元数据、项目名称和消息正文"
+// @Param execution query string true "Execution type: cloud|gateway"
+// @Param device query string false "Gateway device public ID"
 // @Success 200 {object} ConversationListResponseDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversations [get]
@@ -91,9 +93,13 @@ func (h *Handler) ListConversations(c *gin.Context) {
 	starredFilter := normalizeConversationStarredFilter(c.Query("starred"))
 	shareFilter := normalizeConversationShareFilter(c.Query("share"))
 	projectFilter := normalizeConversationProjectQuery(c.Query("project"))
+	executionType, executionDeviceID, ok := conversationExecutionFilter(c)
+	if !ok {
+		return
+	}
 	searchQuery := c.Query("q")
 
-	items, total, err := h.service.ListConversations(c.Request.Context(), userID, page, pageSize, statusFilter, starredFilter, shareFilter, projectFilter, searchQuery)
+	items, total, err := h.service.ListConversations(c.Request.Context(), userID, page, pageSize, statusFilter, starredFilter, shareFilter, projectFilter, executionType, executionDeviceID, searchQuery)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "list conversations failed")
 		return
@@ -115,6 +121,8 @@ func (h *Handler) ListConversations(c *gin.Context) {
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
 // @Param q query string false "搜索关键词；为空时返回最近会话"
+// @Param execution query string true "Execution type: cloud|gateway"
+// @Param device query string false "Gateway device public ID"
 // @Success 200 {object} ConversationSearchListResponseDoc
 // @Failure 400 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
@@ -124,6 +132,10 @@ func (h *Handler) SearchConversations(c *gin.Context) {
 	userID := middleware.MustUserID(c)
 	page, pageSize := pageParams(c)
 	searchQuery := strings.TrimSpace(c.Query("q"))
+	executionType, executionDeviceID, ok := conversationExecutionFilter(c)
+	if !ok {
+		return
+	}
 	if len([]rune(searchQuery)) > maxConversationSearchQueryRunes {
 		response.ErrorWithCode(c, http.StatusBadRequest, response.CodeRequestInvalidQuery, "search query is too long")
 		return
@@ -133,6 +145,8 @@ func (h *Handler) SearchConversations(c *gin.Context) {
 		userID,
 		page,
 		pageSize,
+		executionType,
+		executionDeviceID,
 		searchQuery,
 	)
 	if err != nil {

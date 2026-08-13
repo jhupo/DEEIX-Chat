@@ -9,7 +9,7 @@ import { SidebarConversationsProvider } from "@/entities/conversation";
 import { AppSidebar } from "@/features/layouts/components/navigation/app-sidebar";
 import { MobileHeader } from "@/features/layouts/components/sections/mobile-header";
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
-import { DeviceProvider, ExecutionModeSwitch } from "@/features/devices";
+import { DeviceProvider, ExecutionModeSwitch, useDevices } from "@/features/devices";
 import { AppearancePreferencesSync } from "@/features/settings";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { UserLocaleSync } from "@/i18n/user-locale-sync";
@@ -24,11 +24,14 @@ function ProjectLayoutShell({
 }: {
   children: React.ReactNode;
 }) {
+  const tRecent = useTranslations("recent");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
-  const { requestNewConversation } = useChatSession();
+  const { executionMode, requestNewConversation } = useChatSession();
+  const { defaultDevice } = useDevices();
+  const showModeSwitch = pathname === "/chat";
   const routeKey = `${pathname}?${searchParams.toString()}`;
   const previousRouteKeyRef = React.useRef(routeKey);
 
@@ -44,7 +47,7 @@ function ProjectLayoutShell({
   }, [isMobile, openMobile, routeKey, setOpenMobile]);
 
   const handleCreateConversation = React.useCallback(() => {
-    requestNewConversation({ projectID: "" });
+    requestNewConversation({ projectID: "", workspaceID: "" });
     if (pathname === "/chat") {
       window.history.pushState(null, "", "/chat");
       return;
@@ -52,18 +55,34 @@ function ProjectLayoutShell({
     router.push("/chat");
   }, [pathname, requestNewConversation, router]);
 
+  React.useEffect(() => {
+    if (pathname !== "/chat" && executionMode === "gateway") {
+      requestNewConversation({ projectID: "", workspaceID: "" });
+    }
+  }, [executionMode, pathname, requestNewConversation]);
+
   return (
     <>
-      <AppSidebar onCreateConversation={handleCreateConversation} />
-      <SidebarInset>
-        <MobileHeader onCreateConversation={handleCreateConversation} />
-        <div className="pointer-events-none absolute inset-x-0 top-2 z-30 hidden justify-center md:flex">
-          <ExecutionModeSwitch />
-        </div>
-        <div className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden pb-2 md:p-4 md:pt-0">
-          {children}
-        </div>
-      </SidebarInset>
+      <SidebarConversationsProvider
+        key={`${executionMode}:${defaultDevice?.deviceId ?? ""}`}
+        bulkPendingTitle={tRecent("dialogs.bulk.pending")}
+        executionDeviceID={executionMode === "gateway" ? defaultDevice?.deviceId ?? "" : ""}
+        executionType={executionMode}
+        newConversationTitle={tRecent("newChat")}
+      >
+        <AppSidebar onCreateConversation={handleCreateConversation} />
+        <SidebarInset>
+          <MobileHeader onCreateConversation={handleCreateConversation} showModeSwitch={showModeSwitch} />
+          {showModeSwitch ? (
+            <div className="pointer-events-none absolute inset-x-0 top-2 z-30 hidden justify-center md:flex">
+              <ExecutionModeSwitch />
+            </div>
+          ) : null}
+          <div className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden pb-2 md:p-4 md:pt-0">
+            {children}
+          </div>
+        </SidebarInset>
+      </SidebarConversationsProvider>
     </>
   );
 }
@@ -75,24 +94,17 @@ export function ProjectLayout({
   children: React.ReactNode;
   defaultSidebarOpen?: boolean;
 }) {
-  const tRecent = useTranslations("recent");
-
   return (
     <>
       <UserLocaleSync />
       <AppearancePreferencesSync />
       <AnnouncementDialogHost />
       <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>
-        <SidebarConversationsProvider
-          bulkPendingTitle={tRecent("dialogs.bulk.pending")}
-          newConversationTitle={tRecent("newChat")}
-        >
-          <DeviceProvider>
-            <ChatSessionProvider>
-              <ProjectLayoutShell>{children}</ProjectLayoutShell>
-            </ChatSessionProvider>
-          </DeviceProvider>
-        </SidebarConversationsProvider>
+        <DeviceProvider>
+          <ChatSessionProvider>
+            <ProjectLayoutShell>{children}</ProjectLayoutShell>
+          </ChatSessionProvider>
+        </DeviceProvider>
       </SidebarProvider>
     </>
   );

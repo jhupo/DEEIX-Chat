@@ -35,6 +35,7 @@ export type SidebarConversationsControllerValue = {
   transferringStarPublicID: string | null;
   lastChange: SidebarConversationChange | null;
   loadMore: () => Promise<void>;
+  reload: () => Promise<void>;
   retryLoadMore: () => Promise<void>;
   prependNewConversation: (
     platformModelName?: string,

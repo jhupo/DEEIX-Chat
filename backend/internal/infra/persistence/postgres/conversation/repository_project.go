@@ -225,7 +225,7 @@ func (r *Repo) UpdateConversationProjectAssignmentByPublicID(
 ) (*domainconversation.Conversation, error) {
 	result := r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
-		Where("user_id = ? AND public_id = ?", userID, strings.TrimSpace(conversationPublicID)).
+		Where("user_id = ? AND public_id = ? AND execution_type = ?", userID, strings.TrimSpace(conversationPublicID), domainconversation.ExecutionTypeCloud).
 		Update("project_id", projectID)
 	if result.Error != nil {
 		return nil, translateError(result.Error)
@@ -248,7 +248,7 @@ func (r *Repo) BatchUpdateConversationProjectByPublicIDs(
 	}
 	result := r.db.WithContext(ctx).
 		Model(&models.Conversation{}).
-		Where("user_id = ? AND public_id IN ?", userID, conversationPublicIDs).
+		Where("user_id = ? AND public_id IN ? AND execution_type = ?", userID, conversationPublicIDs, domainconversation.ExecutionTypeCloud).
 		Update("project_id", projectID)
 	if result.Error != nil {
 		return 0, translateError(result.Error)

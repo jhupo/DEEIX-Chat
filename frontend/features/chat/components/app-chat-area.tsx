@@ -174,8 +174,8 @@ export function AppChatArea() {
   const searchParams = useSearchParams();
   const routeConversationID = searchParams.get("conversation_id")?.trim() || null;
   const routeProjectID = searchParams.get("project_id")?.trim() || null;
-  const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, requestNewConversation, executionMode, setExecutionMode } = useChatSession();
-  const { defaultDevice, defaultWorkspace } = useDevices();
+  const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, newConversationWorkspaceID: requestedNewConversationWorkspaceID, requestNewConversation, executionMode, setExecutionMode } = useChatSession();
+  const { defaultDevice, defaultWorkspace, selectDefaultDevice, workspaces } = useDevices();
   const [locallyCreatedConversationID, setLocallyCreatedConversationID] = React.useState<string | null>(null);
   const [newConversationOverride, setNewConversationOverride] = React.useState<{
     ignoredConversationID: string | null;
@@ -304,7 +304,14 @@ export function AppChatArea() {
     if (executionModeConversationRef.current === currentConversation.publicID) return;
     executionModeConversationRef.current = currentConversation.publicID;
     setExecutionMode(currentConversation.executionType);
-  }, [currentConversation, setExecutionMode]);
+    if (
+      currentConversation.executionType === "gateway" &&
+      currentConversation.executionDeviceID &&
+      currentConversation.executionDeviceID !== defaultDevice?.deviceId
+    ) {
+      void selectDefaultDevice(currentConversation.executionDeviceID);
+    }
+  }, [currentConversation, defaultDevice?.deviceId, selectDefaultDevice, setExecutionMode]);
   const activeRouteProject = React.useMemo(() => {
     if (!routeProjectID || conversationID) {
       return null;
@@ -316,20 +323,24 @@ export function AppChatArea() {
     () => projects.find((item) => item.publicID === newConversationProjectID) ?? null,
     [newConversationProjectID, projects],
   );
+  const newConversationWorkspace = React.useMemo(
+    () => workspaces.find((item) => item.workspaceId === requestedNewConversationWorkspaceID) ?? defaultWorkspace,
+    [defaultWorkspace, requestedNewConversationWorkspaceID, workspaces],
+  );
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) => prependNewConversation(
       platformModelName,
-      newConversationProjectID || undefined,
-      executionMode === "gateway" && defaultDevice && defaultWorkspace
+      executionMode === "cloud" ? newConversationProjectID || undefined : undefined,
+      executionMode === "gateway" && defaultDevice && newConversationWorkspace
         ? {
             type: "gateway",
             deviceID: defaultDevice.deviceId,
-            profileID: defaultWorkspace.profileId,
-            workspaceID: defaultWorkspace.workspaceId,
+            profileID: newConversationWorkspace.profileId,
+            workspaceID: newConversationWorkspace.workspaceId,
           }
         : { type: "cloud" },
     ),
-    [defaultDevice, defaultWorkspace, executionMode, newConversationProjectID, prependNewConversation],
+    [defaultDevice, executionMode, newConversationProjectID, newConversationWorkspace, prependNewConversation],
   );
   const chatKeyBindings = useChatKeyBindings();
 

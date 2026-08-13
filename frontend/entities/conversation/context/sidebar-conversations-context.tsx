@@ -10,13 +10,17 @@ const SidebarConversationsContext = React.createContext<SidebarConversationsCont
 export function SidebarConversationsProvider({
   bulkPendingTitle,
   children,
+  executionDeviceID,
+  executionType,
   newConversationTitle,
 }: {
   bulkPendingTitle: string;
   children: React.ReactNode;
+  executionDeviceID: string;
+  executionType: "cloud" | "gateway";
   newConversationTitle: string;
 }) {
-  const value = useSidebarConversationsController({ bulkPendingTitle, newConversationTitle });
+  const value = useSidebarConversationsController({ bulkPendingTitle, executionDeviceID, executionType, newConversationTitle });
   return <SidebarConversationsContext.Provider value={value}>{children}</SidebarConversationsContext.Provider>;
 }
 

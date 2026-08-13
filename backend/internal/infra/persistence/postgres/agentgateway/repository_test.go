@@ -63,6 +63,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.FileObject{},
+		&model.Conversation{}, &model.Message{},
 		&model.AgentDevice{}, &model.AgentCommand{}, &model.AgentBridgeFrame{},
 		&model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentArtifact{}, &model.AgentResourceSnapshot{}, &model.AgentThread{},
 		&model.AgentTurn{}, &model.AgentItem{}, &model.AgentEvent{}, &model.AgentInteraction{},
@@ -239,14 +240,44 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || replayedResource.PublicID != queued.PublicID {
 		t.Fatalf("idempotent resource replay changed result: %#v %v", replayedResource, err)
 	}
-	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session"}]}}}`
+	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","messages":[]},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}] }]}}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, 4, resourceCommand.PublicID, strings.Repeat("9", 64), resourceTerminal, now.Add(8*time.Second)); err != nil || ack != 6 {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
 	}
 	snapshot, err := repo.GetResourceSnapshot(context.Background(), 7, device.PublicID, "", workspace.PublicID, "sessions")
 	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID ||
-		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session"}]}`) {
+		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","messages":[]},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}]}`) {
 		t.Fatalf("resource snapshot mismatch: %#v %v", snapshot, err)
+	}
+	var importedConversation model.Conversation
+	if err := database.Where("execution_type = ? AND title = ?", "gateway", "Imported session").First(&importedConversation).Error; err != nil ||
+		importedConversation.ExecutionDeviceID != device.PublicID || importedConversation.ExecutionProfileID != profile.PublicID ||
+		importedConversation.ExecutionWorkspaceID != workspace.PublicID || importedConversation.MessageCount != 2 {
+		t.Fatalf("imported conversation mismatch: %#v %v", importedConversation, err)
+	}
+	var importedThread model.AgentThread
+	if err := database.Where("conversation_id = ?", importedConversation.ID).First(&importedThread).Error; err != nil ||
+		importedThread.SourceThreadRef == nil || *importedThread.SourceThreadRef != "source-thread-2" {
+		t.Fatalf("imported thread mismatch: %#v %v", importedThread, err)
+	}
+	var importedMessages []model.Message
+	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil ||
+		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
+		importedMessages[1].ParentMessageID == nil || *importedMessages[1].ParentMessageID != importedMessages[0].ID {
+		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
+	}
+	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","createdAt":1786615200,"updatedAt":1786615320,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260},{"role":"user","content":"continue","createdAt":1786615320}] }]}}}`
+	if err := projectTerminalResult(database, &device, &model.AgentCommand{
+		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, Kind: "resource.refresh",
+		PayloadJSON: `{"resource":{"name":"sessions"}}`,
+	}, updatedResourceTerminal, now.Add(9*time.Second)); err != nil {
+		t.Fatalf("update session projection: %v", err)
+	}
+	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil || len(importedMessages) != 3 {
+		t.Fatalf("updated imported messages mismatch: %#v %v", importedMessages, err)
+	}
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 3 {
+		t.Fatalf("updated imported conversation mismatch: %#v %v", importedConversation, err)
 	}
 
 	itemStarted := &domainagent.Event{

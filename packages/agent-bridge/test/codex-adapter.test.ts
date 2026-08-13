@@ -145,6 +145,27 @@ test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves app
 		nextCursor: null,
 		backwardsCursor: null,
 	});
+	const sessionReadRequest = await sent.next();
+	assert.equal(sessionReadRequest.method, "thread/read");
+	assert.deepEqual(sessionReadRequest.params, {
+		threadId: "provider-thread-private",
+		includeTurns: true,
+	});
+	respond(output, sessionReadRequest.id, {
+		thread: {
+			id: "provider-thread-private",
+			turns: [{
+				id: "provider-turn-private",
+				items: [
+					{ type: "userMessage", id: "private-user", clientId: null, content: [{ type: "text", text: "Inspect the repository", text_elements: [] }] },
+					{ type: "reasoning", id: "private-reasoning", summary: ["Check the files"], content: [] },
+					{ type: "agentMessage", id: "private-agent", text: "The repository is ready.", phase: null, memoryCitation: null },
+				],
+				itemsView: "full", status: "completed", error: null,
+				startedAt: 1, completedAt: 2, durationMs: 1000,
+			}],
+		},
+	});
 	const sessionResult = await sessions;
 	assert.equal(sessionResult.kind, "resource");
 	const serializedSessions = JSON.stringify(sessionResult);
@@ -152,11 +173,36 @@ test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves app
 	assert.equal(serializedSessions.includes("/work/project"), false);
 	assert.equal(serializedSessions.includes("/home/test"), false);
 	if (sessionResult.kind !== "resource") throw new Error("expected resource result");
-	const projectedSessions = sessionResult.data as { data: Array<{ sourceThreadRef: string }> };
+	const projectedSessions = sessionResult.data as {
+		data: Array<{ sourceThreadRef: string; messages: Array<{ role: string; content: string; reasoningContent?: string }> }>;
+	};
 	assert.equal(
 		sources.resolve("profile_1", "thread", projectedSessions.data[0]!.sourceThreadRef),
 		"provider-thread-private",
 	);
+	assert.deepEqual(projectedSessions.data[0]!.messages, [
+		{ role: "user", content: "Inspect the repository", createdAt: 1 },
+		{ role: "assistant", content: "The repository is ready.", reasoningContent: "Check the files", createdAt: 2 },
+	]);
+
+	const turn = adapter.execute({
+		kind: "turn.start",
+		commandId: "command_turn",
+		profileRef: "profile_1",
+		canonicalCwd: "/work/project",
+		providerThreadId: "provider-thread-1",
+		input: [{ kind: "text", text: "continue" }],
+		settings: {},
+	}, AbortSignal.timeout(1000));
+	const resumeRequest = await sent.next();
+	assert.equal(resumeRequest.method, "thread/resume");
+	assert.deepEqual(resumeRequest.params, { threadId: "provider-thread-1", cwd: "/work/project" });
+	respond(output, resumeRequest.id, { thread: { id: "provider-thread-1" } });
+	const turnRequest = await sent.next();
+	assert.equal(turnRequest.method, "turn/start");
+	assert.equal(turnRequest.params.threadId, "provider-thread-1");
+	respond(output, turnRequest.id, { turn: { id: "provider-turn-2" } });
+	assert.equal((await turn).kind, "turn-started");
 
 	const challenge = [
 		"deeix-runtime-auth-proof-v1",

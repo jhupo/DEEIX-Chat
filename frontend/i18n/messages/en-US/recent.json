@@ -106,7 +106,6 @@
   "deleteConversationLabel": "\"{title}\"",
   "selectedConversationCountLabel": "{count} conversations selected",
   "row": {
-    "execution": { "cloud": "Cloud", "gateway": "Device" },
     "cancelSelect": "Deselect",
     "selectItem": "Select",
     "unstar": "Unstar",

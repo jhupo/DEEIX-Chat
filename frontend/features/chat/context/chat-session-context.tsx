@@ -5,7 +5,8 @@ import * as React from "react";
 type ChatSessionContextValue = {
   newConversationRevision: number;
   newConversationProjectID: string;
-  requestNewConversation: (options?: { projectID?: string }) => void;
+  newConversationWorkspaceID: string;
+  requestNewConversation: (options?: { projectID?: string; workspaceID?: string }) => void;
   executionMode: "cloud" | "gateway";
   setExecutionMode: (mode: "cloud" | "gateway") => void;
 };
@@ -13,12 +14,13 @@ type ChatSessionContextValue = {
 const ChatSessionContext = React.createContext<ChatSessionContextValue | null>(null);
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = React.useState({ revision: 0, projectID: "" });
+  const [state, setState] = React.useState({ revision: 0, projectID: "", workspaceID: "" });
   const [executionMode, setExecutionMode] = React.useState<"cloud" | "gateway">("cloud");
-  const requestNewConversation = React.useCallback((options?: { projectID?: string }) => {
+  const requestNewConversation = React.useCallback((options?: { projectID?: string; workspaceID?: string }) => {
     setState((prev) => ({
       revision: prev.revision + 1,
       projectID: options?.projectID?.trim() ?? "",
+      workspaceID: options?.workspaceID?.trim() ?? "",
     }));
   }, []);
 
@@ -26,11 +28,12 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     () => ({
       newConversationRevision: state.revision,
       newConversationProjectID: state.projectID,
+      newConversationWorkspaceID: state.workspaceID,
       requestNewConversation,
       executionMode,
       setExecutionMode,
     }),
-    [executionMode, requestNewConversation, state.projectID, state.revision],
+    [executionMode, requestNewConversation, state.projectID, state.revision, state.workspaceID],
   );
 
   return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;

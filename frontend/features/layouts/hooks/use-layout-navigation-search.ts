@@ -10,6 +10,8 @@ import { normalizeConversationSearchText } from "@/shared/lib/conversation-searc
 import { searchConversations } from "@/shared/api/conversation";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import type { ConversationSearchResult } from "@/features/layouts/types/navigation";
+import { useChatSession } from "@/features/chat";
+import { useDevices } from "@/features/devices";
 
 type UseLayoutNavigationSearchOptions = {
   untitled: string;
@@ -28,6 +30,8 @@ function mergeSearchResults(
 
 export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearchOptions) {
   const router = useRouter();
+  const { executionMode } = useChatSession();
+  const { defaultDevice } = useDevices();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState<ConversationSearchResult[]>([]);
@@ -95,6 +99,8 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
             page: 1,
             pageSize: NAVIGATION_SEARCH_PAGE_SIZE,
             query: normalizedQuery,
+            execution: executionMode,
+            deviceId: executionMode === "gateway" ? defaultDevice?.deviceId : undefined,
             signal: abortController.signal,
           });
           if (requestVersion !== requestVersionRef.current) {
@@ -124,7 +130,7 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
       }
       abortController.abort();
     };
-  }, [normalizedQuery, open, refreshRevision, untitled]);
+  }, [defaultDevice?.deviceId, executionMode, normalizedQuery, open, refreshRevision, untitled]);
 
   const loadMore = React.useCallback(async () => {
     if (!open || loading || loadingMoreRef.current || !hasMore) {
@@ -152,6 +158,8 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
         page: nextPage,
         pageSize: NAVIGATION_SEARCH_PAGE_SIZE,
         query: requestQuery,
+        execution: executionMode,
+        deviceId: executionMode === "gateway" ? defaultDevice?.deviceId : undefined,
         signal: abortController.signal,
       });
       if (requestVersion !== requestVersionRef.current) {
@@ -174,7 +182,7 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
         }
       }
     }
-  }, [hasMore, loading, normalizedQuery, open, page, untitled]);
+  }, [defaultDevice?.deviceId, executionMode, hasMore, loading, normalizedQuery, open, page, untitled]);
 
   const retrySearch = React.useCallback(() => {
     setRefreshRevision((current) => current + 1);

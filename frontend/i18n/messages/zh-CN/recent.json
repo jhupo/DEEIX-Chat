@@ -106,7 +106,6 @@
   "deleteConversationLabel": "「{title}」",
   "selectedConversationCountLabel": "{count} 个会话",
   "row": {
-    "execution": { "cloud": "云端", "gateway": "设备" },
     "cancelSelect": "取消选择",
     "selectItem": "选择此项",
     "unstar": "取消星标",

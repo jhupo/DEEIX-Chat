@@ -1068,65 +1068,71 @@ func TestListConversationsByUserSearchesMetadataProjectsAndMessages(t *testing.T
 	}
 
 	projectConversation := model.Conversation{
-		UserID:     1,
-		ProjectID:  &project.ID,
-		PublicID:   "conv_project_search",
-		Title:      "Project conversation",
-		LabelsJSON: "[]",
-		Model:      "gpt-test",
-		Provider:   "openai",
-		SessionKey: "session_project_search",
-		Status:     "active",
+		UserID:        1,
+		ProjectID:     &project.ID,
+		PublicID:      "conv_project_search",
+		Title:         "Project conversation",
+		LabelsJSON:    "[]",
+		Model:         "gpt-test",
+		Provider:      "openai",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_project_search",
+		Status:        "active",
 	}
 	titleConversation := model.Conversation{
-		UserID:     1,
-		PublicID:   "conv_title_search",
-		Title:      "Quarterly Budget",
-		LabelsJSON: `["finance"]`,
-		Model:      "claude-test",
-		Provider:   "anthropic",
-		SessionKey: "session_title_search",
-		Status:     "active",
+		UserID:        1,
+		PublicID:      "conv_title_search",
+		Title:         "Quarterly Budget",
+		LabelsJSON:    `["finance"]`,
+		Model:         "claude-test",
+		Provider:      "anthropic",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_title_search",
+		Status:        "active",
 	}
 	messageConversation := model.Conversation{
-		UserID:     1,
-		PublicID:   "conv_message_search",
-		Title:      "Ordinary chat",
-		LabelsJSON: "[]",
-		Model:      "gemini-test",
-		Provider:   "gemini",
-		SessionKey: "session_message_search",
-		Status:     "active",
+		UserID:        1,
+		PublicID:      "conv_message_search",
+		Title:         "Ordinary chat",
+		LabelsJSON:    "[]",
+		Model:         "gemini-test",
+		Provider:      "gemini",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_message_search",
+		Status:        "active",
 	}
 	toolOnlyConversation := model.Conversation{
-		UserID:     1,
-		PublicID:   "conv_tool_only_search",
-		Title:      "Tool output",
-		LabelsJSON: "[]",
-		Model:      "gpt-test",
-		Provider:   "openai",
-		SessionKey: "session_tool_only_search",
-		Status:     "active",
+		UserID:        1,
+		PublicID:      "conv_tool_only_search",
+		Title:         "Tool output",
+		LabelsJSON:    "[]",
+		Model:         "gpt-test",
+		Provider:      "openai",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_tool_only_search",
+		Status:        "active",
 	}
 	wildcardConversation := model.Conversation{
-		UserID:     1,
-		PublicID:   "conv_literal_wildcard_search",
-		Title:      "Progress 100%",
-		LabelsJSON: "[]",
-		Model:      "gpt-test",
-		Provider:   "openai",
-		SessionKey: "session_literal_wildcard_search",
-		Status:     "active",
+		UserID:        1,
+		PublicID:      "conv_literal_wildcard_search",
+		Title:         "Progress 100%",
+		LabelsJSON:    "[]",
+		Model:         "gpt-test",
+		Provider:      "openai",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_literal_wildcard_search",
+		Status:        "active",
 	}
 	otherUserConversation := model.Conversation{
-		UserID:     2,
-		PublicID:   "conv_other_user",
-		Title:      "Private Budget",
-		LabelsJSON: "[]",
-		Model:      "gpt-test",
-		Provider:   "openai",
-		SessionKey: "session_other_user",
-		Status:     "active",
+		UserID:        2,
+		PublicID:      "conv_other_user",
+		Title:         "Private Budget",
+		LabelsJSON:    "[]",
+		Model:         "gpt-test",
+		Provider:      "openai",
+		ExecutionType: domainconversation.ExecutionTypeCloud,
+		SessionKey:    "session_other_user",
+		Status:        "active",
 	}
 	for _, conversation := range []model.Conversation{
 		projectConversation,
@@ -1188,7 +1194,7 @@ func TestListConversationsByUserSearchesMetadataProjectsAndMessages(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			items, total, err := repo.ListConversationsByUser(ctx, 1, 0, 10, "active", "all", "all", "all", tt.query)
+			items, total, err := repo.ListConversationsByUser(ctx, 1, 0, 10, "active", "all", "all", "all", domainconversation.ExecutionTypeCloud, "", tt.query)
 			if err != nil {
 				t.Fatalf("ListConversationsByUser() error = %v", err)
 			}
@@ -1202,6 +1208,49 @@ func TestListConversationsByUserSearchesMetadataProjectsAndMessages(t *testing.T
 				t.Fatalf("items = %#v, want %q", items, tt.wantID)
 			}
 		})
+	}
+}
+
+func TestConversationExecutionScopesAreIsolated(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := NewRepo(db)
+	ctx := context.Background()
+	project := model.ConversationProject{
+		UserID: 1, PublicID: "proj_cloud_scope", Name: "Cloud", Status: "active",
+	}
+	if err := db.Create(&project).Error; err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	conversations := []model.Conversation{
+		{UserID: 1, PublicID: "conv_cloud_scope", Title: "Cloud", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeCloud, SessionKey: "session_cloud_scope", Status: "active"},
+		{UserID: 1, PublicID: "conv_device_a", Title: "Device A", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SessionKey: "session_device_a", Status: "active"},
+		{UserID: 1, PublicID: "conv_device_b", Title: "Device B", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SessionKey: "session_device_b", Status: "active"},
+	}
+	if err := db.Create(&conversations).Error; err != nil {
+		t.Fatalf("create conversations: %v", err)
+	}
+
+	tests := []struct {
+		name, executionType, deviceID, wantPublicID string
+	}{
+		{name: "cloud", executionType: domainconversation.ExecutionTypeCloud, wantPublicID: "conv_cloud_scope"},
+		{name: "device a", executionType: domainconversation.ExecutionTypeGateway, deviceID: "agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", wantPublicID: "conv_device_a"},
+		{name: "device b", executionType: domainconversation.ExecutionTypeGateway, deviceID: "agd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", wantPublicID: "conv_device_b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items, total, err := repo.ListConversationsByUser(ctx, 1, 0, 10, "active", "all", "all", "all", tt.executionType, tt.deviceID, "")
+			if err != nil {
+				t.Fatalf("ListConversationsByUser() error = %v", err)
+			}
+			if total != 1 || len(items) != 1 || items[0].PublicID != tt.wantPublicID {
+				t.Fatalf("items = %#v, total = %d, want only %q", items, total, tt.wantPublicID)
+			}
+		})
+	}
+
+	if _, err := repo.UpdateConversationProjectAssignmentByPublicID(ctx, 1, "conv_device_a", &project.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("gateway project assignment error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1250,7 +1299,7 @@ func TestListConversationsForSearchReturnsOrderedWindowWithoutStatusFiltering(t 
 		t.Fatalf("create conversations: %v", err)
 	}
 
-	results, err := repo.ListConversationsForSearch(ctx, 1, 1, 2, "needle")
+	results, err := repo.ListConversationsForSearch(ctx, 1, 1, 2, domainconversation.ExecutionTypeCloud, "", "needle")
 	if err != nil {
 		t.Fatalf("ListConversationsForSearch() error = %v", err)
 	}
