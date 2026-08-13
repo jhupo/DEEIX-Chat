@@ -79,7 +79,7 @@ if ((await gitTree(jsonDirectory)) !== artifacts.json_tree_git_object)
 console.log(`Codex app-server ${lock.upstream.tag} schema lock verified`);
 
 async function checkFile(path, expected) {
-	const content = await readFile(path);
+	const content = await readCanonicalFile(path);
 	if (sha256(content) !== expected.sha256)
 		throw new Error(`${basename(path)} SHA-256 differs from the schema lock`);
 	if (expected.git_blob && gitObject("blob", content) !== expected.git_blob)
@@ -98,11 +98,15 @@ async function gitTree(directory) {
 		const path = join(directory, entry.name);
 		const hash = entry.isDirectory()
 			? await gitTree(path)
-			: gitObject("blob", await readFile(path));
+			: gitObject("blob", await readCanonicalFile(path));
 		parts.push(Buffer.from(`${entry.isDirectory() ? "40000" : "100644"} ${entry.name}\0`));
 		parts.push(Buffer.from(hash, "hex"));
 	}
 	return gitObject("tree", Buffer.concat(parts));
+}
+
+async function readCanonicalFile(path) {
+	return Buffer.from((await readFile(path, "utf8")).replaceAll("\r\n", "\n"));
 }
 
 function gitObject(kind, content) {
