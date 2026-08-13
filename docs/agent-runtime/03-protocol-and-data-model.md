@@ -25,9 +25,7 @@ POST   /api/v1/agent/bridge/enroll
 POST   /api/v1/agent/bridge/token-challenges
 POST   /api/v1/agent/bridge/tokens
 GET    /api/v1/agent/bridge/connect
-POST   /api/v1/agent/bridge/transfers/:transfer_ticket_ref/claim
-PUT    /api/v1/agent/bridge/transfers/:transfer_ticket_ref/data
-GET    /api/v1/agent/bridge/transfers/:transfer_ticket_ref/data
+GET    /api/v1/agent/bridge/artifacts/:artifact_id/content
 ```
 
 Browser enrollment creates a one-use code. Bridge exchanges code plus device public key, obtains a challenge, signs it locally, receives a short ordinary `connection` token, then upgrades WSS. Credential endpoints use device-specific rate limits and device-key verification rather than browser session authentication. These secret-returning mutations use the shared claim-first idempotency pipeline and return restart-safe reconstructed bearer values as defined in the credential section. During `revoking`, ordinary/new-work token issuance remains blocked; the same `token-challenges` plus `tokens` endpoints may issue only a typed `settlement` token after a fresh device-key-signed challenge when delivery-started work remains.
@@ -48,16 +46,12 @@ First release projects only existing local account/status/rate-limit state neede
 
 ```text
 GET    /api/v1/agent/devices/:device_id/workspaces
-POST   /api/v1/agent/devices/:device_id/workspaces/pick
-PATCH  /api/v1/agent/workspaces/:workspace_id
-DELETE /api/v1/agent/workspaces/:workspace_id
-GET    /api/v1/agent/workspaces/:workspace_id/files?parent_ref=&query=&cursor=
-GET    /api/v1/agent/workspaces/:workspace_id/resources
-POST   /api/v1/agent/workspaces/:workspace_id/uploads
-GET    /api/v1/agent/artifacts/:artifact_id/download
+POST   /api/v1/agent/workspaces/:workspace_id/artifacts
+GET    /api/v1/agent/devices/:device_id/workspaces/:workspace_id/resources/:resource
+POST   /api/v1/agent/devices/:device_id/workspaces/:workspace_id/resources/:resource/refresh
 ```
 
-Picker is a queued Bridge command. Files use signed opaque `file_ref`; requests never include a local absolute path. Upload and artifact download endpoints issue durable `agent_transfer_tickets` rows after user/workspace ownership checks and return the ticket public ref and state, not a transfer bearer.
+Browser first uses the existing `/files` upload. Artifact registration accepts that opaque `fileId`, validates ownership and image/audio metadata, then returns `artifactId`. Turn input carries only `artifactRef`; requests never contain a local absolute path.
 
 ### 2.4 Thread lifecycle
 
@@ -134,9 +128,9 @@ GET wss://HOST/api/v1/agent/bridge/connect
 Sec-WebSocket-Protocol: deeix.bridge.v1, deeix.auth.<connection-token>
 ```
 
-Enrollment code, challenge nonce and ordinary `connection` token are issued as deterministic Base64URL bearers using Go standard-library HMAC-SHA-256 over active derivation key version, purpose/domain separator, immutable random issuance `public_id`, `user_id`/device/credential version, expiry and normalized issuance fields. Database rows store only SHA-256 `token_hash`, `derivation_key_version` and immutable issuance fields; raw bearer, seed and key material are absent. Ordinary connection tokens remain short-lived and one-use. A `settlement` token is the only second kind: while device is `revoking` and delivery-started work remains, a fresh device-key-signed challenge may issue a short-lived one-use bearer derived/hashed with purpose/domain `bridge-settlement`, device, current credential version, immutable issuance ID/expiry and immutable `settlement_upper_server_seq` equal to the highest already delivery-started command eligible at issuance. Consumption is one conditional update: `consumed_at IS NULL AND expires_at > now`. Upgrade validates the device key/token, marks the connection credential consumed, selects `deeix.bridge.v1`, and creates ordinary or settlement-scoped in-memory epoch. Final revoke/credential rotation invalidates settlement tokens. This subprotocol transport works with Node 24 native `WebSocket` without placing token text in URL logs.
+Enrollment code, challenge nonce and `connection` token are deterministic Base64URL bearers derived with Go standard-library HMAC-SHA-256 over purpose, issuance public ID, User/device credential version and expiry. Database rows store only SHA-256 `token_hash` and immutable issuance fields. Connection tokens are short-lived and one-use. Upgrade consumes the token, selects `deeix.bridge.v1` and never places token text in URL logs. Device revocation rotates the credential version so all earlier challenges and connection tokens fail validation.
 
-A settlement-scoped epoch permits only hello/welcome, resend/ack for already delivery-started command rows at or below `settlement_upper_server_seq`, result/error/recovery/provider frames tied to that settlement set, and existing transfer receipt/data required to finish those commands. It rejects new User-scoped commands, resource refresh/mutation, new transfer claims, unrelated provider frames and every command above the bound. A repeat disconnect may obtain another one-use settlement token through a fresh signed challenge while unsettled work remains; ordinary credential issuance stays blocked.
+Revocation increments the device credential version and blocks further challenge, connection and command issuance. No second connection-token class exists.
 
 Derivation key ring retains an old key until every issuance under that version has expired and its idempotency replay window has elapsed. Key material is server secret/KMS configuration only; database data contains key version, hash and immutable issuance fields.
 
@@ -155,19 +149,26 @@ type BridgeEnvelope = {
   payload: unknown;
 };
 
-type CommandDelivery =
-  | { kind: "execute"; command: Exclude<AgentCommand, { kind: "transfer.execute" }> }
-  | { kind: "execute"; command: Extract<AgentCommand, { kind: "transfer.execute" }>; transferBearer: string }
-  | { kind: "tombstone"; commandId: string; reason: "cancelled" | "expired" | "failed_terminal" };
+type ArtifactGrant = {
+  artifactRef: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  expiresAt: string;
+  grant: string;
+};
 
 type BridgeCommandEnvelope = Omit<BridgeEnvelope, "type" | "serverSeq" | "payload"> & {
   type: "command";
   serverSeq: number;
-  payload: CommandDelivery;
+  commandId: string;
+  command: AgentCommand;
+  artifacts: ArtifactGrant[];
 };
 ```
 
-`hello`, `welcome`, `ack`, `ping`, and `pong` are control frames. They carry cursors but no durable `server_seq`. Every non-control Bridge-to-server frame has a `bridgeSeq`, including device/profile snapshots, command result/error, interaction notifications and provider events. Every command frame has a `serverSeq` allocated by the server. For `transfer.execute`, the dispatcher rebuilds the deterministic HMAC bearer from immutable ticket fields, verifies its SHA-256 against `token_hash`, and attaches it only as `transferBearer` in this ephemeral WSS execute envelope. Bridge validates that envelope and writes a sanitized incoming command record containing `serverSeq`, command ID and ticket/public/source refs, never the bearer. The persisted command payload, browser response and cloud response/body cache contain the ticket ref and allowlisted public/source refs only.
+`hello`, `welcome`, `ack`, `ping`, and `pong` are control frames. Every durable Bridge-to-server frame has `bridgeSeq`; every command frame has server-allocated `serverSeq`. `artifacts` is always explicit, including an empty array. Its grants are five-minute HMAC values bound to artifact, command, User, device, workspace and expiry. Bridge validates the frame, persists only the command, verifies each attachment, writes `command.receipt-ready`, then advances the contiguous ACK cursor. Grants never enter command payload, WAL, browser response or terminal cache.
 
 `hello.ackServerSeq` is Bridge's contiguous durable receipt cursor for cloud-to-Bridge commands. After credential, epoch, range and contiguity validation against allocated command rows, the server may advance cloud `last_acked_server_seq` and mark covered commands acked. `hello.ackBridgeSeq` is only Bridge's last observed cloud acknowledgement for diagnostics/reconciliation; it never advances cloud `last_acked_bridge_seq`. `welcome` returns cloud `last_acked_bridge_seq` as the authoritative upstream cursor, and Bridge resends WAL frames strictly above that value. Thus a stale or higher Bridge-reported `ackBridgeSeq` cannot suppress resend or cause cloud cursor advancement; only the contiguous staged-frame projection transaction advances `last_acked_bridge_seq`.
 
@@ -187,9 +188,7 @@ Bridge allocates monotonically increasing `bridge_seq` in its private durable WA
 
 Command creation serializes the `agent_devices.next_server_seq` read-update and `agent_commands` insert with the PostgreSQL device row lock. It commits the command with its aggregate projection. `next_server_seq` starts at 1 and always represents the next value available for allocation.
 
-Command dispatcher selects the smallest unacknowledged row by `server_seq > last_acked_server_seq AND acked_at IS NULL`. Before WSS write it durably records the first delivery attempt (`delivery_started_at`, attempt metadata and `dispatched`); that first attempt, not receipt ack, transfers terminal ownership to Bridge. Only a queued row with no delivery attempt may become `cancelled`, `expired` or `failed_terminal` and be sent as `CommandDelivery(kind=tombstone)` with the same command ID/server sequence/reason. An explicit transport failure proven before write acceptance may requeue only through the same serialized CAS that clears nullable `delivery_started_at` while retaining attempt/audit metadata; an ambiguous write/connection loss retains that marker and resends with the same command ID/sequence for Bridge WAL/cache/recovery dedup. Once execute delivery may have reached Bridge, cloud expiry/cancel/revoke neither terminalizes the command or linked responding interaction nor replaces it with a tombstone. For `transfer.execute`, Bridge does not ack on envelope receipt: it first persists the sanitized record, claims the ticket with the in-memory bearer, persists the returned non-secret receipt, zeroes bearer, then advances contiguous `ackServerSeq`.
-
-Bridge persists every incoming typed command or tombstone to its private durable WAL store before action. Incoming command WAL state is `received`, `invocation_started`, or `terminal_cached`; `invocation_started` stores the method-specific recovery data and precondition required by the typed recovery registry, while `terminal_cached` stores normalized result/error. For `transfer.execute`, the received record is the sanitized serverSeq/command/ticket-ref form defined above and excludes the bearer; normal commands retain their typed payload. A tombstone advances contiguous ack without provider execution. For an expiry-bearing normal execute command, Bridge checks `expiresAt` immediately before invocation and during recovery: if delivery occurred but invocation has not begun before expiry, it caches/emits normalized `expired` without provider call; after invocation began or provider accepted, deadline does not manufacture a cloud terminal and typed recovery settles result/failure/`outcome_unknown`. Otherwise Bridge checks the command-ID result cache: a hit re-emits the stored result/error with no provider call; a miss persists `invocation_started`, resolves source refs, calls `ProviderAdapter`, persists normalized result/error as `terminal_cached`, then emits the durable up-frame. Ordinary command acknowledgement is receipt/WAL durability rather than provider completion. The Bridge reports contiguous `ackServerSeq` in hello and ack controls. Server advances `last_acked_server_seq` only to the largest contiguous value and writes `acked_at` on covered command rows; acknowledgement does not overwrite delivery-started or terminal business state. It resends every unacknowledged row above that cursor after reconnect. A result/error settles a delivery-started normal command as `completed`, normalized failure, or `failed_terminal` with `outcome_unknown`; ack and completion are separate timestamps. Device revoke leaves delivery-started settlement to Bridge; sequence values remain allocated and never re-enter dispatch.
+Command dispatcher selects rows above `last_acked_server_seq`, marks delivery before WSS write and resends the same command ID/sequence after ambiguous disconnect. Bridge WAL states are `received`, `receipt-ready`, `invocation_started` and `terminal_cached`. Attachment failure leaves the command received but not receipt-ready, so neither current ACK nor restart hello can skip it. A cached terminal result is re-emitted without a second provider call. A restored unsafe invocation becomes `outcome_unknown`; read-only resource refresh and explicitly idempotent lifecycle operations may replay. ACK and command completion remain independent timestamps.
 
 ### 4.3 Local command recovery
 
@@ -324,7 +323,7 @@ acked_at, completed_at, result_json, error_code, error_json, expires_at,
 created_at, updated_at
 ```
 
-Unique `(device_id, server_seq)` and partial unique `(turn_id) WHERE operation='turn.start' AND initial_thread_create=true`; indexes `(device_id, server_seq)`, `(idempotency_record_id)`, `(thread_id, created_at)`, `(expires_at)`. `operation` is an allowlisted AgentCommand discriminant. `payload_json` contains typed input, public/source refs and allowlisted `expiresAt` where required; a `transfer.execute` row contains only `transferTicketRef` and allowlisted device/workspace/thread public/source refs. It never contains a raw provider ID or transfer bearer. Business statuses are `queued`, `dispatched`, `completed`, `cancelled`, `expired`, `failed_retryable`, `failed_terminal`; `delivery_started_at` is the durable first-attempt ownership boundary and `acked_at` is independent Bridge-receipt evidence. Only terminal-before-delivery rows become same-sequence tombstones. A delivery-started row is settled only by the first matching Bridge terminal result/error/recovery: an identical replay is a no-op; conflicting second terminal, or any terminal frame for a cloud-terminal pre-delivery tombstone, is rejected/audited and cannot regress aggregates. If a pre-delivery `interaction.respond` command terminalizes, it atomically writes the linked responding interaction terminal status/code/time; delivery-started interaction response remains responding until its Bridge settlement. Retention preserves result/error for the Bridge command-ID cache window, then redacts payload/result as required while retaining audit summary.
+Unique `(device_id, server_seq)` and guarded initial-turn command creation prevent duplicate provider work. `payload_json` contains only typed input and public/source refs; it never contains raw provider IDs, local paths or artifact grants. `acked_at` records Bridge receipt readiness and is independent from provider completion. Terminal replay with the same hash is a no-op; conflicting terminal data is rejected.
 
 ### 5.10 `agent_idempotency_records`
 
@@ -334,27 +333,16 @@ response_status, response_skeleton_json, secret_kind NULL, secret_ref NULL, comm
 created_at, expires_at
 ```
 
-Unique `(user_id, operation, idempotency_key)`; indexes `(expires_at)`, `(command_id)` and `(secret_ref)`. `request_hash` is calculated from normalized validated request content. `response_skeleton_json` excludes bearer token material. For enrollment/challenge/connection issuance, `secret_kind` and `secret_ref` point to credential public ID; initial response and same-hash replay rebuild bearer from the issuance row, verify its SHA-256 against `token_hash`, then attach it to the response skeleton. Transfer issuance records the ticket public ID but returns no bearer; dispatcher reconstruction is WSS-only. This works after process restart and even after credential consumption: replay returns the same credential bearer while consume CAS still permits only one use. Retention expires response skeleton after the retry window while retaining minimal audit evidence. Every HTTP mutation transaction claims/inserts the record, changes aggregate state, creates/links command when needed, and stores response before commit. Labels/share policy mutations follow the same transaction. Concurrent same-key requests lock/read the record rather than creating a second command.
+Unique `(user_id, operation, idempotency_key)`. `request_hash` is calculated from normalized validated request content. Enrollment/challenge/connection bearer reconstruction uses its credential row and verifies the stored token hash. Every Agent mutation claims the idempotency record, validates aggregate state, creates the command and stores the result in one transaction.
 
-### 5.11 `agent_artifacts`, `agent_thread_shares`, and `agent_transfer_tickets`
+### 5.11 `agent_artifacts`
 
 ```text
-agent_artifacts(id, public_id, user_id, thread_id, turn_id NULL, item_id NULL,
-  workspace_id, file_ref, object_key NULL, name, mime_type, byte_size, sha256,
-  status, display_json, expires_at NULL, created_at, updated_at, deleted_at)
-
-agent_thread_shares(id, public_id, user_id, thread_id, snapshot_json,
-  status, expires_at NULL, revoked_at NULL, created_at, updated_at)
-
-agent_transfer_tickets(id, public_id, user_id, device_id, workspace_id,
-  artifact_id NULL, direction, token_hash, derivation_key_version, object_key NULL, file_ref NULL,
-  target_ref NULL, sha256, byte_size, mime_type, status, expires_at,
-  claim_command_id NULL, claim_receipt_ref NULL, consumed_at NULL, created_at, updated_at)
+id, public_id, user_id, workspace_id, file_object_id, file_name,
+mime_type, size_bytes, sha256, status, created_at, updated_at
 ```
 
-Artifact unique key is `(workspace_id, file_ref)` while the file ref is active; index `(thread_id, created_at)`. Share unique `public_id`; index `(thread_id, status)`. Transfer ticket unique keys are `public_id` and `token_hash`; index `(workspace_id, status, expires_at)`. Token text never enters the database; only `token_hash` is stored. Artifacts use a local signed file ref until a transfer creates `object_key`; share stores only a redacted snapshot.
-
-Transfer bearer uses the same HMAC-SHA-256 derivation scheme with ticket purpose/domain, ticket public ID, `user_id`/device/workspace/direction and expiry; DB stores only `token_hash`, `derivation_key_version` and immutable ticket fields. On every transfer command send or replay, dispatcher rebuilds the bearer, verifies `token_hash`, and puts it only in the ephemeral WSS execute envelope. Bridge validates the envelope and first writes a sanitized incoming record with `serverSeq`, command ID and ticket/public/source refs, with no bearer. It then calls the separately authenticated claim route using its device identity, command ID, ticket ref and in-memory bearer. The typed claim validates user/device/workspace/direction and CAS-updates `status=issued AND consumed_at IS NULL AND expires_at > now` to `consuming`, recording `claim_command_id` and returning durable `claim_receipt_ref` bound to that User, device, command and ticket. A retry of that same device and command returns the same receipt; another command or device does not acquire the claim. Bridge persists this non-secret receipt before advancing/acking `serverSeq`, then zeroes bearer. Authenticated directional streaming uses Bridge device authentication plus the persisted receipt with `PUT .../data` for upload and `GET .../data` for download, never the transfer bearer, while that claim is `consuming`. Before and during streaming, Bridge and server validate User ownership, device, workspace, direction, SHA-256, byte size, MIME type, canonical root and file ref. A verified terminal transfer CAS-moves `consuming -> consumed` with `consumed_at`; hash mismatch or transport failure CAS-moves it to `failed`. A crash before durable claim receipt/ack leaves the command unacknowledged, so server redelivery re-derives the same bearer; a crash after durable receipt/ack resumes the transfer from the receipt with no bearer and no second consumption. Bridge keeps bearer out of durable WAL/result-cache payloads and zeroes it after receipt persistence; only redacted receipt metadata remains after terminal result. Retention marks elapsed issued/consuming rows `expired` and cleans temporary staging/object data. Thread deletion schedules artifact ticket expiry/object cleanup and share revocation, then follows aggregate retention. Canonical local path is never stored.
+Unique `(workspace_id, file_object_id)` makes registration idempotent. Only active image/audio file objects are accepted. Command creation verifies every `artifactRef` against User and workspace. Content delivery additionally binds the artifact to the concrete command/device before issuing a short-lived HMAC grant.
 
 ### 5.12 `agent_cleanup_jobs`
 
@@ -384,7 +372,7 @@ lease_owner NULL, leased_at NULL, leased_until NULL, completed_at NULL, created_
 
 ### 6.3 command dispatcher
 
-Business state flow for normal commands is `queued -> dispatched -> completed`; the durable first delivery attempt is recorded before WSS write. A transport failure proven before write acceptance may requeue only through the same serialized CAS that clears nullable `delivery_started_at` while retaining attempt/audit metadata; an ambiguous write retains the marker, stays delivery-started and resends with the same ID/sequence. Cloud-side expiry/cancel/revoke can produce `cancelled`, `expired` or `failed_terminal` only before delivery starts, yielding a same-sequence tombstone; after delivery starts, Bridge terminal result/error/recovery owns settlement and may legitimately emit local normalized `expired` before invocation. `acked_at` remains Bridge-receipt evidence, not provider completion. Claim/send uses compare-and-set on the smallest `server_seq > last_acked_server_seq` with `acked_at IS NULL`. For `transfer.execute`, this claim also rebuilds and hash-verifies the bearer immediately before WSS send; Bridge acknowledges only after its sanitized command record and claim receipt are durable, then uses the receipt for resumable directional data transfer. In the same pre-delivery terminal-command transaction, a linked `interaction.respond` CAS-updates `responding` to `cancelled`, `expired`, or `failed` with normalized code/time; a delivery-started response leaves it responding until Bridge settles it. Revoke enters `revoking`, blocks new user work and ordinary credential issuance, terminalizes only never-delivered work and pending interactions, and permits only the bounded `settlement` credential/epoch for delivery-started work. It finalizes `revoked`, rotates credential and closes connection only after settlement; offline unsettled devices stay `revoking`.
+Business state flow is `queued -> dispatched -> completed|failed_terminal`. The first delivery attempt is recorded before WSS write; ambiguous disconnect resends the same command ID and sequence. `acked_at` is receipt readiness, not provider completion. A terminal frame settles the matching command once and projects its typed result into Thread/Turn/Resource state.
 
 ### 6.4 `ApplyBridgeFrame`
 

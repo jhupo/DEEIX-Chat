@@ -41,6 +41,17 @@ export type BridgeCommandFrame = {
 	serverSeq: number;
 	commandId: string;
 	command: unknown;
+	artifacts: ArtifactGrant[];
+};
+
+export type ArtifactGrant = {
+	artifactRef: string;
+	fileName: string;
+	mimeType: string;
+	sizeBytes: number;
+	sha256: string;
+	expiresAt: string;
+	grant: string;
 };
 
 export type BridgeServerFrame =
@@ -139,17 +150,35 @@ export function parseBridgeServerFrame(value: unknown): BridgeServerFrame {
 			exact(source, ["version", "type", "ackBridgeSeq"]);
 			return { version: 1, type: "ack.bridge", ackBridgeSeq: positiveCursor(source.ackBridgeSeq, "ack.bridge.ackBridgeSeq") };
 		case "command":
-			exact(source, ["version", "type", "serverSeq", "commandId", "command"]);
+			exact(source, ["version", "type", "serverSeq", "commandId", "command", "artifacts"]);
 			assertOpaqueRef(source.commandId, "commandId");
+			if (!Array.isArray(source.artifacts) || source.artifacts.length > 16)
+				throw new TypeError("command artifacts are invalid");
 			return {
 				version: 1, type: "command",
 				serverSeq: positiveCursor(source.serverSeq, "command.serverSeq"),
 				commandId: source.commandId,
 				command: source.command,
+				artifacts: source.artifacts.map(parseArtifactGrant),
 			};
 		default:
 			throw new TypeError(`unsupported bridge frame type: ${source.type}`);
 	}
+}
+
+function parseArtifactGrant(value: unknown): ArtifactGrant {
+	const source = object(value, "artifact grant");
+	exact(source, ["artifactRef", "fileName", "mimeType", "sizeBytes", "sha256", "expiresAt", "grant"]);
+	assertOpaqueRef(source.artifactRef, "artifact grant reference");
+	if (
+		typeof source.fileName !== "string" || source.fileName.length === 0 || source.fileName.length > 255 ||
+		typeof source.mimeType !== "string" || !/^(?:image|audio)\/[A-Za-z0-9.+-]{1,100}$/.test(source.mimeType) ||
+		typeof source.sizeBytes !== "number" || !Number.isSafeInteger(source.sizeBytes) || source.sizeBytes < 1 || source.sizeBytes > 100 * 1024 * 1024 ||
+		typeof source.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(source.sha256) ||
+		typeof source.expiresAt !== "string" || !validTime(source.expiresAt) ||
+		typeof source.grant !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(source.grant)
+	) throw new TypeError("artifact grant is invalid");
+	return source as ArtifactGrant;
 }
 
 export function parseBridgeCommand(frame: BridgeCommandFrame): AgentCommand {

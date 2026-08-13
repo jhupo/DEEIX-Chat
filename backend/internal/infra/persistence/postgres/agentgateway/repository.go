@@ -79,12 +79,31 @@ func toDomainResourceSnapshot(v model.AgentResourceSnapshot) *domainagent.Resour
 	}
 }
 
+func toDomainArtifact(v model.AgentArtifact) *domainagent.Artifact {
+	return &domainagent.Artifact{
+		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, WorkspaceID: v.WorkspaceID,
+		FileObjectID: v.FileObjectID, FileName: v.FileName, MimeType: v.MimeType,
+		SizeBytes: v.SizeBytes, SHA256: v.SHA256, Status: v.Status,
+		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+	}
+}
+
 func toDomainThread(v model.AgentThread) *domainagent.Thread {
 	return &domainagent.Thread{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID, RuntimeProfileID: v.RuntimeProfileID, WorkspaceID: v.WorkspaceID, SourceThreadRef: v.SourceThreadRef, Title: v.Title, Status: v.Status, LastEventSeq: v.LastEventSeq, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 func toDomainTurn(v model.AgentTurn) *domainagent.Turn {
 	return &domainagent.Turn{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID, SourceTurnRef: v.SourceTurnRef, Status: v.Status, InputJSON: v.InputJSON, SettingsJSON: v.SettingsJSON, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+}
+
+func toDomainItem(v model.AgentItem) *domainagent.Item {
+	return &domainagent.Item{
+		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID,
+		TurnID: v.TurnID, RuntimeProfileID: v.RuntimeProfileID,
+		SourceItemRef: v.SourceItemRef, Kind: v.Kind, Status: v.Status,
+		DataJSON: v.DataJSON, LastEventSeq: v.LastEventSeq,
+		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+	}
 }
 
 func toDomainEvent(v model.AgentEvent) *domainagent.Event {
@@ -663,6 +682,9 @@ func enqueueInitialTurn(tx *gorm.DB, device *model.AgentDevice, thread *model.Ag
 	if err := tx.First(&workspace, *createCommand.WorkspaceID).Error; err != nil {
 		return err
 	}
+	if err := validateCommandArtifacts(tx, thread.UserID, workspace.ID, turn.InputJSON); err != nil {
+		return err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"kind": "turn.start", "deviceId": device.PublicID, "profileId": profile.PublicID,
 		"workspaceId": workspace.PublicID, "threadId": thread.PublicID,
@@ -805,6 +827,47 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 	}
 	if err := tx.Model(&thread).Update("last_event_seq", next).Error; err != nil {
 		return err
+	}
+	if (event.Kind == "item/started" || event.Kind == "item/completed") && event.SourceItemRef != "" {
+		var payload struct {
+			Item struct {
+				Type string `json:"type"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil || payload.Item.Type == "" {
+			return repository.ErrConflict
+		}
+		status := "running"
+		if event.Kind == "item/completed" {
+			status = "completed"
+		}
+		item := model.AgentItem{
+			PublicID: newRepoPublicID("agit"), UserID: event.UserID, ThreadID: thread.ID,
+			TurnID: event.TurnID, RuntimeProfileID: *event.RuntimeProfileID,
+			SourceItemRef: event.SourceItemRef, Kind: payload.Item.Type, Status: status,
+			DataJSON: event.PayloadJSON, LastEventSeq: next,
+		}
+		var stored model.AgentItem
+		result := tx.Where("runtime_profile_id = ? AND source_item_ref = ?", item.RuntimeProfileID, item.SourceItemRef).
+			Attrs(item).FirstOrCreate(&stored)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			if stored.ThreadID != thread.ID || stored.UserID != event.UserID ||
+				(event.TurnID != nil && (stored.TurnID == nil || *stored.TurnID != *event.TurnID)) {
+				return repository.ErrConflict
+			}
+			if event.Kind == "item/started" && stored.Status == "completed" {
+				return repository.ErrConflict
+			}
+			if err := tx.Model(&stored).Updates(map[string]any{
+				"turn_id": event.TurnID, "kind": item.Kind, "status": status,
+				"data_json": item.DataJSON, "last_event_seq": next,
+			}).Error; err != nil {
+				return err
+			}
+		}
 	}
 	if event.Kind == "interaction.requested" && event.SourceRequestRef != "" {
 		interaction := model.AgentInteraction{
@@ -971,6 +1034,116 @@ func (r *Repo) ListWorkspaces(ctx context.Context, userID uint, devicePublicID s
 		result = append(result, *item)
 	}
 	return result, errFor(err)
+}
+
+func (r *Repo) CreateArtifact(ctx context.Context, userID uint, workspacePublicID, fileID string, input *domainagent.Artifact) (*domainagent.Artifact, error) {
+	var artifact model.AgentArtifact
+	var workspaceID uint
+	var resolvedFileID string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var workspace model.AgentWorkspace
+		if err := tx.Where("user_id = ? AND public_id = ? AND status = ?", userID, workspacePublicID, "available").First(&workspace).Error; err != nil {
+			return err
+		}
+		var file model.FileObject
+		if err := tx.Where("user_id = ? AND file_id = ? AND status = ?", userID, fileID, "active").First(&file).Error; err != nil {
+			return err
+		}
+		mimeType := strings.TrimSpace(file.DetectedMIME)
+		if mimeType == "" {
+			mimeType = strings.TrimSpace(file.MimeType)
+		}
+		if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "audio/") {
+			return repository.ErrInvalidInput
+		}
+		created := model.AgentArtifact{
+			PublicID: input.PublicID, UserID: userID, WorkspaceID: workspace.ID,
+			FileObjectID: file.ID, FileName: file.FileName, MimeType: mimeType,
+			SizeBytes: file.SizeBytes, SHA256: file.SHA256, Status: "ready",
+		}
+		if err := tx.Where("workspace_id = ? AND file_object_id = ?", workspace.ID, file.ID).
+			Attrs(created).FirstOrCreate(&artifact).Error; err != nil {
+			return err
+		}
+		workspaceID, resolvedFileID = workspace.ID, file.FileID
+		return nil
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	result := toDomainArtifact(artifact)
+	result.WorkspaceID, result.WorkspacePublicID, result.FileID = workspaceID, workspacePublicID, resolvedFileID
+	return result, nil
+}
+
+func (r *Repo) ListArtifactsForCommand(ctx context.Context, deviceID, commandID uint, refs []string) ([]domainagent.Artifact, error) {
+	if len(refs) == 0 {
+		return []domainagent.Artifact{}, nil
+	}
+	var command model.AgentCommand
+	if err := r.db.WithContext(ctx).Where("id = ? AND device_id = ?", commandID, deviceID).First(&command).Error; err != nil {
+		return nil, errFor(err)
+	}
+	if command.WorkspaceID == nil {
+		return nil, repository.ErrConflict
+	}
+	type row struct {
+		model.AgentArtifact
+		FileID string `gorm:"column:file_id"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Table("agent_artifacts AS artifacts").
+		Select("artifacts.*, files.file_id").
+		Joins("JOIN file_objects AS files ON files.id = artifacts.file_object_id").
+		Where("artifacts.user_id = ? AND artifacts.workspace_id = ? AND artifacts.status = ? AND artifacts.public_id IN ?", command.UserID, *command.WorkspaceID, "ready", refs).
+		Find(&rows).Error
+	if err != nil {
+		return nil, errFor(err)
+	}
+	if len(rows) != len(refs) {
+		return nil, repository.ErrConflict
+	}
+	byRef := make(map[string]domainagent.Artifact, len(rows))
+	for _, row := range rows {
+		item := toDomainArtifact(row.AgentArtifact)
+		item.FileID = row.FileID
+		byRef[item.PublicID] = *item
+	}
+	result := make([]domainagent.Artifact, 0, len(refs))
+	for _, ref := range refs {
+		item, ok := byRef[ref]
+		if !ok {
+			return nil, repository.ErrConflict
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func (r *Repo) GetArtifactForCommand(ctx context.Context, artifactPublicID, commandPublicID string) (*domainagent.Artifact, *domainagent.Command, error) {
+	var command model.AgentCommand
+	if err := r.db.WithContext(ctx).Where("public_id = ?", commandPublicID).First(&command).Error; err != nil {
+		return nil, nil, errFor(err)
+	}
+	if command.WorkspaceID == nil {
+		return nil, nil, repository.ErrConflict
+	}
+	type row struct {
+		model.AgentArtifact
+		FileID string `gorm:"column:file_id"`
+	}
+	var value row
+	err := r.db.WithContext(ctx).Table("agent_artifacts AS artifacts").
+		Select("artifacts.*, files.file_id").
+		Joins("JOIN file_objects AS files ON files.id = artifacts.file_object_id").
+		Where("artifacts.public_id = ? AND artifacts.user_id = ? AND artifacts.workspace_id = ? AND artifacts.status = ?", artifactPublicID, command.UserID, *command.WorkspaceID, "ready").
+		First(&value).Error
+	if err != nil {
+		return nil, nil, errFor(err)
+	}
+	artifact := toDomainArtifact(value.AgentArtifact)
+	artifact.FileID = value.FileID
+	return artifact, toDomainCommand(command), nil
 }
 
 func (r *Repo) QueueResourceRefresh(
@@ -1165,6 +1338,17 @@ func (r *Repo) QueueThreadCommand(
 		if err := tx.Where("id = ? AND status = ?", thread.WorkspaceID, "available").First(&workspace).Error; err != nil {
 			return err
 		}
+		if command.Kind == "turn.steer" {
+			var turnInput struct {
+				Input json.RawMessage `json:"input"`
+			}
+			if json.Unmarshal(parameters, &turnInput) != nil {
+				return repository.ErrInvalidInput
+			}
+			if err := validateCommandArtifacts(tx, userID, workspace.ID, string(turnInput.Input)); err != nil {
+				return err
+			}
+		}
 		var device model.AgentDevice
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", thread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
@@ -1346,6 +1530,11 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 		if err := tx.Where("user_id = ? AND device_id = ? AND runtime_profile_id = ? AND public_id = ? AND status = ?", input.UserID, device.ID, profile.ID, target.WorkspaceID, "available").First(&workspace).Error; err != nil {
 			return err
 		}
+		if initialTurn != nil {
+			if err := validateCommandArtifacts(tx, input.UserID, workspace.ID, initialTurn.InputJSON); err != nil {
+				return err
+			}
+		}
 		thread = model.AgentThread{PublicID: input.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, Title: input.Title, Status: input.Status}
 		if err := tx.Create(&thread).Error; err != nil {
 			return err
@@ -1387,6 +1576,56 @@ func commandDeviceID(payload string) string {
 	}
 	_ = json.Unmarshal([]byte(payload), &target)
 	return target.DeviceID
+}
+
+func validateCommandArtifacts(tx *gorm.DB, userID, workspaceID uint, inputJSON string) error {
+	var input []struct {
+		Kind        string `json:"kind"`
+		ArtifactRef string `json:"artifactRef"`
+	}
+	if json.Unmarshal([]byte(inputJSON), &input) != nil {
+		return repository.ErrInvalidInput
+	}
+	refs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range input {
+		if item.Kind != "artifact" {
+			continue
+		}
+		if !validArtifactRef(item.ArtifactRef) {
+			return repository.ErrInvalidInput
+		}
+		if _, exists := seen[item.ArtifactRef]; exists {
+			continue
+		}
+		seen[item.ArtifactRef] = struct{}{}
+		refs = append(refs, item.ArtifactRef)
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&model.AgentArtifact{}).
+		Where("user_id = ? AND workspace_id = ? AND status = ? AND public_id IN ?", userID, workspaceID, "ready", refs).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count != int64(len(refs)) {
+		return repository.ErrInvalidInput
+	}
+	return nil
+}
+
+func validArtifactRef(value string) bool {
+	if len(value) != len("agart_")+32 || !strings.HasPrefix(value, "agart_") {
+		return false
+	}
+	for _, character := range value[len("agart_"):] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Repo) ListThreads(ctx context.Context, userID uint, limit int) ([]domainagent.Thread, error) {
@@ -1470,6 +1709,9 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
 			return err
 		}
+		if err := validateCommandArtifacts(tx, input.UserID, workspace.ID, input.InputJSON); err != nil {
+			return err
+		}
 		turn = model.AgentTurn{PublicID: input.PublicID, UserID: input.UserID, ThreadID: thread.ID, Status: input.Status, InputJSON: input.InputJSON, SettingsJSON: input.SettingsJSON}
 		if err := tx.Create(&turn).Error; err != nil {
 			return err
@@ -1529,6 +1771,27 @@ func (r *Repo) ListEvents(ctx context.Context, userID uint, threadPublicID strin
 	for _, row := range rows {
 		item := toDomainEvent(row.AgentEvent)
 		item.TurnPublicID = row.TurnPublicID
+		result = append(result, *item)
+	}
+	return result, errFor(err)
+}
+
+func (r *Repo) ListItems(ctx context.Context, userID uint, threadPublicID string, limit int) ([]domainagent.Item, error) {
+	type row struct {
+		model.AgentItem
+		TurnPublicID string `gorm:"column:turn_public_id"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Table("agent_items AS items").
+		Select("items.*, COALESCE(turns.public_id, '') AS turn_public_id").
+		Joins("JOIN agent_threads AS threads ON threads.id = items.thread_id").
+		Joins("LEFT JOIN agent_turns AS turns ON turns.id = items.turn_id").
+		Where("items.user_id = ? AND threads.public_id = ?", userID, threadPublicID).
+		Order("items.last_event_seq ASC").Limit(limit).Find(&rows).Error
+	result := make([]domainagent.Item, 0, len(rows))
+	for _, row := range rows {
+		item := toDomainItem(row.AgentItem)
+		item.ThreadPublicID, item.TurnPublicID = threadPublicID, row.TurnPublicID
 		result = append(result, *item)
 	}
 	return result, errFor(err)

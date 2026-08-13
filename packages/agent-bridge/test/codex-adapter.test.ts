@@ -200,6 +200,54 @@ test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves app
 	await adapter.close();
 });
 
+test("Codex notification policy maps, redacts extensions, and drops disabled methods", async () => {
+	const input = new PassThrough();
+	const output = new PassThrough();
+	const sent = lineReader(input);
+	const events: Array<{
+		kind: string;
+		occurredAt: string;
+		payload: Record<string, unknown>;
+	}> = [];
+	const adapter = new CodexAdapter({
+		profileId: "profile_1",
+		rpc: new JsonLineRpcClient(input, output),
+		sources: new SourceRefRegistry(),
+	});
+	const started = adapter.start(async (event) => {
+		events.push(event);
+	}, AbortSignal.timeout(1000));
+	const initialize = await sent.next();
+	respond(output, initialize.id, {
+		userAgent: "codex-cli/0.147.0",
+		codexHome: "/home/test/.codex",
+		platformFamily: "unix",
+		platformOs: "linux",
+	});
+	await sent.next();
+	await started;
+
+	output.write(`${JSON.stringify({ method: "warning", params: { message: "mapped" } })}\n`);
+	output.write(`${JSON.stringify({
+		method: "deprecationNotice",
+		params: { message: "extension", token: "redacted" },
+	})}\n`);
+	output.write(`${JSON.stringify({
+		method: "thread/realtime/started",
+		params: { threadId: "private-thread" },
+	})}\n`);
+	await eventually(() => events.length === 2);
+	assert.equal(events[0]?.kind, "warning");
+	assert.deepEqual(events[0]?.payload, { message: "mapped" });
+	assert.equal(events[1]?.kind, "provider.extension");
+	assert.deepEqual(events[1]?.payload, {
+		method: "deprecationNotice",
+		data: { message: "extension" },
+	});
+	assert.ok(events.every((event) => !Number.isNaN(Date.parse(event.occurredAt))));
+	await adapter.close();
+});
+
 function lineReader(stream: PassThrough): { next: () => Promise<Record<string, any>> } {
 	const lines: string[] = [];
 	const waiters: Array<(value: string) => void> = [];

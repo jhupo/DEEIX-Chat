@@ -14,6 +14,7 @@ import type {
 	ProviderResult,
 } from "../src/providers/provider-adapter.js";
 import { ProviderRegistry } from "../src/providers/provider-registry.js";
+import { ArtifactDownloader } from "../src/transport/artifact-downloader.js";
 import { CommandJournal } from "../src/wal/command-journal.js";
 import { DurableWalStore } from "../src/wal/durable-wal-store.js";
 
@@ -101,6 +102,97 @@ test("executor terminalizes an indeterminate restored invocation without replay"
 	await providers.close();
 });
 
+test("executor replays a read-only resource refresh after a crash", async (context) => {
+	const directory = await mkdtemp(join(tmpdir(), "deeix-recovery-read-"));
+	context.after(() => rm(directory, { recursive: true, force: true }));
+	const command = {
+		kind: "resource.refresh",
+		deviceId: "device_1",
+		profileId: "profile_1",
+		resource: { scope: "profile", name: "models" },
+	} as const;
+	const wal = await DurableWalStore.open(join(directory, "wal"));
+	const journal = CommandJournal.restore(wal);
+	await journal.receive(1, "command_1", command);
+	await journal.start("command_1", {
+		commandKind: "resource.refresh",
+		replay: "safe",
+	});
+	wal.close();
+
+	const restoredWal = await DurableWalStore.open(join(directory, "wal"));
+	const restored = CommandJournal.restore(restoredWal);
+	const providers = new ProviderRegistry();
+	const adapter = new FakeAdapter();
+	providers.register("profile_1", adapter);
+	const executor = new GatewayCommandExecutor(
+		restored,
+		new WorkspaceRegistry(),
+		new SourceRefRegistry(),
+		providers,
+	);
+	const outcome = await executor.dispatch(
+		1,
+		"command_1",
+		command,
+		AbortSignal.timeout(1000),
+	);
+	assert.deepEqual(outcome, {
+		kind: "result",
+		result: { kind: "resource", resource: "models", data: [] },
+	});
+	assert.equal(adapter.calls, 1);
+	restoredWal.close();
+	await providers.close();
+});
+
+test("artifact failure persists the command without advancing its receipt", async (context) => {
+	const directory = await mkdtemp(join(tmpdir(), "deeix-artifact-receipt-"));
+	context.after(() => rm(directory, { recursive: true, force: true }));
+	const wal = await DurableWalStore.open(join(directory, "wal"));
+	const journal = CommandJournal.restore(wal);
+	const workspaces = new WorkspaceRegistry();
+	await workspaces.register("workspace_1", directory);
+	const providers = new ProviderRegistry();
+	const adapter = new BlockingAdapter();
+	providers.register("profile_1", adapter);
+	const executor = new GatewayCommandExecutor(
+		journal,
+		workspaces,
+		new SourceRefRegistry(),
+		providers,
+		new ArtifactDownloader("https://deeix.test", workspaces, async () =>
+			new Response(null, { status: 503 })),
+	);
+	const command = {
+		kind: "turn.start",
+		deviceId: "device_1",
+		profileId: "profile_1",
+		workspaceId: "workspace_1",
+		threadId: "thread_1",
+		sourceThreadRef: "thread_ref",
+		input: [{ kind: "artifact", artifactRef: "agart_0123456789abcdef0123456789abcdef" }],
+		settings: {},
+	};
+
+	await assert.rejects(
+		() => executor.dispatch(1, "command_1", command, AbortSignal.timeout(1000), undefined, [{
+			artifactRef: "agart_0123456789abcdef0123456789abcdef",
+			fileName: "fixture.png",
+			mimeType: "image/png",
+			sizeBytes: 1,
+			sha256: "0".repeat(64),
+			expiresAt: new Date(Date.now() + 60_000).toISOString(),
+			grant: "A".repeat(43),
+		}]),
+		/artifact download failed/,
+	);
+	assert.equal(journal.get("command_1")?.state, "received");
+	assert.equal(journal.contiguousReceipt(), 0);
+	wal.close();
+	await providers.close();
+});
+
 test("interaction response can complete while a turn command is waiting", async (context) => {
 	const directory = await mkdtemp(join(tmpdir(), "deeix-interaction-"));
 	context.after(() => rm(directory, { recursive: true, force: true }));
@@ -154,7 +246,7 @@ class FakeAdapter implements ProviderAdapter {
 		runtimeVersion: "0.147.0",
 		protocolVersion: "v2",
 		schemaHash: "fixture",
-		commands: ["thread.create"],
+		commands: ["thread.create", "resource.refresh"],
 	};
 
 	async start(
@@ -173,6 +265,8 @@ class FakeAdapter implements ProviderAdapter {
 		_signal: AbortSignal,
 	): Promise<ProviderResult> {
 		this.calls += 1;
+		if (command.kind === "resource.refresh")
+			return { kind: "resource", resource: command.resource.name, data: [] };
 		assert.equal(command.kind, "thread.create");
 		return { kind: "thread-created", sourceThreadRef: "source_thread_1" };
 	}

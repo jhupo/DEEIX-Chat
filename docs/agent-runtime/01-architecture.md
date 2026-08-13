@@ -45,13 +45,13 @@ flowchart LR
 - 验证 user 对 device、runtime profile、workspace、thread、turn、interaction 和 artifact ref 的关联；所有 mutation 接收 `Idempotency-Key`。
 - 每个 HTTP mutation 先完成 authentication、DTO 语法/大小/枚举校验并计算 request hash，再在同一事务 claim/read `agent_idempotency_records`。同 key/op/hash 直接重放首个 committed response；新 record 才继续 aggregate state 校验、变更、必要 command 与 response 保存。labels 与 share policy 使用同一流程。
 - 创建 `agent_commands` 行并原子分配 `server_seq`，写 command audit，再让 Hub 唤醒连接。
-- 处理 thread/turn/interaction/resource 查询，提供 thread-scoped NDJSON replay，签发文件 transfer ticket。
+- 处理 thread/turn/item/interaction/resource 查询、thread-scoped replay 和 workspace 附件登记。
 - 不持有 provider credential、canonical cwd 或 raw provider request ID；也不拼装 chat 模型上下文或执行 server-MCP。
 
 ### 2.3 Command dispatcher 与 Bridge Gateway
 
 - Hub 只维护当前进程的 device socket、connection epoch、heartbeat 与背压。首版一个应用实例，Hub 数据不承担恢复职责。
-- command dispatcher 以 `server_seq > last_acked_server_seq` 选择每个 device 的下一行，而非仅按业务 status 筛选。Dispatcher 在 WSS write 前 durably marks the first delivery attempt. 仅 queued 且未开始 delivery 的取消、过期或 terminal failure 才转为同一 command ID/server_seq 的 typed tombstone/no-op；一旦 execute delivery 可能到达 Bridge，cloud 不再直接 terminalize 或替换为 tombstone。明确证明 write acceptance 前的 transport failure 仅可通过同一 serialized CAS 清除 nullable `delivery_started_at` ownership marker 后 requeue，同时保留 attempt/audit metadata；无法证明 zero acceptance 的 write/connection loss 保持 delivery-started，并以同一 command ID/seq resend 给 Bridge WAL/cache/recovery dedup。Bridge incoming-command WAL records `received`, `invocation_started` (with typed recovery data/precondition) or `terminal_cached` (normalized result/error). Tombstone 持久化后推进连续 ack，不调用 provider；普通 execute 命令先查 command-ID result cache：命中时重发已存 result/error，不调用 provider；未命中时先持久化 `invocation_started`，再解析 source refs、调用 `ProviderAdapter`、持久化 normalized result/error，最后发 durable up-frame。普通 ack 表示 receipt/WAL durability 而非 provider completion；delivery-started 命令由 Bridge terminal result/error/recovery (`completed`, normalized failure 或 `outcome_unknown`) 结算。`transfer.execute` 仍先写只含 `serverSeq`、command/ticket refs 的 sanitized incoming record，再取得并持久化 claim receipt 后才推进 ack，随后 suffix 才继续下发。
+- command dispatcher 以 `server_seq > last_acked_server_seq` 选择每个 device 的下一行。Bridge 先把不含附件 grant 的 typed command 写入 WAL；若命令引用附件，则下载到临时文件，校验声明大小与 SHA-256，原子移动到 workspace 后写 `command.receipt-ready`。只有连续 receipt-ready 序号进入 `ackServerSeq`。执行前写 `invocation_started`，terminal result/error 先缓存再上行；崩溃恢复只重放明确安全的方法，其余返回 `outcome_unknown`。
 - Gateway 在接收上行 durable frame 后调用 projector。只有数据库事务提交成功才发送 `ackBridgeSeq`。
 - WSS control frame 处理 hello/welcome/ping/pong/ack；control frame 不占 durable command sequence。
 
@@ -78,7 +78,7 @@ Agent command/projection persistence uses PostgreSQL with pgvector as the sole s
 | --- | --- | --- |
 | Conversation/Message/Run | DEEIX database | 普通聊天执行、恢复、分享、导出，以及 Sub2 request/usage/external-ID audit；不保存本地金融计费事实 |
 | provider thread/session | local app-server/session store | AgentThread projection、历史与审计 |
-| local workspace files | device | workspace metadata、file ref、按需 transfer |
+| local workspace files | device | Cloud 只保存 workspace metadata 与 opaque artifact ref |
 | provider credentials/config secrets | device | auth/configured status，不存 secret |
 | Agent commands/projections | PostgreSQL + pgvector | durable intent、Web query、replay、audit |
 | bridge outgoing frames/results | private Bridge durable WAL store | 上行续传和 command result de-duplication |
@@ -149,15 +149,15 @@ The browser never sends a provider method or JSON-RPC ID. It references Agent pu
 
 ### 浏览器到 workspace
 
-1. Browser uses current object-storage upload path and receives upload metadata.
-2. Agent service validates User/workspace ownership, writes an `agent_transfer_tickets` row and returns its opaque public ref; the row stores only token hash, hash/size/MIME, direction and refs.
-3. Dispatcher persists a typed `transfer.execute` command containing only `transferTicketRef` and allowlisted public/source refs, then rebuilds and hash-verifies the bearer only for its ephemeral WSS delivery. Bridge validates the envelope and persists a sanitized incoming record with `serverSeq`, command ID and ticket refs, but no bearer; it uses the in-memory bearer once to claim the ticket.
-4. Claim CAS returns a durable non-secret receipt bound to User, device, command and ticket. Bridge persists that receipt before advancing/acking the command `serverSeq`, then zeroes the bearer. Directional data transfer uses Bridge device authentication plus the persisted receipt, not the bearer; Bridge validates user/device/workspace/direction, size/hash/MIME, canonical root and file ref before adding an app-server local input. A terminal result consumes the claim once and retains only redacted receipt metadata in Bridge WAL/result data.
-5. Hash mismatch or transfer failure marks ticket failed, and retention removes expired ticket rows, staging files and eligible temporary objects.
+1. Browser uses the existing `/files` upload path and receives `fileId`.
+2. `POST /agent/workspaces/:workspace_id/artifacts` validates User/workspace/file ownership, active file status, image/audio MIME, byte size and SHA-256, then returns an opaque `artifactId`.
+3. `turn.start` or `turn.steer` stores only `artifactRef`; its transaction verifies every ref belongs to the same User and workspace.
+4. Command delivery derives a five-minute HMAC grant bound to artifact, command, User, device, workspace and expiry. The grant appears only in the WSS envelope and download authorization header.
+5. Bridge persists the grant-free command, downloads to `.partial`, enforces the declared byte ceiling and SHA-256, atomically moves the file into `.deeix/artifacts`, writes `command.receipt-ready`, then ACKs and maps it to Codex `localImage`/`localAudio`.
 
 ### workspace 到浏览器或 share
 
-Bridge resolves signed file ref, validates workspace/root again, chunks through a short-lived upload ticket, and reports progress as thread-visible artifact events. Full workspace mirroring is absent. Share snapshots use redacted item/artifact projections and omit command environment, absolute paths and config secrets.
+Workspace output download and share snapshots are outside the current gateway batch. Full workspace mirroring is absent; absolute paths and local config secrets never enter Cloud projections.
 
 ## 7. 恢复模型
 
@@ -167,7 +167,7 @@ Browser reconnect with a mounted reducer subscribes to the Redis-backed notifier
 
 ### Bridge reconnect and server restart
 
-Bridge hello reports contiguous `ackServerSeq` and `ackBridgeSeq`. `ackServerSeq` is Bridge's contiguous durable receipt cursor for cloud-to-Bridge commands; after credential/epoch/range/contiguity validation against allocated command rows, server advances `last_acked_server_seq` and marks covered commands acked. `ackBridgeSeq` is only Bridge's last observed cloud acknowledgement for diagnostics/reconciliation and never advances cloud `last_acked_bridge_seq`. `welcome` returns the cloud authoritative `last_acked_bridge_seq`; Bridge resends durable WAL frames strictly above that returned cursor, so a stale or higher hello `ackBridgeSeq` cannot suppress resend or advance the cloud cursor. PostgreSQL serializes the device cursor, then the server resends every `agent_commands.server_seq > last_acked_server_seq`, including typed tombstones only for rows terminalized before their first delivery attempt. For transfer, a crash before durable claim receipt/ack produces this normal redelivery and re-derives the same bearer; after receipt/ack, Bridge resumes with its persisted receipt and no bearer. PostgreSQL survives API restart; the new Hub resumes delivery when Bridge reconnects. Bridge durable WAL store writes tombstones before ack and replays each unacked `bridge_seq` in order.
+Bridge hello reports contiguous `ackServerSeq` and `ackBridgeSeq`. `ackServerSeq` advances only through durable `command.receipt-ready` records, so a crash after command WAL but before attachment verification causes normal redelivery with a fresh short-lived grant. `welcome` returns the cloud authoritative `last_acked_bridge_seq`; Bridge resends durable outgoing frames strictly above it. PostgreSQL survives API restart and the same command ID/server sequence is reused after reconnect.
 
 ### Provider process restart
 
@@ -175,7 +175,7 @@ Bridge restarts app-server, emits profile state, initializes its adapter, then r
 
 ### Device revoke
 
-Device revoke first enters `revoking`: it blocks new user commands and ordinary credential issuance, terminalizes only never-delivered work and pending interactions, and permits a narrow settlement-only Bridge connection for delivery-started work. Through existing `token-challenges` plus `tokens`, a fresh device-key-signed challenge may issue a short-lived one-use `settlement` token bound to current credential version and immutable upper already-delivery-started `server_seq`; ordinary/new-work issuance remains blocked. That epoch permits only bounded resend/ack, terminal/recovery/provider frames and existing transfer receipt/data for that set, never new commands/resources/transfers or unrelated frames. Repeat disconnect may obtain another one-use settlement token while work remains; final revoke/credential rotation invalidates it. It does not directly cancel delivery-started commands or linked responding interactions; where a typed local cancellation such as turn interrupt exists it may be requested, otherwise Bridge result/recovery/`outcome_unknown` settles the work. Offline unsettled devices remain `revoking`; first release has no force-terminal UI. After acknowledged/delivery-started work settles, revoke finalizes `revoked`, rotates credential, closes Hub connection and records audit; sequence values are never reused. `DeleteAccountHard` means DEEIX workspace deletion: it atomically invalidates local access and deletes DEEIX aggregates, then best-effort logs out the Sub2 token pair from each deleted DEEIX browser session. It never calls `/auth/revoke-all-sessions`, never deletes the Sub2 account, and never claims to cancel already accepted local provider activity.
+Device revoke atomically marks the device revoked and rotates its credential version. New enrollment, challenge, connection and command operations then fail ownership/status validation; the active socket is closed when replaced or disconnected. Already accepted provider work is not represented as cancelled by Cloud without a matching Bridge terminal event. Sequence values are never reused.
 
 Before workspace deletion or any retained sensitive account mutation, the current Browser session must atomically consume a short-lived single-use local step-up grant bound to that session, purpose and current account/token version; no upstream refresh-family grant is reused across User sessions.
 
@@ -183,7 +183,7 @@ Protected Browser routes validate the short-lived DEEIX access token against the
 
 ## 8. 安全、部署与观测
 
-- enrollment code、challenge、ordinary connection token、settlement token 与 transfer ticket bearer 由 Go 标准库 HMAC-SHA-256 按 key version、purpose/domain、发行 public ID、`user_id`/device/credential version 和 expires_at 等不可变字段确定性生成后 Base64URL 编码；settlement additionally binds immutable `settlement_upper_server_seq` and purpose `bridge-settlement`。DB 仅保存 SHA-256 token hash、key version 与发行字段。credential idempotency replay 重建 token 后先核对 hash；transfer bearer 仅由 dispatcher 在 WSS send/replay 时重建并核对 hash，消费仍使用 `consumed_at IS NULL AND expires_at > now` 条件更新。
+- enrollment code、challenge 与 ordinary connection token 由 Go 标准库 HMAC-SHA-256 按发行字段确定性生成后 Base64URL 编码，DB 只保存 SHA-256 token hash。附件 grant 绑定 artifact/command/User/device/workspace/expiry，只在交付时派生且不持久化。
 - Derivation key ring 的旧 key 保留至其全部 issuance expiry 加 idempotency replay window 结束；key material 仅存在 server secret/KMS 配置。
 - WSS is TLS terminated by a proxy that supports Upgrade, forwards `Sec-WebSocket-Protocol`, enforces frame/message limits and permits heartbeat duration. app-server stays stdio-only.
 - Bridge validates all local paths, file refs, capability requests and interaction ownership. Server validates all public refs, idempotency scope and payload size before queueing.

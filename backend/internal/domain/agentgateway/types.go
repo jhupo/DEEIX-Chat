@@ -88,6 +88,23 @@ type ResourceSnapshot struct {
 	UpdatedAt         time.Time
 }
 
+type Artifact struct {
+	ID                uint
+	PublicID          string
+	UserID            uint
+	WorkspaceID       uint
+	WorkspacePublicID string
+	FileObjectID      uint
+	FileID            string
+	FileName          string
+	MimeType          string
+	SizeBytes         int64
+	SHA256            string
+	Status            string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type Thread struct {
 	ID                uint
 	PublicID          string
@@ -118,6 +135,24 @@ type Turn struct {
 	SettingsJSON   string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type Item struct {
+	ID               uint
+	PublicID         string
+	UserID           uint
+	ThreadID         uint
+	TurnID           *uint
+	ThreadPublicID   string
+	TurnPublicID     string
+	RuntimeProfileID uint
+	SourceItemRef    string
+	Kind             string
+	Status           string
+	DataJSON         string
+	LastEventSeq     uint64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type Event struct {

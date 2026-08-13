@@ -103,6 +103,18 @@ type avatarContentOpener struct {
 	conversationService *conversation.Service
 }
 
+type agentArtifactStore struct {
+	conversationService *conversation.Service
+}
+
+func (s agentArtifactStore) OpenAgentArtifact(ctx context.Context, userID uint, fileID string) (*appagentgateway.ArtifactContent, error) {
+	content, err := s.conversationService.OpenFileContent(ctx, userID, fileID)
+	if err != nil {
+		return nil, err
+	}
+	return &appagentgateway.ArtifactContent{Reader: content.Reader, ContentType: content.ContentType, SizeBytes: content.SizeBytes}, nil
+}
+
 func (o avatarContentOpener) OpenAvatarFileContent(ctx context.Context, userID uint, fileID string) (*user.AvatarFileContent, error) {
 	content, err := o.conversationService.OpenFileContent(ctx, userID, fileID)
 	if err != nil {
@@ -271,6 +283,7 @@ func NewApp() (*App, error) {
 	conversationService.SetAuditWriter(auditService)
 	conversationService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetMCPRepository(mcpRepo)
+	agentGatewayService.SetArtifactContentStore(agentArtifactStore{conversationService: conversationService})
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
 	authService.SetAvatarFileValidator(conversationService)
 	memoryService.SetCacheInvalidator(conversationService.InvalidateMemoryCache)

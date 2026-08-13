@@ -1,7 +1,9 @@
 # @deeix/agent-bridge
 
 Local Gateway runtime for DEEIX Agent execution. The package owns device pairing, outbound WSS, local command validation,
-workspace path containment, crash-safe command/event/source journals, and the pinned Codex app-server `0.147.0` adapter.
+workspace path containment, crash-safe command/event/source journals, verified image/audio downloads, and the pinned Codex
+app-server `0.147.0` adapter. A command becomes receipt-ready only after all referenced artifacts pass size and SHA-256
+validation; short-lived artifact grants are never written to the Bridge WAL.
 
 It does not contain Browser APIs, Chat execution, Sub2 commerce, provider credentials, or Cloud persistence.
 

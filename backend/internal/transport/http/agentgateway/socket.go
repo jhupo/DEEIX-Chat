@@ -26,30 +26,41 @@ const (
 )
 
 type bridgeFrame struct {
-	Version          int               `json:"version"`
-	Type             string            `json:"type"`
-	ProfileID        string            `json:"profileId,omitempty"`
-	ChallengeID      string            `json:"challengeId,omitempty"`
-	Challenge        string            `json:"challenge,omitempty"`
-	ExpiresAt        string            `json:"expiresAt,omitempty"`
-	Proof            string            `json:"proof,omitempty"`
-	LeaseExpiresAt   string            `json:"leaseExpiresAt,omitempty"`
-	Workspaces       []bridgeWorkspace `json:"workspaces,omitempty"`
-	AckServerSeq     uint64            `json:"ackServerSeq,omitempty"`
-	AckBridgeSeq     uint64            `json:"ackBridgeSeq,omitempty"`
-	DeviceID         string            `json:"deviceId,omitempty"`
-	HeartbeatSeconds int               `json:"heartbeatSeconds,omitempty"`
-	ServerSeq        uint64            `json:"serverSeq,omitempty"`
-	BridgeSeq        uint64            `json:"bridgeSeq,omitempty"`
-	CommandID        string            `json:"commandId,omitempty"`
-	Command          json.RawMessage   `json:"command,omitempty"`
-	Outcome          json.RawMessage   `json:"outcome,omitempty"`
-	Event            json.RawMessage   `json:"event,omitempty"`
+	Version          int                    `json:"version"`
+	Type             string                 `json:"type"`
+	ProfileID        string                 `json:"profileId,omitempty"`
+	ChallengeID      string                 `json:"challengeId,omitempty"`
+	Challenge        string                 `json:"challenge,omitempty"`
+	ExpiresAt        string                 `json:"expiresAt,omitempty"`
+	Proof            string                 `json:"proof,omitempty"`
+	LeaseExpiresAt   string                 `json:"leaseExpiresAt,omitempty"`
+	Workspaces       []bridgeWorkspace      `json:"workspaces,omitempty"`
+	AckServerSeq     uint64                 `json:"ackServerSeq,omitempty"`
+	AckBridgeSeq     uint64                 `json:"ackBridgeSeq,omitempty"`
+	DeviceID         string                 `json:"deviceId,omitempty"`
+	HeartbeatSeconds int                    `json:"heartbeatSeconds,omitempty"`
+	ServerSeq        uint64                 `json:"serverSeq,omitempty"`
+	BridgeSeq        uint64                 `json:"bridgeSeq,omitempty"`
+	CommandID        string                 `json:"commandId,omitempty"`
+	Command          json.RawMessage        `json:"command,omitempty"`
+	Outcome          json.RawMessage        `json:"outcome,omitempty"`
+	Event            json.RawMessage        `json:"event,omitempty"`
+	Artifacts        *[]bridgeArtifactGrant `json:"artifacts,omitempty"`
 }
 
 type bridgeWorkspace struct {
 	WorkspaceID string `json:"workspaceId"`
 	Name        string `json:"name"`
+}
+
+type bridgeArtifactGrant struct {
+	ArtifactRef string `json:"artifactRef"`
+	FileName    string `json:"fileName"`
+	MimeType    string `json:"mimeType"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	SHA256      string `json:"sha256"`
+	ExpiresAt   string `json:"expiresAt"`
+	Grant       string `json:"grant"`
 }
 
 type bridgeHub struct {
@@ -340,20 +351,22 @@ func validAuthProofFrame(frame bridgeFrame) bool {
 	return frame.AckServerSeq == 0 && frame.AckBridgeSeq == 0 && frame.ServerSeq == 0 &&
 		frame.BridgeSeq == 0 && frame.CommandID == "" && len(frame.Command) == 0 &&
 		len(frame.Outcome) == 0 && len(frame.Event) == 0 && frame.DeviceID == "" &&
-		frame.HeartbeatSeconds == 0 && frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == ""
+		frame.HeartbeatSeconds == 0 && frame.Challenge == "" && frame.ExpiresAt == "" &&
+		frame.LeaseExpiresAt == "" && frame.Artifacts == nil
 }
 
 func validClientEmpty(frame bridgeFrame) bool {
 	return frame.ServerSeq == 0 && frame.BridgeSeq == 0 && frame.CommandID == "" &&
 		len(frame.Command) == 0 && len(frame.Outcome) == 0 && len(frame.Event) == 0 &&
 		frame.DeviceID == "" && frame.HeartbeatSeconds == 0 && frame.ChallengeID == "" &&
-		frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == "" && len(frame.Workspaces) == 0
+		frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == "" &&
+		len(frame.Workspaces) == 0 && frame.Artifacts == nil
 }
 
 func validClientMetadataEmpty(frame bridgeFrame) bool {
 	return frame.DeviceID == "" && frame.HeartbeatSeconds == 0 && frame.ChallengeID == "" &&
 		frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == "" &&
-		frame.ProfileID == "" && frame.Proof == "" && len(frame.Workspaces) == 0
+		frame.ProfileID == "" && frame.Proof == "" && len(frame.Workspaces) == 0 && frame.Artifacts == nil
 
 }
 
@@ -386,9 +399,17 @@ func (h *Handler) sendCommands(connection *websocket.Conn, identity *appagent.Co
 		if err != nil {
 			return sentThrough, err
 		}
+		artifacts := make([]bridgeArtifactGrant, len(item.Artifacts))
+		for index, artifact := range item.Artifacts {
+			artifacts[index] = bridgeArtifactGrant{
+				ArtifactRef: artifact.ArtifactRef, FileName: artifact.FileName,
+				MimeType: artifact.MimeType, SizeBytes: artifact.SizeBytes,
+				SHA256: artifact.SHA256, ExpiresAt: artifact.ExpiresAt, Grant: artifact.Grant,
+			}
+		}
 		if err = websocket.JSON.Send(connection, bridgeFrame{
 			Version: bridgeVersion, Type: "command", ServerSeq: item.ServerSeq,
-			CommandID: item.CommandID, Command: item.Command,
+			CommandID: item.CommandID, Command: item.Command, Artifacts: &artifacts,
 		}); err != nil {
 			return sentThrough, err
 		}

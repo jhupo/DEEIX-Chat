@@ -12,6 +12,7 @@ export * from "./providers/provider-adapter.js";
 export * from "./providers/provider-registry.js";
 export * from "./runtime/gateway-runtime.js";
 export * from "./transport/cloud-client.js";
+export * from "./transport/artifact-downloader.js";
 export * from "./transport/wss-client.js";
 export * from "./wal/command-journal.js";
 export * from "./wal/durable-wal-store.js";

@@ -10,9 +10,10 @@ type ErrorDoc struct {
 	Data      interface{} `json:"data"`
 }
 
-type AgentTextInputDoc struct {
-	Kind string `json:"kind" enums:"text"`
-	Text string `json:"text"`
+type AgentInputDoc struct {
+	Kind        string `json:"kind" enums:"text,artifact"`
+	Text        string `json:"text,omitempty"`
+	ArtifactRef string `json:"artifactRef,omitempty"`
 }
 
 type AgentSettingsDoc struct {
@@ -28,16 +29,34 @@ type StartThreadRequestDoc struct {
 	WorkspaceID string              `json:"workspaceId"`
 	Title       string              `json:"title,omitempty"`
 	Settings    AgentSettingsDoc    `json:"settings"`
-	Input       []AgentTextInputDoc `json:"input,omitempty"`
+	Input       []AgentInputDoc     `json:"input,omitempty"`
 }
 
 type StartTurnRequestDoc struct {
-	Input    []AgentTextInputDoc `json:"input"`
-	Settings AgentSettingsDoc    `json:"settings"`
+	Input    []AgentInputDoc  `json:"input"`
+	Settings AgentSettingsDoc `json:"settings"`
+}
+
+type CreateArtifactRequestDoc struct {
+	FileID string `json:"fileId"`
+}
+
+type ArtifactDoc struct {
+	ArtifactID  string `json:"artifactId"`
+	WorkspaceID string `json:"workspaceId"`
+	FileName    string `json:"fileName"`
+	MimeType    string `json:"mimeType"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	SHA256      string `json:"sha256"`
+}
+
+type ArtifactResponseDoc struct {
+	ErrorMsg string      `json:"errorMsg"`
+	Data     ArtifactDoc `json:"data"`
 }
 
 type SteerTurnRequestDoc struct {
-	Input []AgentTextInputDoc `json:"input"`
+	Input []AgentInputDoc `json:"input"`
 }
 
 type RenameThreadRequestDoc struct {
@@ -127,6 +146,18 @@ type EventDoc struct {
 	Kind       string      `json:"kind"`
 	Payload    interface{} `json:"payload"`
 	OccurredAt time.Time   `json:"occurredAt"`
+}
+
+type ItemDoc struct {
+	ItemID       string      `json:"itemId"`
+	ThreadID     string      `json:"threadId"`
+	TurnID       string      `json:"turnId,omitempty"`
+	Kind         string      `json:"kind"`
+	Status       string      `json:"status"`
+	Data         interface{} `json:"data"`
+	LastEventSeq uint64      `json:"lastEventSeq"`
+	CreatedAt    time.Time   `json:"createdAt"`
+	UpdatedAt    time.Time   `json:"updatedAt"`
 }
 
 type InteractionDoc struct {
@@ -223,6 +254,10 @@ type TurnListResponseDoc struct {
 type EventListResponseDoc struct {
 	ErrorMsg string     `json:"errorMsg"`
 	Data     []EventDoc `json:"data"`
+}
+type ItemListResponseDoc struct {
+	ErrorMsg string    `json:"errorMsg"`
+	Data     []ItemDoc `json:"data"`
 }
 type InteractionResponseDoc struct {
 	ErrorMsg string         `json:"errorMsg"`

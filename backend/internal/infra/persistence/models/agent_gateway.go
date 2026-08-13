@@ -116,6 +116,21 @@ type AgentWorkspace struct {
 
 func (AgentWorkspace) TableName() string { return "agent_workspaces" }
 
+type AgentArtifact struct {
+	ControlPlaneModel
+	PublicID     string `gorm:"size:64;not null;uniqueIndex:uk_agent_artifacts_public_id"`
+	UserID       uint   `gorm:"not null;index"`
+	WorkspaceID  uint   `gorm:"not null;uniqueIndex:uk_agent_artifacts_workspace_file,priority:1"`
+	FileObjectID uint   `gorm:"not null;uniqueIndex:uk_agent_artifacts_workspace_file,priority:2"`
+	FileName     string `gorm:"size:255;not null"`
+	MimeType     string `gorm:"size:128;not null"`
+	SizeBytes    int64  `gorm:"not null"`
+	SHA256       string `gorm:"size:64;not null"`
+	Status       string `gorm:"size:32;not null;index"`
+}
+
+func (AgentArtifact) TableName() string { return "agent_artifacts" }
+
 type AgentResourceSnapshot struct {
 	ControlPlaneModel
 	PublicID         string    `gorm:"size:64;not null;uniqueIndex:uk_agent_resource_snapshots_public_id"`
@@ -157,6 +172,22 @@ type AgentTurn struct {
 }
 
 func (AgentTurn) TableName() string { return "agent_turns" }
+
+type AgentItem struct {
+	ControlPlaneModel
+	PublicID         string `gorm:"size:64;not null;uniqueIndex:uk_agent_items_public_id"`
+	UserID           uint   `gorm:"not null;index"`
+	ThreadID         uint   `gorm:"not null;index:idx_agent_items_thread_event,priority:1"`
+	TurnID           *uint  `gorm:"index"`
+	RuntimeProfileID uint   `gorm:"not null;uniqueIndex:uk_agent_items_profile_source,priority:1"`
+	SourceItemRef    string `gorm:"size:256;not null;uniqueIndex:uk_agent_items_profile_source,priority:2"`
+	Kind             string `gorm:"size:64;not null;index"`
+	Status           string `gorm:"size:32;not null;index"`
+	DataJSON         string `gorm:"type:jsonb;not null"`
+	LastEventSeq     uint64 `gorm:"not null;index:idx_agent_items_thread_event,priority:2"`
+}
+
+func (AgentItem) TableName() string { return "agent_items" }
 
 type AgentEvent struct {
 	ControlPlaneModel

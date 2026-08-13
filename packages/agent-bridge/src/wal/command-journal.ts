@@ -43,12 +43,14 @@ type ReceivedRecord = {
 };
 
 type StartedRecord = { commandId: string; recovery: Record<string, unknown> };
+type ReceiptReadyRecord = { commandId: string };
 type TerminalRecord = { commandId: string; outcome: TerminalOutcome };
 
 export class CommandJournal {
 	readonly #wal: DurableWalStore;
 	readonly #states = new Map<string, JournalCommandState>();
 	readonly #serverSequences = new Map<number, string>();
+	readonly #receiptReady = new Set<number>();
 	#transitionQueue: Promise<void> = Promise.resolve();
 
 	private constructor(wal: DurableWalStore) {
@@ -69,7 +71,7 @@ export class CommandJournal {
 
 	contiguousReceipt(after = 0): number {
 		let sequence = after + 1;
-		while (this.#serverSequences.has(sequence)) sequence += 1;
+		while (this.#receiptReady.has(sequence)) sequence += 1;
 		return sequence - 1;
 	}
 
@@ -134,6 +136,18 @@ export class CommandJournal {
 			} satisfies StartedRecord);
 			this.#apply(record);
 			return structuredClone(this.#required(commandId));
+		});
+	}
+
+	async markReceiptReady(commandId: string): Promise<void> {
+		assertOpaqueRef(commandId, "commandId");
+		await this.#transition(async () => {
+			const state = this.#required(commandId);
+			if (this.#receiptReady.has(state.serverSeq)) return;
+			const record = await this.#wal.append("command.receipt-ready", {
+				commandId,
+			} satisfies ReceiptReadyRecord);
+			this.#apply(record);
 		});
 	}
 
@@ -203,6 +217,14 @@ export class CommandJournal {
 				});
 				return;
 			}
+			case "command.receipt-ready": {
+				const payload = receiptReadyRecord(record.payload);
+				const state = this.#required(payload.commandId);
+				if (this.#receiptReady.has(state.serverSeq))
+					throw new Error(`duplicate receipt-ready record: ${payload.commandId}`);
+				this.#receiptReady.add(state.serverSeq);
+				return;
+			}
 			case "command.terminal": {
 				const payload = terminalRecord(record.payload);
 				const state = this.#required(payload.commandId);
@@ -244,6 +266,12 @@ function startedRecord(value: unknown): StartedRecord {
 	const recovery = object(payload.recovery, "started recovery");
 	assertSerializableObject(recovery, "started recovery");
 	return { commandId: payload.commandId, recovery };
+}
+
+function receiptReadyRecord(value: unknown): ReceiptReadyRecord {
+	const payload = object(value, "receipt-ready record");
+	assertOpaqueRef(payload.commandId, "receipt-ready commandId");
+	return { commandId: payload.commandId };
 }
 
 function terminalRecord(value: unknown): TerminalRecord {

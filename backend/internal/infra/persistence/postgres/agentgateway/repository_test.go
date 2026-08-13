@@ -17,8 +17,8 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.AgentDevice{}, &model.AgentCommand{}, &model.AgentBridgeFrame{},
-		&model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentResourceSnapshot{}, &model.AgentThread{},
-		&model.AgentTurn{}, &model.AgentEvent{}, &model.AgentInteraction{},
+		&model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentArtifact{}, &model.AgentResourceSnapshot{}, &model.AgentThread{},
+		&model.AgentTurn{}, &model.AgentItem{}, &model.AgentEvent{}, &model.AgentInteraction{},
 		&model.AgentIdempotencyRecord{},
 	); err != nil {
 		t.Fatalf("migrate agent gateway tables: %v", err)
@@ -49,12 +49,38 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Create(&workspace).Error; err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	imageFile := model.FileObject{
+		FileID: "file_0123456789abcdef0123456789abcdef", UserID: 7, Purpose: "agent_input",
+		FileName: "fixture.png", MimeType: "image/png", DetectedMIME: "image/png",
+		FileCategory: "image", SizeBytes: 12, SHA256: strings.Repeat("f", 64),
+		StoragePath: "fixture.png", Status: "active",
+	}
+	if err := database.Create(&imageFile).Error; err != nil {
+		t.Fatalf("create artifact file: %v", err)
+	}
 
 	repo := NewRepo(database)
+	artifact, err := repo.CreateArtifact(context.Background(), 7, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_0123456789abcdef0123456789abcdef"})
+	if err != nil || artifact.FileID != imageFile.FileID || artifact.WorkspacePublicID != workspace.PublicID || artifact.MimeType != "image/png" {
+		t.Fatalf("create artifact: %#v %v", artifact, err)
+	}
+	replayedArtifact, err := repo.CreateArtifact(context.Background(), 7, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+	if err != nil || replayedArtifact.PublicID != artifact.PublicID {
+		t.Fatalf("artifact replay changed identity: %#v %v", replayedArtifact, err)
+	}
+	if _, err := repo.CreateArtifact(context.Background(), 8, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}); err == nil {
+		t.Fatal("cross-user artifact creation succeeded")
+	}
+	if err := validateCommandArtifacts(database, 7, workspace.ID, `[{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`); err != nil {
+		t.Fatalf("valid command artifact rejected: %v", err)
+	}
+	if err := validateCommandArtifacts(database, 7, workspace.ID, `[{"kind":"artifact","artifactRef":"agart_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]`); err == nil {
+		t.Fatal("unknown command artifact accepted")
+	}
 	threadInput := &domainagent.Thread{PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, Title: "Agent work", Status: "queued"}
 	turnInput := &domainagent.Turn{
 		PublicID: "agturn_0123456789abcdef0123456789abcdef", UserID: 7,
-		Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"}]`, SettingsJSON: `{}`,
+		Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{}`,
 	}
 	createCommand := &domainagent.Command{
 		PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.create",
@@ -96,6 +122,14 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	turnTerminal := `{"kind":"result","result":{"kind":"turn-started","sourceTurnRef":"source-turn-1"}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 3, 2, commands[1].PublicID, strings.Repeat("4", 64), turnTerminal, now.Add(3*time.Second)); err != nil || ack != 3 {
 		t.Fatalf("apply turn terminal: ack=%d err=%v", ack, err)
+	}
+	commandArtifacts, err := repo.ListArtifactsForCommand(context.Background(), device.ID, commands[1].ID, []string{artifact.PublicID})
+	if err != nil || len(commandArtifacts) != 1 || commandArtifacts[0].FileID != imageFile.FileID {
+		t.Fatalf("load command artifacts: %#v %v", commandArtifacts, err)
+	}
+	loadedArtifact, loadedCommand, err := repo.GetArtifactForCommand(context.Background(), artifact.PublicID, commands[1].PublicID)
+	if err != nil || loadedArtifact.FileID != imageFile.FileID || loadedCommand.ID != commands[1].ID {
+		t.Fatalf("load artifact grant binding: %#v %#v %v", loadedArtifact, loadedCommand, err)
 	}
 
 	var storedThread model.AgentThread
@@ -221,6 +255,33 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	var storedFork model.AgentThread
 	if err := database.First(&storedFork, forked.ID).Error; err != nil || storedFork.SourceThreadRef == nil || *storedFork.SourceThreadRef != "source-thread-fork" || storedFork.Status != "active" {
 		t.Fatalf("fork final state: %#v %v", storedFork, err)
+	}
+
+	itemStarted := &domainagent.Event{
+		PublicID: "agev_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "item/started",
+		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
+		PayloadJSON: `{"item":{"type":"agentMessage","text":""},"startedAtMs":1}`, OccurredAt: now.Add(13 * time.Second),
+	}
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 10, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack != 10 {
+		t.Fatalf("apply item start: ack=%d err=%v", ack, err)
+	}
+	itemCompleted := &domainagent.Event{
+		PublicID: "agev_cccccccccccccccccccccccccccccccc", Kind: "item/completed",
+		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
+		PayloadJSON: `{"item":{"type":"agentMessage","text":"done"},"completedAtMs":2}`, OccurredAt: now.Add(14 * time.Second),
+	}
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 11, strings.Repeat("1", 64), itemCompleted, now.Add(14*time.Second)); err != nil || ack != 11 {
+		t.Fatalf("apply item completion: ack=%d err=%v", ack, err)
+	}
+	items, err := repo.ListItems(context.Background(), 7, thread.PublicID, 100)
+	if err != nil || len(items) != 1 || items[0].Status != "completed" || items[0].Kind != "agentMessage" ||
+		items[0].LastEventSeq != 4 || items[0].TurnPublicID != turn.PublicID ||
+		!jsonEqual(items[0].DataJSON, itemCompleted.PayloadJSON) {
+		t.Fatalf("item projection mismatch: %#v %v", items, err)
+	}
+	otherItems, err := repo.ListItems(context.Background(), 8, thread.PublicID, 100)
+	if err != nil || len(otherItems) != 0 {
+		t.Fatalf("item projection crossed user boundary: %#v %v", otherItems, err)
 	}
 }
 

@@ -52,6 +52,25 @@ for (const [name, expected] of Object.entries(lock.unions)) {
 	}
 }
 
+const policyPath = join(
+	tsDirectory,
+	"..",
+	"..",
+	"..",
+	"src",
+	"providers",
+	"codex",
+	"codex-method-policy.ts",
+);
+const policy = await readFile(policyPath, "utf8");
+checkPolicyObject(policy, "CODEX_SERVER_REQUESTS", lock.unions.ServerRequest);
+checkPolicyObject(
+	policy,
+	"CODEX_SERVER_NOTIFICATIONS",
+	lock.unions.ServerNotification,
+);
+checkDispatchedClientRequests(policy, lock.unions.ClientRequest);
+
 if ((await gitTree(tsDirectory)) !== artifacts.typescript_tree_git_object)
 	throw new Error("generated TypeScript tree differs from the schema lock");
 if ((await gitTree(jsonDirectory)) !== artifacts.json_tree_git_object)
@@ -99,4 +118,40 @@ function sha256(content) {
 
 function sameSet(left, right) {
 	return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+function checkPolicyObject(source, name, expected) {
+	const body = extract(source, `export const ${name} = {`, "} as const");
+	const entries = [...body.matchAll(/^\s*(?:"([^"]+)"|([A-Za-z][A-Za-z0-9]*)):\s*"(mapped|extension|disabled)",?\s*$/gm)]
+		.map((match) => ({ name: match[1] ?? match[2], disposition: match[3] }));
+	if (entries.length !== expected.count)
+		throw new Error(`${name} does not cover the locked union`);
+	for (const member of expected.members) {
+		const actual = entries.find((entry) => entry.name === member.name);
+		if (!actual || actual.disposition !== member.disposition)
+			throw new Error(`${name} disposition differs for ${member.name}`);
+	}
+}
+
+function checkDispatchedClientRequests(source, expected) {
+	const body = extract(
+		source,
+		"export const CODEX_DISPATCHED_CLIENT_REQUESTS = [",
+		"] as const",
+	);
+	const methods = [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+	if (methods.length === 0 || new Set(methods).size !== methods.length)
+		throw new Error("dispatched ClientRequest registry is empty or duplicated");
+	for (const method of methods) {
+		const member = expected.members.find((item) => item.name === method);
+		if (!member || member.disposition === "disabled")
+			throw new Error(`dispatched ClientRequest is not enabled by the lock: ${method}`);
+	}
+}
+
+function extract(source, start, end) {
+	const from = source.indexOf(start);
+	const to = source.indexOf(end, from + start.length);
+	if (from < 0 || to < 0) throw new Error(`method policy section is missing: ${start}`);
+	return source.slice(from + start.length, to);
 }

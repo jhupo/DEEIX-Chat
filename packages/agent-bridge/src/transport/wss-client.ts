@@ -117,6 +117,7 @@ async function handleServerFrame(
 				signal,
 				async (ackServerSeq) =>
 					writer.send({ version: 1, type: "ack.server", ackServerSeq }),
+				frame.artifacts,
 			).then(
 				(outcome) => runtime.outgoing.appendTerminal(
 					frame.serverSeq,

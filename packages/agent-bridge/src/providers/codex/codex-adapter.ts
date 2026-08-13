@@ -6,6 +6,7 @@ import type { GetAuthStatusResponse } from "../../../generated/codex-app-server-
 import type { AppsListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/AppsListResponse.js";
 import type { ListMcpServerStatusResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ListMcpServerStatusResponse.js";
 import type { ModelListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ModelListResponse.js";
+import type { ModelProviderCapabilitiesReadResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ModelProviderCapabilitiesReadResponse.js";
 import type { PermissionProfileListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/PermissionProfileListResponse.js";
 import type { PluginListResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/PluginListResponse.js";
 import type { ReviewStartResponse } from "../../../generated/codex-app-server-v0.147.0/ts/v2/ReviewStartResponse.js";
@@ -20,7 +21,8 @@ import type {
 	ProviderCommand,
 	SourceRefRegistry,
 } from "../../commands/resolve-provider-command.js";
-import type { AgentInput, InteractionResponse } from "../../protocol/agent-command.js";
+import type { InteractionResponse } from "../../protocol/agent-command.js";
+import type { ProviderInput } from "../../commands/resolve-provider-command.js";
 import type {
 	ProviderAdapter,
 	ProviderEvent,
@@ -32,6 +34,11 @@ import type {
 	RpcNotification,
 	RpcServerRequest,
 } from "./rpc-client.js";
+import {
+	CODEX_SERVER_NOTIFICATIONS,
+	CODEX_SERVER_REQUESTS,
+	codexMethodDisposition,
+} from "./codex-method-policy.js";
 
 const SCHEMA_HASH = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74";
 const COMMANDS: ProviderManifest["commands"] = [
@@ -290,6 +297,13 @@ export class CodexAdapter implements ProviderAdapter {
 			case "models":
 				data = await this.#rpc.request<ModelListResponse>("model/list", {}, signal);
 				break;
+			case "model-capabilities":
+				data = await this.#rpc.request<ModelProviderCapabilitiesReadResponse>(
+					"modelProvider/capabilities/read",
+					{},
+					signal,
+				);
+				break;
 			case "permission-profiles":
 				data = await this.#rpc.request<PermissionProfileListResponse>(
 					"permissionProfile/list",
@@ -371,6 +385,11 @@ export class CodexAdapter implements ProviderAdapter {
 
 	async #notification(notification: RpcNotification): Promise<void> {
 		if (!this.#onEvent) return;
+		const disposition = codexMethodDisposition(
+			CODEX_SERVER_NOTIFICATIONS,
+			notification.method,
+		);
+		if (disposition === "disabled") return;
 		const params = record(notification.params);
 		const threadId = identity(params, "threadId", "thread");
 		const turnId = identity(params, "turnId", "turn");
@@ -389,19 +408,23 @@ export class CodexAdapter implements ProviderAdapter {
 			? await this.#sources.publish(this.#profileId, "request", rpcId(requestId))
 			: undefined;
 		await this.#onEvent({
-			kind: notification.method,
+			kind: disposition === "mapped" ? notification.method : "provider.extension",
 			...(sourceThreadRef ? { sourceThreadRef } : {}),
 			...(sourceTurnRef ? { sourceTurnRef } : {}),
 			...(sourceItemRef ? { sourceItemRef } : {}),
 			...(sourceRequestRef ? { sourceRequestRef } : {}),
 			occurredAt: new Date().toISOString(),
-			payload: sanitizeRecord(params),
+			payload: disposition === "mapped"
+				? sanitizeRecord(params)
+				: { method: notification.method, data: sanitizeRecord(params) },
 		});
 	}
 
 	async #serverRequest(request: RpcServerRequest): Promise<unknown> {
 		if (!this.#onEvent) throw new Error("Codex adapter has no event consumer");
-		if (!MAPPED_REQUESTS.has(request.method))
+		if (
+			codexMethodDisposition(CODEX_SERVER_REQUESTS, request.method) !== "mapped"
+		)
 			throw new Error(`Codex server request is disabled: ${request.method}`);
 		const providerRequestId = rpcId(request.id);
 		const sourceRequestRef = await this.#sources.publish(
@@ -453,15 +476,6 @@ export class CodexAdapter implements ProviderAdapter {
 	}
 }
 
-const MAPPED_REQUESTS = new Set([
-	"item/commandExecution/requestApproval",
-	"item/fileChange/requestApproval",
-	"item/tool/requestUserInput",
-	"mcpServer/elicitation/request",
-	"item/permissions/requestApproval",
-	"item/tool/call",
-]);
-
 function threadSettings(settings: ProviderCommand extends never ? never : {
 	model?: string;
 	reasoningEffort?: string;
@@ -499,11 +513,13 @@ function turnSettings(
 	};
 }
 
-function userInput(input: AgentInput[]): UserInput[] {
+function userInput(input: ProviderInput[]): UserInput[] {
 	return input.map((item) => {
-		if (item.kind === "artifact")
-			throw new TypeError("artifact input requires a completed transfer");
-		return { type: "text", text: item.text, text_elements: [] };
+		if (item.kind === "text")
+			return { type: "text", text: item.text, text_elements: [] };
+		return item.kind === "local-image"
+			? { type: "localImage", path: item.path }
+			: { type: "localAudio", path: item.path };
 	});
 }
 

@@ -91,6 +91,10 @@ type startTurnRequest struct {
 	Settings json.RawMessage `json:"settings"`
 }
 
+type createArtifactRequest struct {
+	FileID string `json:"fileId"`
+}
+
 type respondInteractionRequest struct {
 	Response json.RawMessage `json:"response"`
 }
@@ -283,7 +287,7 @@ func (h *Handler) ListWorkspaces(c *gin.Context) {
 // @Security BearerAuth
 // @Param device_id path string true "设备公开 ID"
 // @Param profile_id path string true "Profile ID"
-// @Param resource path string true "资源" Enums(models,permission-profiles,apps,mcp,plugins,auth-status)
+// @Param resource path string true "资源" Enums(models,model-capabilities,permission-profiles,apps,mcp,plugins,auth-status)
 // @Param Idempotency-Key header string true "UUID"
 // @Success 200 {object} CommandResponseDoc
 // @Failure 400,404,409,500 {object} ErrorDoc
@@ -298,7 +302,7 @@ func (h *Handler) QueueProfileResourceRefresh(c *gin.Context) {
 // @Security BearerAuth
 // @Param device_id path string true "设备公开 ID"
 // @Param profile_id path string true "Profile ID"
-// @Param resource path string true "资源" Enums(models,permission-profiles,apps,mcp,plugins,auth-status)
+// @Param resource path string true "资源" Enums(models,model-capabilities,permission-profiles,apps,mcp,plugins,auth-status)
 // @Success 200 {object} ResourceSnapshotResponseDoc
 // @Failure 400,404,500 {object} ErrorDoc
 // @Router /agent/devices/{device_id}/profiles/{profile_id}/resources/{resource} [get]
@@ -678,6 +682,65 @@ func (h *Handler) ListEvents(c *gin.Context) {
 	response.Success(c, toEventDocs(items))
 }
 
+// CreateArtifact godoc
+// @Summary 创建 Agent workspace artifact
+// @Tags agent
+// @Security BearerAuth
+// @Param workspace_id path string true "Workspace ID"
+// @Param body body CreateArtifactRequestDoc true "已上传文件"
+// @Success 200 {object} ArtifactResponseDoc
+// @Failure 400,404,409,500 {object} ErrorDoc
+// @Router /agent/workspaces/{workspace_id}/artifacts [post]
+func (h *Handler) CreateArtifact(c *gin.Context) {
+	var request createArtifactRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	item, err := h.service.CreateArtifact(c.Request.Context(), middleware.MustUserID(c), c.Param("workspace_id"), request.FileID)
+	if err != nil {
+		writeError(c, err, "create agent artifact failed")
+		return
+	}
+	response.Success(c, ArtifactDoc{ArtifactID: item.ArtifactID, WorkspaceID: item.WorkspaceID, FileName: item.FileName, MimeType: item.MimeType, SizeBytes: item.SizeBytes, SHA256: item.SHA256})
+}
+
+func (h *Handler) GetArtifactContent(c *gin.Context) {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	grant := strings.TrimPrefix(authorization, "Bearer deeix_artifact_")
+	if grant == authorization {
+		grant = ""
+	}
+	content, err := h.service.OpenArtifact(c.Request.Context(), c.Param("artifact_id"), strings.TrimSpace(c.Query("command")), strings.TrimSpace(c.Query("expires")), grant)
+	if err != nil {
+		writeError(c, err, "open agent artifact failed")
+		return
+	}
+	defer content.Reader.Close() //nolint:errcheck
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Length", strconv.FormatInt(content.SizeBytes, 10))
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, content.Reader)
+}
+
+// ListItems godoc
+// @Summary 获取 Agent Thread 条目快照
+// @Tags agent
+// @Security BearerAuth
+// @Param thread_id path string true "Thread ID"
+// @Success 200 {object} ItemListResponseDoc
+// @Failure 400,404,500 {object} ErrorDoc
+// @Router /agent/threads/{thread_id}/items [get]
+func (h *Handler) ListItems(c *gin.Context) {
+	items, err := h.service.ListItems(c.Request.Context(), middleware.MustUserID(c), c.Param("thread_id"))
+	if err != nil {
+		writeError(c, err, "load agent items failed")
+		return
+	}
+	response.Success(c, toItemDocs(items))
+}
+
 // ListInteractions godoc
 // @Summary 获取 Agent 交互请求
 // @Tags agent
@@ -858,6 +921,18 @@ func toEventDocs(items []appagent.EventView) []EventDoc {
 		result = append(result, EventDoc{
 			EventID: item.EventID, ThreadID: item.ThreadID, TurnID: item.TurnID, Seq: item.Seq,
 			Kind: item.Kind, Payload: item.Payload, OccurredAt: item.OccurredAt,
+		})
+	}
+	return result
+}
+
+func toItemDocs(items []appagent.ItemView) []ItemDoc {
+	result := make([]ItemDoc, 0, len(items))
+	for _, item := range items {
+		result = append(result, ItemDoc{
+			ItemID: item.ItemID, ThreadID: item.ThreadID, TurnID: item.TurnID,
+			Kind: item.Kind, Status: item.Status, Data: item.Data,
+			LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 		})
 	}
 	return result

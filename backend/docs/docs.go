@@ -5130,6 +5130,7 @@ const docTemplate = `{
                     {
                         "enum": [
                             "models",
+                            "model-capabilities",
                             "permission-profiles",
                             "apps",
                             "mcp",
@@ -5200,6 +5201,7 @@ const docTemplate = `{
                     {
                         "enum": [
                             "models",
+                            "model-capabilities",
                             "permission-profiles",
                             "apps",
                             "mcp",
@@ -6011,6 +6013,54 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/threads/{thread_id}/items": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "获取 Agent Thread 条目快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Thread ID",
+                        "name": "thread_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ItemListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/threads/{thread_id}/name": {
             "patch": {
                 "security": [
@@ -6491,6 +6541,69 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/AgentgatewayErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/workspaces/{workspace_id}/artifacts": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent"
+                ],
+                "summary": "创建 Agent workspace artifact",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "workspace_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "已上传文件",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/CreateArtifactRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ArtifactResponseDoc"
                         }
                     },
                     "400": {
@@ -11789,6 +11902,27 @@ const docTemplate = `{
                 }
             }
         },
+        "AgentInputDoc": {
+            "type": "object",
+            "required": [
+                "kind"
+            ],
+            "properties": {
+                "artifactRef": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "text",
+                        "artifact"
+                    ]
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
         "AgentSettingsDoc": {
             "type": "object",
             "properties": {
@@ -11818,24 +11952,6 @@ const docTemplate = `{
                         "read-only",
                         "workspace-write"
                     ]
-                }
-            }
-        },
-        "AgentTextInputDoc": {
-            "type": "object",
-            "required": [
-                "kind",
-                "text"
-            ],
-            "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": [
-                        "text"
-                    ]
-                },
-                "text": {
-                    "type": "string"
                 }
             }
         },
@@ -12041,6 +12157,52 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/AnnouncementDataResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ArtifactDoc": {
+            "type": "object",
+            "required": [
+                "artifactId",
+                "fileName",
+                "mimeType",
+                "sha256",
+                "sizeBytes",
+                "workspaceId"
+            ],
+            "properties": {
+                "artifactId": {
+                    "type": "string"
+                },
+                "fileName": {
+                    "type": "string"
+                },
+                "mimeType": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "sizeBytes": {
+                    "type": "integer"
+                },
+                "workspaceId": {
+                    "type": "string"
+                }
+            }
+        },
+        "ArtifactResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ArtifactDoc"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -13736,6 +13898,17 @@ const docTemplate = `{
                 }
             }
         },
+        "CreateArtifactRequestDoc": {
+            "type": "object",
+            "required": [
+                "fileId"
+            ],
+            "properties": {
+                "fileId": {
+                    "type": "string"
+                }
+            }
+        },
         "CreateConversationProjectRequest": {
             "type": "object",
             "required": [
@@ -14854,6 +15027,64 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/InteractionDoc"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ItemDoc": {
+            "type": "object",
+            "required": [
+                "createdAt",
+                "data",
+                "itemId",
+                "kind",
+                "lastEventSeq",
+                "status",
+                "threadId",
+                "updatedAt"
+            ],
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "data": {},
+                "itemId": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "lastEventSeq": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "threadId": {
+                    "type": "string"
+                },
+                "turnId": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "ItemListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ItemDoc"
+                    }
                 },
                 "errorMsg": {
                     "type": "string"
@@ -18092,7 +18323,7 @@ const docTemplate = `{
                 "input": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/AgentTextInputDoc"
+                        "$ref": "#/definitions/AgentInputDoc"
                     }
                 },
                 "profileId": {
@@ -18134,7 +18365,7 @@ const docTemplate = `{
                 "input": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/AgentTextInputDoc"
+                        "$ref": "#/definitions/AgentInputDoc"
                     }
                 },
                 "settings": {
@@ -18151,7 +18382,7 @@ const docTemplate = `{
                 "input": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/AgentTextInputDoc"
+                        "$ref": "#/definitions/AgentInputDoc"
                     }
                 }
             }

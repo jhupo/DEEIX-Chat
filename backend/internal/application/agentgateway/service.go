@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,12 +49,23 @@ type RuntimeProofVerifier interface {
 	MatchRuntimeProof(context.Context, uint, int64, []byte, []byte) (int64, string, error)
 }
 
+type ArtifactContentStore interface {
+	OpenAgentArtifact(context.Context, uint, string) (*ArtifactContent, error)
+}
+
+type ArtifactContent struct {
+	Reader      io.ReadCloser
+	ContentType string
+	SizeBytes   int64
+}
+
 type Service struct {
-	repo   repository.AgentGatewayRepository
-	secret []byte
-	now    func() time.Time
-	users  RuntimeUserResolver
-	proofs RuntimeProofVerifier
+	repo      repository.AgentGatewayRepository
+	secret    []byte
+	now       func() time.Time
+	users     RuntimeUserResolver
+	proofs    RuntimeProofVerifier
+	artifacts ArtifactContentStore
 }
 
 type DeviceView struct {
@@ -108,6 +120,17 @@ type DeliveryCommand struct {
 	CommandID  string
 	ServerSeq  uint64
 	Command    json.RawMessage
+	Artifacts  []ArtifactGrant
+}
+
+type ArtifactGrant struct {
+	ArtifactRef string
+	FileName    string
+	MimeType    string
+	SizeBytes   int64
+	SHA256      string
+	ExpiresAt   string
+	Grant       string
 }
 
 type RuntimeChallengeResult struct {
@@ -132,6 +155,15 @@ type WorkspaceView struct {
 	Name        string
 	Status      string
 	LastSeenAt  time.Time
+}
+
+type ArtifactView struct {
+	ArtifactID  string
+	WorkspaceID string
+	FileName    string
+	MimeType    string
+	SizeBytes   int64
+	SHA256      string
 }
 
 type ResourceSnapshotView struct {
@@ -194,6 +226,18 @@ type EventView struct {
 	OccurredAt time.Time
 }
 
+type ItemView struct {
+	ItemID       string
+	ThreadID     string
+	TurnID       string
+	Kind         string
+	Status       string
+	Data         json.RawMessage
+	LastEventSeq uint64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type InteractionView struct {
 	InteractionID string
 	ThreadID      string
@@ -237,6 +281,44 @@ func NewService(repo repository.AgentGatewayRepository, secret string) (*Service
 func (s *Service) SetRuntimeAuth(users RuntimeUserResolver, proofs RuntimeProofVerifier) {
 	s.users = users
 	s.proofs = proofs
+}
+
+func (s *Service) SetArtifactContentStore(store ArtifactContentStore) { s.artifacts = store }
+
+func (s *Service) CreateArtifact(ctx context.Context, userID uint, workspaceID, fileID string) (*ArtifactView, error) {
+	workspaceID, fileID = strings.TrimSpace(workspaceID), strings.TrimSpace(fileID)
+	if userID == 0 || len(workspaceID) > 64 || !validOpaqueRef(workspaceID) || !validPublicID(fileID, "file") {
+		return nil, ErrInvalidInput
+	}
+	item, err := s.repo.CreateArtifact(ctx, userID, workspaceID, fileID, &domainagent.Artifact{PublicID: newPublicID("agart")})
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	return &ArtifactView{ArtifactID: item.PublicID, WorkspaceID: workspaceID, FileName: item.FileName, MimeType: item.MimeType, SizeBytes: item.SizeBytes, SHA256: item.SHA256}, nil
+}
+
+func (s *Service) OpenArtifact(ctx context.Context, artifactID, commandID, expires, grant string) (*ArtifactContent, error) {
+	if s.artifacts == nil || !validPublicID(artifactID, "agart") || !validPublicID(commandID, "agcmd") || len(grant) != 43 {
+		return nil, ErrCredential
+	}
+	now := s.now().UTC()
+	expiresAt, err := time.Parse(time.RFC3339Nano, expires)
+	if err != nil || !expiresAt.After(now) || expiresAt.After(now.Add(6*time.Minute)) {
+		return nil, ErrCredential
+	}
+	artifact, command, err := s.repo.GetArtifactForCommand(ctx, artifactID, commandID)
+	if err != nil || !sameHash(s.artifactGrant(*artifact, *command, expiresAt), grant) {
+		return nil, ErrCredential
+	}
+	content, err := s.artifacts.OpenAgentArtifact(ctx, artifact.UserID, artifact.FileID)
+	if err != nil {
+		return nil, err
+	}
+	if content.SizeBytes != artifact.SizeBytes {
+		_ = content.Reader.Close()
+		return nil, ErrStateConflict
+	}
+	return content, nil
 }
 
 func (s *Service) BeginRuntimeProof(ctx context.Context, identity *ConnectionIdentity, profilePublicID string) (*RuntimeChallengeResult, error) {
@@ -619,6 +701,28 @@ func (s *Service) ListEvents(ctx context.Context, userID uint, threadPublicID st
 	return result, nil
 }
 
+func (s *Service) ListItems(ctx context.Context, userID uint, threadPublicID string) ([]ItemView, error) {
+	if !validPublicID(threadPublicID, "agth") {
+		return nil, ErrInvalidInput
+	}
+	items, err := s.repo.ListItems(ctx, userID, threadPublicID, 500)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	result := make([]ItemView, 0, len(items))
+	for _, item := range items {
+		if !json.Valid([]byte(item.DataJSON)) {
+			continue
+		}
+		result = append(result, ItemView{
+			ItemID: item.PublicID, ThreadID: threadPublicID, TurnID: item.TurnPublicID,
+			Kind: item.Kind, Status: item.Status, Data: json.RawMessage(item.DataJSON),
+			LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
 func (s *Service) ListInteractions(ctx context.Context, userID uint, threadPublicID, status string) ([]InteractionView, error) {
 	status = strings.TrimSpace(status)
 	if !validPublicID(threadPublicID, "agth") || (status != "" && !contains([]string{"pending", "responding", "resolved", "failed"}, status)) {
@@ -905,9 +1009,66 @@ func (s *Service) CommandsForDelivery(ctx context.Context, identity *ConnectionI
 		if !json.Valid([]byte(item.PayloadJSON)) {
 			return nil, errors.New("stored agent command is invalid")
 		}
-		result = append(result, DeliveryCommand{InternalID: item.ID, CommandID: item.PublicID, ServerSeq: item.ServerSeq, Command: json.RawMessage(item.PayloadJSON)})
+		refs, err := commandArtifactRefs(item.PayloadJSON)
+		if err != nil {
+			return nil, errors.New("stored agent command artifact input is invalid")
+		}
+		artifacts, err := s.repo.ListArtifactsForCommand(ctx, identity.InternalDeviceID, item.ID, refs)
+		if err != nil {
+			return nil, err
+		}
+		expiresAt := s.now().UTC().Add(5 * time.Minute)
+		grants := make([]ArtifactGrant, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			grants = append(grants, ArtifactGrant{
+				ArtifactRef: artifact.PublicID, FileName: artifact.FileName,
+				MimeType: artifact.MimeType, SizeBytes: artifact.SizeBytes, SHA256: artifact.SHA256,
+				ExpiresAt: expiresAt.Format(time.RFC3339Nano), Grant: s.artifactGrant(artifact, item, expiresAt),
+			})
+		}
+		result = append(result, DeliveryCommand{InternalID: item.ID, CommandID: item.PublicID, ServerSeq: item.ServerSeq, Command: json.RawMessage(item.PayloadJSON), Artifacts: grants})
 	}
 	return result, nil
+}
+
+func commandArtifactRefs(payload string) ([]string, error) {
+	var command struct {
+		Kind  string `json:"kind"`
+		Input []struct {
+			Kind        string `json:"kind"`
+			ArtifactRef string `json:"artifactRef"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(payload), &command); err != nil {
+		return nil, err
+	}
+	if command.Kind != "turn.start" && command.Kind != "turn.steer" {
+		return []string{}, nil
+	}
+	seen := make(map[string]struct{})
+	refs := make([]string, 0)
+	for _, input := range command.Input {
+		if input.Kind != "artifact" {
+			continue
+		}
+		if !validPublicID(input.ArtifactRef, "agart") {
+			return nil, ErrInvalidInput
+		}
+		if _, ok := seen[input.ArtifactRef]; ok {
+			continue
+		}
+		seen[input.ArtifactRef] = struct{}{}
+		refs = append(refs, input.ArtifactRef)
+	}
+	return refs, nil
+}
+
+func (s *Service) artifactGrant(artifact domainagent.Artifact, command domainagent.Command, expiresAt time.Time) string {
+	payload := fmt.Sprintf("deeix-agent-artifact-v1\n%s\n%s\n%d\n%d\n%d\n%d",
+		artifact.PublicID, command.PublicID, artifact.UserID, command.DeviceID, artifact.WorkspaceID, expiresAt.Unix())
+	mac := hmac.New(sha256.New, s.secret)
+	_, _ = mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func (s *Service) MarkCommandDelivered(ctx context.Context, identity *ConnectionIdentity, commandInternalID uint) error {
@@ -1097,6 +1258,14 @@ func validInput(value json.RawMessage) bool {
 				return false
 			}
 			textBytes += len([]byte(text))
+		case "artifact":
+			if len(item) != 2 {
+				return false
+			}
+			var artifactRef string
+			if json.Unmarshal(item["artifactRef"], &artifactRef) != nil || !validPublicID(artifactRef, "agart") {
+				return false
+			}
 		default:
 			return false
 		}
@@ -1302,7 +1471,7 @@ func validPlatform(value string) bool {
 func validCommandKind(value string) bool {
 	switch value {
 	case "thread.create", "thread.lifecycle", "thread.rename", "thread.compact", "review.start",
-		"turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh", "transfer.execute":
+		"turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh":
 		return true
 	default:
 		return false
@@ -1310,7 +1479,7 @@ func validCommandKind(value string) bool {
 }
 
 func validProfileResource(value string) bool {
-	return contains([]string{"models", "permission-profiles", "apps", "mcp", "plugins", "auth-status"}, value)
+	return contains([]string{"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status"}, value)
 }
 
 func validWorkspaceResource(value string) bool {

@@ -43,6 +43,7 @@ export type ReviewTarget =
 
 export type ProfileResource =
 	| "models"
+	| "model-capabilities"
 	| "permission-profiles"
 	| "apps"
 	| "mcp"
@@ -67,15 +68,6 @@ type ThreadTarget = WorkspaceTarget & {
 type TurnTarget = ThreadTarget & {
 	turnId: OpaqueRef;
 	sourceTurnRef: OpaqueRef;
-};
-
-export type TransferCommand = {
-	kind: "transfer.execute";
-	deviceId: OpaqueRef;
-	workspaceId: OpaqueRef;
-	threadId?: OpaqueRef;
-	sourceThreadRef?: OpaqueRef;
-	transferTicketRef: OpaqueRef;
 };
 
 export type AgentCommand =
@@ -115,8 +107,7 @@ export type AgentCommand =
 	| (WorkspaceTarget & {
 			kind: "resource.refresh";
 			resource: { scope: "workspace"; name: WorkspaceResource };
-	  })
-	| TransferCommand;
+	  });
 
 const REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const MAX_TEXT_BYTES = 1024 * 1024;
@@ -190,8 +181,6 @@ export function parseAgentCommand(value: unknown): AgentCommand {
 			return interaction(command);
 		case "resource.refresh":
 			return resourceRefresh(command);
-		case "transfer.execute":
-			return transfer(command);
 		default:
 			throw new TypeError(`unsupported command kind: ${kind}`);
 	}
@@ -240,6 +229,7 @@ function resourceRefresh(command: Record<string, unknown>): AgentCommand {
 				scope,
 				name: oneOf(resource.name, "command.resource.name", [
 					"models",
+					"model-capabilities",
 					"permission-profiles",
 					"apps",
 					"mcp",
@@ -262,39 +252,6 @@ function resourceRefresh(command: Record<string, unknown>): AgentCommand {
 			] as const),
 		},
 	};
-}
-
-function transfer(command: Record<string, unknown>): TransferCommand {
-	const allowed = ["kind", "deviceId", "workspaceId", "transferTicketRef"];
-	if (command.threadId !== undefined || command.sourceThreadRef !== undefined) {
-		allowed.push("threadId", "sourceThreadRef");
-		if (
-			command.threadId === undefined ||
-			command.sourceThreadRef === undefined
-		) {
-			throw new TypeError(
-				"command.threadId and command.sourceThreadRef must be provided together",
-			);
-		}
-	}
-	exact(command, allowed);
-	const result: TransferCommand = {
-		kind: "transfer.execute",
-		deviceId: ref(command.deviceId, "command.deviceId"),
-		workspaceId: ref(command.workspaceId, "command.workspaceId"),
-		transferTicketRef: ref(
-			command.transferTicketRef,
-			"command.transferTicketRef",
-		),
-	};
-	if (command.threadId !== undefined) {
-		result.threadId = ref(command.threadId, "command.threadId");
-		result.sourceThreadRef = ref(
-			command.sourceThreadRef,
-			"command.sourceThreadRef",
-		);
-	}
-	return result;
 }
 
 function interactionResponse(value: unknown): InteractionResponse {

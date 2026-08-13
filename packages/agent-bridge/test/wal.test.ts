@@ -68,12 +68,16 @@ test("command journal restores invocation state and replays a cached terminal", 
 	const wal = await DurableWalStore.open(directory);
 	const journal = CommandJournal.restore(wal);
 	await journal.receive(1, "command_1", command);
+	assert.equal(journal.contiguousReceipt(), 0);
+	await journal.markReceiptReady("command_1");
+	assert.equal(journal.contiguousReceipt(), 1);
 	await journal.start("command_1", { commandKind: "thread.create" });
 	assert.equal(journal.pendingRecovery().length, 1);
 	wal.close();
 
 	const restoredWal = await DurableWalStore.open(directory);
 	const restored = CommandJournal.restore(restoredWal);
+	assert.equal(restored.contiguousReceipt(), 1);
 	assert.equal(restored.pendingRecovery()[0]?.commandId, "command_1");
 	const terminal = await restored.complete("command_1", {
 		kind: "result",

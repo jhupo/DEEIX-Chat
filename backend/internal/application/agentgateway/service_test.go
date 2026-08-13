@@ -74,7 +74,7 @@ func TestRuntimeChallengeBindsExistingUserPublicID(t *testing.T) {
 
 func TestAgentWorkPayloadValidation(t *testing.T) {
 	validSettingsJSON := json.RawMessage(`{"model":"gpt-5.6","reasoningEffort":"high","approvalPolicy":"on-request","sandboxPolicy":"workspace-write"}`)
-	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"}]`)
+	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`)
 	validResponseJSON := json.RawMessage(`{"kind":"approval","decision":"accept"}`)
 	if !validSettings(validSettingsJSON) || !validInput(validInputJSON) || !validInteractionResponse(validResponseJSON) {
 		t.Fatal("valid agent work payload rejected")

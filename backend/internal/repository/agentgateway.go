@@ -31,6 +31,9 @@ type AgentGatewayRepository interface {
 	SyncWorkspaces(context.Context, uint, uint, uint, []domainagent.Workspace, time.Time) error
 	ListRuntimeProfiles(context.Context, uint, string) ([]domainagent.RuntimeProfile, error)
 	ListWorkspaces(context.Context, uint, string) ([]domainagent.Workspace, error)
+	CreateArtifact(context.Context, uint, string, string, *domainagent.Artifact) (*domainagent.Artifact, error)
+	ListArtifactsForCommand(context.Context, uint, uint, []string) ([]domainagent.Artifact, error)
+	GetArtifactForCommand(context.Context, string, string) (*domainagent.Artifact, *domainagent.Command, error)
 	QueueResourceRefresh(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error)
 	QueueThreadCommand(context.Context, string, string, uint, string, string, json.RawMessage, *domainagent.Command, time.Time) (*domainagent.Command, error)
@@ -40,6 +43,7 @@ type AgentGatewayRepository interface {
 	GetThread(context.Context, uint, string) (*domainagent.Thread, error)
 	StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error)
 	ListTurns(context.Context, uint, string, int) ([]domainagent.Turn, error)
+	ListItems(context.Context, uint, string, int) ([]domainagent.Item, error)
 	ListEvents(context.Context, uint, string, uint64, int) ([]domainagent.Event, error)
 	ListInteractions(context.Context, uint, string, string, int) ([]domainagent.Interaction, error)
 	RespondInteraction(context.Context, string, string, uint, string, json.RawMessage, *domainagent.Command, time.Time) (*domainagent.Interaction, error)

@@ -39,6 +39,14 @@ func TestConnectionTokenProtocols(t *testing.T) {
 	}
 }
 
+func TestClientFramesRejectServerArtifactGrants(t *testing.T) {
+	artifacts := []bridgeArtifactGrant{}
+	frame := bridgeFrame{Version: 1, Type: "ping", Artifacts: &artifacts}
+	if validPingFrame(frame) {
+		t.Fatal("client frame must not carry server artifact grants")
+	}
+}
+
 func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	const token = "deeix_connection_test_value"
 	const runtimeKey = "sk-test-runtime-key"
@@ -301,6 +309,15 @@ func (*socketRepo) ListRuntimeProfiles(context.Context, uint, string) ([]domaina
 func (*socketRepo) ListWorkspaces(context.Context, uint, string) ([]domainagent.Workspace, error) {
 	return nil, nil
 }
+func (*socketRepo) CreateArtifact(context.Context, uint, string, string, *domainagent.Artifact) (*domainagent.Artifact, error) {
+	return nil, repository.ErrNotFound
+}
+func (*socketRepo) ListArtifactsForCommand(context.Context, uint, uint, []string) ([]domainagent.Artifact, error) {
+	return nil, nil
+}
+func (*socketRepo) GetArtifactForCommand(context.Context, string, string) (*domainagent.Artifact, *domainagent.Command, error) {
+	return nil, nil, repository.ErrNotFound
+}
 func (*socketRepo) QueueResourceRefresh(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
 	return nil, repository.ErrNotFound
 }
@@ -326,6 +343,9 @@ func (*socketRepo) StartTurn(context.Context, string, string, *domainagent.Turn,
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) ListTurns(context.Context, uint, string, int) ([]domainagent.Turn, error) {
+	return nil, nil
+}
+func (*socketRepo) ListItems(context.Context, uint, string, int) ([]domainagent.Item, error) {
 	return nil, nil
 }
 func (*socketRepo) ListEvents(context.Context, uint, string, uint64, int) ([]domainagent.Event, error) {

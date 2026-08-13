@@ -1,0 +1,50 @@
+name: Agent Bridge
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "packages/agent-bridge/**"
+      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - ".github/workflows/agent-bridge.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "packages/agent-bridge/**"
+      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - ".github/workflows/agent-bridge.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @deeix/agent-bridge check
+      - run: pnpm --filter @deeix/agent-bridge check:schema
+      - name: Download pinned Codex
+        shell: pwsh
+        run: |
+          $url = "https://github.com/openai/codex/releases/download/rust-v0.147.0/codex-x86_64-pc-windows-msvc.exe.zip"
+          Invoke-WebRequest -Uri $url -OutFile codex.zip
+          $actual = (Get-FileHash codex.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "a1c073ede409178502b1ff11bed635d2b644424352f9d4f3999de8272c6aebbd") {
+            throw "Pinned Codex SHA-256 mismatch"
+          }
+          Expand-Archive codex.zip codex-e2e
+          $exe = Get-ChildItem codex-e2e -Recurse -Filter codex.exe | Select-Object -First 1
+          if (-not $exe) { throw "codex.exe is missing from the pinned asset" }
+          "CODEX_E2E_EXECUTABLE=$($exe.FullName)" | Out-File $env:GITHUB_ENV -Append
+      - run: pnpm --filter @deeix/agent-bridge test
+

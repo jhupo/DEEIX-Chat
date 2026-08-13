@@ -12,6 +12,7 @@ import {
 } from "../providers/codex/codex-process.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { BridgeCloudClient } from "../transport/cloud-client.js";
+import { ArtifactDownloader } from "../transport/artifact-downloader.js";
 import { runBridgeSocket } from "../transport/wss-client.js";
 import { CommandJournal } from "../wal/command-journal.js";
 import { DurableWalStore } from "../wal/durable-wal-store.js";
@@ -70,6 +71,7 @@ export async function runGateway(
 		workspaces,
 		sources,
 		providers,
+		new ArtifactDownloader(config.cloudUrl, workspaces),
 	);
 
 	try {

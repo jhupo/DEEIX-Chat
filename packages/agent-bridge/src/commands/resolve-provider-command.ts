@@ -3,7 +3,6 @@ import type { WorkspaceRegistry } from "../config/workspace-registry.js";
 import type { DurableWalStore, WalRecord } from "../wal/durable-wal-store.js";
 import type {
 	AgentCommand,
-	AgentInput,
 	InteractionResponse,
 	ProfileResource,
 	ReviewTarget,
@@ -16,6 +15,10 @@ type LocalCommand = { commandId: string; profileRef: string };
 type LocalWorkspaceCommand = LocalCommand & { canonicalCwd: string };
 type LocalThreadCommand = LocalWorkspaceCommand & { providerThreadId: string };
 type LocalTurnCommand = LocalThreadCommand & { providerTurnId: string };
+export type ProviderInput =
+	| { kind: "text"; text: string }
+	| { kind: "local-image"; path: string }
+	| { kind: "local-audio"; path: string };
 
 export type ProviderCommand =
 	| (LocalWorkspaceCommand & {
@@ -31,10 +34,10 @@ export type ProviderCommand =
 	| (LocalThreadCommand & { kind: "review.start"; target: ReviewTarget })
 	| (LocalThreadCommand & {
 			kind: "turn.start";
-			input: AgentInput[];
+			input: ProviderInput[];
 			settings: ThreadSettings;
 	  })
-	| (LocalTurnCommand & { kind: "turn.steer"; input: AgentInput[] })
+	| (LocalTurnCommand & { kind: "turn.steer"; input: ProviderInput[] })
 	| (LocalTurnCommand & { kind: "turn.interrupt" })
 	| (LocalThreadCommand & {
 			kind: "interaction.respond";
@@ -183,11 +186,9 @@ export async function resolveProviderCommand(
 	command: AgentCommand,
 	workspaces: WorkspaceRegistry,
 	sources: SourceRefRegistry,
+	artifacts: ReadonlyMap<string, { path: string; mimeType: string }> = new Map(),
 ): Promise<ProviderCommand> {
 	assertOpaqueRef(commandId, "commandId");
-	if (command.kind === "transfer.execute")
-		throw new TypeError("transfer.execute is handled by the Gateway transport");
-
 	const base = { commandId, profileRef: command.profileId };
 	if (isProfileResourceCommand(command)) {
 		return { ...base, kind: command.kind, resource: command.resource };
@@ -220,7 +221,7 @@ export async function resolveProviderCommand(
 			return {
 				...thread,
 				kind: command.kind,
-				input: command.input,
+				input: providerInput(command.input, artifacts),
 				settings: command.settings,
 			};
 		case "turn.steer":
@@ -228,7 +229,7 @@ export async function resolveProviderCommand(
 				...thread,
 				...turn(command, sources),
 				kind: command.kind,
-				input: command.input,
+				input: providerInput(command.input, artifacts),
 			};
 		case "turn.interrupt":
 			return { ...thread, ...turn(command, sources), kind: command.kind };
@@ -258,8 +259,24 @@ export async function resolveProviderCommand(
 	}
 }
 
+function providerInput(
+	input: Extract<AgentCommand, { kind: "turn.start" | "turn.steer" }>["input"],
+	artifacts: ReadonlyMap<string, { path: string; mimeType: string }>,
+): ProviderInput[] {
+	return input.map((item) => {
+		if (item.kind === "text") return item;
+		const artifact = artifacts.get(item.artifactRef);
+		if (!artifact) throw new Error(`artifact is not prepared: ${item.artifactRef}`);
+		if (artifact.mimeType.startsWith("image/"))
+			return { kind: "local-image", path: artifact.path };
+		if (artifact.mimeType.startsWith("audio/"))
+			return { kind: "local-audio", path: artifact.path };
+		throw new Error(`artifact MIME is unsupported: ${artifact.mimeType}`);
+	});
+}
+
 function isProfileResourceCommand(
-	command: Exclude<AgentCommand, { kind: "transfer.execute" }>,
+	command: AgentCommand,
 ): command is Extract<AgentCommand, { kind: "resource.refresh" }> & {
 	resource: { scope: "profile"; name: ProfileResource };
 } {

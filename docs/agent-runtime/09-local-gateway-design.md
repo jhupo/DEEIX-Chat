@@ -9,8 +9,8 @@
 source ref、带 hash 与 `fsync` 的分段 WAL、command result cache/recovery、Ed25519 设备配对、一次性 WSS 凭据、双向
 连续游标、官方 `0.147.0` 生成 schema 和漂移校验、Codex lifecycle/turn/interaction/resource mapper、stdio JSONL
 RPC、`pair/run` 入口，以及绑定现有 `identity_users.public_id` 的实时 Sub2 Key HMAC 准入证明。Cloud 的
-AgentThread/Turn/Event/Interaction 聚合、幂等命令 API、事件 projector 与只读资源快照已经实现；Web UI、文件传输、
-分享、审计和清理任务仍按本文后续批次推进。
+AgentThread/Turn/Item/Event/Interaction 聚合、幂等命令 API、事件 projector、只读资源快照与图片/音频附件输入已经实现；Web UI、
+分享、审计和清理任务仍按后续批次推进。
 
 ## 1. 决策
 
@@ -87,11 +87,9 @@ packages/agent-bridge/
   src/providers/provider-registry.ts
   src/providers/codex/codex-adapter.ts
   src/providers/codex/rpc-client.ts
-  src/providers/codex/method-registry.ts
-  src/providers/codex/event-mapper.ts
+  src/providers/codex/codex-method-policy.ts
   src/commands/resolve-provider-command.ts
-  src/commands/recovery-registry.ts
-  src/resources/redaction.ts
+  src/transport/artifact-downloader.ts
   generated/codex-app-server-v<VERSION>/
   fixtures/codex/
 ```
@@ -157,15 +155,13 @@ function createAdapter(profile: LocalRuntimeProfile): ProviderAdapter {
 命令解析顺序固定：
 
 1. 校验 envelope schema、大小、device/profile 绑定与连续 `serverSeq`。
-2. 将 sanitized `AgentCommand` 以 `received` 状态写入 incoming WAL 并 `fsync`。
-3. 由 `resolve-provider-command.ts` 校验全部 public/source refs。
-4. 从 workspace registry 解析 canonical cwd，从 source mapping 解析 raw provider ID。
-5. 生成判别联合 `ProviderCommand`；它不含 Cloud ownership 字段和 `unknown` payload。
-6. 从 Registry 取 Adapter，再执行 capability 与当前状态校验。
-7. 写入 `invocation_started` 后调用 `adapter.execute`。
-8. terminal result/error 先缓存，再形成 durable 上行帧。
-
-`transfer.execute` 属于 Gateway transport，不进入 `ProviderAdapter`。它只处理 ticket/receipt 和有界数据传输。
+2. 将不含附件 grant 的 `AgentCommand` 以 `received` 状态写入 incoming WAL 并 `fsync`。
+3. 下载 WSS envelope 中 command-bound 的附件，校验大小与 SHA-256 后原子放入 workspace `.deeix/artifacts`，再写 `command.receipt-ready` 并 ACK。
+4. 由 `resolve-provider-command.ts` 校验全部 public/source refs。
+5. 从 workspace registry 解析 canonical cwd，从 source mapping 解析 raw provider ID。
+6. 生成判别联合 `ProviderCommand`；它不含 Cloud ownership 字段和 `unknown` payload。
+7. 从 Registry 取 Adapter，再执行 capability 与当前状态校验。
+8. 写入 `invocation_started` 后调用 `adapter.execute`；terminal result/error 先缓存，再形成 durable 上行帧。
 
 ## 6. 统一命令与事件
 
@@ -180,7 +176,6 @@ turn.start / steer / interrupt
 review.start
 interaction.respond
 resource.refresh
-transfer.execute (Gateway transport only)
 ```
 
 `POST /threads` 带初始输入时也不把输入塞入 `thread.create`：Cloud 先保存 `awaiting_thread` provisional turn；

@@ -59,15 +59,6 @@ type ThreadInteractionCommand = {
   response: InteractionResponse;
 };
 
-type TransferCommand = {
-  kind: "transfer.execute";
-  deviceId: string;
-  workspaceId: string;
-  threadId?: string;
-  sourceThreadRef?: string;
-  transferTicketRef: string;
-};
-
 type ThreadMetadataPatch = Pick<
   CodexThreadMetadataUpdateParams,
   "gitInfo"
@@ -85,14 +76,13 @@ export type AgentCommand =
   | { kind: "turn.interrupt"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; turnId: string; sourceTurnRef: string }
   | TurnInteractionCommand
   | ThreadInteractionCommand
-  | TransferCommand
   | ProfileResourceCommand<"resource.refresh">
   | WorkspaceResourceCommand<"resource.refresh">
   | (ProfileResourceCommand<"resource.mutate"> & { mutation: ResourceMutation })
   | (WorkspaceResourceCommand<"resource.mutate"> & { mutation: ResourceMutation });
 
 type ProviderKind = ProviderRegistry["kind"];
-type ProviderAgentCommand = Exclude<AgentCommand, TransferCommand>;
+type ProviderAgentCommand = AgentCommand;
 type CloudRefs = "deviceId" | "profileId" | "workspaceId" | "threadId" | "turnId" | "interactionId" | "sourceThreadRef" | "sourceTurnRef" | "sourceRequestRef";
 
 type ResolvedFields = {
@@ -149,7 +139,7 @@ export interface ProviderAdapter {
 }
 ```
 
-Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants only. `thread.create` has no user input and no `sourceThreadRef` until its Bridge result/event binds it; its settings are only the typed `thread/start` settings accepted by the pinned schema. Browser initial input is stored on an optional provisional turn and appears solely in the follow-on `turn.start` command. Thread lifecycle/name/metadata/compact/review and turn start carry `sourceThreadRef`; `thread.metadata.update.patch` is only generated `thread/metadata/update.gitInfo`, whose only nested fields are optional nullable `sha`, `branch`, and `originUrl`; it rejects every other field, arbitrary JSON, and DEEIX labels/share/pin. Steer/interrupt also carry `sourceTurnRef`; interaction response carries `sourceThreadRef` and `sourceRequestRef`, plus `sourceTurnRef` only for turn scope. It has no canonical cwd, raw provider ID, raw RPC method, arbitrary JSON, credential or secret. Resolver validates every top-level and nested ref, then resolves source refs through the Local Bridge durable mapping `(profile_ref, source_kind, source_ref) -> raw provider ID` before constructing `ProviderCommand`; `thread.metadata.update` resolves only local raw thread ID plus canonical cwd. The `providerThreadId`, `providerTurnId` and `providerRequestId` fields exist only in this local adapter boundary. `transfer.execute` is a Bridge transport command, not a `ProviderAdapter` command: its persisted command payload has only `transferTicketRef` and allowlisted device/workspace/thread public/source refs. The distributive `ResolvedCommandMember` preserves `AgentResource.scope`: profile-scoped resources reject `canonicalCwd`, while workspace-scoped resources require it. `InteractionResolvedFields` preserves interaction scope: both forms require provider thread/request/cwd, turn scope requires provider turn, and thread scope rejects it. `mcpServer/elicitation/request` can be thread-scoped with no `source_turn_ref`; at the Local Bridge boundary that path likewise has no raw `providerTurnId`. Adapter receives a `kind`-narrowed union with no `unknown` payload. Bridge de-duplicates by command ID/result cache.
+Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants only. `thread.create` has no user input and no `sourceThreadRef` until its Bridge result/event binds it; Browser initial input appears solely in the follow-on `turn.start` command. Thread lifecycle/name/compact/review and turn start carry `sourceThreadRef`; steer/interrupt also carry `sourceTurnRef`; interaction response carries `sourceRequestRef`. Commands contain no canonical cwd, raw provider ID, raw RPC method, credential or secret. An attachment is an opaque `artifactRef`; Cloud validates its User/workspace binding, the WSS envelope adds a short-lived command-bound grant, and Bridge maps the downloaded image/audio to `localImage`/`localAudio`. Adapter receives a `kind`-narrowed union with no `unknown` payload. Bridge de-duplicates by command ID/result cache.
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 

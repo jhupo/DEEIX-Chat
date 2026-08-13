@@ -14,6 +14,7 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 	group.DELETE("/agent/devices/:device_id", m.Handler.RevokeDevice)
 	group.GET("/agent/devices/:device_id/profiles", m.Handler.ListRuntimeProfiles)
 	group.GET("/agent/devices/:device_id/workspaces", m.Handler.ListWorkspaces)
+	group.POST("/agent/workspaces/:workspace_id/artifacts", m.Handler.CreateArtifact)
 	group.GET("/agent/devices/:device_id/profiles/:profile_id/resources/:resource", m.Handler.GetProfileResource)
 	group.POST("/agent/devices/:device_id/profiles/:profile_id/resources/:resource/refresh", m.Handler.QueueProfileResourceRefresh)
 	group.GET("/agent/devices/:device_id/workspaces/:workspace_id/resources/:resource", m.Handler.GetWorkspaceResource)
@@ -31,6 +32,7 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 	group.POST("/agent/threads/:thread_id/reviews", m.Handler.StartReview)
 	group.POST("/agent/threads/:thread_id/turns", m.Handler.StartTurn)
 	group.GET("/agent/threads/:thread_id/turns", m.Handler.ListTurns)
+	group.GET("/agent/threads/:thread_id/items", m.Handler.ListItems)
 	group.POST("/agent/turns/:turn_id/steer", m.Handler.SteerTurn)
 	group.POST("/agent/turns/:turn_id/interrupt", m.Handler.InterruptTurn)
 	group.GET("/agent/threads/:thread_id/events", m.Handler.ListEvents)
@@ -43,4 +45,5 @@ func (m *Module) RegisterBridgeRoutes(group *gin.RouterGroup) {
 	group.POST("/agent/bridge/token-challenges", m.Handler.CreateChallenge)
 	group.POST("/agent/bridge/tokens", m.Handler.IssueConnection)
 	group.GET("/agent/bridge/connect", m.Handler.ConnectBridge)
+	group.GET("/agent/bridge/artifacts/:artifact_id/content", m.Handler.GetArtifactContent)
 }

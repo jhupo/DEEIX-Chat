@@ -264,6 +264,20 @@ definitions:
     - updatedAt
     - username
     type: object
+  AgentInputDoc:
+    properties:
+      artifactRef:
+        type: string
+      kind:
+        enum:
+        - text
+        - artifact
+        type: string
+      text:
+        type: string
+    required:
+    - kind
+    type: object
   AgentSettingsDoc:
     properties:
       approvalPolicy:
@@ -286,18 +300,6 @@ definitions:
         - read-only
         - workspace-write
         type: string
-    type: object
-  AgentTextInputDoc:
-    properties:
-      kind:
-        enum:
-        - text
-        type: string
-      text:
-        type: string
-    required:
-    - kind
-    - text
     type: object
   AgentgatewayErrorDoc:
     properties:
@@ -439,6 +441,38 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/AnnouncementDataResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ArtifactDoc:
+    properties:
+      artifactId:
+        type: string
+      fileName:
+        type: string
+      mimeType:
+        type: string
+      sha256:
+        type: string
+      sizeBytes:
+        type: integer
+      workspaceId:
+        type: string
+    required:
+    - artifactId
+    - fileName
+    - mimeType
+    - sha256
+    - sizeBytes
+    - workspaceId
+    type: object
+  ArtifactResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ArtifactDoc'
       errorMsg:
         type: string
     required:
@@ -1636,6 +1670,13 @@ definitions:
     - contentMarkdown
     - title
     type: object
+  CreateArtifactRequestDoc:
+    properties:
+      fileId:
+        type: string
+    required:
+    - fileId
+    type: object
   CreateConversationProjectRequest:
     properties:
       color:
@@ -2416,6 +2457,47 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/InteractionDoc'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ItemDoc:
+    properties:
+      createdAt:
+        type: string
+      data: {}
+      itemId:
+        type: string
+      kind:
+        type: string
+      lastEventSeq:
+        type: integer
+      status:
+        type: string
+      threadId:
+        type: string
+      turnId:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - createdAt
+    - data
+    - itemId
+    - kind
+    - lastEventSeq
+    - status
+    - threadId
+    - updatedAt
+    type: object
+  ItemListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/ItemDoc'
+        type: array
       errorMsg:
         type: string
     required:
@@ -4674,7 +4756,7 @@ definitions:
         type: string
       input:
         items:
-          $ref: '#/definitions/AgentTextInputDoc'
+          $ref: '#/definitions/AgentInputDoc'
         type: array
       profileId:
         type: string
@@ -4704,7 +4786,7 @@ definitions:
     properties:
       input:
         items:
-          $ref: '#/definitions/AgentTextInputDoc'
+          $ref: '#/definitions/AgentInputDoc'
         type: array
       settings:
         $ref: '#/definitions/AgentSettingsDoc'
@@ -4716,7 +4798,7 @@ definitions:
     properties:
       input:
         items:
-          $ref: '#/definitions/AgentTextInputDoc'
+          $ref: '#/definitions/AgentInputDoc'
         type: array
     required:
     - input
@@ -10009,6 +10091,7 @@ paths:
       - description: 资源
         enum:
         - models
+        - model-capabilities
         - permission-profiles
         - apps
         - mcp
@@ -10056,6 +10139,7 @@ paths:
       - description: 资源
         enum:
         - models
+        - model-capabilities
         - permission-profiles
         - apps
         - mcp
@@ -10601,6 +10685,36 @@ paths:
       summary: 获取 Agent 交互请求
       tags:
       - agent
+  /agent/threads/{thread_id}/items:
+    get:
+      parameters:
+      - description: Thread ID
+        in: path
+        name: thread_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ItemListResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 获取 Agent Thread 条目快照
+      tags:
+      - agent
   /agent/threads/{thread_id}/name:
     patch:
       parameters:
@@ -10925,6 +11039,46 @@ paths:
       security:
       - BearerAuth: []
       summary: 追加 Agent Turn 输入
+      tags:
+      - agent
+  /agent/workspaces/{workspace_id}/artifacts:
+    post:
+      parameters:
+      - description: Workspace ID
+        in: path
+        name: workspace_id
+        required: true
+        type: string
+      - description: 已上传文件
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/CreateArtifactRequestDoc'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ArtifactResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 创建 Agent workspace artifact
       tags:
       - agent
   /announcements:

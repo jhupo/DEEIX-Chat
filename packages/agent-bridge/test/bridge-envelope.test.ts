@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	parseBridgeAuthChallenge,
 	parseBridgeAuthReady,
+	parseBridgeServerFrame,
 	parseBridgeWelcome,
 } from "../src/protocol/bridge-envelope.js";
 
@@ -13,6 +14,28 @@ test("parseBridgeWelcome accepts the expected device", () => {
 		parseBridgeWelcome({ version: 1, type: "welcome", deviceId, heartbeatSeconds: 30 }, deviceId),
 		{ version: 1, type: "welcome", deviceId, heartbeatSeconds: 30 },
 	);
+});
+
+test("command frames require explicit artifact grants", () => {
+	assert.deepEqual(parseBridgeServerFrame({
+		version: 1,
+		type: "command",
+		serverSeq: 1,
+		commandId: "command_1",
+		command: { kind: "resource.refresh" },
+		artifacts: [],
+	}), {
+		version: 1,
+		type: "command",
+		serverSeq: 1,
+		commandId: "command_1",
+		command: { kind: "resource.refresh" },
+		artifacts: [],
+	});
+	assert.throws(() => parseBridgeServerFrame({
+		version: 1, type: "command", serverSeq: 1, commandId: "command_1",
+		command: { kind: "resource.refresh" },
+	}), /missing/);
 });
 
 test("parseBridgeWelcome rejects device substitution", () => {

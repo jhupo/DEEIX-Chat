@@ -110,16 +110,17 @@ export interface AdminUserResponse {
   username: string;
 }
 
+export interface AgentInputDoc {
+  artifactRef?: string;
+  kind: "text" | "artifact";
+  text?: string;
+}
+
 export interface AgentSettingsDoc {
   approvalPolicy?: "untrusted" | "on-request" | "never";
   model?: string;
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
   sandboxPolicy?: "read-only" | "workspace-write";
-}
-
-export interface AgentTextInputDoc {
-  kind: "text";
-  text: string;
 }
 
 export interface AgentgatewayErrorDoc {
@@ -187,6 +188,20 @@ export interface AnnouncementResponse {
 
 export interface AnnouncementResponseDoc {
   data: AnnouncementDataResponse;
+  errorMsg: string;
+}
+
+export interface ArtifactDoc {
+  sha256: string;
+  artifactId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  workspaceId: string;
+}
+
+export interface ArtifactResponseDoc {
+  data: ArtifactDoc;
   errorMsg: string;
 }
 
@@ -698,6 +713,10 @@ export interface CreateAnnouncementRequest {
   type?: "critical" | "warning" | "info" | "normal" | "general";
 }
 
+export interface CreateArtifactRequestDoc {
+  fileId: string;
+}
+
 export interface CreateConversationProjectRequest {
   /** @maxLength 32 */
   color?: string;
@@ -1082,6 +1101,23 @@ export interface InteractionListResponseDoc {
 
 export interface InteractionResponseDoc {
   data: InteractionDoc;
+  errorMsg: string;
+}
+
+export interface ItemDoc {
+  createdAt: string;
+  data: any;
+  itemId: string;
+  kind: string;
+  lastEventSeq: number;
+  status: string;
+  threadId: string;
+  turnId?: string;
+  updatedAt: string;
+}
+
+export interface ItemListResponseDoc {
+  data: ItemDoc[];
   errorMsg: string;
 }
 
@@ -2057,7 +2093,7 @@ export interface StartThreadDataDoc {
 
 export interface StartThreadRequestDoc {
   deviceId: string;
-  input?: AgentTextInputDoc[];
+  input?: AgentInputDoc[];
   profileId: string;
   settings: AgentSettingsDoc;
   title?: string;
@@ -2070,12 +2106,12 @@ export interface StartThreadResponseDoc {
 }
 
 export interface StartTurnRequestDoc {
-  input: AgentTextInputDoc[];
+  input: AgentInputDoc[];
   settings: AgentSettingsDoc;
 }
 
 export interface SteerTurnRequestDoc {
-  input: AgentTextInputDoc[];
+  input: AgentInputDoc[];
 }
 
 export interface StorageQuotaResponse {
@@ -4981,6 +5017,7 @@ export namespace Agent {
       /** 资源 */
       resource:
         | "models"
+        | "model-capabilities"
         | "permission-profiles"
         | "apps"
         | "mcp"
@@ -5010,6 +5047,7 @@ export namespace Agent {
       /** 资源 */
       resource:
         | "models"
+        | "model-capabilities"
         | "permission-profiles"
         | "apps"
         | "mcp"
@@ -5304,6 +5342,25 @@ export namespace Agent {
   /**
    * No description
    * @tags agent
+   * @name ThreadsItemsList
+   * @summary 获取 Agent Thread 条目快照
+   * @request GET:/agent/threads/{thread_id}/items
+   * @secure
+   */
+  export namespace ThreadsItemsList {
+    export type RequestParams = {
+      /** Thread ID */
+      threadId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ItemListResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent
    * @name ThreadsNamePartialUpdate
    * @summary 重命名 Agent Thread
    * @request PATCH:/agent/threads/{thread_id}/name
@@ -5472,6 +5529,25 @@ export namespace Agent {
       "Idempotency-Key": string;
     };
     export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent
+   * @name WorkspacesArtifactsCreate
+   * @summary 创建 Agent workspace artifact
+   * @request POST:/agent/workspaces/{workspace_id}/artifacts
+   * @secure
+   */
+  export namespace WorkspacesArtifactsCreate {
+    export type RequestParams = {
+      /** Workspace ID */
+      workspaceId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = CreateArtifactRequestDoc;
+    export type RequestHeaders = {};
+    export type ResponseBody = ArtifactResponseDoc;
   }
 }
 
