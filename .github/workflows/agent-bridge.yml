@@ -43,8 +43,7 @@ jobs:
             throw "Pinned Codex SHA-256 mismatch"
           }
           Expand-Archive codex.zip codex-e2e
-          $exe = Get-ChildItem codex-e2e -Recurse -Filter codex.exe | Select-Object -First 1
-          if (-not $exe) { throw "codex.exe is missing from the pinned asset" }
+          $exe = Get-ChildItem codex-e2e -Recurse -Filter codex-x86_64-pc-windows-msvc.exe | Select-Object -First 1
+          if (-not $exe) { throw "Pinned Codex executable is missing from the asset" }
           "CODEX_E2E_EXECUTABLE=$($exe.FullName)" | Out-File $env:GITHUB_ENV -Append
       - run: pnpm --filter @deeix/agent-bridge test
-
