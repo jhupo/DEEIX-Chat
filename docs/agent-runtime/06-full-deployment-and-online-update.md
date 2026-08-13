@@ -38,7 +38,7 @@ A fresh v0.4 deployment leaves `REDIS_DB` unset and uses logical database `0`. W
 
 An online update writes only `deeix-chat-app-runtime` and the journal in `deeix-chat-app-data`. It does not recreate PostgreSQL, flush Redis, replace `config.yaml`, or touch uploaded files.
 
-The image contains a baseline release under `/app/image-runtime`. The entrypoint seeds that release into the runtime volume on first boot and atomically selects `/app/runtime/current`. If a later container image contains a version newer than the active runtime release, it seeds and selects the image version. Recreating the container with the same named volume preserves an application release installed online.
+The image contains a baseline release under `/app/image-runtime` with a digest covering the server binary, static frontend, and version file. On every container start, the entrypoint seeds that exact build into an immutable `releases/image-<version>-<digest>` directory. Online-installed stable bundles exclusively use `releases/<version>`, so an image never overwrites an administrator-installed bundle. The `current` symlink is switched atomically: a rebuilt `dev` image replaces an older image build even when `VERSION` has not changed, while an online-installed release of the same or a newer semantic version remains active. Recreating the container with the same named volume preserves releases and rollback data.
 
 ## Online Update Flow
 

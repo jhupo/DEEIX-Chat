@@ -17,6 +17,7 @@ on:
       - "compose.yaml"
       - "config.example.yaml"
       - "deploy/docker-entrypoint.sh"
+      - "deploy/docker-entrypoint.test.sh"
       - "scripts/sync-version.mjs"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
@@ -36,6 +37,7 @@ on:
       - "compose.yaml"
       - "config.example.yaml"
       - "deploy/docker-entrypoint.sh"
+      - "deploy/docker-entrypoint.test.sh"
       - "scripts/sync-version.mjs"
       - "VERSION"
       - ".github/workflows/frontend-quality.yml"
@@ -79,6 +81,9 @@ jobs:
         run: |
           cp config.example.yaml config.yaml
           docker compose -f compose.yaml config -q
+
+      - name: Check Docker runtime activation
+        run: sh deploy/docker-entrypoint.test.sh
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

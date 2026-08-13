@@ -78,6 +78,12 @@ COPY --from=runtime-deps /etc/timezone /etc/timezone
 COPY --from=backend-builder /out/deeix-chat /app/image-runtime/deeix-chat
 COPY --from=frontend-builder /src/frontend/out /app/image-runtime/frontend/out
 COPY VERSION /app/image-runtime/VERSION
+RUN find /app/image-runtime -type f -print0 \
+  | sort -z \
+  | xargs -0 sha256sum \
+  | sha256sum \
+  | cut -d ' ' -f 1 > /tmp/deeix-image-digest \
+  && mv /tmp/deeix-image-digest /app/image-runtime/IMAGE_DIGEST
 COPY --chmod=0755 deploy/docker-entrypoint.sh /usr/local/bin/deeix-chat-entrypoint
 COPY LICENSE NOTICE /app/licenses/DEEIX-Chat/
 
