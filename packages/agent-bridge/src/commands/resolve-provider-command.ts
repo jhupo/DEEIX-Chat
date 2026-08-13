@@ -7,6 +7,7 @@ import type {
 	ProfileResource,
 	ReviewTarget,
 	ThreadSettings,
+	ThreadGitInfoPatch,
 	WorkspaceResource,
 } from "../protocol/agent-command.js";
 import { assertOpaqueRef } from "../protocol/agent-command.js";
@@ -30,6 +31,7 @@ export type ProviderCommand =
 			action: "resume" | "fork" | "archive" | "unarchive" | "delete";
 	  })
 	| (LocalThreadCommand & { kind: "thread.rename"; name: string })
+	| (LocalThreadCommand & { kind: "thread.metadata.update"; gitInfo: ThreadGitInfoPatch })
 	| (LocalThreadCommand & { kind: "thread.compact" })
 	| (LocalThreadCommand & { kind: "review.start"; target: ReviewTarget })
 	| (LocalThreadCommand & {
@@ -213,6 +215,8 @@ export async function resolveProviderCommand(
 			return { ...thread, kind: command.kind, action: command.action };
 		case "thread.rename":
 			return { ...thread, kind: command.kind, name: command.name };
+		case "thread.metadata.update":
+			return { ...thread, kind: command.kind, gitInfo: command.gitInfo };
 		case "thread.compact":
 			return { ...thread, kind: command.kind };
 		case "review.start":

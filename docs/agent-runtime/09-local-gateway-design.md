@@ -12,6 +12,8 @@ RPC、`pair/run` 入口，以及绑定现有 `identity_users.public_id` 的实�
 AgentThread/Turn/Item/Event/Interaction 聚合、幂等命令 API、事件 projector、只读资源快照与图片/音频附件输入已经实现；Web UI、
 分享、审计和清理任务仍按后续批次推进。
 
+后端网关基数为 `User 1:N Device`。每个 Device 的身份、Profile、Workspace、WSS cursor 与命令队列完全隔离；同一 Device 的新 socket 接管旧 socket，不同 Device 可以并发在线。Thread 创建后固定绑定 Device/Profile/Workspace。Full 单实例在命令提交后按 User fan-out 一个合并唤醒信号，各 socket 仍只读取自身 Device 的连续序列；离线或重启恢复只依赖 PostgreSQL 队列和 Bridge WAL。
+
 ## 1. 决策
 
 不新增 `WorkCommand`、`WorkEvent` 或另一套 Provider 接口。沿用现有四层合同：

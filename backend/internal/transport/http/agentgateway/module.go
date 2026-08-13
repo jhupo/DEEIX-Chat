@@ -22,6 +22,9 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 	group.GET("/agent/threads", m.Handler.ListThreads)
 	group.POST("/agent/threads", m.Handler.StartThread)
 	group.GET("/agent/threads/:thread_id", m.Handler.GetThread)
+	group.GET("/agent/threads/:thread_id/snapshot", m.Handler.GetThreadSnapshot)
+	group.PATCH("/agent/threads/:thread_id", m.Handler.UpdateThreadMetadata)
+	group.PATCH("/agent/threads/:thread_id/provider-metadata", m.Handler.UpdateProviderMetadata)
 	group.PATCH("/agent/threads/:thread_id/name", m.Handler.RenameThread)
 	group.POST("/agent/threads/:thread_id/fork", m.Handler.ForkThread)
 	group.POST("/agent/threads/:thread_id/resume", m.Handler.ResumeThread)
@@ -36,6 +39,7 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 	group.POST("/agent/turns/:turn_id/steer", m.Handler.SteerTurn)
 	group.POST("/agent/turns/:turn_id/interrupt", m.Handler.InterruptTurn)
 	group.GET("/agent/threads/:thread_id/events", m.Handler.ListEvents)
+	group.GET("/agent/threads/:thread_id/notifications", m.Handler.StreamThreadNotifications)
 	group.GET("/agent/threads/:thread_id/interactions", m.Handler.ListInteractions)
 	group.POST("/agent/interactions/:interaction_id/respond", m.Handler.RespondInteraction)
 }

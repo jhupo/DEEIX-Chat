@@ -64,6 +64,23 @@ test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves app
 		created.sourceThreadRef,
 	);
 
+	const metadata = adapter.execute({
+		kind: "thread.metadata.update",
+		commandId: "command_metadata",
+		profileRef: "profile_1",
+		canonicalCwd: "/work/project",
+		providerThreadId: "provider-thread-1",
+		gitInfo: { sha: null, branch: "main" },
+	}, AbortSignal.timeout(1000));
+	const metadataRequest = await sent.next();
+	assert.equal(metadataRequest.method, "thread/metadata/update");
+	assert.deepEqual(metadataRequest.params, {
+		threadId: "provider-thread-1",
+		gitInfo: { sha: null, branch: "main" },
+	});
+	respond(output, metadataRequest.id, {});
+	assert.deepEqual(await metadata, { kind: "accepted" });
+
 	const auth = adapter.execute(
 		{
 			kind: "resource.refresh",

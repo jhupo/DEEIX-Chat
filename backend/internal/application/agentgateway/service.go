@@ -66,6 +66,7 @@ type Service struct {
 	users     RuntimeUserResolver
 	proofs    RuntimeProofVerifier
 	artifacts ArtifactContentStore
+	notify    func(uint)
 }
 
 type DeviceView struct {
@@ -198,14 +199,21 @@ type WorkspaceRegistration struct {
 }
 
 type ThreadView struct {
-	ThreadID    string
-	DeviceID    string
-	ProfileID   string
-	WorkspaceID string
-	Title       string
-	Status      string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ThreadID     string
+	DeviceID     string
+	ProfileID    string
+	WorkspaceID  string
+	Title        string
+	Status       string
+	IsPinned     bool
+	Labels       []string
+	SharePolicy  string
+	GitSHA       *string
+	GitBranch    *string
+	GitOriginURL *string
+	LastEventSeq uint64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type TurnView struct {
@@ -271,6 +279,14 @@ type StartThreadResult struct {
 	Turn   *TurnView
 }
 
+type ThreadSnapshotView struct {
+	Thread       ThreadView
+	Turns        []TurnView
+	Items        []ItemView
+	Interactions []InteractionView
+	SnapshotSeq  uint64
+}
+
 func NewService(repo repository.AgentGatewayRepository, secret string) (*Service, error) {
 	if repo == nil || len(strings.TrimSpace(secret)) < 32 {
 		return nil, ErrInvalidInput
@@ -284,6 +300,14 @@ func (s *Service) SetRuntimeAuth(users RuntimeUserResolver, proofs RuntimeProofV
 }
 
 func (s *Service) SetArtifactContentStore(store ArtifactContentStore) { s.artifacts = store }
+
+func (s *Service) SetNotifier(notify func(uint)) { s.notify = notify }
+
+func (s *Service) notifyUser(userID uint) {
+	if s.notify != nil {
+		s.notify(userID)
+	}
+}
 
 func (s *Service) CreateArtifact(ctx context.Context, userID uint, workspaceID, fileID string) (*ArtifactView, error) {
 	workspaceID, fileID = strings.TrimSpace(workspaceID), strings.TrimSpace(fileID)
@@ -472,6 +496,7 @@ func (s *Service) QueueResourceRefresh(ctx context.Context, userID uint, deviceP
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	return &ResourceRefreshView{CommandID: created.PublicID, Status: created.State}, nil
 }
 
@@ -528,6 +553,7 @@ func (s *Service) ForkThread(ctx context.Context, userID uint, threadID, idempot
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	view := threadView(*created, created.DevicePublicID, created.ProfilePublicID, created.WorkspacePublicID)
 	return &view, nil
 }
@@ -595,6 +621,7 @@ func (s *Service) queueThreadCommand(ctx context.Context, userID uint, threadID,
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
 }
 
@@ -621,6 +648,7 @@ func (s *Service) StartThread(ctx context.Context, userID uint, input StartThrea
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	result := &StartThreadResult{Thread: threadView(*createdThread, input.DeviceID, input.ProfileID, input.WorkspaceID)}
 	if createdTurn != nil {
 		view := turnView(*createdTurn, createdThread.PublicID)
@@ -653,6 +681,114 @@ func (s *Service) GetThread(ctx context.Context, userID uint, threadPublicID str
 	return &view, nil
 }
 
+func (s *Service) GetThreadSnapshot(ctx context.Context, userID uint, threadPublicID string) (*ThreadSnapshotView, error) {
+	if userID == 0 || !validPublicID(threadPublicID, "agth") {
+		return nil, ErrInvalidInput
+	}
+	item, err := s.repo.GetThreadSnapshot(ctx, userID, threadPublicID)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	result := &ThreadSnapshotView{
+		Thread:      threadView(item.Thread, item.Thread.DevicePublicID, item.Thread.ProfilePublicID, item.Thread.WorkspacePublicID),
+		SnapshotSeq: item.SnapshotSeq,
+		Turns:       make([]TurnView, 0, len(item.Turns)), Items: make([]ItemView, 0, len(item.Items)),
+		Interactions: make([]InteractionView, 0, len(item.Interactions)),
+	}
+	for _, row := range item.Turns {
+		result.Turns = append(result.Turns, turnView(row, threadPublicID))
+	}
+	for _, row := range item.Items {
+		if json.Valid([]byte(row.DataJSON)) {
+			result.Items = append(result.Items, ItemView{ItemID: row.PublicID, ThreadID: threadPublicID, TurnID: row.TurnPublicID, Kind: row.Kind, Status: row.Status, Data: json.RawMessage(row.DataJSON), LastEventSeq: row.LastEventSeq, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
+		}
+	}
+	for _, row := range item.Interactions {
+		if json.Valid([]byte(row.RequestJSON)) {
+			result.Interactions = append(result.Interactions, InteractionView{InteractionID: row.PublicID, ThreadID: threadPublicID, TurnID: row.TurnPublicID, Kind: row.Kind, Status: row.Status, Request: json.RawMessage(row.RequestJSON), CreatedAt: row.CreatedAt})
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) UpdateThreadMetadata(ctx context.Context, userID uint, threadID, idempotencyKey string, isPinned *bool, labels *[]string, sharePolicy *string) (*ThreadView, error) {
+	if userID == 0 || !validPublicID(threadID, "agth") || !validIdempotencyKey(idempotencyKey) || (isPinned == nil && labels == nil && sharePolicy == nil) {
+		return nil, ErrInvalidInput
+	}
+	patch := domainagent.ThreadMetadataPatch{IsPinned: isPinned}
+	if labels != nil {
+		if len(*labels) > 20 {
+			return nil, ErrInvalidInput
+		}
+		normalized, seen := make([]string, 0, len(*labels)), make(map[string]struct{}, len(*labels))
+		for _, label := range *labels {
+			label = strings.TrimSpace(label)
+			if label == "" || utf8.RuneCountInString(label) > 64 {
+				return nil, ErrInvalidInput
+			}
+			if _, exists := seen[label]; exists {
+				continue
+			}
+			seen[label], normalized = struct{}{}, append(normalized, label)
+		}
+		encoded, _ := json.Marshal(normalized)
+		value := string(encoded)
+		patch.LabelsJSON = &value
+	}
+	if sharePolicy != nil {
+		value := strings.TrimSpace(*sharePolicy)
+		if !contains([]string{"private", "link"}, value) {
+			return nil, ErrInvalidInput
+		}
+		patch.SharePolicy = &value
+	}
+	request := struct {
+		ThreadID    string
+		IsPinned    *bool
+		LabelsJSON  *string
+		SharePolicy *string
+	}{threadID, patch.IsPinned, patch.LabelsJSON, patch.SharePolicy}
+	item, err := s.repo.UpdateThreadMetadata(ctx, idempotencyKey, requestHash(request), userID, threadID, patch, s.now().UTC())
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	view := threadView(*item, item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID)
+	return &view, nil
+}
+
+func (s *Service) UpdateProviderMetadata(ctx context.Context, userID uint, threadID string, gitInfo json.RawMessage, idempotencyKey string) (*CommandView, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(gitInfo, &fields) != nil || len(fields) == 0 || len(fields) > 3 {
+		return nil, ErrInvalidInput
+	}
+	limits := map[string]int{"sha": 64, "branch": 256, "originUrl": 2048}
+	normalized := make(map[string]any, len(fields))
+	for name, raw := range fields {
+		limit, ok := limits[name]
+		if !ok {
+			return nil, ErrInvalidInput
+		}
+		if string(raw) == "null" {
+			normalized[name] = nil
+			continue
+		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return nil, ErrInvalidInput
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || len(value) > limit || strings.ContainsAny(value, "\r\n\x00") {
+			return nil, ErrInvalidInput
+		}
+		if name == "sha" && !validGitSHA(value) {
+			return nil, ErrInvalidInput
+		}
+		normalized[name] = value
+	}
+	return s.queueThreadCommand(ctx, userID, threadID, "", "thread.metadata.update", map[string]any{"gitInfo": normalized}, idempotencyKey)
+}
+
 func (s *Service) StartTurn(ctx context.Context, userID uint, input StartTurnInput) (*TurnView, error) {
 	if userID == 0 || !validPublicID(input.ThreadID, "agth") || !validIdempotencyKey(input.IdempotencyKey) ||
 		!validInput(input.Input) || !validSettings(input.Settings) {
@@ -664,6 +800,7 @@ func (s *Service) StartTurn(ctx context.Context, userID uint, input StartTurnInp
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	view := turnView(*created, input.ThreadID)
 	return &view, nil
 }
@@ -748,6 +885,7 @@ func (s *Service) RespondInteraction(ctx context.Context, userID uint, input Res
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
+	s.notifyUser(userID)
 	view := InteractionView{InteractionID: item.PublicID, ThreadID: item.ThreadPublicID, TurnID: item.TurnPublicID, Kind: item.Kind, Status: item.Status, Request: json.RawMessage(item.RequestJSON), CreatedAt: item.CreatedAt}
 	return &view, nil
 }
@@ -993,6 +1131,7 @@ func (s *Service) EnqueueCommand(ctx context.Context, userID uint, devicePublicI
 		}
 		return nil, err
 	}
+	s.notifyUser(userID)
 	return &DeliveryCommand{InternalID: created.ID, CommandID: created.PublicID, ServerSeq: created.ServerSeq, Command: json.RawMessage(created.PayloadJSON)}, nil
 }
 
@@ -1107,6 +1246,7 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 		}
 		return 0, err
 	}
+	s.notifyUser(identity.UserID)
 	return acknowledged, nil
 }
 
@@ -1143,6 +1283,7 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		}
 		return 0, err
 	}
+	s.notifyUser(identity.UserID)
 	return acknowledged, nil
 }
 
@@ -1370,7 +1511,21 @@ func requestHash(value any) string {
 }
 
 func threadView(item domainagent.Thread, deviceID, profileID, workspaceID string) ThreadView {
-	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	labels := []string{}
+	_ = json.Unmarshal([]byte(item.LabelsJSON), &labels)
+	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, IsPinned: item.IsPinned, Labels: labels, SharePolicy: item.SharePolicy, GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+func validGitSHA(value string) bool {
+	if len(value) < 7 || len(value) > 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') && (character < 'A' || character > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func turnView(item domainagent.Turn, threadID string) TurnView {
@@ -1470,7 +1625,7 @@ func validPlatform(value string) bool {
 
 func validCommandKind(value string) bool {
 	switch value {
-	case "thread.create", "thread.lifecycle", "thread.rename", "thread.compact", "review.start",
+	case "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "review.start",
 		"turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh":
 		return true
 	default:

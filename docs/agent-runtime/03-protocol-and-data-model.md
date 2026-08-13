@@ -59,6 +59,7 @@ Browser first uses the existing `/files` upload. Artifact registration accepts t
 GET    /api/v1/agent/threads?device_id=&workspace_id=&profile_id=&status=&query=&cursor=
 POST   /api/v1/agent/threads
 GET    /api/v1/agent/threads/:thread_id
+GET    /api/v1/agent/threads/:thread_id/snapshot
 PATCH  /api/v1/agent/threads/:thread_id
 PATCH  /api/v1/agent/threads/:thread_id/name
 PATCH  /api/v1/agent/threads/:thread_id/provider-metadata
@@ -67,11 +68,19 @@ POST   /api/v1/agent/threads/:thread_id/archive
 POST   /api/v1/agent/threads/:thread_id/unarchive
 DELETE /api/v1/agent/threads/:thread_id
 GET    /api/v1/agent/threads/:thread_id/turns?cursor=
+GET    /api/v1/agent/threads/:thread_id/items
 GET    /api/v1/agent/threads/:thread_id/events?after_seq=N
+GET    /api/v1/agent/threads/:thread_id/notifications
 GET    /api/v1/agent/threads/:thread_id/interactions?status=
 ```
 
 `POST /threads` accepts device/profile/workspace public IDs, typed thread-start settings and optional initial input. It creates only a `thread.create` command: that command carries no input. When input is present, the transaction stores it in a provisional AgentTurn `awaiting_thread`; after the Bridge `thread/start` result/event binds `sourceThreadRef`, projector creates the one follow-on `turn.start` command. `PATCH /threads/:thread_id` persists only DEEIX labels, share policy and `is_pinned` directly in cloud metadata in the same idempotent transaction; pin has no app-server call. The separate idempotent `PATCH /threads/:thread_id/name` accepts only bounded normalized `name`, resolves `sourceThreadRef`, and queues `thread.rename`; Bridge resolves raw thread ID/cwd for `thread/name/set`, and provider result/event updates title. The separate idempotent `PATCH /threads/:thread_id/provider-metadata` validates only generated pinned `ThreadMetadataPatch.gitInfo`: optional nullable `sha`, `branch`, and `originUrl`; it resolves `sourceThreadRef` and queues `thread.metadata.update`, rejecting arbitrary JSON and DEEIX labels/share/pin fields. Provider result/event updates the Git projection. `fork`, archive, unarchive and delete queue typed lifecycle commands. UI layout preference belongs to user settings. Browser event replay is always thread-scoped.
+
+当前后端允许一个 User 配对多个 Device；每个 Device 独立维护凭据、Runtime Profile、Workspace、WSS 游标和命令序列。同一 Device 只保留一个活跃 WSS，新连接接管旧连接；不同 Device 可同时在线。AgentThread 创建后永久绑定一个 `device_id + runtime_profile_id + workspace_id`，元数据接口不接受修改这三个字段。命令提交后，单实例 Full 服务按 User 唤醒其在线连接，但每条连接只按自身内部 Device ID 拉取连续命令，因此多个网关之间不会串发。唤醒只降低延迟，PostgreSQL `agent_commands` 和设备游标仍是恢复事实源。
+
+`GET /threads/:thread_id/snapshot` 在 PostgreSQL `REPEATABLE READ READ ONLY` 事务中读取 Thread、Turn、Item、Interaction 和 `snapshotSeq`。调用方安装快照后仅回放 `thread_seq > snapshotSeq` 的事件。`PATCH /threads/:thread_id/provider-metadata` 生成 `thread.metadata.update`，Bridge 严格保留 Git 字段的 omit/null/value 语义并调用 Codex `thread/metadata/update`；只有成功 terminal result 才更新云端 Git 投影。
+
+`GET /threads/:thread_id/notifications` 在校验线程所有权后提供用户级 SSE wake。连接成功立即发送一次 `wake`，后续 provider frame、terminal result、云端元数据或命令提交只发送空 wake；调用方收到后仍查询数据库快照/事件接口。15 秒注释心跳只维持连接，不推进任何事件 cursor。
 
 `thread/section/move` and `threadSection/*` are separately locked extensions with no first-release control.
 

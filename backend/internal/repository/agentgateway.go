@@ -41,6 +41,8 @@ type AgentGatewayRepository interface {
 	StartThread(context.Context, string, string, *domainagent.Thread, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Turn, error)
 	ListThreads(context.Context, uint, int) ([]domainagent.Thread, error)
 	GetThread(context.Context, uint, string) (*domainagent.Thread, error)
+	GetThreadSnapshot(context.Context, uint, string) (*domainagent.ThreadSnapshot, error)
+	UpdateThreadMetadata(context.Context, string, string, uint, string, domainagent.ThreadMetadataPatch, time.Time) (*domainagent.Thread, error)
 	StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error)
 	ListTurns(context.Context, uint, string, int) ([]domainagent.Turn, error)
 	ListItems(context.Context, uint, string, int) ([]domainagent.Item, error)

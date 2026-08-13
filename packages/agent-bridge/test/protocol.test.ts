@@ -53,3 +53,32 @@ test("parseAgentCommand validates interaction scope fields", () => {
 		/unexpected field: turnId/,
 	);
 });
+
+test("thread metadata patch preserves omitted and null git fields", () => {
+	assert.deepEqual(parseAgentCommand({
+		kind: "thread.metadata.update",
+		deviceId: "device_1",
+		profileId: "profile_1",
+		workspaceId: "workspace_1",
+		threadId: "thread_1",
+		sourceThreadRef: "source_thread_1",
+		gitInfo: { sha: null, branch: "main" },
+	}), {
+		kind: "thread.metadata.update",
+		deviceId: "device_1",
+		profileId: "profile_1",
+		workspaceId: "workspace_1",
+		threadId: "thread_1",
+		sourceThreadRef: "source_thread_1",
+		gitInfo: { sha: null, branch: "main" },
+	});
+	assert.throws(() => parseAgentCommand({
+		kind: "thread.metadata.update",
+		deviceId: "device_1",
+		profileId: "profile_1",
+		workspaceId: "workspace_1",
+		threadId: "thread_1",
+		sourceThreadRef: "source_thread_1",
+		gitInfo: {},
+	}), /must not be empty/);
+});

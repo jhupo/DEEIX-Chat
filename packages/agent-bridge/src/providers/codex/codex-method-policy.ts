@@ -96,6 +96,7 @@ export const CODEX_DISPATCHED_CLIENT_REQUESTS = [
 	"thread/archive",
 	"thread/delete",
 	"thread/name/set",
+	"thread/metadata/update",
 	"thread/unarchive",
 	"thread/compact/start",
 	"thread/list",

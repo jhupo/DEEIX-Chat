@@ -2,6 +2,7 @@ package agentgateway
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"time"
@@ -89,7 +90,14 @@ func toDomainArtifact(v model.AgentArtifact) *domainagent.Artifact {
 }
 
 func toDomainThread(v model.AgentThread) *domainagent.Thread {
-	return &domainagent.Thread{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID, RuntimeProfileID: v.RuntimeProfileID, WorkspaceID: v.WorkspaceID, SourceThreadRef: v.SourceThreadRef, Title: v.Title, Status: v.Status, LastEventSeq: v.LastEventSeq, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return &domainagent.Thread{
+		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID,
+		RuntimeProfileID: v.RuntimeProfileID, WorkspaceID: v.WorkspaceID,
+		SourceThreadRef: v.SourceThreadRef, Title: v.Title, Status: v.Status,
+		IsPinned: v.IsPinned, LabelsJSON: v.LabelsJSON, SharePolicy: v.SharePolicy,
+		GitSHA: v.GitSHA, GitBranch: v.GitBranch, GitOriginURL: v.GitOriginURL,
+		LastEventSeq: v.LastEventSeq, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+	}
 }
 
 func toDomainTurn(v model.AgentTurn) *domainagent.Turn {
@@ -560,6 +568,40 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			}
 			return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).
 				Updates(map[string]any{"title": payload.Name, "updated_at": now}).Error
+		case "thread.metadata.update":
+			var payload map[string]json.RawMessage
+			if json.Unmarshal([]byte(command.PayloadJSON), &payload) != nil {
+				return repository.ErrConflict
+			}
+			var gitInfo map[string]json.RawMessage
+			if json.Unmarshal(payload["gitInfo"], &gitInfo) != nil || len(gitInfo) == 0 {
+				return repository.ErrConflict
+			}
+			updates := map[string]any{"updated_at": now}
+			columns := map[string]string{
+				"sha": "git_sha", "branch": "git_branch", "originUrl": "git_origin_url",
+			}
+			for field := range gitInfo {
+				if _, allowed := columns[field]; !allowed {
+					return repository.ErrConflict
+				}
+			}
+			for field, column := range columns {
+				raw, present := gitInfo[field]
+				if !present {
+					continue
+				}
+				if string(raw) == "null" {
+					updates[column] = nil
+					continue
+				}
+				var value string
+				if json.Unmarshal(raw, &value) != nil || value == "" {
+					return repository.ErrConflict
+				}
+				updates[column] = value
+			}
+			return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error
 		case "thread.lifecycle":
 			var payload struct {
 				Action string `json:"action"`
@@ -1315,7 +1357,7 @@ func (r *Repo) QueueThreadCommand(
 				if activeTurns > 0 {
 					return repository.ErrConflict
 				}
-			case "thread.rename":
+			case "thread.rename", "thread.metadata.update":
 				if thread.Status == "failed" || thread.Status == "deleted" {
 					return repository.ErrConflict
 				}
@@ -1667,6 +1709,133 @@ func (r *Repo) GetThread(ctx context.Context, userID uint, publicID string) (*do
 	item := toDomainThread(value.AgentThread)
 	item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID = value.DevicePublicID, value.ProfilePublicID, value.WorkspacePublicID
 	return item, nil
+}
+
+func (r *Repo) GetThreadSnapshot(ctx context.Context, userID uint, publicID string) (*domainagent.ThreadSnapshot, error) {
+	result := &domainagent.ThreadSnapshot{}
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		type threadRow struct {
+			model.AgentThread
+			DevicePublicID, ProfilePublicID, WorkspacePublicID string
+		}
+		var thread threadRow
+		if err := tx.Table("agent_threads AS threads").
+			Select("threads.*, devices.public_id AS device_public_id, profiles.public_id AS profile_public_id, workspaces.public_id AS workspace_public_id").
+			Joins("JOIN agent_devices AS devices ON devices.id = threads.device_id").
+			Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = threads.runtime_profile_id").
+			Joins("JOIN agent_workspaces AS workspaces ON workspaces.id = threads.workspace_id").
+			Where("threads.user_id = ? AND threads.public_id = ?", userID, publicID).First(&thread).Error; err != nil {
+			return err
+		}
+		item := toDomainThread(thread.AgentThread)
+		item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID = thread.DevicePublicID, thread.ProfilePublicID, thread.WorkspacePublicID
+		result.Thread, result.SnapshotSeq = *item, item.LastEventSeq
+
+		var turns []model.AgentTurn
+		if err := tx.Where("user_id = ? AND thread_id = ?", userID, item.ID).Order("id ASC").Find(&turns).Error; err != nil {
+			return err
+		}
+		result.Turns = make([]domainagent.Turn, 0, len(turns))
+		for _, row := range turns {
+			turn := toDomainTurn(row)
+			turn.ThreadPublicID = publicID
+			result.Turns = append(result.Turns, *turn)
+		}
+
+		type itemRow struct {
+			model.AgentItem
+			TurnPublicID string `gorm:"column:turn_public_id"`
+		}
+		var items []itemRow
+		if err := tx.Table("agent_items AS items").
+			Select("items.*, COALESCE(turns.public_id, '') AS turn_public_id").
+			Joins("LEFT JOIN agent_turns AS turns ON turns.id = items.turn_id").
+			Where("items.user_id = ? AND items.thread_id = ? AND items.last_event_seq <= ?", userID, item.ID, result.SnapshotSeq).
+			Order("items.last_event_seq ASC").Find(&items).Error; err != nil {
+			return err
+		}
+		result.Items = make([]domainagent.Item, 0, len(items))
+		for _, row := range items {
+			projected := toDomainItem(row.AgentItem)
+			projected.ThreadPublicID, projected.TurnPublicID = publicID, row.TurnPublicID
+			result.Items = append(result.Items, *projected)
+		}
+
+		type interactionRow struct {
+			model.AgentInteraction
+			TurnPublicID string `gorm:"column:turn_public_id"`
+		}
+		var interactions []interactionRow
+		if err := tx.Table("agent_interactions AS interactions").
+			Select("interactions.*, COALESCE(turns.public_id, '') AS turn_public_id").
+			Joins("LEFT JOIN agent_turns AS turns ON turns.id = interactions.turn_id").
+			Where("interactions.user_id = ? AND interactions.thread_id = ?", userID, item.ID).
+			Order("interactions.id ASC").Find(&interactions).Error; err != nil {
+			return err
+		}
+		result.Interactions = make([]domainagent.Interaction, 0, len(interactions))
+		for _, row := range interactions {
+			projected := toDomainInteraction(row.AgentInteraction)
+			projected.ThreadPublicID, projected.TurnPublicID = publicID, row.TurnPublicID
+			result.Interactions = append(result.Interactions, *projected)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return result, nil
+}
+
+func (r *Repo) UpdateThreadMetadata(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	threadPublicID string,
+	patch domainagent.ThreadMetadataPatch,
+	now time.Time,
+) (*domainagent.Thread, error) {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		const operationName = "thread.metadata.update.cloud"
+		var operation model.AgentIdempotencyRecord
+		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: operationName, Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, operationName, idempotencyKey).
+			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return nil
+		}
+		var thread model.AgentThread
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND public_id = ?", userID, threadPublicID).First(&thread).Error; err != nil {
+			return err
+		}
+		if thread.Status == "deleted" {
+			return repository.ErrConflict
+		}
+		updates := map[string]any{"updated_at": now}
+		if patch.IsPinned != nil {
+			updates["is_pinned"] = *patch.IsPinned
+		}
+		if patch.LabelsJSON != nil {
+			updates["labels_json"] = *patch.LabelsJSON
+		}
+		if patch.SharePolicy != nil {
+			updates["share_policy"] = *patch.SharePolicy
+		}
+		if err := tx.Model(&thread).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Model(&operation).Update("result_public_id", thread.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return r.GetThread(ctx, userID, threadPublicID)
 }
 
 func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string, input *domainagent.Turn, command *domainagent.Command, now time.Time) (*domainagent.Turn, error) {

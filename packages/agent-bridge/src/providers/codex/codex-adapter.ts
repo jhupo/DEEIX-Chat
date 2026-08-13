@@ -45,6 +45,7 @@ const COMMANDS: ProviderManifest["commands"] = [
 	"thread.create",
 	"thread.lifecycle",
 	"thread.rename",
+	"thread.metadata.update",
 	"thread.compact",
 	"review.start",
 	"turn.start",
@@ -175,6 +176,12 @@ export class CodexAdapter implements ProviderAdapter {
 				await this.#rpc.request("thread/name/set", {
 					threadId: command.providerThreadId,
 					name: command.name,
+				}, signal);
+				return { kind: "accepted" };
+			case "thread.metadata.update":
+				await this.#rpc.request("thread/metadata/update", {
+					threadId: command.providerThreadId,
+					gitInfo: command.gitInfo,
 				}, signal);
 				return { kind: "accepted" };
 			case "thread.compact":

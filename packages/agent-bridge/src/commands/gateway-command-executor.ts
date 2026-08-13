@@ -209,6 +209,7 @@ function canReplayAfterCrash(command: AgentCommand): boolean {
 	if (
 		command.kind === "resource.refresh" ||
 		command.kind === "thread.rename" ||
+		command.kind === "thread.metadata.update" ||
 		command.kind === "turn.interrupt"
 	) {
 		return true;

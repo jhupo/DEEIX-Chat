@@ -24,12 +24,12 @@ type AgentSettingsDoc struct {
 }
 
 type StartThreadRequestDoc struct {
-	DeviceID    string              `json:"deviceId"`
-	ProfileID   string              `json:"profileId"`
-	WorkspaceID string              `json:"workspaceId"`
-	Title       string              `json:"title,omitempty"`
-	Settings    AgentSettingsDoc    `json:"settings"`
-	Input       []AgentInputDoc     `json:"input,omitempty"`
+	DeviceID    string           `json:"deviceId"`
+	ProfileID   string           `json:"profileId"`
+	WorkspaceID string           `json:"workspaceId"`
+	Title       string           `json:"title,omitempty"`
+	Settings    AgentSettingsDoc `json:"settings"`
+	Input       []AgentInputDoc  `json:"input,omitempty"`
 }
 
 type StartTurnRequestDoc struct {
@@ -61,6 +61,22 @@ type SteerTurnRequestDoc struct {
 
 type RenameThreadRequestDoc struct {
 	Name string `json:"name"`
+}
+
+type UpdateThreadMetadataRequestDoc struct {
+	IsPinned    *bool     `json:"isPinned,omitempty"`
+	Labels      *[]string `json:"labels,omitempty"`
+	SharePolicy *string   `json:"sharePolicy,omitempty" enums:"private,link"`
+}
+
+type GitInfoUpdateDoc struct {
+	SHA       *string `json:"sha,omitempty" extensions:"x-nullable"`
+	Branch    *string `json:"branch,omitempty" extensions:"x-nullable"`
+	OriginURL *string `json:"originUrl,omitempty" extensions:"x-nullable"`
+}
+
+type UpdateProviderMetadataRequestDoc struct {
+	GitInfo GitInfoUpdateDoc `json:"gitInfo"`
 }
 
 type ReviewTargetDoc struct {
@@ -120,14 +136,21 @@ type WorkspaceDoc struct {
 }
 
 type ThreadDoc struct {
-	ThreadID    string    `json:"threadId"`
-	DeviceID    string    `json:"deviceId"`
-	ProfileID   string    `json:"profileId"`
-	WorkspaceID string    `json:"workspaceId"`
-	Title       string    `json:"title"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ThreadID     string    `json:"threadId"`
+	DeviceID     string    `json:"deviceId"`
+	ProfileID    string    `json:"profileId"`
+	WorkspaceID  string    `json:"workspaceId"`
+	Title        string    `json:"title"`
+	Status       string    `json:"status"`
+	IsPinned     bool      `json:"isPinned"`
+	Labels       []string  `json:"labels"`
+	SharePolicy  string    `json:"sharePolicy"`
+	GitSHA       *string   `json:"gitSha" extensions:"x-nullable,!x-omitempty"`
+	GitBranch    *string   `json:"gitBranch" extensions:"x-nullable,!x-omitempty"`
+	GitOriginURL *string   `json:"gitOriginUrl" extensions:"x-nullable,!x-omitempty"`
+	LastEventSeq uint64    `json:"lastEventSeq"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type TurnDoc struct {
@@ -194,6 +217,14 @@ type StartThreadDataDoc struct {
 	Turn   *TurnDoc  `json:"turn,omitempty" extensions:"x-nullable"`
 }
 
+type ThreadSnapshotDoc struct {
+	Thread       ThreadDoc        `json:"thread"`
+	Turns        []TurnDoc        `json:"turns"`
+	Items        []ItemDoc        `json:"items"`
+	Interactions []InteractionDoc `json:"interactions"`
+	SnapshotSeq  uint64           `json:"snapshotSeq"`
+}
+
 type EnrollmentDataDoc struct {
 	EnrollmentCode string `json:"enrollmentCode"`
 	ExpiresAt      string `json:"expiresAt"`
@@ -238,6 +269,10 @@ type ThreadResponseDoc struct {
 type ThreadListResponseDoc struct {
 	ErrorMsg string      `json:"errorMsg"`
 	Data     []ThreadDoc `json:"data"`
+}
+type ThreadSnapshotResponseDoc struct {
+	ErrorMsg string            `json:"errorMsg"`
+	Data     ThreadSnapshotDoc `json:"data"`
 }
 type StartThreadResponseDoc struct {
 	ErrorMsg string             `json:"errorMsg"`

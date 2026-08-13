@@ -177,6 +177,34 @@ type socketRepo struct {
 	bridgeAck uint64
 }
 
+func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
+	hub := newBridgeHub()
+	hub.connections["device-a"] = &bridgeConnection{userID: 7, wake: make(chan struct{}, 1)}
+	hub.connections["device-b"] = &bridgeConnection{userID: 7, wake: make(chan struct{}, 1)}
+	hub.connections["device-c"] = &bridgeConnection{userID: 8, wake: make(chan struct{}, 1)}
+	browser, cleanup := hub.subscribeUser(7)
+	defer cleanup()
+
+	hub.notifyUser(7)
+	for _, deviceID := range []string{"device-a", "device-b"} {
+		select {
+		case <-hub.connections[deviceID].wake:
+		default:
+			t.Fatalf("%s did not receive the user wake", deviceID)
+		}
+	}
+	select {
+	case <-hub.connections["device-c"].wake:
+		t.Fatal("wake crossed the user boundary")
+	default:
+	}
+	select {
+	case <-browser:
+	default:
+		t.Fatal("browser subscriber did not receive the user wake")
+	}
+}
+
 func (r *socketRepo) ConsumeConnection(_ context.Context, tokenHash string, now time.Time) (*domainagent.Device, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -337,6 +365,12 @@ func (*socketRepo) ListThreads(context.Context, uint, int) ([]domainagent.Thread
 	return nil, nil
 }
 func (*socketRepo) GetThread(context.Context, uint, string) (*domainagent.Thread, error) {
+	return nil, repository.ErrNotFound
+}
+func (*socketRepo) GetThreadSnapshot(context.Context, uint, string) (*domainagent.ThreadSnapshot, error) {
+	return nil, repository.ErrNotFound
+}
+func (*socketRepo) UpdateThreadMetadata(context.Context, string, string, uint, string, domainagent.ThreadMetadataPatch, time.Time) (*domainagent.Thread, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error) {

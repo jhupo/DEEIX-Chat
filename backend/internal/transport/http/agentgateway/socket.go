@@ -65,25 +65,74 @@ type bridgeArtifactGrant struct {
 
 type bridgeHub struct {
 	mu          sync.Mutex
-	connections map[string]*websocket.Conn
+	connections map[string]*bridgeConnection
+	subscribers map[uint]map[chan struct{}]struct{}
+}
+
+type bridgeConnection struct {
+	userID     uint
+	connection *websocket.Conn
+	wake       chan struct{}
 }
 
 func newBridgeHub() *bridgeHub {
-	return &bridgeHub{connections: make(map[string]*websocket.Conn)}
+	return &bridgeHub{
+		connections: make(map[string]*bridgeConnection),
+		subscribers: make(map[uint]map[chan struct{}]struct{}),
+	}
 }
 
-func (h *bridgeHub) replace(deviceID string, connection *websocket.Conn) func() {
+func (h *bridgeHub) replace(userID uint, deviceID string, connection *websocket.Conn) (<-chan struct{}, func()) {
+	entry := &bridgeConnection{userID: userID, connection: connection, wake: make(chan struct{}, 1)}
 	h.mu.Lock()
 	previous := h.connections[deviceID]
-	h.connections[deviceID] = connection
+	h.connections[deviceID] = entry
 	h.mu.Unlock()
-	if previous != nil && previous != connection {
-		_ = previous.Close()
+	if previous != nil && previous.connection != connection {
+		_ = previous.connection.Close()
 	}
-	return func() {
+	return entry.wake, func() {
 		h.mu.Lock()
-		if h.connections[deviceID] == connection {
+		if h.connections[deviceID] == entry {
 			delete(h.connections, deviceID)
+		}
+		h.mu.Unlock()
+	}
+}
+
+func (h *bridgeHub) notifyUser(userID uint) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, entry := range h.connections {
+		if entry.userID != userID {
+			continue
+		}
+		select {
+		case entry.wake <- struct{}{}:
+		default:
+		}
+	}
+	for subscriber := range h.subscribers[userID] {
+		select {
+		case subscriber <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (h *bridgeHub) subscribeUser(userID uint) (<-chan struct{}, func()) {
+	subscriber := make(chan struct{}, 1)
+	h.mu.Lock()
+	if h.subscribers[userID] == nil {
+		h.subscribers[userID] = make(map[chan struct{}]struct{})
+	}
+	h.subscribers[userID][subscriber] = struct{}{}
+	h.mu.Unlock()
+	return subscriber, func() {
+		h.mu.Lock()
+		delete(h.subscribers[userID], subscriber)
+		if len(h.subscribers[userID]) == 0 {
+			delete(h.subscribers, userID)
 		}
 		h.mu.Unlock()
 	}
@@ -117,6 +166,7 @@ func (h *Handler) connect(w http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.ConnectionIdentity) {
+	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(bridgeHelloTimeout))
 	var hello bridgeFrame
 	if err := receiveBridgeFrame(connection, &hello); err != nil ||
@@ -173,7 +223,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		return
 	}
 	_ = connection.SetDeadline(time.Now().Add(2 * bridgeHeartbeat))
-	cleanup := h.hub.replace(identity.DeviceID, connection)
+	wake, cleanup := h.hub.replace(identity.UserID, identity.DeviceID, connection)
 	defer cleanup()
 
 	ctx, cancel = socketOperationContext()
@@ -197,95 +247,136 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	if err != nil {
 		return
 	}
+	reads := make(chan bridgeRead, 1)
+	stopReads := make(chan struct{})
+	defer close(stopReads)
+	go readBridgeFrames(connection, reads, stopReads)
+	leaseTimer := time.NewTimer(time.Until(leaseExpiresAt))
+	defer leaseTimer.Stop()
 	for {
-		now := time.Now()
-		if !now.Before(leaseExpiresAt) {
+		select {
+		case <-leaseTimer.C:
 			return
+		case <-wake:
+			if sentThrough != identity.LastAckedServerSeq {
+				continue
+			}
+			_ = connection.SetDeadline(nextBridgeDeadline(leaseExpiresAt))
+			sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+			if err != nil {
+				return
+			}
+		case read := <-reads:
+			if read.err != nil {
+				if errors.Is(read.err, io.EOF) {
+					return
+				}
+				return
+			}
+			frame := read.frame
+			if frame.Version != bridgeVersion {
+				return
+			}
+			_ = connection.SetDeadline(nextBridgeDeadline(leaseExpiresAt))
+			switch frame.Type {
+			case "ping":
+				if !validPingFrame(frame) {
+					return
+				}
+				if err := websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "pong"}); err != nil {
+					return
+				}
+				if sentThrough == identity.LastAckedServerSeq {
+					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					if err != nil {
+						return
+					}
+				}
+			case "ack.server":
+				if !validServerAckFrame(frame) {
+					return
+				}
+				ctx, cancel = socketOperationContext()
+				err = h.service.AckServerCommands(ctx, identity, frame.AckServerSeq)
+				cancel()
+				if frame.AckServerSeq == 0 || err != nil {
+					return
+				}
+				if frame.AckServerSeq > identity.LastAckedServerSeq {
+					identity.LastAckedServerSeq = frame.AckServerSeq
+				}
+				if identity.LastAckedServerSeq == sentThrough {
+					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					if err != nil {
+						return
+					}
+				}
+			case "terminal":
+				if !validTerminalFrame(frame) {
+					return
+				}
+				ctx, cancel = socketOperationContext()
+				acknowledged, err := h.service.ApplyTerminalFrame(
+					ctx, identity, frame.BridgeSeq, frame.ServerSeq, frame.CommandID, frame.Outcome,
+				)
+				cancel()
+				if err != nil {
+					return
+				}
+				if err = websocket.JSON.Send(connection, bridgeFrame{
+					Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
+				}); err != nil {
+					return
+				}
+			case "event":
+				if !validEventFrame(frame) {
+					return
+				}
+				ctx, cancel = socketOperationContext()
+				acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
+				cancel()
+				if err != nil {
+					return
+				}
+				if err = websocket.JSON.Send(connection, bridgeFrame{
+					Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
+				}); err != nil {
+					return
+				}
+			default:
+				return
+			}
 		}
-		deadline := now.Add(2 * bridgeHeartbeat)
-		if leaseExpiresAt.Before(deadline) {
-			deadline = leaseExpiresAt
-		}
-		_ = connection.SetDeadline(deadline)
+	}
+}
+
+type bridgeRead struct {
+	frame bridgeFrame
+	err   error
+}
+
+func readBridgeFrames(connection *websocket.Conn, output chan<- bridgeRead, stop <-chan struct{}) {
+	for {
 		var frame bridgeFrame
-		if err := receiveBridgeFrame(connection, &frame); err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
+		read := bridgeRead{frame: frame, err: receiveBridgeFrame(connection, &frame)}
+		read.frame = frame
+		select {
+		case output <- read:
+		case <-stop:
 			return
 		}
-		if frame.Version != bridgeVersion {
-			return
-		}
-		switch frame.Type {
-		case "ping":
-			if !validPingFrame(frame) {
-				return
-			}
-			if err := websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "pong"}); err != nil {
-				return
-			}
-			if sentThrough == identity.LastAckedServerSeq {
-				sentThrough, err = h.sendCommands(connection, identity, sentThrough)
-				if err != nil {
-					return
-				}
-			}
-		case "ack.server":
-			if !validServerAckFrame(frame) {
-				return
-			}
-			ctx, cancel = socketOperationContext()
-			err = h.service.AckServerCommands(ctx, identity, frame.AckServerSeq)
-			cancel()
-			if frame.AckServerSeq == 0 || err != nil {
-				return
-			}
-			if frame.AckServerSeq > identity.LastAckedServerSeq {
-				identity.LastAckedServerSeq = frame.AckServerSeq
-			}
-			if identity.LastAckedServerSeq == sentThrough {
-				sentThrough, err = h.sendCommands(connection, identity, sentThrough)
-				if err != nil {
-					return
-				}
-			}
-		case "terminal":
-			if !validTerminalFrame(frame) {
-				return
-			}
-			ctx, cancel = socketOperationContext()
-			acknowledged, err := h.service.ApplyTerminalFrame(
-				ctx, identity, frame.BridgeSeq, frame.ServerSeq, frame.CommandID, frame.Outcome,
-			)
-			cancel()
-			if err != nil {
-				return
-			}
-			if err = websocket.JSON.Send(connection, bridgeFrame{
-				Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
-			}); err != nil {
-				return
-			}
-		case "event":
-			if !validEventFrame(frame) {
-				return
-			}
-			ctx, cancel = socketOperationContext()
-			acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
-			cancel()
-			if err != nil {
-				return
-			}
-			if err = websocket.JSON.Send(connection, bridgeFrame{
-				Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
-			}); err != nil {
-				return
-			}
-		default:
+		if read.err != nil {
 			return
 		}
 	}
+}
+
+func nextBridgeDeadline(leaseExpiresAt time.Time) time.Time {
+	deadline := time.Now().Add(2 * bridgeHeartbeat)
+	if leaseExpiresAt.Before(deadline) {
+		return leaseExpiresAt
+	}
+	return deadline
 }
 
 func receiveBridgeFrame(connection *websocket.Conn, frame *bridgeFrame) error {

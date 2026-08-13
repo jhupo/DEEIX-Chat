@@ -284,6 +284,47 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || len(otherItems) != 0 {
 		t.Fatalf("item projection crossed user boundary: %#v %v", otherItems, err)
 	}
+
+	threadSnapshot, err := repo.GetThreadSnapshot(context.Background(), 7, thread.PublicID)
+	if err != nil || threadSnapshot.SnapshotSeq != 4 || len(threadSnapshot.Turns) != 1 ||
+		len(threadSnapshot.Items) != 1 || len(threadSnapshot.Interactions) != 1 ||
+		threadSnapshot.Thread.DevicePublicID != device.PublicID || threadSnapshot.Thread.ProfilePublicID != profile.PublicID ||
+		threadSnapshot.Thread.WorkspacePublicID != workspace.PublicID {
+		t.Fatalf("thread snapshot mismatch: %#v %v", threadSnapshot, err)
+	}
+
+	pinned, labelsJSON, sharePolicy := true, `["work","urgent"]`, "link"
+	metadataPatch := domainagent.ThreadMetadataPatch{IsPinned: &pinned, LabelsJSON: &labelsJSON, SharePolicy: &sharePolicy}
+	metadataKey, metadataHash := "51234567-89ab-4def-8123-456789abcdef", strings.Repeat("2", 64)
+	updated, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, metadataHash, 7, thread.PublicID, metadataPatch, now.Add(15*time.Second))
+	if err != nil || !updated.IsPinned || updated.LabelsJSON != labelsJSON || updated.SharePolicy != sharePolicy {
+		t.Fatalf("update cloud thread metadata: %#v %v", updated, err)
+	}
+	replayedMetadata, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, metadataHash, 7, thread.PublicID, domainagent.ThreadMetadataPatch{}, now.Add(16*time.Second))
+	if err != nil || replayedMetadata.LabelsJSON != labelsJSON {
+		t.Fatalf("cloud metadata replay changed result: %#v %v", replayedMetadata, err)
+	}
+	if _, err := repo.UpdateThreadMetadata(context.Background(), metadataKey, strings.Repeat("3", 64), 7, thread.PublicID, metadataPatch, now.Add(16*time.Second)); err == nil {
+		t.Fatal("cloud metadata accepted idempotency key with a different request")
+	}
+
+	providerMetadata := &domainagent.Command{PublicID: "agcmd_12121212121212121212121212121212", Kind: "thread.metadata.update"}
+	queuedMetadata, err := repo.QueueThreadCommand(
+		context.Background(), "61234567-89ab-4def-8123-456789abcdef", strings.Repeat("4", 64), 7,
+		thread.PublicID, "", json.RawMessage(`{"gitInfo":{"sha":null,"branch":"main","originUrl":"https://example.test/repo.git"}}`), providerMetadata, now.Add(17*time.Second),
+	)
+	if err != nil || queuedMetadata.ServerSeq != 8 || !strings.Contains(queuedMetadata.PayloadJSON, `"deviceId":"`+device.PublicID+`"`) {
+		t.Fatalf("queue provider metadata: %#v %v", queuedMetadata, err)
+	}
+	metadataTerminal := `{"kind":"result","result":{"kind":"accepted"}}`
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 12, queuedMetadata.ServerSeq, providerMetadata.PublicID, strings.Repeat("5", 64), metadataTerminal, now.Add(18*time.Second)); err != nil || ack != 12 {
+		t.Fatalf("apply provider metadata terminal: ack=%d err=%v", ack, err)
+	}
+	projected, err := repo.GetThread(context.Background(), 7, thread.PublicID)
+	if err != nil || projected.GitSHA != nil || projected.GitBranch == nil || *projected.GitBranch != "main" ||
+		projected.GitOriginURL == nil || *projected.GitOriginURL != "https://example.test/repo.git" {
+		t.Fatalf("provider metadata projection mismatch: %#v %v", projected, err)
+	}
 }
 
 func jsonEqual(left, right string) bool {

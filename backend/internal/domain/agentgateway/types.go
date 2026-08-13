@@ -118,9 +118,29 @@ type Thread struct {
 	SourceThreadRef   *string
 	Title             string
 	Status            string
+	IsPinned          bool
+	LabelsJSON        string
+	SharePolicy       string
+	GitSHA            *string
+	GitBranch         *string
+	GitOriginURL      *string
 	LastEventSeq      uint64
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+type ThreadMetadataPatch struct {
+	IsPinned    *bool
+	LabelsJSON  *string
+	SharePolicy *string
+}
+
+type ThreadSnapshot struct {
+	Thread       Thread
+	Turns        []Turn
+	Items        []Item
+	Interactions []Interaction
+	SnapshotSeq  uint64
 }
 
 type Turn struct {

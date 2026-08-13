@@ -65,6 +65,12 @@ type ThreadTarget = WorkspaceTarget & {
 	sourceThreadRef: OpaqueRef;
 };
 
+export type ThreadGitInfoPatch = {
+	sha?: string | null;
+	branch?: string | null;
+	originUrl?: string | null;
+};
+
 type TurnTarget = ThreadTarget & {
 	turnId: OpaqueRef;
 	sourceTurnRef: OpaqueRef;
@@ -77,6 +83,7 @@ export type AgentCommand =
 			action: "resume" | "fork" | "archive" | "unarchive" | "delete";
 	  })
 	| (ThreadTarget & { kind: "thread.rename"; name: string })
+	| (ThreadTarget & { kind: "thread.metadata.update"; gitInfo: ThreadGitInfoPatch })
 	| (ThreadTarget & { kind: "thread.compact" })
 	| (ThreadTarget & { kind: "review.start"; target: ReviewTarget })
 	| (ThreadTarget & {
@@ -157,6 +164,9 @@ export function parseAgentCommand(value: unknown): AgentCommand {
 				...thread(command),
 				name: boundedString(command.name, "command.name", 256),
 			};
+		case "thread.metadata.update":
+			exact(command, ["kind", ...threadKeys(), "gitInfo"]);
+			return { kind, ...thread(command), gitInfo: gitInfoPatch(command.gitInfo) };
 		case "thread.compact":
 			exact(command, ["kind", ...threadKeys()]);
 			return { kind, ...thread(command) };
@@ -184,6 +194,19 @@ export function parseAgentCommand(value: unknown): AgentCommand {
 		default:
 			throw new TypeError(`unsupported command kind: ${kind}`);
 	}
+}
+
+function gitInfoPatch(value: unknown): ThreadGitInfoPatch {
+	const input = object(value, "command.gitInfo");
+	const fields = ["sha", "branch", "originUrl"] as const;
+	exact(input, fields.filter((field) => field in input));
+	if (Object.keys(input).length === 0) throw new TypeError("command.gitInfo must not be empty");
+	const result: ThreadGitInfoPatch = {};
+	for (const [name, limit] of [["sha", 64], ["branch", 256], ["originUrl", 2048]] as const) {
+		if (!(name in input)) continue;
+		result[name] = input[name] === null ? null : boundedString(input[name], `command.gitInfo.${name}`, limit);
+	}
+	return result;
 }
 
 function interaction(command: Record<string, unknown>): AgentCommand {

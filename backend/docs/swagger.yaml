@@ -2278,6 +2278,18 @@ definitions:
     - quota
     - reused
     type: object
+  GitInfoUpdateDoc:
+    properties:
+      branch:
+        type: string
+        x-nullable: true
+      originUrl:
+        type: string
+        x-nullable: true
+      sha:
+        type: string
+        x-nullable: true
+    type: object
   GroupModelsResponseDoc:
     properties:
       modelIDs:
@@ -5105,7 +5117,29 @@ definitions:
         type: string
       deviceId:
         type: string
+      gitBranch:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      gitOriginUrl:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      gitSha:
+        type: string
+        x-nullable: true
+        x-omitempty: false
+      isPinned:
+        type: boolean
+      labels:
+        items:
+          type: string
+        type: array
+      lastEventSeq:
+        type: integer
       profileId:
+        type: string
+      sharePolicy:
         type: string
       status:
         type: string
@@ -5120,7 +5154,14 @@ definitions:
     required:
     - createdAt
     - deviceId
+    - gitBranch
+    - gitOriginUrl
+    - gitSha
+    - isPinned
+    - labels
+    - lastEventSeq
     - profileId
+    - sharePolicy
     - status
     - threadId
     - title
@@ -5143,6 +5184,41 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/ThreadDoc'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ThreadSnapshotDoc:
+    properties:
+      interactions:
+        items:
+          $ref: '#/definitions/InteractionDoc'
+        type: array
+      items:
+        items:
+          $ref: '#/definitions/ItemDoc'
+        type: array
+      snapshotSeq:
+        type: integer
+      thread:
+        $ref: '#/definitions/ThreadDoc'
+      turns:
+        items:
+          $ref: '#/definitions/TurnDoc'
+        type: array
+    required:
+    - interactions
+    - items
+    - snapshotSeq
+    - thread
+    - turns
+    type: object
+  ThreadSnapshotResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ThreadSnapshotDoc'
       errorMsg:
         type: string
     required:
@@ -5501,6 +5577,13 @@ definitions:
     required:
     - name
     type: object
+  UpdateProviderMetadataRequestDoc:
+    properties:
+      gitInfo:
+        $ref: '#/definitions/GitInfoUpdateDoc'
+    required:
+    - gitInfo
+    type: object
   UpdateServerToolsStatusRequest:
     properties:
       status:
@@ -5512,6 +5595,20 @@ definitions:
     required:
     - status
     - toolIDs
+    type: object
+  UpdateThreadMetadataRequestDoc:
+    properties:
+      isPinned:
+        type: boolean
+      labels:
+        items:
+          type: string
+        type: array
+      sharePolicy:
+        enum:
+        - private
+        - link
+        type: string
     type: object
   UpdateToolRequest:
     properties:
@@ -10495,6 +10592,50 @@ paths:
       summary: 获取 Agent Thread 详情
       tags:
       - agent
+    patch:
+      parameters:
+      - description: Thread ID
+        in: path
+        name: thread_id
+        required: true
+        type: string
+      - description: UUID
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: 元数据补丁
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateThreadMetadataRequestDoc'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ThreadResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新 Agent Thread 云端元数据
+      tags:
+      - agent
   /agent/threads/{thread_id}/archive:
     post:
       parameters:
@@ -10760,6 +10901,83 @@ paths:
       summary: 重命名 Agent Thread
       tags:
       - agent
+  /agent/threads/{thread_id}/notifications:
+    get:
+      parameters:
+      - description: Thread ID
+        in: path
+        name: thread_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 订阅 Agent Thread 变更唤醒
+      tags:
+      - agent
+  /agent/threads/{thread_id}/provider-metadata:
+    patch:
+      parameters:
+      - description: Thread ID
+        in: path
+        name: thread_id
+        required: true
+        type: string
+      - description: UUID
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Git 元数据补丁
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/UpdateProviderMetadataRequestDoc'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CommandResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 更新 Agent Thread Provider Git 元数据
+      tags:
+      - agent
   /agent/threads/{thread_id}/resume:
     post:
       parameters:
@@ -10842,6 +11060,36 @@ paths:
       security:
       - BearerAuth: []
       summary: 启动 Agent 代码审查
+      tags:
+      - agent
+  /agent/threads/{thread_id}/snapshot:
+    get:
+      parameters:
+      - description: Thread ID
+        in: path
+        name: thread_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ThreadSnapshotResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/AgentgatewayErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 获取 Agent Thread 一致性快照
       tags:
       - agent
   /agent/threads/{thread_id}/turns:

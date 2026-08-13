@@ -1021,6 +1021,12 @@ export interface FileUploadResponse {
   reused: boolean;
 }
 
+export interface GitInfoUpdateDoc {
+  branch?: string | null;
+  originUrl?: string | null;
+  sha?: string | null;
+}
+
 export interface GroupModelsResponseDoc {
   modelIDs: number[];
   rules: PermissionGroupModelRuleResponse[];
@@ -2522,7 +2528,14 @@ export interface SystemEventResponse {
 export interface ThreadDoc {
   createdAt: string;
   deviceId: string;
+  gitBranch: string | null;
+  gitOriginUrl: string | null;
+  gitSha: string | null;
+  isPinned: boolean;
+  labels: string[];
+  lastEventSeq: number;
   profileId: string;
+  sharePolicy: string;
   status: string;
   threadId: string;
   title: string;
@@ -2537,6 +2550,19 @@ export interface ThreadListResponseDoc {
 
 export interface ThreadResponseDoc {
   data: ThreadDoc;
+  errorMsg: string;
+}
+
+export interface ThreadSnapshotDoc {
+  interactions: InteractionDoc[];
+  items: ItemDoc[];
+  snapshotSeq: number;
+  thread: ThreadDoc;
+  turns: TurnDoc[];
+}
+
+export interface ThreadSnapshotResponseDoc {
+  data: ThreadSnapshotDoc;
   errorMsg: string;
 }
 
@@ -2732,9 +2758,19 @@ export interface UpdatePermissionGroupRequest {
   name: string;
 }
 
+export interface UpdateProviderMetadataRequestDoc {
+  gitInfo: GitInfoUpdateDoc;
+}
+
 export interface UpdateServerToolsStatusRequest {
   status: string;
   toolIDs: number[];
+}
+
+export interface UpdateThreadMetadataRequestDoc {
+  isPinned?: boolean;
+  labels?: string[];
+  sharePolicy?: "private" | "link";
 }
 
 export interface UpdateToolRequest {
@@ -5232,6 +5268,28 @@ export namespace Agent {
   /**
    * No description
    * @tags agent
+   * @name ThreadsPartialUpdate
+   * @summary 更新 Agent Thread 云端元数据
+   * @request PATCH:/agent/threads/{thread_id}
+   * @secure
+   */
+  export namespace ThreadsPartialUpdate {
+    export type RequestParams = {
+      /** Thread ID */
+      threadId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateThreadMetadataRequestDoc;
+    export type RequestHeaders = {
+      /** UUID */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = ThreadResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent
    * @name ThreadsArchiveCreate
    * @summary 归档 Agent Thread
    * @request POST:/agent/threads/{thread_id}/archive
@@ -5383,6 +5441,47 @@ export namespace Agent {
   /**
    * No description
    * @tags agent
+   * @name ThreadsNotificationsList
+   * @summary 订阅 Agent Thread 变更唤醒
+   * @request GET:/agent/threads/{thread_id}/notifications
+   * @secure
+   */
+  export namespace ThreadsNotificationsList {
+    export type RequestParams = {
+      /** Thread ID */
+      threadId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = string;
+  }
+
+  /**
+   * No description
+   * @tags agent
+   * @name ThreadsProviderMetadataPartialUpdate
+   * @summary 更新 Agent Thread Provider Git 元数据
+   * @request PATCH:/agent/threads/{thread_id}/provider-metadata
+   * @secure
+   */
+  export namespace ThreadsProviderMetadataPartialUpdate {
+    export type RequestParams = {
+      /** Thread ID */
+      threadId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = UpdateProviderMetadataRequestDoc;
+    export type RequestHeaders = {
+      /** UUID */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent
    * @name ThreadsResumeCreate
    * @summary 恢复 Agent Thread
    * @request POST:/agent/threads/{thread_id}/resume
@@ -5422,6 +5521,25 @@ export namespace Agent {
       "Idempotency-Key": string;
     };
     export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent
+   * @name ThreadsSnapshotList
+   * @summary 获取 Agent Thread 一致性快照
+   * @request GET:/agent/threads/{thread_id}/snapshot
+   * @secure
+   */
+  export namespace ThreadsSnapshotList {
+    export type RequestParams = {
+      /** Thread ID */
+      threadId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ThreadSnapshotResponseDoc;
   }
 
   /**

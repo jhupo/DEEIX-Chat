@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -21,7 +22,9 @@ type Handler struct {
 }
 
 func NewHandler(service *appagent.Service) *Handler {
-	return &Handler{service: service, hub: newBridgeHub()}
+	hub := newBridgeHub()
+	service.SetNotifier(hub.notifyUser)
+	return &Handler{service: service, hub: hub}
 }
 
 type enrollmentResponse struct {
@@ -420,6 +423,126 @@ func (h *Handler) GetThread(c *gin.Context) {
 		return
 	}
 	response.Success(c, toThreadDoc(*item))
+}
+
+// GetThreadSnapshot godoc
+// @Summary 获取 Agent Thread 一致性快照
+// @Tags agent
+// @Security BearerAuth
+// @Param thread_id path string true "Thread ID"
+// @Success 200 {object} ThreadSnapshotResponseDoc
+// @Failure 400,404,500 {object} ErrorDoc
+// @Router /agent/threads/{thread_id}/snapshot [get]
+func (h *Handler) GetThreadSnapshot(c *gin.Context) {
+	item, err := h.service.GetThreadSnapshot(c.Request.Context(), middleware.MustUserID(c), c.Param("thread_id"))
+	if err != nil {
+		writeError(c, err, "load agent thread snapshot failed")
+		return
+	}
+	response.Success(c, toThreadSnapshotDoc(*item))
+}
+
+// StreamThreadNotifications godoc
+// @Summary 订阅 Agent Thread 变更唤醒
+// @Tags agent
+// @Security BearerAuth
+// @Produce text/event-stream
+// @Param thread_id path string true "Thread ID"
+// @Success 200 {string} string
+// @Failure 400,404,500 {object} ErrorDoc
+// @Router /agent/threads/{thread_id}/notifications [get]
+func (h *Handler) StreamThreadNotifications(c *gin.Context) {
+	userID := middleware.MustUserID(c)
+	if _, err := h.service.GetThread(c.Request.Context(), userID, c.Param("thread_id")); err != nil {
+		writeError(c, err, "subscribe agent thread notifications failed")
+		return
+	}
+	notifications, cleanup := h.hub.subscribeUser(userID)
+	defer cleanup()
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	if _, err := io.WriteString(c.Writer, "event: wake\ndata: {}\n\n"); err != nil {
+		return
+	}
+	c.Writer.Flush()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-notifications:
+			if _, err := io.WriteString(c.Writer, "event: wake\ndata: {}\n\n"); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		case <-heartbeat.C:
+			if _, err := io.WriteString(c.Writer, ": keepalive\n\n"); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
+}
+
+type updateThreadMetadataRequest struct {
+	IsPinned    *bool     `json:"isPinned"`
+	Labels      *[]string `json:"labels"`
+	SharePolicy *string   `json:"sharePolicy"`
+}
+
+// UpdateThreadMetadata godoc
+// @Summary 更新 Agent Thread 云端元数据
+// @Tags agent
+// @Security BearerAuth
+// @Param thread_id path string true "Thread ID"
+// @Param Idempotency-Key header string true "UUID"
+// @Param body body UpdateThreadMetadataRequestDoc true "元数据补丁"
+// @Success 200 {object} ThreadResponseDoc
+// @Failure 400,404,409,500 {object} ErrorDoc
+// @Router /agent/threads/{thread_id} [patch]
+func (h *Handler) UpdateThreadMetadata(c *gin.Context) {
+	var request updateThreadMetadataRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	item, err := h.service.UpdateThreadMetadata(c.Request.Context(), middleware.MustUserID(c), c.Param("thread_id"), idempotencyKey(c), request.IsPinned, request.Labels, request.SharePolicy)
+	if err != nil {
+		writeError(c, err, "update agent thread metadata failed")
+		return
+	}
+	response.Success(c, toThreadDoc(*item))
+}
+
+type updateProviderMetadataRequest struct {
+	GitInfo json.RawMessage `json:"gitInfo"`
+}
+
+// UpdateProviderMetadata godoc
+// @Summary 更新 Agent Thread Provider Git 元数据
+// @Tags agent
+// @Security BearerAuth
+// @Param thread_id path string true "Thread ID"
+// @Param Idempotency-Key header string true "UUID"
+// @Param body body UpdateProviderMetadataRequestDoc true "Git 元数据补丁"
+// @Success 200 {object} CommandResponseDoc
+// @Failure 400,404,409,500 {object} ErrorDoc
+// @Router /agent/threads/{thread_id}/provider-metadata [patch]
+func (h *Handler) UpdateProviderMetadata(c *gin.Context) {
+	var request updateProviderMetadataRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	item, err := h.service.UpdateProviderMetadata(c.Request.Context(), middleware.MustUserID(c), c.Param("thread_id"), request.GitInfo, idempotencyKey(c))
+	if err != nil {
+		writeError(c, err, "update agent provider metadata failed")
+		return
+	}
+	response.Success(c, toCommandDoc(*item))
 }
 
 // RenameThread godoc
@@ -879,7 +1002,9 @@ func toResourceSnapshotDoc(item appagent.ResourceSnapshotView) ResourceSnapshotD
 func toThreadDoc(item appagent.ThreadView) ThreadDoc {
 	return ThreadDoc{
 		ThreadID: item.ThreadID, DeviceID: item.DeviceID, ProfileID: item.ProfileID, WorkspaceID: item.WorkspaceID,
-		Title: item.Title, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Title: item.Title, Status: item.Status, IsPinned: item.IsPinned, Labels: item.Labels, SharePolicy: item.SharePolicy,
+		GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq,
+		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }
 
@@ -889,6 +1014,13 @@ func toThreadDocs(items []appagent.ThreadView) []ThreadDoc {
 		result = append(result, toThreadDoc(item))
 	}
 	return result
+}
+
+func toThreadSnapshotDoc(item appagent.ThreadSnapshotView) ThreadSnapshotDoc {
+	return ThreadSnapshotDoc{
+		Thread: toThreadDoc(item.Thread), Turns: toTurnDocs(item.Turns), Items: toItemDocs(item.Items),
+		Interactions: toInteractionDocs(item.Interactions), SnapshotSeq: item.SnapshotSeq,
+	}
 }
 
 func toTurnDoc(item appagent.TurnView) TurnDoc {
