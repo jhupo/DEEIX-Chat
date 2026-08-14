@@ -121,10 +121,10 @@ deeix-agent doctor
 | 删除本地会话 | `thread/delete` 已映射并实测 | 当前删除接口只软删除 DEEIX Conversation | 未形成产品闭环；本地 thread 仍存在且可能被再次导入 |
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
 | 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
-| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 通过 profile resource client 缓存优先读取并支持手动刷新 | 已接入独立设备插件页；安装、卸载仍未开放 |
+| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 在统一“插件”入口中按当前模式读取平台或设备数据 | 已接入；安装、卸载仍未开放 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-聊天模式“插件”页面属于 DEEIX 服务端 Skill/Prompt 库；工作模式“插件”页面读取选中设备 Codex profile 的 `plugins` snapshot。两者使用不同数据源和路由，不混用同名数据。
+“插件”始终使用 `/skills-prompt` 入口。聊天模式读取 DEEIX 服务端 Skill/Prompt 库；工作模式读取选中设备 Codex profile 的 `plugins` snapshot。页面边界按执行模式选择数据实现，不对用户暴露数据来源命名。
 
 ## 5. Schema 与官方当前文档的边界
 
@@ -291,7 +291,7 @@ deeix-agent doctor
 2. 生命周期 HTTP 接口先校验 conversation 属于当前用户和 gateway execution，再持久化命令；由命令 terminal result 投影最终 Conversation 状态。设备离线时显示 pending，不把排队状态伪装成已完成。
 3. 删除得到设备 ACK 后再软删除 Conversation。保留以 `runtime_profile_id + source_thread_ref` 唯一定位的 AgentThread tombstone；`syncWorkspaceSessions` 使用包含软删除记录的查询，命中 tombstone 时跳过导入，防止已删本地会话重新出现。
 4. Workspace 创建使用客户端配置的 allowlisted parent roots。Web 仅提交 `rootRef`、合法单段目录名和显示名；Bridge 将 opaque root ref 解析为本机根目录，拒绝绝对路径、`.`、`..`、分隔符、符号链接越界和已存在的非目录目标，然后创建目录并同步 Workspace。注册任意现有目录继续由本机 CLI 或原生目录选择器完成，Cloud 不接收绝对路径。
-5. Profile resource client 与独立设备插件页已完成，使用缓存优先、显式刷新和 device/profile/refreshed-at 状态；Workspace `skills` 页面仍待接入。
+5. Profile resource client 已接入统一“插件”页面：聊天模式读取平台插件，工作模式使用缓存优先读取当前 device/profile 的插件快照并支持显式刷新；Workspace `skills` 数据仍待接入。
 6. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
 7. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
 
@@ -420,7 +420,7 @@ TaskCenter                              user scope，独立于输入框
 | `backend/internal/transport/http/agentgateway` | 设备、资源和管理命令 API |
 | `frontend/shared/api/agent-gateway.ts` | Workspace/Profile 资源与生命周期 API client |
 | `frontend/features/layouts/components/navigation/nav-projects.tsx` | 共享项目树；聊天映射 DEEIX Project，工作映射设备 Workspace |
-| `frontend/features/devices/components/agent-plugins-page.tsx` | 设备 Codex Plugin 快照与刷新入口 |
+| `frontend/features/devices/components/agent-plugins-page.tsx` | 统一“插件”入口在工作模式下使用的 Codex Plugin 数据视图 |
 | `frontend/features/chat/components/sections/chat-input.tsx` | 输入框与会话级 status stack 的组合边界 |
 | `frontend/features/chat/components/message` | turn-scoped Plan、文件汇总和 unified diff 入口 |
 | `frontend/features/chat/hooks/use-chat-message-submit.ts` | 服务端输入队列、乐观更新和真实 steer |

@@ -55,7 +55,9 @@ export function NavMain({
         </SidebarMenu>
 
         <SidebarMenu className="mt-4 gap-0.5">
-          {NAVIGATION_ITEMS.filter((item) => item.group === "secondary" && item.mode === executionMode).map((item) => (
+          {NAVIGATION_ITEMS.filter(
+            (item) => item.group === "secondary" && (!item.mode || item.mode === executionMode),
+          ).map((item) => (
             <NavMainItem
               key={item.id}
               item={item}

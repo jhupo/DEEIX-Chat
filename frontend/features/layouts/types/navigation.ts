@@ -24,7 +24,7 @@ type NavigationCommandItem = NavigationItemBase & {
 };
 
 type NavigationLinkItem = NavigationItemBase & {
-  id: "recent" | "files" | "skillsPrompt" | "tasks" | "devicePlugins";
+  id: "recent" | "files" | "skillsPrompt" | "tasks";
   kind: "link";
   href: string;
 };

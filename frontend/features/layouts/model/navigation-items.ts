@@ -6,7 +6,7 @@ import { Blend } from "@/components/animate-ui/icons/blend";
 import { ClipboardList } from "@/components/animate-ui/icons/clipboard-list";
 import type { NavigationItem } from "@/features/layouts/types/navigation";
 
-export const NAVIGATION_ITEMS = [
+export const NAVIGATION_ITEMS: readonly NavigationItem[] = [
   {
     id: "newChat",
     kind: "command",
@@ -44,7 +44,6 @@ export const NAVIGATION_ITEMS = [
     href: "/skills-prompt",
     icon: Blend,
     group: "secondary",
-    mode: "cloud",
   },
   {
     id: "tasks",
@@ -54,12 +53,4 @@ export const NAVIGATION_ITEMS = [
     group: "secondary",
     mode: "gateway",
   },
-  {
-    id: "devicePlugins",
-    kind: "link",
-    href: "/agent-plugins",
-    icon: Blend,
-    group: "secondary",
-    mode: "gateway",
-  },
-] as const satisfies readonly NavigationItem[];
+];
