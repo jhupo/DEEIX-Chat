@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -20,7 +20,8 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 	const workspace = resolve(requiredEnvironment("CODEX_GATEWAY_E2E_WORKSPACE"));
 	const marker = `.deeix-gateway-e2e-${randomUUID()}.txt`;
 	const prompt = process.env.CODEX_GATEWAY_E2E_PROMPT?.trim() ||
-		`Use the terminal to create ${marker} in the current workspace containing the text P0, then report completion.`;
+		`Use the terminal tool to run exactly: node -e "require('node:fs').writeFileSync('${marker}', 'P0')". ` +
+		"Do not simulate the command or report completion before the tool finishes.";
 	const codex = process.env.CODEX_GATEWAY_E2E_CODEX?.trim() || "codex";
 	const dataDirectory = await mkdtemp(join(tmpdir(), "deeix-gateway-e2e-"));
 	let deviceId = "";
@@ -72,16 +73,20 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 		});
 		conversationId = conversation.publicID;
 		const runId = `run_${randomUUID().replaceAll("-", "")}`;
-		await api(`/api/v1/conversations/${conversationId}/turns`, {
+		let turnFailure: unknown;
+		const turnRequest = api(`/api/v1/conversations/${conversationId}/turns`, {
 			method: "POST",
 			body: JSON.stringify({
 				contentType: "text", content: prompt, clientRunID: runId,
-				options: { approvalPolicy: "on-request", sandboxPolicy: "read-only" },
+				options: { approvalPolicy: "untrusted", sandboxPolicy: "read-only" },
 			}),
+		}).catch((error: unknown) => {
+			turnFailure = error;
 		});
 
 		let responded = false;
 		await eventually(async () => {
+			if (turnFailure) throw turnFailure;
 			const interactions = await api<Interaction[]>(`/api/v1/conversations/${conversationId}/interactions?status=pending`);
 			const interaction = interactions[0];
 			if (interaction && !responded) {
@@ -98,7 +103,10 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 				throw new Error(`gateway turn ended as ${assistant.status}: ${assistant.errorMessage ?? "unknown error"}`);
 			return assistant?.status === "success" && assistant.content.trim().length > 0;
 		}, 4 * 60_000);
+		await turnRequest;
+		if (turnFailure) throw turnFailure;
 		assert.equal(responded, true, "the E2E prompt did not produce a server interaction");
+		assert.equal(await readFile(join(workspace, marker), "utf8"), "P0");
 
 		await stopGateway(running);
 		running = undefined;

@@ -343,6 +343,10 @@ test("Codex notification policy maps, redacts extensions, and drops disabled met
 		method: "thread/realtime/started",
 		params: { threadId: "private-thread" },
 	})}\n`);
+	output.write(`${JSON.stringify({
+		method: "item/fileChange/outputDelta",
+		params: { threadId: "private-thread", turnId: "private-turn", itemId: "private-item", delta: "legacy" },
+	})}\n`);
 	await eventually(() => events.length === 2);
 	assert.equal(events[0]?.kind, "warning");
 	assert.deepEqual(events[0]?.payload, { message: "mapped" });

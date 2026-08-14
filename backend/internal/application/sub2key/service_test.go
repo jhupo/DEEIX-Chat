@@ -92,7 +92,7 @@ func TestMatchRuntimeProofUsesLiveActiveSub2Key(t *testing.T) {
 	service := newKeyTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/user/profile":
-			writeKeyEnvelope(w, map[string]any{"id": 7})
+			http.Error(w, "runtime proof must use key ownership", http.StatusInternalServerError)
 		case "/api/v1/keys":
 			writeKeyEnvelope(w, map[string]any{"total": 2, "items": []any{
 				map[string]any{"id": 31, "user_id": 7, "key": runtimeKey, "status": "active"},

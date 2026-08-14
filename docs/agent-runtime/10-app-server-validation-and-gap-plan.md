@@ -123,7 +123,7 @@ pnpm.cmd --filter @deeix/agent-bridge test
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
 | 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
 | 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 可保存 `plugins` snapshot，前端缺 profile resource client 和页面 | 后端能力已具备，UI 待接入 |
-| 展示文件 Diff | `turn/diff/updated`、`item/fileChange/outputDelta`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
+| 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
 现有“插件”页面属于 DEEIX 服务端 Skill/Prompt 库，不等同于设备上的 Codex Skill、Plugin、App 或 MCP。后续 UI 必须按“平台插件”和“设备能力”分区，避免同名数据混用。
 
@@ -166,6 +166,8 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 实现基线：2026-08-14。定向 repository/socket/Adapter 测试已进入默认测试集；真实生产链路测试为显式 opt-in。
 
+兼容性边界：产品协议只接受 `deeix.bridge.v2` 与 frame `version: 2`，没有 v1 解码、双写、降级或旧路由分支。Bridge 配置、设备身份和 WAL 中各自的 `version: 1` 是这些本地持久化格式的当前首版，不代表 Bridge v1。`generated/codex-app-server-v0.147.0` 中出现的 legacy/deprecated 类型来自官方锁定 schema，保持原样用于版本审计；项目方法策略将不采用的旧通知设为 `disabled`，不会把它们接入产品事件链路。
+
 #### 6.1 AgentTurn 终态投影不完整
 
 实现：`projectAgentEvent` 与乱序 terminal result 都解析 `payload.turn.status`，只接受 `completed|interrupted|failed`；`AgentTurn` 同时持久化失败 code/message，迟到的 `turn/started` 不会覆盖终态。
@@ -204,6 +206,8 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 实现：新增 `packages/agent-bridge/test/gateway-production.e2e.test.ts`，默认跳过，仅在显式设置 `CODEX_GATEWAY_E2E=1` 时连接目标 Full 部署。
 
 该测试完成 enrollment、runtime proof、manifest/profile 持久化读取、workspace sync、gateway conversation、turn stream、interaction response、WSS ack、Bridge WAL、进程级断线重连、sessions/app-server history 回读和清理。Web API 在重连后读取的 profile、message、interaction 和 resource snapshot 用于验证 PostgreSQL 持久化状态。
+
+运行前，本机 Codex 必须使用 API key 登录，并且该 key 归属于 `CODEX_GATEWAY_E2E_ACCESS_TOKEN` 对应的 Sub2 用户；runtime proof 会验证这层归属关系。测试并发等待同步 turn 请求和 pending interaction，使用 `untrusted` 稳定触发命令审批，再验证审批后真实写入 workspace marker。
 
 ```powershell
 $env:CODEX_GATEWAY_E2E='1'
@@ -343,9 +347,10 @@ ChatInput                               输入框
 
 AssistantMessage                        turn scope
   PlanSteps                             当前 turn 的模型计划
-  FileChangeSummary                     N 个文件已更改，+A -D
+  TurnProgressDock                      紧凑进度控件：第 X/Y 步 · N 个文件已更改 +A -D
+    PlanProgressPopover                 当前步骤、计划清单与完成状态
     FileChangePopover                   文件名与逐文件增删统计
-    UnifiedDiffSheet                    完整 diff
+      UnifiedDiffSheet                  完整 diff
 
 TaskCenter                              user scope，独立于输入框
   Runs across conversations             跨会话 queued/running/terminal 任务
@@ -357,21 +362,22 @@ TaskCenter                              user scope，独立于输入框
 2. `GoalStatusBar` 仅在 gateway conversation 存在 Goal 时显示，固定高度、单行截断；显示状态、objective、耗时和预算摘要。第一阶段只读。Goal 管理命令接通后再增加编辑、暂停/继续和清除按钮。
 3. `ActiveRunStatus` 只显示当前 conversation 的运行状态以及待处理 interaction。跨会话运行不堆在输入框上方，统一进入 TaskCenter。
 4. 复用现有 QueuedSubmission UI 的编辑、删除和优先操作，抽离到 `QueuedSubmissionList`；改为读取服务端队列 snapshot，并保留乐观更新与失败回滚。
-5. `PlanSteps` 属于产生它的 turn，放在对应 assistant message 内，按 `pending|inProgress|completed` 渲染紧凑步骤列表。Goal 属于 thread，Plan 属于 turn，两者不合并。
-6. `FileChangeSummary` 放在对应 assistant message 底部，显示“`N 个文件已更改 +A -D`”。点击或键盘激活打开 popover，逐项显示 workspace-relative 文件名和增删统计；再进入 `UnifiedDiffSheet` 查看完整 diff。完成 turn 后仍可从历史 Item/Diff API 恢复。
-7. 增删统计从结构化 `FileUpdateChange.diff` 或最终 `turn/diff/updated.diff` 解析；最终汇总按规范 unified diff parser 计算，不用字符串搜索文件名。deprecated `item/fileChange/outputDelta` 只保留诊断，不作为最终统计来源。
-8. Diff 中的路径必须转换为 workspace-relative display path；绝对路径、越界路径和无法归属当前 Workspace 的 change 不进入浏览器。超大 diff 显示截断状态并提供按文件分页读取。
-9. TaskCenter 复用 Run 作为列表源，展示 conversation、设备、Workspace、模型、状态、开始时间和耗时；运行中任务可进入对应对话或中断，terminal 任务只读。AgentTurn/AgentItem 作为详情来源，不与 Run 并列成重复任务。
-10. 桌面端 popover 和 sheet 使用项目现有组件；移动端文件列表与 diff 使用全宽 sheet。所有图标按钮带可访问名称，Goal、Plan、Diff 的状态变化使用克制的 live region，不抢占输入焦点。
+5. `PlanSteps` 属于产生它的 turn，按 `pending|inProgress|completed` 渲染。默认收进对应 assistant message 底部的 `TurnProgressDock`；点击“第 `X/Y` 步”打开 `PlanProgressPopover`，展示截图中的步骤清单、当前步骤和完成状态。Goal 属于 thread，Plan 属于 turn，两者不合并。
+6. `TurnProgressDock` 是展示容器，不是新的状态模型。它在一条稳定的紧凑控件内并列显示“第 `X/Y` 步”和“`N 个文件已更改 +A -D`”；两段各自是独立按钮，分别打开计划与文件 popover。仅有计划或仅有文件变化时只显示对应按钮，两者都没有时不渲染空占位。
+7. `FileChangePopover` 逐项显示 workspace-relative 文件名和增删统计；选择文件后进入 `UnifiedDiffSheet` 查看完整 diff。完成 turn 后，`TurnProgressDock` 仍从历史 Plan 与 Item/Diff API 恢复，不依赖浏览器内存。
+8. 增删统计从结构化 `FileUpdateChange.diff` 或最终 `turn/diff/updated.diff` 解析；最终汇总按规范 unified diff parser 计算，不用字符串搜索文件名。已废弃且 app-server 不再发送的 `item/fileChange/outputDelta` 在 Bridge 方法表中明确为 `disabled`，不进入事件、存储或 UI 链路。
+9. Diff 中的路径必须转换为 workspace-relative display path；绝对路径、越界路径和无法归属当前 Workspace 的 change 不进入浏览器。超大 diff 显示截断状态并提供按文件分页读取。
+10. TaskCenter 复用 Run 作为列表源，展示 conversation、设备、Workspace、模型、状态、开始时间和耗时；运行中任务可进入对应对话或中断，terminal 任务只读。AgentTurn/AgentItem 作为详情来源，不与 Run 并列成重复任务。
+11. 桌面端 popover 和 sheet 使用项目现有组件；移动端计划、文件列表与 diff 使用全宽 sheet。两个触发按钮均带可访问名称和展开状态，Goal、Plan、Diff 的状态变化使用克制的 live region，不抢占输入焦点。
 
 验收：
 
 - cloud conversation 不显示设备 Goal/Plan/Diff 占位；切换 conversation、设备或 branch 后没有上一上下文残留。
 - 输入框高度不会因状态刷新抖动；长 Goal、长文件名、100+ 队列项和窄屏下均不溢出或遮挡输入。
 - Plan、Diff 精确绑定 source turn；Goal 精确绑定 source thread；TaskCenter 精确绑定用户和 Run。
-- FileChangeSummary 的文件数与 `+A -D` 和最终 unified diff 一致，rename/add/delete、多 hunk、二进制文件和截断均有测试。
+- TurnProgressDock 的步骤进度绑定当前 turn 的最终 Plan；文件数与 `+A -D` 绑定同一 turn 的最终 unified diff，rename/add/delete、多 hunk、二进制文件和截断均有测试。
 - 页面刷新和 SSE 重连后，Goal、Plan、队列、任务与 Diff 均由服务端快照恢复，再继续应用新事件。
-- 键盘可打开文件汇总、浏览文件、关闭 popover/sheet；屏幕阅读器可获得按钮名称和任务状态更新。
+- 键盘可分别打开计划清单与文件汇总、浏览步骤和文件、关闭 popover/sheet；屏幕阅读器可获得按钮名称、展开状态和任务状态更新。
 
 ### P2：补只读诊断和可选工具面
 

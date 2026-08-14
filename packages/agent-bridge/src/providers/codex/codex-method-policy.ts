@@ -48,7 +48,7 @@ export const CODEX_SERVER_NOTIFICATIONS = {
 	"process/exited": "disabled",
 	"item/commandExecution/outputDelta": "mapped",
 	"item/commandExecution/terminalInteraction": "extension",
-	"item/fileChange/outputDelta": "mapped",
+	"item/fileChange/outputDelta": "disabled",
 	"item/fileChange/patchUpdated": "mapped",
 	"serverRequest/resolved": "mapped",
 	"item/mcpToolCall/progress": "extension",

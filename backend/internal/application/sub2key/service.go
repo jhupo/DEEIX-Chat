@@ -133,11 +133,7 @@ func (s *Service) MatchRuntimeProof(
 	}
 	matchedID := int64(0)
 	for _, token := range tokens {
-		profile, profileErr := s.client.UserProfile(ctx, token)
-		if profileErr != nil || profile.ID != expectedRemoteUserID {
-			continue
-		}
-		keys, keysErr := s.remoteKeys(ctx, token, profile.ID)
+		keys, keysErr := s.remoteKeys(ctx, token, expectedRemoteUserID)
 		if keysErr != nil {
 			continue
 		}
