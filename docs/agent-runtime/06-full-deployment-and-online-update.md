@@ -40,7 +40,7 @@ An online update writes only `deeix-chat-app-runtime` and the journal in `deeix-
 
 The image contains a baseline release under `/app/image-runtime` with a digest covering the server binary, static frontend, and version file. On every container start, the entrypoint seeds that exact build into an immutable `releases/image-<version>-<digest>` directory. Online-installed stable bundles exclusively use `releases/<version>`, so an image never overwrites an administrator-installed bundle. The `current` symlink is switched atomically: a rebuilt `dev` image replaces an older image build even when `VERSION` has not changed, while an online-installed release of the same or a newer semantic version remains active. Recreating the container with the same named volume preserves releases and rollback data.
 
-When a fresh container is running `releases/image-<version>-<digest>`, the updater may install the stable bundle of that same version once. This promotes the baseline image to `releases/<version>` and supplies release-time assets such as the packaged Agent Bridge clients. Once the stable release is active, another same-version install is rejected.
+When a fresh container is running `releases/image-<version>-<digest>`, the updater may install the stable bundle of that same version once. This promotes the baseline image to `releases/<version>` and supplies the native `deeix-agent` executables and checksums. Once the stable release is active, another same-version install is rejected.
 
 ## Online Update Flow
 

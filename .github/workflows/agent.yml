@@ -1,0 +1,44 @@
+name: Native Agent
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "backend/cmd/deeix-agent/**"
+      - "backend/internal/agentclient/**"
+      - "frontend/public/agent/**"
+      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - ".github/workflows/agent.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "backend/cmd/deeix-agent/**"
+      - "backend/internal/agentclient/**"
+      - "frontend/public/agent/**"
+      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - ".github/workflows/agent.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: go test ./internal/agentclient ./cmd/deeix-agent
+        working-directory: backend
+      - run: go vet ./internal/agentclient ./cmd/deeix-agent
+        working-directory: backend
+      - name: Build all native packages
+        shell: bash
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -C backend -o ../dist/deeix-agent-windows-x64.exe ./cmd/deeix-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -C backend -o ../dist/deeix-agent-linux-x64 ./cmd/deeix-agent
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -C backend -o ../dist/deeix-agent-macos-arm64 ./cmd/deeix-agent

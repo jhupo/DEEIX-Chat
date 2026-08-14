@@ -129,73 +129,55 @@ jobs:
       - name: Inspect image
         run: docker buildx imagetools inspect "${{ steps.image.outputs.name }}:${{ steps.meta.outputs.version }}"
 
-  package_agent_bridge:
-    name: Package Agent Bridge (${{ matrix.name }})
+  package_agent:
+    name: Package native Agent (${{ matrix.name }})
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         include:
           - name: windows-x64
-            runner: windows-2025
-            archive: zip
+            goos: windows
+            goarch: amd64
+            asset: deeix-agent-windows-x64.exe
           - name: linux-x64
-            runner: ubuntu-24.04
-            archive: tar
+            goos: linux
+            goarch: amd64
+            asset: deeix-agent-linux-x64
           - name: macos-arm64
-            runner: macos-15
-            archive: tar
-    runs-on: ${{ matrix.runner }}
+            goos: darwin
+            goarch: arm64
+            asset: deeix-agent-macos-arm64
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-go@v5
         with:
-          version: 10.17.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @deeix/agent-bridge check:schema
-      - run: pnpm --filter @deeix/agent-bridge test
-      - name: Assemble Windows bundle
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $root = "dist/deeix-agent-bridge-${{ matrix.name }}"
-          New-Item -ItemType Directory -Force "$root/dist" | Out-Null
-          Copy-Item (Get-Command node).Source "$root/node.exe"
-          Copy-Item packages/agent-bridge/dist/src "$root/dist/src" -Recurse
-          Set-Content "$root/package.json" '{"private":true,"type":"module"}' -Encoding ascii
-          @('@echo off', '"%~dp0node.exe" "%~dp0dist\src\cli.js" %*') | Set-Content "$root/deeix-agent-bridge.cmd" -Encoding ascii
-          Compress-Archive "$root/*" "dist/deeix-agent-bridge-${{ matrix.name }}.zip"
-          (Get-FileHash "dist/deeix-agent-bridge-${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLowerInvariant() + "  deeix-agent-bridge-${{ matrix.name }}.zip" | Set-Content "dist/deeix-agent-bridge-${{ matrix.name }}.zip.sha256" -Encoding ascii
-      - name: Assemble Unix bundle
-        if: matrix.archive == 'tar'
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test Agent
+        working-directory: backend
+        run: go test ./internal/agentclient ./cmd/deeix-agent
+      - name: Build native executable
         shell: bash
         run: |
-          root="dist/deeix-agent-bridge-${{ matrix.name }}"
-          mkdir -p "$root/dist"
-          cp "$(command -v node)" "$root/node"
-          cp -a packages/agent-bridge/dist/src "$root/dist/src"
-          printf '%s\n' '{"private":true,"type":"module"}' > "$root/package.json"
-          printf '%s\n' '#!/bin/sh' 'DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)' 'exec "$DIR/node" "$DIR/dist/src/cli.js" "$@"' > "$root/deeix-agent-bridge"
-          chmod 755 "$root/node" "$root/deeix-agent-bridge"
-          tar -C "$root" -czf "dist/deeix-agent-bridge-${{ matrix.name }}.tar.gz" node deeix-agent-bridge package.json dist
-          (cd dist && shasum -a 256 "deeix-agent-bridge-${{ matrix.name }}.tar.gz" > "deeix-agent-bridge-${{ matrix.name }}.tar.gz.sha256")
+          mkdir -p dist
+          version=$(cat VERSION)
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -C backend -trimpath \
+            -ldflags="-s -w -X main.version=$version -X main.commit=$GITHUB_SHA" \
+            -o "../dist/${{ matrix.asset }}" ./cmd/deeix-agent
+          (cd dist && sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256")
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-bridge-${{ matrix.name }}
+          name: agent-${{ matrix.name }}
           path: |
-            dist/deeix-agent-bridge-${{ matrix.name }}.zip
-            dist/deeix-agent-bridge-${{ matrix.name }}.zip.sha256
-            dist/deeix-agent-bridge-${{ matrix.name }}.tar.gz
-            dist/deeix-agent-bridge-${{ matrix.name }}.tar.gz.sha256
+            dist/${{ matrix.asset }}
+            dist/${{ matrix.asset }}.sha256
           if-no-files-found: error
 
   release_application:
     name: Package stable application release
     runs-on: ubuntu-latest
-    needs: [merge, package_agent_bridge]
+    needs: [merge, package_agent]
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
@@ -223,10 +205,10 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter @deeix/web build
-      - name: Download Agent Bridge bundles
+      - name: Download native Agent packages
         uses: actions/download-artifact@v4
         with:
-          pattern: agent-bridge-*
+          pattern: agent-*
           path: dist
           merge-multiple: true
       - name: Build application bundles
@@ -235,9 +217,9 @@ jobs:
           mkdir -p dist
           version=$(cat VERSION)
           build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          bridge_dir="frontend/out/agent/releases/current"
-          mkdir -p "$bridge_dir"
-          cp dist/deeix-agent-bridge-*.zip* dist/deeix-agent-bridge-*.tar.gz* "$bridge_dir/"
+          agent_dir="frontend/out/agent/releases/current"
+          mkdir -p "$agent_dir"
+          cp dist/deeix-agent-windows-x64.exe* dist/deeix-agent-linux-x64* dist/deeix-agent-macos-arm64* "$agent_dir/"
           for arch in amd64 arm64; do
             root="dist/release-$arch"
             mkdir -p "$root/frontend"
@@ -301,7 +283,7 @@ jobs:
             emit_section '工程与测试' "${engineering[@]}"
             printf '## 发布内容\n\n'
             printf -- '- Full 应用包：Linux amd64、Linux arm64\n'
-            printf -- '- Agent Bridge：Windows x64、Linux x64、macOS arm64\n'
+            printf -- '- 原生 Agent：Windows x64、Linux x64、macOS arm64\n'
             printf -- '- 所有包均附带 SHA-256 校验文件\n'
             printf -- '- 管理员可在后台检查并在线更新 Docker 中的应用运行时\n\n'
             if [ -n "$previous_tag" ]; then
@@ -314,4 +296,4 @@ jobs:
         shell: bash
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file dist/release-notes.md
-          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 dist/deeix-agent-bridge-*.zip* dist/deeix-agent-bridge-*.tar.gz* --clobber
+          gh release upload "$GITHUB_REF_NAME" dist/update-manifest.json dist/update-manifest.json.sha256 dist/deeix-chat-linux-*.tar.gz dist/deeix-chat-linux-*.tar.gz.sha256 dist/deeix-agent-windows-x64.exe* dist/deeix-agent-linux-x64* dist/deeix-agent-macos-arm64* --clobber

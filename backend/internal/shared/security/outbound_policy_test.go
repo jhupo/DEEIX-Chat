@@ -39,8 +39,9 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 			files:  map[string]struct{}{},
 		},
 		"&http.Client{": {
-			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries; updater.go is limited to the fixed GitHub release boundary with allowGitHubRedirect",
+			reason: "direct HTTP clients must be reviewed for external-vs-internal trust boundaries; updater.go is limited to the fixed GitHub release boundary with allowGitHubRedirect, and the native Agent uses its explicitly configured server with redirects disabled",
 			files: allowFiles(
+				"internal/agentclient/cloud.go",
 				"internal/infra/embedding/client.go",
 				"internal/infra/extract/mineru/client.go",
 				"internal/infra/geoip/client.go",

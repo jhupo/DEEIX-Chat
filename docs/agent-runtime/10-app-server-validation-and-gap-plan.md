@@ -6,7 +6,7 @@
 
 本轮完成了 app-server 适配器全部已声明命令的真实进程或确定性 JSONL 验收：
 
-- `@deeix/agent-bridge`：32/32 通过。
+- 原生 `deeix-agent`：配置、状态、协议、JSONL 并发与三平台构建回归通过。
 - schema lock：`ClientRequest` 98、`ClientNotification` 1、`ServerRequest` 10、`ServerNotification` 72，生成文件、哈希和 union 全部通过。
 - 真实进程：官方 `rust-v0.147.0` Windows x64 release，stdio JSONL，真实 API key 认证和真实 Responses 上游。
 - 真实生命周期：初始化、认证证明、资源读取、创建、改名、Git 元数据、模型回合、历史读取、压缩、分叉、引导、中断、Review、归档、恢复、重新载入和删除全部通过。
@@ -30,11 +30,10 @@
 ## 3. 实际执行命令
 
 ```powershell
-pnpm.cmd --filter @deeix/agent-bridge check
-pnpm.cmd --filter @deeix/agent-bridge check:schema
-$env:CODEX_E2E_EXECUTABLE = (Resolve-Path '.cache/codex-e2e-v0.147.0/bin/codex-x86_64-pc-windows-msvc.exe').Path
-$env:CODEX_E2E_AUTHENTICATED = '1'
-pnpm.cmd --filter @deeix/agent-bridge test
+Set-Location backend
+go test ./internal/agentclient ./cmd/deeix-agent
+go vet ./internal/agentclient ./cmd/deeix-agent
+deeix-agent doctor
 ```
 
 真实模型测试需要访问本机 Codex 已配置的 Responses 上游。受限网络环境会得到 `stream disconnected before completion`，开放网络后同一测试通过。这是测试运行前置条件，不属于协议缺陷。
@@ -203,7 +202,7 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 #### 6.4 缺少可重复的生产 WSS 全链路测试
 
-实现：新增 `packages/agent-bridge/test/gateway-production.e2e.test.ts`，默认跳过，仅在显式设置 `CODEX_GATEWAY_E2E=1` 时连接目标 Full 部署。
+实现入口：`backend/internal/agentclient/gateway.go`。生产验收使用已安装的原生 Agent、官方独立 Codex CLI 和目标 Full 部署。
 
 该测试完成 enrollment、runtime proof、manifest/profile 持久化读取、workspace sync、gateway conversation、turn stream、interaction response、WSS ack、Bridge WAL、进程级断线重连、sessions/app-server history 回读和清理。Web API 在重连后读取的 profile、message、interaction 和 resource snapshot 用于验证 PostgreSQL 持久化状态。
 
@@ -216,7 +215,7 @@ $env:CODEX_GATEWAY_E2E_USER_PUBLIC_ID='USER_PUBLIC_ID'
 $env:CODEX_GATEWAY_E2E_ACCESS_TOKEN='ACCESS_TOKEN'
 $env:CODEX_GATEWAY_E2E_WORKSPACE='D:\path\to\fixture'
 $env:CODEX_GATEWAY_E2E_CODEX='codex' # optional
-pnpm --filter @deeix/agent-bridge test:gateway:e2e
+deeix-agent doctor
 ```
 
 验收：同一测试同时验证 Web API、PostgreSQL 状态、WSS ack、Bridge WAL、app-server history 和最终 Conversation message。
@@ -407,10 +406,10 @@ TaskCenter                              user scope，独立于输入框
 
 | 文件 | 修改职责 |
 | --- | --- |
-| `packages/agent-bridge/src/protocol/agent-command.ts` | 输入、设置、交互响应、资源命令的唯一公开 union |
-| `packages/agent-bridge/src/commands/resolve-provider-command.ts` | opaque ref 到本机 path/provider ID 的解析 |
-| `packages/agent-bridge/src/providers/codex/codex-adapter.ts` | 生成类型到语义命令/事件的适配 |
-| `packages/agent-bridge/src/providers/codex/codex-method-policy.ts` | 实际调度方法 registry |
+| `backend/internal/agentclient/protocol.go` | 输入、设置、交互响应与资源命令的严格边界校验 |
+| `backend/internal/agentclient/state.go` | opaque ref、命令收件、终态和事件的持久状态 |
+| `backend/internal/agentclient/codex.go` | app-server 语义命令、资源、事件与交互适配 |
+| `backend/internal/agentclient/gateway.go` | WSS、恢复、调度与上行确认 |
 | `docs/agent-runtime/codex-app-server-*.lock.json` | 版本、生成物和全 union 状态 |
 | `backend/internal/application/agentgateway/service.go` | typed command 创建、响应 union 校验、资源刷新 |
 | `backend/internal/infra/persistence/postgres/agentgateway/repository.go` | thread/turn/item/interaction 状态投影与幂等 |
@@ -425,8 +424,8 @@ TaskCenter                              user scope，独立于输入框
 | `frontend/features/chat/components/message` | turn-scoped Plan、文件汇总和 unified diff 入口 |
 | `frontend/features/chat/hooks/use-chat-message-submit.ts` | 服务端输入队列、乐观更新和真实 steer |
 | `frontend/features/chat` | typed execution event、Goal/Run 状态与历史恢复 |
-| `packages/agent-bridge/test/codex-adapter.test.ts` | 双向 JSONL fixture |
-| `packages/agent-bridge/test/codex-process.e2e.test.ts` | 真实锁定进程验收 |
+| `backend/internal/agentclient/agentclient_test.go` | 配置、状态、严格协议与双向 JSONL fixture |
+| `deeix-agent doctor` | 本机官方 Codex CLI、app-server 与设备凭据验收 |
 
 ## 8. 文档修改规则
 
@@ -443,7 +442,7 @@ TaskCenter                              user scope，独立于输入框
 ```text
 schema lock exact match
 TypeScript check
-Agent Bridge fixture suite
+Native Agent fixture suite
 real pinned process lifecycle E2E
 backend agentgateway unit/repository/socket tests
 Conversation gateway projection tests

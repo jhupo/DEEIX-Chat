@@ -35,6 +35,7 @@ Web
 | [08-clean-slate-identity-commerce-runtime.md](./08-clean-slate-identity-commerce-runtime.md) | Sub2API identity/commerce 设计 |
 | [09-local-gateway-design.md](./09-local-gateway-design.md) | Local Bridge、设备、多网关与信任边界 |
 | [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) | app-server 真实进程验收、官方文档差距与实施顺序 |
+| [11-native-agent.md](./11-native-agent.md) | 原生 Agent、安装更新、服务管理、持久恢复与发布合同 |
 | [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) | app-server schema 锁定证据 |
 
 ## 实现入口
@@ -43,9 +44,9 @@ Web
 - Gateway 事件归一化：`backend/internal/application/conversation/service_gateway_projection.go`
 - Conversation 执行事件事务：`backend/internal/infra/persistence/postgres/conversation/repository_execution.go`
 - Gateway 应用服务：`backend/internal/application/agentgateway/service.go`
-- Local Bridge：`packages/agent-bridge`
+- Native Agent：`backend/cmd/deeix-agent` 与 `backend/internal/agentclient`
 
 ## P0 回归
 
-- 默认回归：`pnpm --filter @deeix/agent-bridge test` 与 `go test ./internal/application/agentgateway ./internal/infra/persistence/postgres/agentgateway ./internal/transport/http/agentgateway`。
-- 生产 WSS 全链路：按 [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) 设置 `CODEX_GATEWAY_E2E_*` 后运行 `pnpm --filter @deeix/agent-bridge test:gateway:e2e`。
+- 默认回归：在 `backend` 运行 `go test ./internal/agentclient ./cmd/deeix-agent ./internal/application/agentgateway ./internal/infra/persistence/postgres/agentgateway ./internal/transport/http/agentgateway`。
+- 原生发布回归：按 [11-native-agent.md](./11-native-agent.md) 构建三平台二进制，并使用官方独立 Codex CLI 运行 `deeix-agent doctor` 与真实 WSS 链路。

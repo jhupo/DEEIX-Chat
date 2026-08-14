@@ -6,15 +6,14 @@
 
 ## 1. 接入规则与 schema pin
 
-Bridge launches `codex app-server` with stdio JSONL. The provider protocol is JSON-RPC 2.0 without a header; each line is one object. WebSocket and Unix transports exist upstream, but Bridge uses stdio because it binds process lifecycle locally and keeps app-server off the network. Upstream WebSocket transport is experimental and is not the Bridge transport.
+The native `deeix-agent` launches the user-installed `codex app-server` with stdio JSONL. The provider protocol is JSON-RPC 2.0 without a header; each line is one object. WebSocket and Unix transports exist upstream, but the Agent uses stdio because it binds process lifecycle locally and keeps app-server off the network. Upstream WebSocket transport is not the DEEIX transport.
 
 The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-07). Its reproducible authority is [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions. Adapter startup follows this procedure:
 
-1. Download and verify the lock's release asset, then install the pinned Codex dependency in the Bridge workspace.
-2. Run the lock's stable generator commands without `--experimental`; commit generated source, schema hash and lock together.
-3. Run the lock checker, then compile adapter method registry and fixtures against that output.
-4. Start app-server, send `initialize`, verify protocol/runtime/schema compatibility, then send `initialized`.
-5. Publish manifest `{ runtimeVersion, protocolVersion, schemaHash, capabilities }`; a mismatch produces `schema_mismatch`, which permits diagnostics and blocks command dispatch.
+1. Keep the stable lock as the reviewed protocol evidence and update the native method registry with it.
+2. Run the native Agent tests and build all three target executables.
+3. Start app-server, send `initialize`, verify runtime output, then send `initialized`.
+4. Publish manifest `{ runtimeVersion, protocolVersion, schemaHash, capabilities }`; the server validates every advertised capability.
 
 The lock file and its exact generated schema are implementation authority. The tables below are a human capability summary, not an exhaustive registry. A name outside this stable lock is not advertised or dispatched. Main-branch/experimental drift stays disabled until a separate `--experimental` lock has generated artifacts, hashes, exhaustive dispositions and review.
 
@@ -22,7 +21,7 @@ Official references: [app-server documentation](https://developers.openai.com/co
 
 ## 2. Local adapter boundary
 
-下面的类型片段是边界设计草图，不是编译后的当前合同。当前合同直接查看 `packages/agent-bridge/src/protocol/agent-command.ts`、`resolve-provider-command.ts` 和 `provider-adapter.ts`。
+下面的类型片段是边界设计草图，不是编译后的当前合同。当前合同直接查看 `backend/internal/agentclient/protocol.go`、`codex.go` 和 `gateway.go`。
 
 ```ts
 import type { ThreadMetadataUpdateParams as CodexThreadMetadataUpdateParams } from "./generated/codex-app-server-v0.147.0/v2";

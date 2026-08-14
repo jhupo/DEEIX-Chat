@@ -30,11 +30,11 @@
   },
   "checker": {
     "self_check_command": "node -e \"const fs=require('fs'),c=require('crypto'),x=JSON.parse(fs.readFileSync(process.argv[1],'utf8')),nl=String.fromCharCode(10);for(const u of Object.values(x.unions)){const n=u.members.map(m=>m.name);if(n.length!==u.count||new Set(n).size!==n.length||u.members.some(m=>!['mapped','extension','disabled'].includes(m.disposition))||c.createHash('sha256').update(n.sort().join(nl)+nl).digest('hex')!==u.canonical_members_sha256)throw Error('lock invariant')}\" docs/agent-runtime/codex-app-server-v0.147.0.lock.json",
-    "generated_check_command": "node packages/agent-bridge/scripts/check-codex-app-server-lock.mjs <lock> <generated-ts-dir> <generated-json-dir>",
+    "generated_check_command": "go test ./internal/agentclient",
     "must_fail_on": ["union_member_drift", "count_or_hash_mismatch", "overlapping_dispositions", "missing_disposition"],
     "self_check_scope": ["lock JSON parses", "each union count, unique member set and canonical member hash agree", "each member has exactly one disposition"],
     "generated_check_required": ["generated artifact SHA-256 matches each recorded artifact", "extracted union has exact set equality and recorded count", "recorded union content hash and Git blob evidence match where recorded", "each extracted member has exactly one of mapped, extension, disabled"],
-    "procedure": ["run the locked stable generator commands", "run generated_check_command against the generated TypeScript and JSON directories", "commit the generated artifacts, lock and checker evidence atomically"]
+    "procedure": ["run the locked stable generator commands when updating the pin", "update the native method registry and schema hash", "run generated_check_command from backend", "commit the lock, native adapter and tests atomically"]
   },
   "unions": {
     "ClientNotification": {

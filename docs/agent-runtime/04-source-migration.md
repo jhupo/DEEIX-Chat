@@ -83,7 +83,7 @@ Required Redis supplies cache/wake behavior through a tiny notifier adapter patt
 Add a TypeScript workspace package:
 
 ```text
-packages/agent-bridge/
+backend/internal/agentclient/
   src/index.ts
   src/config/workspace-registry.ts
   src/wal/durable-wal-store.ts
@@ -171,7 +171,7 @@ Implemented: credential exchange, `Sec-WebSocket-Protocol` upgrade, command disp
 
 ### Batch 4: Codex Bridge
 
-Implement Bridge durable WAL store, registry, generated app-server adapter, lifecycle/method registry, event/interaction mapper and fixture tests. Carry allowlisted expiry deadlines, check them before invocation and recovery, and emit Bridge-local `expired` without provider call when invocation never began. Cover typed `thread.metadata.update` `gitInfo` patch with optional nullable `sha`, `branch`, and `originUrl`, source-ref/raw-thread/cwd resolution, Git projection after provider result/event, and idempotent API fixture. Cover crash before invocation marker (one execution), after provider acceptance/before terminal cache (typed recovery with no blind replay), and cached terminal replay. Include initial `thread.create`/follow-on `turn.start` recovery proving source reconciliation and the cloud conditional transition/partial unique prevent duplicate provider thread/turn creation. Generate the stable schema, update [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json), then run `packages/agent-bridge/scripts/check-codex-app-server-lock.mjs` with the lock and generated TypeScript/JSON directories. CI runs that generated-artifact checker after schema generation and fails on artifact SHA-256, recorded Git/blob evidence, union set/count or disposition drift. The lock's `self_check_command` remains a runnable JSON-invariant check only; it does not compare generated artifacts. Commit generated schema, lock, checker evidence and fixtures atomically. Include no-turn MCP elicitation from request through response to `serverRequest/resolved`, plus server-initiated `item/tool/requestUserInput` source-request correlation and typed response fixture. `tool/requestUserInput` is absent from this stable pin. Start with stable lifecycle/thread/turn/item/interaction/resource reads; gate a separately locked experimental surface by manifest.
+Implement the native Agent durable state store, source registry, app-server adapter, lifecycle method registry, event/interaction mapper and fixture tests. Carry bounded deadlines, check them before invocation and recovery, and emit a local terminal error without a provider call when invocation never began. Cover typed `thread.metadata.update` `gitInfo`, source-ref/provider ID/cwd resolution, crash recovery without blind replay, source reconciliation and idempotent cloud projection. Keep [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) as the reviewed stable schema evidence and run `go test ./internal/agentclient` from `backend`. Include no-turn MCP elicitation and server-initiated `item/tool/requestUserInput` source-request correlation. Start with stable lifecycle/thread/turn/interaction/resource reads; gate separately reviewed experimental methods by the provider manifest.
 
 Keep section-operation fixtures out of the mapped method: `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 

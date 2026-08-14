@@ -118,7 +118,7 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 		"agent_devices":                  "本地 Agent 设备表",
 		"agent_credentials":              "Agent 一次性凭据哈希表",
 		"agent_commands":                 "Agent 设备下行命令表",
-		"agent_bridge_frames":            "Agent Bridge 上行终态帧表",
+		"agent_bridge_frames":            "Agent 网关上行终态帧表",
 		"agent_runtime_profiles":         "Agent 本地运行时验证状态表",
 		"agent_runtime_proof_challenges": "Agent 运行时一次性证明挑战表",
 		"agent_workspaces":               "Agent 工作区投影表",
