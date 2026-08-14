@@ -730,6 +730,7 @@ type workspaceSession struct {
 	Preview         string                    `json:"preview"`
 	Name            string                    `json:"name"`
 	ModelProvider   string                    `json:"modelProvider"`
+	Status          string                    `json:"status"`
 	CreatedAt       int64                     `json:"createdAt"`
 	UpdatedAt       int64                     `json:"updatedAt"`
 	Messages        []workspaceSessionMessage `json:"messages"`
@@ -744,7 +745,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		return repository.ErrConflict
 	}
 	var snapshot workspaceSessionSnapshot
-	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Data) > 30 {
+	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Data) > 60 {
 		return repository.ErrConflict
 	}
 	var profile model.AgentRuntimeProfile
@@ -788,7 +789,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 			UserID: device.UserID, PublicID: newChatPublicID(), Title: title, LabelsJSON: "[]",
 			Provider: profile.Provider, ExecutionType: "gateway", ExecutionDeviceID: device.PublicID,
 			ExecutionProfileID: profile.PublicID, ExecutionWorkspaceID: workspace.PublicID,
-			SessionKey: uuid.NewString(), MessageCount: len(session.Messages), Status: "active", ContextPolicy: "{}",
+			SessionKey: uuid.NewString(), MessageCount: len(session.Messages), Status: session.Status, ContextPolicy: "{}",
 			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: updatedAt},
 		}
 		if err := tx.Create(&conversation).Error; err != nil {
@@ -797,7 +798,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		thread := model.AgentThread{
 			PublicID: newRepoPublicID("agth"), UserID: device.UserID, DeviceID: device.ID,
 			RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: conversation.ID,
-			SourceThreadRef: &session.SourceThreadRef, Title: title, Status: "active",
+			SourceThreadRef: &session.SourceThreadRef, Title: title, Status: session.Status,
 		}
 		if err := tx.Create(&thread).Error; err != nil {
 			return err
@@ -821,7 +822,9 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 }
 
 func validWorkspaceSession(session workspaceSession) bool {
-	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) || len(session.Messages) > 200 || len(session.Name) > 1024 || len(session.Preview) > 4096 {
+	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
+		(session.Status != "active" && session.Status != "archived") ||
+		len(session.Messages) > 200 || len(session.Name) > 1024 || len(session.Preview) > 4096 {
 		return false
 	}
 	total := 0
@@ -845,15 +848,19 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		return err
 	}
+	threadUpdates := map[string]any{"status": session.Status, "updated_at": now}
 	if thread.WorkspaceID != workspace.ID {
-		if err := tx.Model(thread).Updates(map[string]any{"workspace_id": workspace.ID, "updated_at": now}).Error; err != nil {
-			return err
-		}
+		threadUpdates["workspace_id"] = workspace.ID
 	}
+	if err := tx.Model(thread).Updates(threadUpdates).Error; err != nil {
+		return err
+	}
+	conversationUpdates := map[string]any{"status": session.Status}
 	if conversation.ExecutionWorkspaceID != workspace.PublicID {
-		if err := tx.Model(&conversation).UpdateColumn("execution_workspace_id", workspace.PublicID).Error; err != nil {
-			return err
-		}
+		conversationUpdates["execution_workspace_id"] = workspace.PublicID
+	}
+	if err := tx.Model(&conversation).Updates(conversationUpdates).Error; err != nil {
+		return err
 	}
 	var stored []model.Message
 	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {

@@ -449,6 +449,21 @@ function buildSections({
         sections.push({ kind: "prompt" as const, items: promptItems });
       }
     }
+    if (enabledKinds.has("model")) {
+      const modelItems = filterModels(modelOptions, normalizedQuery).map((item) => ({
+        ...item,
+        selected: item.model.platformModelName === selectedPlatformModelName,
+      }));
+      if (modelItems.length > 0) {
+        sections.push({ kind: "model" as const, items: modelItems });
+      }
+    }
+    if (enabledKinds.has("tool") && !toolsDisabled) {
+      const toolItems = filterTools(availableTools, normalizedQuery, selectedToolIDs);
+      if (toolItems.length > 0) {
+        sections.push({ kind: "tool" as const, items: toolItems });
+      }
+    }
     if (sections.length === 0) {
       return [];
     }

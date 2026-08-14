@@ -247,6 +247,37 @@ export function mapServerMessage(
   return msg;
 }
 
+export function mergeGatewayAssistantTurns(messages: MessageDTO[]): MessageDTO[] {
+  const merged: MessageDTO[] = [];
+  for (const item of messages) {
+    const previous = merged.at(-1);
+    const sameTurn =
+      previous?.role === "assistant" &&
+      item.role === "assistant" &&
+      !previous.runID.trim() &&
+      !item.runID.trim() &&
+      previous.status === "success" &&
+      item.status === "success" &&
+      previous.branchReason === "default" &&
+      item.branchReason === "default" &&
+      !previous.sourcePublicID.trim() &&
+      !item.sourcePublicID.trim() &&
+      item.parentPublicID.trim() === previous.publicID.trim();
+    if (!sameTurn || !previous) {
+      merged.push(item);
+      continue;
+    }
+    merged[merged.length - 1] = {
+      ...item,
+      content: [previous.content.trim(), item.content.trim()].filter(Boolean).join("\n\n"),
+      createdAt: previous.createdAt,
+      parentMessageID: previous.parentMessageID,
+      parentPublicID: previous.parentPublicID,
+    };
+  }
+  return merged;
+}
+
 export function toBranchKey(publicID?: string | null): string {
   return publicID?.trim() || ROOT_BRANCH_KEY;
 }

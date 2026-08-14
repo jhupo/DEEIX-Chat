@@ -195,60 +195,62 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 
 func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
 	byID := make(map[string]Workspace)
-	seenCursors := make(map[string]struct{})
-	cursor := ""
-	for len(byID) < 128 {
-		params := map[string]any{
-			"limit": 100, "archived": false, "sortKey": "recency_at",
-			"sourceKinds": codexInteractiveSourceKinds,
-		}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		page, err := adapter.requestMap(ctx, "thread/list", params)
-		if err != nil {
-			return nil, fmt.Errorf("list Codex threads: %w", err)
-		}
-		items, ok := page["data"].([]any)
-		if !ok {
-			return nil, errors.New("Codex thread catalog is invalid")
-		}
-		for _, raw := range items {
-			thread, ok := raw.(map[string]any)
+	for _, archived := range []bool{false, true} {
+		seenCursors := make(map[string]struct{})
+		cursor := ""
+		for len(byID) < 128 {
+			params := map[string]any{
+				"limit": 100, "archived": archived, "sortKey": "recency_at",
+				"sourceKinds": codexInteractiveSourceKinds,
+			}
+			if cursor != "" {
+				params["cursor"] = cursor
+			}
+			page, err := adapter.requestMap(ctx, "thread/list", params)
+			if err != nil {
+				return nil, fmt.Errorf("list Codex threads: %w", err)
+			}
+			items, ok := page["data"].([]any)
 			if !ok {
-				continue
+				return nil, errors.New("Codex thread catalog is invalid")
 			}
-			root, _ := thread["cwd"].(string)
-			root = strings.TrimSpace(root)
-			if root == "" {
-				continue
-			}
-			workspace, workspaceErr := codexProjectWorkspace(root)
-			if workspaceErr != nil {
-				continue
-			}
-			sessionRoot := workspace.SessionRoots[0]
-			if existing, exists := byID[workspace.WorkspaceID]; exists {
-				workspace = existing
-				if !slices.Contains(workspace.SessionRoots, sessionRoot) {
-					workspace.SessionRoots = append(workspace.SessionRoots, sessionRoot)
+			for _, raw := range items {
+				thread, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				root, _ := thread["cwd"].(string)
+				root = strings.TrimSpace(root)
+				if root == "" {
+					continue
+				}
+				workspace, workspaceErr := codexProjectWorkspace(root)
+				if workspaceErr != nil {
+					continue
+				}
+				sessionRoot := workspace.SessionRoots[0]
+				if existing, exists := byID[workspace.WorkspaceID]; exists {
+					workspace = existing
+					if !slices.Contains(workspace.SessionRoots, sessionRoot) {
+						workspace.SessionRoots = append(workspace.SessionRoots, sessionRoot)
+					}
+				}
+				byID[workspace.WorkspaceID] = workspace
+				if len(byID) == 128 {
+					break
 				}
 			}
-			byID[workspace.WorkspaceID] = workspace
-			if len(byID) == 128 {
+			nextCursor, _ := page["nextCursor"].(string)
+			nextCursor = strings.TrimSpace(nextCursor)
+			if nextCursor == "" {
 				break
 			}
+			if _, duplicate := seenCursors[nextCursor]; duplicate {
+				return nil, errors.New("Codex thread catalog cursor repeated")
+			}
+			seenCursors[nextCursor] = struct{}{}
+			cursor = nextCursor
 		}
-		nextCursor, _ := page["nextCursor"].(string)
-		nextCursor = strings.TrimSpace(nextCursor)
-		if nextCursor == "" {
-			break
-		}
-		if _, duplicate := seenCursors[nextCursor]; duplicate {
-			return nil, errors.New("Codex thread catalog cursor repeated")
-		}
-		seenCursors[nextCursor] = struct{}{}
-		cursor = nextCursor
 	}
 	workspaces := make([]Workspace, 0, len(byID))
 	for _, workspace := range byID {
@@ -442,7 +444,13 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	case "hooks":
 		params["cwds"] = []string{cwd}
 	}
-	data, err := adapter.requestAny(ctx, method, params)
+	var data any
+	var err error
+	if name == "sessions" {
+		data, err = adapter.listSessions(ctx, params)
+	} else {
+		data, err = adapter.requestAny(ctx, method, params)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -458,6 +466,41 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 		data = sanitizeResource(data, "")
 	}
 	return map[string]any{"kind": "resource", "resource": name, "data": data}, nil
+}
+
+func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string]any) (any, error) {
+	items := make([]any, 0, 60)
+	for _, archived := range []bool{false, true} {
+		request := make(map[string]any, len(params))
+		for key, value := range params {
+			request[key] = value
+		}
+		request["archived"] = archived
+		page, err := adapter.requestMap(ctx, "thread/list", request)
+		if err != nil {
+			return nil, err
+		}
+		pageItems, ok := page["data"].([]any)
+		if !ok {
+			return nil, errors.New("Codex session catalog is invalid")
+		}
+		status := "active"
+		if archived {
+			status = "archived"
+		}
+		for index, raw := range pageItems {
+			if index == 30 {
+				break
+			}
+			thread, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			thread["status"] = status
+			items = append(items, thread)
+		}
+	}
+	return map[string]any{"data": items}, nil
 }
 
 func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any, error) {
@@ -480,7 +523,7 @@ func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any
 		}
 		result = append(result, map[string]any{
 			"sourceThreadRef": sourceRef, "preview": thread["preview"], "name": thread["name"], "modelProvider": thread["modelProvider"],
-			"createdAt": thread["createdAt"], "updatedAt": thread["updatedAt"], "recencyAt": thread["recencyAt"], "status": "active", "messages": messages,
+			"createdAt": thread["createdAt"], "updatedAt": thread["updatedAt"], "recencyAt": thread["recencyAt"], "status": thread["status"], "messages": messages,
 		})
 	}
 	return map[string]any{"data": result}, nil
@@ -940,7 +983,8 @@ func projectSessionMessages(detail map[string]any) []any {
 	for _, rawTurn := range turns {
 		turn, _ := rawTurn.(map[string]any)
 		items, _ := turn["items"].([]any)
-		reasoning := ""
+		reasoningParts := make([]string, 0)
+		assistantParts := make([]string, 0)
 		for _, rawItem := range items {
 			item, _ := rawItem.(map[string]any)
 			switch item["type"] {
@@ -958,18 +1002,23 @@ func projectSessionMessages(detail map[string]any) []any {
 				}
 			case "reasoning":
 				parts := append(stringSlice(item["summary"]), stringSlice(item["content"])...)
-				reasoning = strings.Join(parts, "\n")
+				reasoningParts = append(reasoningParts, parts...)
 			case "agentMessage":
 				text := strings.TrimSpace(fmt.Sprint(item["text"]))
 				if text != "" {
-					message := map[string]any{"role": "assistant", "content": text, "createdAt": firstValue(turn["completedAt"], turn["startedAt"])}
-					if reasoning != "" {
-						message["reasoningContent"] = reasoning
-					}
-					messages = append(messages, message)
-					reasoning = ""
+					assistantParts = append(assistantParts, text)
 				}
 			}
+		}
+		if len(assistantParts) > 0 {
+			message := map[string]any{
+				"role": "assistant", "content": strings.Join(assistantParts, "\n\n"),
+				"createdAt": firstValue(turn["completedAt"], turn["startedAt"]),
+			}
+			if len(reasoningParts) > 0 {
+				message["reasoningContent"] = strings.Join(reasoningParts, "\n")
+			}
+			messages = append(messages, message)
 		}
 	}
 	start, size := len(messages), 0

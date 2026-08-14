@@ -444,6 +444,7 @@ async function refreshGeneratedConversationMetadata(
 export function useChatMessageSubmit({
   conversationID,
   conversationScopeKey,
+  executionMode,
   activeConversation,
   selectedPlatformModelName,
   selectedKeyBindingID,
@@ -489,6 +490,7 @@ export function useChatMessageSubmit({
 }: {
   conversationID: string | null;
   conversationScopeKey: string;
+  executionMode: "cloud" | "gateway";
   activeConversation: ConversationDTO | null;
   selectedPlatformModelName: string;
   selectedKeyBindingID: string;
@@ -727,9 +729,15 @@ export function useChatMessageSubmit({
       const requestPlatformModelName = (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim();
       const requestKeyBindingID = (queuedSubmission?.keyBindingID ?? selectedKeyBindingID).trim();
       const requestOptions = queuedSubmission?.options ?? options;
-      const requestSelectedToolIDs = queuedSubmission?.selectedToolIDs ?? selectedToolIDs;
-      const requestSelectedSkills = queuedSubmission?.selectedSkills ?? selectedSkills;
-      const requestHTMLVisualPromptEnabled = queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled;
+      const requestExecutionMode = queuedSubmission?.conversation?.executionType ?? executionMode;
+      const requestSelectedToolIDs = requestExecutionMode === "cloud"
+        ? queuedSubmission?.selectedToolIDs ?? selectedToolIDs
+        : [];
+      const requestSelectedSkills = requestExecutionMode === "cloud"
+        ? queuedSubmission?.selectedSkills ?? selectedSkills
+        : [];
+      const requestHTMLVisualPromptEnabled = requestExecutionMode === "cloud" &&
+        (queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled);
       let targetConversationScopeKey = queuedSubmission?.conversationScopeKey ?? conversationScopeKeyRef.current;
       const resolvedParentPublicID = resolvePersistedPublicID(parentMessagePublicID);
       const targetBranchScopePath = queuedSubmission?.branchScopePath.slice() ??
@@ -805,10 +813,10 @@ export function useChatMessageSubmit({
         return false;
       }
       const submitTask = submitDecision.task;
-      if (submitTask === "chat" && !requestKeyBindingID) {
+      if (submitTask === "chat" && requestExecutionMode === "cloud" && !requestKeyBindingID) {
         return false;
       }
-      if (!requestPlatformModelName) {
+      if (requestExecutionMode === "cloud" && !requestPlatformModelName) {
         toast.error(t("noModel"), { description: t("selectModelFirst") });
         return false;
       }
@@ -1038,9 +1046,9 @@ export function useChatMessageSubmit({
           options: Object.keys(sanitizedOptions).length > 0 ? sanitizedOptions : undefined,
           clientRunID: clientRunID,
           fileIDs: effectiveAttachments.length > 0 ? effectiveAttachments.map((item) => item.fileID) : undefined,
-          parentMessagePublicID: resolvedParentPublicID || undefined,
-          sourceMessagePublicID: resolvedSourcePublicID || undefined,
-          branchReason: resolvedBranchReason,
+          parentMessagePublicID: requestExecutionMode === "cloud" ? resolvedParentPublicID || undefined : undefined,
+          sourceMessagePublicID: requestExecutionMode === "cloud" ? resolvedSourcePublicID || undefined : undefined,
+          branchReason: requestExecutionMode === "cloud" ? resolvedBranchReason : "default",
         };
         let terminalStreamError: Extract<StreamMessageEvent, { type: "error" }> | null = null;
         const streamOptions: ConversationStreamOptions = {
@@ -1463,6 +1471,7 @@ export function useChatMessageSubmit({
       modelOptions,
       selectedToolIDs,
       selectedSkills,
+      executionMode,
       htmlVisualPromptEnabled,
       selectedPlatformModelName,
       setAttachments,

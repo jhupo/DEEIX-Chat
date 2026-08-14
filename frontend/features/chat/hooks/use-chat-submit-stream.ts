@@ -20,6 +20,7 @@ import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 export function useChatSubmitStream({
   conversationID,
   conversationScopeKey,
+  executionMode,
   activeConversation,
   selectedPlatformModelName,
   selectedKeyBindingID,
@@ -59,6 +60,7 @@ export function useChatSubmitStream({
 }: {
   conversationID: string | null;
   conversationScopeKey: string;
+  executionMode: "cloud" | "gateway";
   activeConversation: ConversationDTO | null;
   selectedPlatformModelName: string;
   selectedKeyBindingID: string;
@@ -103,6 +105,7 @@ export function useChatSubmitStream({
   const messageSubmit = useChatMessageSubmit({
     conversationID,
     conversationScopeKey,
+    executionMode,
     activeConversation,
     selectedPlatformModelName,
     selectedKeyBindingID,

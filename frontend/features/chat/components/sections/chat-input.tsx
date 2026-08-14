@@ -89,6 +89,7 @@ type QueuedComposerMessage = {
 
 type ChatInputProps = {
   draft: string;
+  executionMode: "cloud" | "gateway";
   loading: boolean;
   sending: boolean;
   uploading: boolean;
@@ -230,6 +231,7 @@ function formatAttachmentMeta(fileName: string, sizeBytes: number) {
 
 function ChatInputComponent({
   draft,
+  executionMode,
   loading,
   sending,
   uploading,
@@ -393,15 +395,15 @@ function ChatInputComponent({
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
   const submitTask = submitDecision.task;
-  const requiresKeyBinding = submitTask === "chat";
-  const chatRouteReady = Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
-  const canSend = hasSubmitContent && !loading && !uploading && (!requiresKeyBinding || chatRouteReady);
+  const requiresCloudRoute = submitTask === "chat" && executionMode === "cloud";
+  const chatRouteReady = executionMode === "gateway" || Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
+  const canSend = hasSubmitContent && !loading && !uploading && (!requiresCloudRoute || chatRouteReady);
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
   const modelOptionPolicyDisabled = modelOptionPolicy?.mode?.trim() === "disabled";
   const showMCPToolsButton = availableTools.length > 0 && !isMediaMode;
-  const showHTMLVisualPromptButton = !isMediaMode;
+  const showHTMLVisualPromptButton = executionMode === "cloud" && !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
   const showSelectedSkills = selectedSkills.length > 0 && !isMediaMode;
   const {
@@ -1049,7 +1051,7 @@ function ChatInputComponent({
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || (requiresKeyBinding && !selectedKeyBindingID) || (!sending && !hasSubmitContent && !speechInput.supported)}
+                disabled={loading || uploading || (requiresCloudRoute && !chatRouteReady) || (!sending && !hasSubmitContent && !speechInput.supported)}
                 onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}

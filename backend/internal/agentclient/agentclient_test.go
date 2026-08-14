@@ -324,6 +324,32 @@ func TestLockedAppServerContractMatchesNativeRegistry(t *testing.T) {
 	assertMappedSet(t, lock.Unions["ServerNotification"].Members, mappedNotifications)
 }
 
+func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(`{
+		"thread":{"turns":[{
+			"startedAt":1786615200,
+			"completedAt":1786615260,
+			"items":[
+				{"type":"userMessage","content":[{"type":"text","text":"inspect"}]},
+				{"type":"reasoning","summary":["checked configuration"],"content":[]},
+				{"type":"agentMessage","text":"first paragraph"},
+				{"type":"agentMessage","text":"second paragraph"}
+			]
+		}]}
+	}`), &detail); err != nil {
+		t.Fatal(err)
+	}
+	messages := projectSessionMessages(detail)
+	if len(messages) != 2 {
+		t.Fatalf("projected messages = %#v", messages)
+	}
+	assistant, ok := messages[1].(map[string]any)
+	if !ok || assistant["content"] != "first paragraph\n\nsecond paragraph" || assistant["reasoningContent"] != "checked configuration" {
+		t.Fatalf("projected assistant message = %#v", messages[1])
+	}
+}
+
 func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	root, err := os.MkdirTemp(".", ".agent-codex-workspace-")
 	if err != nil {

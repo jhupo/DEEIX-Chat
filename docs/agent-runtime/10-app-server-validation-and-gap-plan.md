@@ -110,7 +110,7 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；`thread/list` + `thread/read(includeTurns:true)` 导入历史 | 所选设备连接后自动刷新 `sessions`，将 user/assistant/reasoning 消息显示在对应 Workspace | 已接通；设备间隔离，当前每个 Workspace 取最近 30 个未归档会话 |
+| 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；活动与归档目录分别通过 `thread/list` 读取，再以 `thread/read(includeTurns:true)` 导入历史 | 所选设备连接后自动刷新 `sessions`，将 user/assistant/reasoning 消息显示在对应 Workspace；同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；设备间隔离，当前每个 Workspace 分别取最近 30 个活动会话和 30 个归档会话 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
@@ -124,7 +124,7 @@ deeix-agent doctor
 | 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 当前“插件”入口仍只读取平台 Skill/Prompt 数据 | 后端能力已具备；统一资源适配接口和 UI 投影待接入 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-聊天和工作共用原有导航、最近会话、项目树、搜索和“插件”入口。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
+聊天和工作共用原有导航、最近会话、项目树、搜索和“插件”入口。聊天输入框的 `/` 菜单复用现有选择器，统一展示平台 Skill、Prompt、模型和 MCP 功能；工作模式不把这些平台资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
 
 本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口并展示平台 Skill/Prompt；本地 Skill/Plugin 在统一资源 adapter 完成前不伪装为另一套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 
@@ -257,9 +257,9 @@ deeix-agent doctor
 
 验收：决策逐项 fixture；请求未提供 amendment 时提交 candidate ref 会失败；session decision 不跨 thread/profile。
 
-#### 6.8 Session 资源固定 30 条且状态写死
+#### 6.8 Session 资源分页与读取成本
 
-现状：`sessions` 固定 `limit: 30`，逐条 `thread/read`，忽略 cursor，投影状态固定为 `active`。这会产生 N+1 调用并把 archived/idle/notLoaded 状态写错。
+现状：`sessions` 已分别读取最近 30 个活动会话和 30 个归档会话，并将归档状态投影到 Conversation；同一 turn 的 reasoning 与多个 `agentMessage` 项会规范化为一条助手消息。当前仍逐条调用 `thread/read` 且未暴露 cursor，因此大量历史会话会产生 N+1 调用。
 
 修改：
 

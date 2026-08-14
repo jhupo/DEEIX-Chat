@@ -323,16 +323,17 @@ export function AppChatArea() {
     () => projects.find((item) => item.publicID === newConversationProjectID) ?? null,
     [newConversationProjectID, projects],
   );
-  const executionProjectID = newConversationProjectID || projects[0]?.publicID || "";
+  const selectedProjectID = newConversationProject?.publicID ?? "";
+  const executionProjectID = selectedProjectID || projects[0]?.publicID || "";
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) => prependNewConversation(
       platformModelName,
-      executionMode === "gateway" ? executionProjectID : newConversationProjectID || undefined,
+      executionMode === "gateway" ? executionProjectID : selectedProjectID || undefined,
       executionMode === "gateway"
         ? { type: "gateway", deviceID: defaultDevice?.deviceId ?? "" }
         : { type: "cloud" },
     ),
-    [defaultDevice, executionMode, executionProjectID, newConversationProjectID, prependNewConversation],
+    [defaultDevice, executionMode, executionProjectID, prependNewConversation, selectedProjectID],
   );
   const chatKeyBindings = useChatKeyBindings();
 
@@ -649,6 +650,7 @@ export function AppChatArea() {
   } = useChatRuntime({
     conversationID,
     resetToken: newConversationRevision,
+    executionMode,
     messages,
     activeConversation: currentConversation,
     selectedPlatformModelName,
@@ -656,7 +658,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
-    htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
+    htmlVisualPromptEnabled: executionMode === "cloud" && htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
     draft,
     attachments,
@@ -1166,6 +1168,7 @@ export function AppChatArea() {
 
   const chatInputProps = {
     draft,
+    executionMode,
     loading,
     sending: generating,
     uploading,
@@ -1180,9 +1183,9 @@ export function AppChatArea() {
     requestProtocol: selectedChatProtocol,
     selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
     selectedPlatformModelName,
-    availableTools,
-    selectedToolIDs,
-    selectedSkills,
+    availableTools: executionMode === "cloud" ? availableTools : [],
+    selectedToolIDs: executionMode === "cloud" ? selectedToolIDs : [],
+    selectedSkills: executionMode === "cloud" ? selectedSkills : [],
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,

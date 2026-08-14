@@ -430,7 +430,7 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 	}
 	bucket := now.Truncate(time.Hour).Format(time.RFC3339)
 	for _, item := range items {
-		key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+		key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:v2:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
 		if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "sessions", key); err != nil {
 			return err
 		}

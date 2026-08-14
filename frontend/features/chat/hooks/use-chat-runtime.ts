@@ -6,6 +6,7 @@ import type { PendingAttachment, PendingExchangeMap } from "@/features/chat/type
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
 import { useChatBranchState } from "@/features/chat/hooks/use-chat-branch-state";
 import { useChatSubmitStream } from "@/features/chat/hooks/use-chat-submit-stream";
+import { mergeGatewayAssistantTurns } from "@/features/chat/model/chat-thread";
 import type {
   ConversationDTO,
   ConversationOptions,
@@ -89,6 +90,7 @@ function useScopedPendingExchanges(conversationScopeKey: string) {
 export function useChatRuntime({
   conversationID,
   resetToken,
+  executionMode,
   messages,
   activeConversation,
   selectedPlatformModelName,
@@ -118,6 +120,7 @@ export function useChatRuntime({
 }: {
   conversationID: string | null;
   resetToken: number;
+  executionMode: "cloud" | "gateway";
   messages: MessageDTO[];
   activeConversation: ConversationDTO | null;
   selectedPlatformModelName: string;
@@ -157,12 +160,16 @@ export function useChatRuntime({
     const normalized = resumingRunID.trim();
     return normalized ? new Set([normalized]) : undefined;
   }, [resumingRunID]);
+  const executionMessages = React.useMemo(
+    () => executionMode === "gateway" ? mergeGatewayAssistantTurns(messages) : messages,
+    [executionMode, messages],
+  );
 
   const branchState = useChatBranchState({
     conversationID,
     conversationScopeKey,
     resetToken,
-    messages,
+    messages: executionMessages,
     pendingExchanges,
     liveRunIDs: liveServerRunIDs,
   });
@@ -184,6 +191,7 @@ export function useChatRuntime({
   const submitState = useChatSubmitStream({
     conversationID,
     conversationScopeKey,
+    executionMode,
     activeConversation,
     selectedPlatformModelName,
     selectedKeyBindingID,
