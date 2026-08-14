@@ -25,27 +25,45 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [defaultDeviceId, setDefaultDeviceId] = React.useState("");
   const [loading, setLoading] = React.useState(true);
 
-  const refresh = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const [nextDevices, settings] = await Promise.all([
-        listAgentDevices(accessToken),
-        getUserSettings(accessToken),
-      ]);
-      const active = nextDevices.filter((item) => item.status === "active");
-      const saved = settings[DEFAULT_DEVICE_KEY]?.trim() ?? "";
-      const nextDefaultId = active.some((item) => item.deviceId === saved) ? saved : (active[0]?.deviceId ?? "");
-      setDevices(nextDevices);
-      setDefaultDeviceId(nextDefaultId);
-    } catch {
-      setDevices([]);
-      setDefaultDeviceId("");
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken]);
+  const applyDevices = React.useCallback((nextDevices: AgentDeviceDTO[], preferredDeviceId?: string) => {
+    const active = nextDevices.filter((item) => item.status === "active");
+    setDevices(nextDevices);
+    setDefaultDeviceId((current) => {
+      const preferred = preferredDeviceId ?? current;
+      return active.some((item) => item.deviceId === preferred) ? preferred : (active[0]?.deviceId ?? "");
+    });
+  }, []);
 
-  React.useEffect(() => { void refresh(); }, [refresh]);
+  const refresh = React.useCallback(async () => {
+    try {
+      applyDevices(await listAgentDevices(accessToken));
+    } catch {
+      // Keep the last known state during a transient polling failure.
+    }
+  }, [accessToken, applyDevices]);
+
+  React.useEffect(() => {
+    let active = true;
+    setLoading(true);
+    void Promise.all([listAgentDevices(accessToken), getUserSettings(accessToken)])
+      .then(([nextDevices, settings]) => {
+        if (active) applyDevices(nextDevices, settings[DEFAULT_DEVICE_KEY]?.trim() ?? "");
+      })
+      .catch(() => {
+        if (active) {
+          setDevices([]);
+          setDefaultDeviceId("");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    const timer = window.setInterval(() => { void refresh(); }, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [accessToken, applyDevices, refresh]);
 
   const selectDefaultDevice = React.useCallback(async (deviceId: string) => {
     const selected = devices.find((item) => item.deviceId === deviceId && item.status === "active");

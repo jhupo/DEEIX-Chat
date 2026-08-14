@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -187,6 +188,74 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest.ThreadSettings.ApprovalPolicy = []string{"untrusted", "on-request", "never"}
 	manifest.ThreadSettings.SandboxPolicy = []string{"read-only", "workspace-write"}
 	return manifest
+}
+
+func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
+	byID := make(map[string]Workspace)
+	seenCursors := make(map[string]struct{})
+	cursor := ""
+	for len(byID) < 128 {
+		params := map[string]any{"limit": 100, "archived": false}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		page, err := adapter.requestMap(ctx, "thread/list", params)
+		if err != nil {
+			return nil, fmt.Errorf("list Codex threads: %w", err)
+		}
+		items, ok := page["data"].([]any)
+		if !ok {
+			return nil, errors.New("Codex thread catalog is invalid")
+		}
+		for _, raw := range items {
+			thread, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			root, _ := thread["cwd"].(string)
+			root = strings.TrimSpace(root)
+			if root == "" {
+				continue
+			}
+			workspace, workspaceErr := CanonicalWorkspace(root)
+			if workspaceErr != nil {
+				continue
+			}
+			byID[workspace.WorkspaceID] = workspace
+			if len(byID) == 128 {
+				break
+			}
+		}
+		nextCursor, _ := page["nextCursor"].(string)
+		nextCursor = strings.TrimSpace(nextCursor)
+		if nextCursor == "" {
+			break
+		}
+		if _, duplicate := seenCursors[nextCursor]; duplicate {
+			return nil, errors.New("Codex thread catalog cursor repeated")
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
+	}
+	workspaces := make([]Workspace, 0, len(byID))
+	for _, workspace := range byID {
+		workspaces = append(workspaces, workspace)
+	}
+	sort.Slice(workspaces, func(left, right int) bool {
+		leftName, rightName := strings.ToLower(workspaces[left].Name), strings.ToLower(workspaces[right].Name)
+		if leftName == rightName {
+			return workspaces[left].WorkspaceID < workspaces[right].WorkspaceID
+		}
+		return leftName < rightName
+	})
+	return workspaces, nil
+}
+
+func (adapter *CodexAdapter) replaceWorkspaces(workspaces []Workspace) {
+	adapter.workspaces = make(map[string]Workspace, len(workspaces))
+	for _, workspace := range workspaces {
+		adapter.workspaces[workspace.WorkspaceID] = workspace
+	}
 }
 
 func (adapter *CodexAdapter) ProveRuntimeAuth(ctx context.Context, challenge string) (string, error) {

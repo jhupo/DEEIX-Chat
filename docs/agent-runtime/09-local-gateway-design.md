@@ -29,15 +29,19 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 
 聊天与工作是互斥的数据域。Conversation 列表、搜索和 Project 查询必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域返回 Cloud Conversation 和 Cloud Project；Gateway Adapter 将所选设备的 Workspace 和 Gateway Conversation 投影为相同 Project/Conversation DTO。切换模式或设备会重建数据作用域，界面不会同时合并或标注两套数据。
 
+Bridge 启动后先通过无 `cwd` 过滤的 `thread/list` 分页读取本机 Codex 线程目录，以每条线程返回的 canonical `cwd` 去重并生成 Workspace。安装命令所在目录不参与 Project 投影；没有历史线程时设备仍保持在线，Workspace 列表为空。Cloud 的 Workspace 查询只返回当前所选 Device 上本次连接仍为 `available` 的记录，其他设备和旧目录均不进入结果。
+
 创建请求只携带统一 `projectID` 和 `execution(type/device)`。Cloud Project 直接解析；Gateway Adapter 校验 Workspace 属于该用户和设备，解析对应 Profile 后写入 Conversation 执行绑定。Web 不提交 `profileID/workspaceID` 组合，也不直接请求 Workspace sessions 来拼装导航。
 
 Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurns=true)` 读取最近的 Codex 线程。Bridge 只上传 opaque thread ref、标题、时间以及裁剪后的用户/助手文本；provider raw ID、本地路径、命令输出和凭据留在设备。Cloud 在接收资源终态的同一事务内创建或增量更新 Conversation/Message 投影，并将 `AgentThread` 绑定到原 opaque thread ref。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
+
+每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Workspace 和小时桶幂等下发一次 `sessions` 刷新。首次连接会自动导入历史；同一小时内的 WSS 重连复用原命令，不重复扫描全部线程。
 
 ## 2.1 安装、注册与更新
 
 账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Agent 包一并放入前端静态目录，用户机器不直接连接 GitHub。Agent 包只有原生可执行文件，不携带 Node.js 或 Codex；用户机器必须预先安装组件完整的官方 Codex CLI。安装时解析并保存 CLI 绝对路径，也可通过 `--codex` / `-Codex` 明确指定。
 
-Agent 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与 Workspace 校验，再原子替换程序目录。重复运行安装命令会停止原常驻进程、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows SCM 系统服务重新启动。Windows SCM 只承载一个 Agent 进程，并以安装用户的活动会话令牌启动 `codex app-server` 子进程。程序包与身份数据分目录，客户端更新不会改变设备 ID。
+Agent 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与引导目录校验，再原子替换程序目录。引导目录仅用于安装阶段的本地路径校验，不进入运行时 Project 列表。重复运行安装命令会停止原常驻进程、校验并覆盖程序、复用私钥完成幂等注册，最后用 systemd user service、LaunchAgent 或 Windows SCM 系统服务重新启动。Windows SCM 只承载一个 Agent 进程，并以安装用户的活动会话令牌启动 `codex app-server` 子进程。程序包与身份数据分目录，客户端更新不会改变设备 ID。
 
 ## 3. 强类型命令
 

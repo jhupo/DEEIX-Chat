@@ -80,6 +80,20 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 	if err != nil {
 		return err
 	}
+	discoveryContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	discoveredWorkspaces, err := adapter.DiscoverWorkspaces(discoveryContext)
+	cancel()
+	if err != nil {
+		_ = adapter.Close()
+		return err
+	}
+	config.Workspaces = discoveredWorkspaces
+	gateway.config = config
+	gateway.workspaces = make(map[string]Workspace, len(discoveredWorkspaces))
+	for _, workspace := range discoveredWorkspaces {
+		gateway.workspaces[workspace.WorkspaceID] = workspace
+	}
+	adapter.replaceWorkspaces(discoveredWorkspaces)
 	gateway.adapter = adapter
 	defer adapter.Close()
 	defer func() { _ = gateway.writeStatus("stopped", "") }()

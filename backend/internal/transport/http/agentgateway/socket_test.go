@@ -50,6 +50,17 @@ func TestClientFramesRejectServerArtifactGrants(t *testing.T) {
 	}
 }
 
+func TestAuthProofAllowsDeviceWithoutCodexProjects(t *testing.T) {
+	frame := bridgeFrame{
+		Version: bridgeVersion, Type: "auth.proof", ProfileID: "profile_1",
+		ChallengeID: "agp_0123456789abcdef0123456789abcdef", Proof: strings.Repeat("p", 43),
+		Manifest: json.RawMessage(testProviderManifest),
+	}
+	if !validAuthProofFrame(frame) {
+		t.Fatal("an online device without Codex projects was rejected")
+	}
+}
+
 func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	const token = "deeix_connection_test_value"
 	const runtimeKey = "sk-test-runtime-key"
@@ -360,8 +371,13 @@ func (*socketRepo) ListArtifactsForCommand(context.Context, uint, uint, []string
 func (*socketRepo) GetArtifactForCommand(context.Context, string, string) (*domainagent.Artifact, *domainagent.Command, error) {
 	return nil, nil, repository.ErrNotFound
 }
-func (*socketRepo) QueueResourceRefresh(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
-	return nil, repository.ErrNotFound
+func (r *socketRepo) QueueResourceRefresh(_ context.Context, _, _ string, userID uint, deviceID, profileID, workspaceID, resourceName string, command *domainagent.Command, _ time.Time) (*domainagent.Command, error) {
+	if userID != r.device.UserID || deviceID != r.device.PublicID || profileID != "" || workspaceID != "workspace_1" || resourceName != "sessions" || command == nil {
+		return nil, repository.ErrConflict
+	}
+	created := *command
+	created.State = "queued"
+	return &created, nil
 }
 func (*socketRepo) GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error) {
 	return nil, repository.ErrNotFound

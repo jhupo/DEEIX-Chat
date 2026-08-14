@@ -434,7 +434,7 @@ func validTerminalFrame(frame bridgeFrame) bool {
 func validAuthProofFrame(frame bridgeFrame) bool {
 	if !validProfileID(frame.ProfileID) || !strings.HasPrefix(frame.ChallengeID, "agp_") ||
 		len(frame.ChallengeID) != 36 || len(frame.Proof) < 43 || len(frame.Proof) > 64 ||
-		len(frame.Workspaces) == 0 || len(frame.Workspaces) > 128 {
+		len(frame.Workspaces) > 128 {
 		return false
 	}
 	seen := make(map[string]struct{}, len(frame.Workspaces))

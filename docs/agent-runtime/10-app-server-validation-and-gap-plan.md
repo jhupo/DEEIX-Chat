@@ -110,7 +110,7 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地会话历史 | `thread/list` + `thread/read(includeTurns:true)` 已映射并实测 | `sessions` 刷新会导入 user/assistant/reasoning 消息并显示在对应 Workspace | 已接通，但当前只取最近 30 个未归档会话 |
+| 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；`thread/list` + `thread/read(includeTurns:true)` 导入历史 | 所选设备连接后自动刷新 `sessions`，将 user/assistant/reasoning 消息显示在对应 Workspace | 已接通；设备间隔离，当前每个 Workspace 取最近 30 个未归档会话 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
@@ -285,7 +285,7 @@ deeix-agent doctor
 
 #### 6.10 本地生命周期、Workspace 注册与 Diff 产品闭环
 
-现状：新建本地会话、导入历史和继续输入已经使用同一 `sourceThreadRef` 闭环。删除与归档页面只修改 DEEIX Conversation，尚未调用已经映射的 `thread/delete|archive|unarchive`。本地 Workspace 只来自 Bridge 配置；Diff 通知虽已进入统一事件流，前端没有结构化展示或刷新恢复。
+现状：新建本地会话、导入历史和继续输入已经使用同一 `sourceThreadRef` 闭环。删除与归档页面只修改 DEEIX Conversation，尚未调用已经映射的 `thread/delete|archive|unarchive`。本地 Workspace 由 Bridge 从 app-server 全局线程目录自动发现；Diff 通知虽已进入统一事件流，前端没有结构化展示或刷新恢复。
 
 修改：
 

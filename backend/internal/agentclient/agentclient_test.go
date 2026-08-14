@@ -290,7 +290,12 @@ func TestLockedAppServerContractMatchesNativeRegistry(t *testing.T) {
 }
 
 func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
-	root := t.TempDir()
+	root, err := os.MkdirTemp(".", ".agent-codex-workspace-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	t.Setenv("DEEIX_TEST_THREAD_CWD", root)
 	state, err := OpenStateStore(filepath.Join(root, "state.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -328,6 +333,17 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	}, nil)
 	if err != nil || result["kind"] != "resource" {
 		t.Fatalf("resource request failed: %#v %v", result, err)
+	}
+	workspaces, err := adapter.DiscoverWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := CanonicalWorkspace(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces) != 1 || workspaces[0] != want {
+		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 }
 
@@ -369,6 +385,13 @@ func runFakeAppServer() {
 			result = map[string]any{"authMethod": "apikey", "authToken": "sub2-test-key", "requiresOpenaiAuth": false}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "gpt-test", "displayName": "GPT Test"}}}
+		case "thread/list":
+			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
+			result = map[string]any{"data": []any{
+				map[string]any{"id": "thread-1", "cwd": root},
+				map[string]any{"id": "thread-2", "cwd": root},
+				map[string]any{"id": "thread-missing-cwd"},
+			}, "nextCursor": nil}
 		}
 		var id any
 		_ = json.Unmarshal(request["id"], &id)

@@ -1431,9 +1431,12 @@ func (r *Repo) SyncWorkspaces(ctx context.Context, userID, deviceID, profileID u
 			}
 			publicIDs = append(publicIDs, item.PublicID)
 		}
-		return tx.Model(&model.AgentWorkspace{}).
-			Where("user_id = ? AND device_id = ? AND runtime_profile_id = ? AND public_id NOT IN ?", userID, deviceID, profileID, publicIDs).
-			Update("status", "unavailable").Error
+		stale := tx.Model(&model.AgentWorkspace{}).
+			Where("user_id = ? AND device_id = ? AND runtime_profile_id = ?", userID, deviceID, profileID)
+		if len(publicIDs) > 0 {
+			stale = stale.Where("public_id NOT IN ?", publicIDs)
+		}
+		return stale.Update("status", "unavailable").Error
 	}))
 }
 
@@ -1460,7 +1463,7 @@ func (r *Repo) ListWorkspaces(ctx context.Context, userID uint, devicePublicID s
 		Select("workspaces.*, profiles.public_id AS profile_public_id").
 		Joins("JOIN agent_devices AS devices ON devices.id = workspaces.device_id").
 		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = workspaces.runtime_profile_id").
-		Where("workspaces.user_id = ? AND devices.public_id = ?", userID, devicePublicID).
+		Where("workspaces.user_id = ? AND devices.public_id = ? AND workspaces.status = ?", userID, devicePublicID, "available").
 		Order("workspaces.name ASC").Scan(&rows).Error
 	result := make([]domainagent.Workspace, 0, len(rows))
 	for _, row := range rows {

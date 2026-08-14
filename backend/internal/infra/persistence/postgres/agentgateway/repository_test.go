@@ -92,6 +92,45 @@ func TestRuntimeProofPersistsManifestSnapshot(t *testing.T) {
 	}
 }
 
+func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
+		t.Fatalf("migrate workspace tables: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 2, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaseExpiresAt := now.Add(time.Hour)
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
+		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace_old", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "install-directory", Status: "available", LastSeenAt: now.Add(-time.Hour),
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	if err := repo.SyncWorkspaces(context.Background(), 7, device.ID, profile.ID, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListWorkspaces(context.Background(), 7, device.PublicID)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("stale project remained visible: %#v %v", items, err)
+	}
+}
+
 func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(

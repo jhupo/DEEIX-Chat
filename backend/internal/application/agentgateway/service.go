@@ -404,7 +404,7 @@ func (s *Service) CompleteRuntimeProof(
 }
 
 func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdentity, challenge *RuntimeChallengeResult, registrations []WorkspaceRegistration) error {
-	if identity == nil || challenge == nil || challenge.Profile == nil || len(registrations) == 0 || len(registrations) > 128 {
+	if identity == nil || challenge == nil || challenge.Profile == nil || len(registrations) > 128 {
 		return ErrInvalidInput
 	}
 	items := make([]domainagent.Workspace, 0, len(registrations))
@@ -424,7 +424,18 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 			RuntimeProfileID: challenge.Profile.ID, Name: registration.Name, Status: "available",
 		})
 	}
-	return s.repo.SyncWorkspaces(ctx, identity.UserID, identity.InternalDeviceID, challenge.Profile.ID, items, s.now().UTC())
+	now := s.now().UTC()
+	if err := s.repo.SyncWorkspaces(ctx, identity.UserID, identity.InternalDeviceID, challenge.Profile.ID, items, now); err != nil {
+		return err
+	}
+	bucket := now.Truncate(time.Hour).Format(time.RFC3339)
+	for _, item := range items {
+		key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+		if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "sessions", key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) ListRuntimeProfiles(ctx context.Context, userID uint, devicePublicID string) ([]RuntimeProfileView, error) {

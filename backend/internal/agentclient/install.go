@@ -147,12 +147,6 @@ func Doctor(ctx context.Context, dataDir string, stderr io.Writer) (DoctorReport
 	if err != nil {
 		return DoctorReport{}, err
 	}
-	for _, workspace := range config.Workspaces {
-		info, statErr := os.Stat(workspace.Root)
-		if statErr != nil || !info.IsDir() {
-			return DoctorReport{}, fmt.Errorf("workspace is unavailable: %s", workspace.Root)
-		}
-	}
 	state, err := OpenStateStore(filepath.Join(dataDir, "state.json"))
 	if err != nil {
 		return DoctorReport{}, err
@@ -162,6 +156,12 @@ func Doctor(ctx context.Context, dataDir string, stderr io.Writer) (DoctorReport
 		return DoctorReport{}, err
 	}
 	defer adapter.Close()
+	discoveryContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+	workspaces, err := adapter.DiscoverWorkspaces(discoveryContext)
+	cancel()
+	if err != nil {
+		return DoctorReport{}, err
+	}
 	connectionContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	_, err = NewCloudClient(config.CloudURL).ConnectionToken(connectionContext, config, identity)
 	cancel()
@@ -170,7 +170,7 @@ func Doctor(ctx context.Context, dataDir string, stderr io.Writer) (DoctorReport
 	}
 	return DoctorReport{
 		Healthy: true, DeviceID: config.DeviceID, Server: config.CloudURL, CodexExecutable: config.CodexExecutable,
-		CodexVersion: adapter.version, WorkspaceCount: len(config.Workspaces), Connection: "authenticated",
+		CodexVersion: adapter.version, WorkspaceCount: len(workspaces), Connection: "authenticated",
 	}, nil
 }
 
