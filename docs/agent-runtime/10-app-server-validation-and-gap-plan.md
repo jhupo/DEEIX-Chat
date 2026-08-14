@@ -315,15 +315,60 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 - Plan 覆盖增量、最终快照、乱序、重复事件和刷新恢复；最终 steps 以 `turn/plan/updated` 为准。
 - Goal 覆盖 updated、cleared、预算耗尽、暂停、阻塞和完成，并按 user/thread 校验归属。
 
+#### 6.12 Web UI 组件布局与状态边界
+
+现状：`chat-input.tsx` 只把临时输入队列硬编码在输入框上方，没有可复用的会话状态容器。前端没有处理 gateway 的通用 `execution_event`，因此 `turn/diff/updated`、`item/fileChange/patchUpdated`、`turn/plan/updated` 和 `thread/goal/updated|cleared` 虽已到达 SSE，页面仍无对应展示。现有 `message-tool-trace.tsx` 面向普通聊天的工具 trace，不能代替 app-server Plan、Goal、Diff 或跨会话任务 UI。
+
+UI 位置固定如下：
+
+```text
+ChatComposerStatusStack                  thread/conversation scope
+  GoalStatusBar                         当前 Thread Goal，最多一行
+  ActiveRunStatus                       当前运行、审批等待或设备离线状态
+  QueuedSubmissionList                  当前 conversation/branch 输入队列
+ChatInput                               输入框
+
+AssistantMessage                        turn scope
+  PlanSteps                             当前 turn 的模型计划
+  FileChangeSummary                     N 个文件已更改，+A -D
+    FileChangePopover                   文件名与逐文件增删统计
+    UnifiedDiffSheet                    完整 diff
+
+TaskCenter                              user scope，独立于输入框
+  Runs across conversations             跨会话 queued/running/terminal 任务
+```
+
+实现：
+
+1. 增加一个显式 `ChatComposerStatusStack`，由 Chat runtime 直接传入 goal、active run 和 queue props。它不是动态插件 registry，也不接受任意组件注入；只解决已经存在的三个会话级状态，保持单一数据流。
+2. `GoalStatusBar` 仅在 gateway conversation 存在 Goal 时显示，固定高度、单行截断；显示状态、objective、耗时和预算摘要。第一阶段只读。Goal 管理命令接通后再增加编辑、暂停/继续和清除按钮。
+3. `ActiveRunStatus` 只显示当前 conversation 的运行状态以及待处理 interaction。跨会话运行不堆在输入框上方，统一进入 TaskCenter。
+4. 复用现有 QueuedSubmission UI 的编辑、删除和优先操作，抽离到 `QueuedSubmissionList`；改为读取服务端队列 snapshot，并保留乐观更新与失败回滚。
+5. `PlanSteps` 属于产生它的 turn，放在对应 assistant message 内，按 `pending|inProgress|completed` 渲染紧凑步骤列表。Goal 属于 thread，Plan 属于 turn，两者不合并。
+6. `FileChangeSummary` 放在对应 assistant message 底部，显示“`N 个文件已更改 +A -D`”。点击或键盘激活打开 popover，逐项显示 workspace-relative 文件名和增删统计；再进入 `UnifiedDiffSheet` 查看完整 diff。完成 turn 后仍可从历史 Item/Diff API 恢复。
+7. 增删统计从结构化 `FileUpdateChange.diff` 或最终 `turn/diff/updated.diff` 解析；最终汇总按规范 unified diff parser 计算，不用字符串搜索文件名。deprecated `item/fileChange/outputDelta` 只保留诊断，不作为最终统计来源。
+8. Diff 中的路径必须转换为 workspace-relative display path；绝对路径、越界路径和无法归属当前 Workspace 的 change 不进入浏览器。超大 diff 显示截断状态并提供按文件分页读取。
+9. TaskCenter 复用 Run 作为列表源，展示 conversation、设备、Workspace、模型、状态、开始时间和耗时；运行中任务可进入对应对话或中断，terminal 任务只读。AgentTurn/AgentItem 作为详情来源，不与 Run 并列成重复任务。
+10. 桌面端 popover 和 sheet 使用项目现有组件；移动端文件列表与 diff 使用全宽 sheet。所有图标按钮带可访问名称，Goal、Plan、Diff 的状态变化使用克制的 live region，不抢占输入焦点。
+
+验收：
+
+- cloud conversation 不显示设备 Goal/Plan/Diff 占位；切换 conversation、设备或 branch 后没有上一上下文残留。
+- 输入框高度不会因状态刷新抖动；长 Goal、长文件名、100+ 队列项和窄屏下均不溢出或遮挡输入。
+- Plan、Diff 精确绑定 source turn；Goal 精确绑定 source thread；TaskCenter 精确绑定用户和 Run。
+- FileChangeSummary 的文件数与 `+A -D` 和最终 unified diff 一致，rename/add/delete、多 hunk、二进制文件和截断均有测试。
+- 页面刷新和 SSE 重连后，Goal、Plan、队列、任务与 Diff 均由服务端快照恢复，再继续应用新事件。
+- 键盘可打开文件汇总、浏览文件、关闭 popover/sheet；屏幕阅读器可获得按钮名称和任务状态更新。
+
 ### P2：补只读诊断和可选工具面
 
-#### 6.12 Account 与 Config
+#### 6.13 Account 与 Config
 
 当前运行时已验证 `account/read`、`config/read`，产品只使用 `getAuthStatus` 和 HMAC proof。用户账户订阅额度仍由 Sub2API 提供，Codex account 只应作为本机 runtime 诊断。
 
 修改：新增脱敏的 `runtime-account` 与 `runtime-config-summary` profile resource，只保留 auth type、provider、受管要求和 feature flags。API key、token、endpoint secret、绝对路径均不进入 Cloud。
 
-#### 6.13 Filesystem 与 command/exec
+#### 6.14 Filesystem 与 command/exec
 
 官方提供 fs 和独立 command API。当前 Agent 工作已经可通过 turn 工具执行，立即增加第二套 Web terminal 会重复权限、流和审计模型。
 
@@ -357,7 +402,10 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 | `backend/internal/transport/http/agentgateway` | 设备、资源和管理命令 API |
 | `frontend/shared/api/agent-gateway.ts` | Workspace/Profile 资源与生命周期 API client |
 | `frontend/features/layouts/components/navigation/nav-workspaces.tsx` | 本地 Workspace、会话和设备资源入口 |
-| `frontend/features/chat` | 持久化输入队列、任务状态、Plan/Goal、typed execution event、实时 Diff 与历史恢复 UI |
+| `frontend/features/chat/components/sections/chat-input.tsx` | 输入框与会话级 status stack 的组合边界 |
+| `frontend/features/chat/components/message` | turn-scoped Plan、文件汇总和 unified diff 入口 |
+| `frontend/features/chat/hooks/use-chat-message-submit.ts` | 服务端输入队列、乐观更新和真实 steer |
+| `frontend/features/chat` | typed execution event、Goal/Run 状态与历史恢复 |
 | `packages/agent-bridge/test/codex-adapter.test.ts` | 双向 JSONL fixture |
 | `packages/agent-bridge/test/codex-process.e2e.test.ts` | 真实锁定进程验收 |
 
