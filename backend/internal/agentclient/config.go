@@ -32,9 +32,10 @@ type Config struct {
 }
 
 type Workspace struct {
-	WorkspaceID string `json:"workspaceId"`
-	Root        string `json:"root"`
-	Name        string `json:"name"`
+	WorkspaceID  string   `json:"workspaceId"`
+	Root         string   `json:"root"`
+	Name         string   `json:"name"`
+	SessionRoots []string `json:"-"`
 }
 
 func DefaultDataDir() (string, error) {
@@ -176,6 +177,81 @@ func CanonicalWorkspace(root string) (Workspace, error) {
 		Root:        canonical,
 		Name:        filepath.Base(canonical),
 	}, nil
+}
+
+func codexProjectWorkspace(root string) (Workspace, error) {
+	session, err := CanonicalWorkspace(root)
+	if err != nil {
+		return Workspace{}, err
+	}
+	project, err := CanonicalWorkspace(gitProjectRoot(session.Root))
+	if err != nil {
+		return Workspace{}, err
+	}
+	project.SessionRoots = []string{session.Root}
+	return project, nil
+}
+
+func gitProjectRoot(root string) string {
+	for current := root; ; current = filepath.Dir(current) {
+		metadataPath := filepath.Join(current, ".git")
+		info, err := os.Stat(metadataPath)
+		if err == nil {
+			if info.IsDir() {
+				return current
+			}
+			if info.Mode().IsRegular() {
+				if projectRoot, ok := linkedWorktreeProjectRoot(current, metadataPath); ok {
+					return projectRoot
+				}
+				return current
+			}
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return root
+		}
+	}
+}
+
+func linkedWorktreeProjectRoot(worktreeRoot, metadataPath string) (string, bool) {
+	metadata, ok := readSmallGitMetadata(metadataPath)
+	if !ok || !strings.HasPrefix(strings.ToLower(metadata), "gitdir:") {
+		return "", false
+	}
+	gitDirectory := strings.TrimSpace(metadata[len("gitdir:"):])
+	if gitDirectory == "" || strings.ContainsAny(gitDirectory, "\x00\r\n") {
+		return "", false
+	}
+	if !filepath.IsAbs(gitDirectory) {
+		gitDirectory = filepath.Join(worktreeRoot, gitDirectory)
+	}
+	commonPath, ok := readSmallGitMetadata(filepath.Join(filepath.Clean(gitDirectory), "commondir"))
+	if !ok || commonPath == "" || strings.ContainsAny(commonPath, "\x00\r\n") {
+		return "", false
+	}
+	if !filepath.IsAbs(commonPath) {
+		commonPath = filepath.Join(gitDirectory, commonPath)
+	}
+	commonPath, err := filepath.EvalSymlinks(filepath.Clean(commonPath))
+	if err != nil || !strings.EqualFold(filepath.Base(commonPath), ".git") {
+		return "", false
+	}
+	projectRoot := filepath.Dir(commonPath)
+	info, err := os.Stat(projectRoot)
+	return projectRoot, err == nil && info.IsDir()
+}
+
+func readSmallGitMetadata(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 4096 {
+		return "", false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) > 4096 {
+		return "", false
+	}
+	return strings.TrimSpace(string(data)), true
 }
 
 func writeFileAtomic(path string, data []byte, mode os.FileMode) error {

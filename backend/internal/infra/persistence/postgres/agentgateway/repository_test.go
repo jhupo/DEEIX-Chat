@@ -358,6 +358,26 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 3 {
 		t.Fatalf("updated imported conversation mismatch: %#v %v", importedConversation, err)
 	}
+	canonicalWorkspace := model.AgentWorkspace{
+		PublicID: "workspace-canonical", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "source-repository", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&canonicalWorkspace).Error; err != nil {
+		t.Fatalf("create canonical workspace: %v", err)
+	}
+	shortResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}] }]}}}`
+	if err := projectTerminalResult(database, &device, &model.AgentCommand{
+		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &canonicalWorkspace.ID, Kind: "resource.refresh",
+		PayloadJSON: `{"resource":{"name":"sessions"}}`,
+	}, shortResourceTerminal, now.Add(10*time.Second)); err != nil {
+		t.Fatalf("rebind worktree session: %v", err)
+	}
+	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.WorkspaceID != canonicalWorkspace.ID {
+		t.Fatalf("thread workspace was not rebound: %#v %v", importedThread, err)
+	}
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.ExecutionWorkspaceID != canonicalWorkspace.PublicID {
+		t.Fatalf("conversation workspace was not rebound: %#v %v", importedConversation, err)
+	}
 
 	itemStarted := &domainagent.Event{
 		PublicID: "agev_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "item/started",

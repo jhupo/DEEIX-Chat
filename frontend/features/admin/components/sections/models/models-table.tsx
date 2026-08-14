@@ -1104,7 +1104,10 @@ export function ModelsTable({
     <>
     <Table
       viewportRef={virtualRows.viewportRef}
-      viewportClassName={virtualRows.viewportClassName}
+      viewportClassName={cn(
+        virtualRows.viewportClassName,
+        "min-h-[clamp(14rem,calc(100svh-18rem),28rem)]",
+      )}
       viewportStyle={virtualRows.viewportStyle}
     >
       <TableHeader>

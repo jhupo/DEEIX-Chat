@@ -70,6 +70,41 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	}
 }
 
+func TestCodexProjectWorkspaceCollapsesLinkedWorktree(t *testing.T) {
+	repositoryRoot := filepath.Join(t.TempDir(), "source-repository")
+	gitDirectory := filepath.Join(repositoryRoot, ".git")
+	worktreeGitDirectory := filepath.Join(gitDirectory, "worktrees", "generated-task")
+	worktreeRoot := filepath.Join(t.TempDir(), "generated-task")
+	for _, directory := range []string{worktreeGitDirectory, worktreeRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDirectory, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeRoot, ".git"), []byte("gitdir: "+worktreeGitDirectory+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace, err := codexProjectWorkspace(worktreeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := CanonicalWorkspace(repositoryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorktree, err := filepath.EvalSymlinks(worktreeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.WorkspaceID != want.WorkspaceID || workspace.Root != want.Root || workspace.Name != want.Name ||
+		len(workspace.SessionRoots) != 1 || workspace.SessionRoots[0] != canonicalWorktree {
+		t.Fatalf("linked worktree was not collapsed: %#v", workspace)
+	}
+}
+
 func TestCloudBoundaryRejectsMetadataAndRedirects(t *testing.T) {
 	if _, err := NormalizeCloudURL("http://169.254.169.254/latest/meta-data"); err == nil {
 		t.Fatal("metadata endpoint was accepted as a server URL")
@@ -295,6 +330,9 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err = os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("DEEIX_TEST_THREAD_CWD", root)
 	state, err := OpenStateStore(filepath.Join(root, "state.json"))
 	if err != nil {
@@ -342,7 +380,8 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspaces) != 1 || workspaces[0] != want {
+	if len(workspaces) != 1 || workspaces[0].WorkspaceID != want.WorkspaceID || workspaces[0].Root != want.Root ||
+		workspaces[0].Name != want.Name || len(workspaces[0].SessionRoots) != 1 || workspaces[0].SessionRoots[0] != want.Root {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 }

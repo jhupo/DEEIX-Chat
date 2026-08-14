@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -22,6 +23,8 @@ import (
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
+
+var codexInteractiveSourceKinds = []string{"cli", "vscode", "appServer", "unknown"}
 
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
@@ -195,7 +198,10 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 	seenCursors := make(map[string]struct{})
 	cursor := ""
 	for len(byID) < 128 {
-		params := map[string]any{"limit": 100, "archived": false}
+		params := map[string]any{
+			"limit": 100, "archived": false, "sortKey": "recency_at",
+			"sourceKinds": codexInteractiveSourceKinds,
+		}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -217,9 +223,16 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 			if root == "" {
 				continue
 			}
-			workspace, workspaceErr := CanonicalWorkspace(root)
+			workspace, workspaceErr := codexProjectWorkspace(root)
 			if workspaceErr != nil {
 				continue
+			}
+			sessionRoot := workspace.SessionRoots[0]
+			if existing, exists := byID[workspace.WorkspaceID]; exists {
+				workspace = existing
+				if !slices.Contains(workspace.SessionRoots, sessionRoot) {
+					workspace.SessionRoots = append(workspace.SessionRoots, sessionRoot)
+				}
 			}
 			byID[workspace.WorkspaceID] = workspace
 			if len(byID) == 128 {
@@ -239,6 +252,7 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 	}
 	workspaces := make([]Workspace, 0, len(byID))
 	for _, workspace := range byID {
+		sort.Strings(workspace.SessionRoots)
 		workspaces = append(workspaces, workspace)
 	}
 	sort.Slice(workspaces, func(left, right int) bool {
@@ -283,7 +297,7 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 		return nil, errors.New("gateway command profile does not match this runtime")
 	}
 	if command.Kind == "resource.refresh" && command.Resource.Scope == "profile" {
-		return adapter.resource(ctx, command, "")
+		return adapter.resource(ctx, command, Workspace{})
 	}
 	workspace, ok := adapter.workspaces[command.WorkspaceID]
 	if !ok {
@@ -306,7 +320,7 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 		return map[string]any{"kind": "thread-created", "sourceThreadRef": sourceRef}, err
 	}
 	if command.Kind == "resource.refresh" {
-		return adapter.resource(ctx, command, cwd)
+		return adapter.resource(ctx, command, workspace)
 	}
 	providerThreadID, err := adapter.state.ResolveSource(adapter.profileID, "thread", command.SourceThreadRef)
 	if err != nil {
@@ -400,8 +414,9 @@ func (adapter *CodexAdapter) threadLifecycle(ctx context.Context, command AgentC
 	return map[string]any{"kind": "accepted"}, nil
 }
 
-func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand, cwd string) (map[string]any, error) {
+func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand, workspace Workspace) (map[string]any, error) {
 	name := command.Resource.Name
+	cwd := workspace.Root
 	method := map[string]string{
 		"models": "model/list", "model-capabilities": "modelProvider/capabilities/read", "permission-profiles": "permissionProfile/list",
 		"apps": "app/list", "mcp": "mcpServerStatus/list", "plugins": "plugin/list", "auth-status": "getAuthStatus",
@@ -416,7 +431,12 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	case "auth-status":
 		params["includeToken"], params["refreshToken"] = false, false
 	case "sessions":
-		params["cwd"], params["limit"], params["archived"] = cwd, 30, false
+		sessionRoots := workspace.SessionRoots
+		if len(sessionRoots) == 0 {
+			sessionRoots = []string{cwd}
+		}
+		params["cwd"], params["limit"], params["archived"] = sessionRoots, 30, false
+		params["sortKey"], params["sourceKinds"] = "recency_at", codexInteractiveSourceKinds
 	case "skills":
 		params["cwds"], params["forceReload"] = []string{cwd}, true
 	case "hooks":

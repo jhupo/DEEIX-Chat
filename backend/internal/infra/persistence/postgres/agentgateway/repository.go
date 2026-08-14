@@ -762,7 +762,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		var existing model.AgentThread
 		err := tx.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, session.SourceThreadRef).First(&existing).Error
 		if err == nil {
-			if err := syncExistingWorkspaceSession(tx, &existing, session, now); err != nil {
+			if err := syncExistingWorkspaceSession(tx, &existing, &workspace, session, now); err != nil {
 				return err
 			}
 			continue
@@ -837,13 +837,23 @@ func validWorkspaceSession(session workspaceSession) bool {
 	return true
 }
 
-func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, session workspaceSession, now time.Time) error {
+func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, workspace *model.AgentWorkspace, session workspaceSession, now time.Time) error {
 	var conversation model.Conversation
 	if err := tx.Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").First(&conversation).Error; err != nil {
 		if dberror.IsRecordNotFound(err) {
 			return nil
 		}
 		return err
+	}
+	if thread.WorkspaceID != workspace.ID {
+		if err := tx.Model(thread).Updates(map[string]any{"workspace_id": workspace.ID, "updated_at": now}).Error; err != nil {
+			return err
+		}
+	}
+	if conversation.ExecutionWorkspaceID != workspace.PublicID {
+		if err := tx.Model(&conversation).UpdateColumn("execution_workspace_id", workspace.PublicID).Error; err != nil {
+			return err
+		}
 	}
 	var stored []model.Message
 	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {
