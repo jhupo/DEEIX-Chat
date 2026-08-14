@@ -15,6 +15,7 @@ import {
   useSidebarConversations,
 } from "@/entities/conversation";
 import { useChatSession } from "@/features/chat";
+import { useDevices } from "@/features/devices";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { useLoadMoreSentinel } from "@/shared/hooks/use-load-more-sentinel";
 import { useSettingsChatPreferences } from "@/features/settings";
@@ -101,7 +102,8 @@ export function useRecentPage() {
   const t = useTranslations("recent");
   const resolveErrorMessage = useLocalizedErrorMessage();
   const router = useRouter();
-  const { requestNewConversation } = useChatSession();
+  const { executionMode, requestNewConversation } = useChatSession();
+  const { defaultDevice, defaultWorkspace } = useDevices();
   const {
     renameByPublicID,
     regenerateTitleByPublicID,
@@ -147,8 +149,8 @@ export function useRecentPage() {
   const isSelectionMode = selectionMode || selectedConversationIDs.length > 0;
 
   React.useEffect(() => {
-    setProjectFilter(searchParams.get("project") || "all");
-  }, [searchParams]);
+    setProjectFilter(executionMode === "cloud" ? searchParams.get("project") || "all" : "all");
+  }, [executionMode, searchParams]);
 
   React.useEffect(() => {
     loadingMoreRef.current = loadingMore;
@@ -220,6 +222,11 @@ export function useRecentPage() {
         }
         return;
       }
+      if (executionMode === "gateway" && !defaultDevice?.deviceId) {
+        setItems([]);
+        setHasMore(false);
+        return;
+      }
 
       const data = await listConversations(token, {
         page,
@@ -227,9 +234,10 @@ export function useRecentPage() {
         status: statusFilter,
         starred: starredFilter,
         share: shareFilter,
-        project: projectFilter,
+        project: executionMode === "cloud" ? projectFilter : "all",
         query: normalizedQuery,
-        execution: "cloud",
+        execution: executionMode,
+        deviceId: executionMode === "gateway" ? defaultDevice?.deviceId : undefined,
       });
       if (requestVersion !== requestVersionRef.current) {
         return;
@@ -248,7 +256,7 @@ export function useRecentPage() {
       loadMoreFailedRef.current = false;
       pageRef.current = page;
     },
-    [normalizedQuery, projectFilter, shareFilter, starredFilter, statusFilter],
+    [defaultDevice?.deviceId, executionMode, normalizedQuery, projectFilter, shareFilter, starredFilter, statusFilter],
   );
 
   React.useEffect(() => {
@@ -341,10 +349,15 @@ export function useRecentPage() {
   }, [exportingAll, t]);
 
   const onCreateConversation = React.useCallback(() => {
+    if (executionMode === "gateway") {
+      requestNewConversation({ projectID: "", workspaceID: defaultWorkspace?.workspaceId ?? "" });
+      router.push("/chat");
+      return;
+    }
     const currentProjectID = projectFilter !== "all" && projectFilter !== "unassigned" ? projectFilter : "";
     requestNewConversation({ projectID: currentProjectID });
     router.push(currentProjectID ? `/chat?project_id=${encodeURIComponent(currentProjectID)}` : "/chat");
-  }, [projectFilter, requestNewConversation, router]);
+  }, [defaultWorkspace?.workspaceId, executionMode, projectFilter, requestNewConversation, router]);
 
   const onProjectFilterChange = React.useCallback(
     (value: ConversationProjectFilter) => {

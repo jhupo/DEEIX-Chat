@@ -27,13 +27,13 @@ import { Badge } from "@/components/ui/badge";
 import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConversationProjectSubmenu } from "@/shared/components/conversation-project-submenu";
+import type { ConversationProjectSubmenuProject } from "@/shared/components/conversation-project-submenu";
 import { ConversationShareExportSubmenu } from "@/shared/components/conversation-share-export-menu";
 import { cn } from "@/lib/utils";
 import { useAppLocale } from "@/i18n/app-i18n-provider";
 import { parseConversationLabelsJSON } from "@/shared/lib/conversation-labels";
 import type {
   ConversationDTO,
-  ConversationProjectDTO,
   ConversationShareFilter,
   ConversationStarredFilter,
   ConversationStatusFilter,
@@ -89,6 +89,7 @@ function RecentListSkeleton({
 function RecentConversationRow({
   item,
   projects,
+  canManageProjects,
   hovered,
   selected,
   highlighted,
@@ -109,7 +110,8 @@ function RecentConversationRow({
   onDelete,
 }: {
   item: ConversationDTO;
-  projects: ConversationProjectDTO[];
+  projects: ConversationProjectSubmenuProject[];
+  canManageProjects: boolean;
   hovered: boolean;
   selected: boolean;
   highlighted: boolean;
@@ -298,13 +300,13 @@ function RecentConversationRow({
                 requestAnimationFrame(() => onManageLabels(item));
               }}
             />
-            <ConversationProjectSubmenu
+            {canManageProjects ? <ConversationProjectSubmenu
               label={t("row.moveToProject")}
               unassignedLabel={t("projects.unassigned")}
               currentProjectID={item.projectID}
               projects={projects}
               onSelect={(projectID) => onSetProject(item.publicID, projectID)}
-            />
+            /> : null}
             <ConversationShareExportSubmenu
               label={t("row.shareAndExport")}
               shareLabel={shared ? t("row.manageShare") : t("row.share")}
@@ -341,9 +343,11 @@ function RecentConversationRow({
 }
 
 type RecentListProps = {
+  canManageProjects: boolean;
+  executionType: "cloud" | "gateway";
   loadingInitial: boolean;
   filteredItems: ConversationDTO[];
-  projects: ConversationProjectDTO[];
+  projects: ConversationProjectSubmenuProject[];
   normalizedQuery: string;
   statusFilter: ConversationStatusFilter;
   starredFilter: ConversationStarredFilter;
@@ -376,8 +380,9 @@ type RecentConversationGroup = {
 
 function buildConversationGroups(
   items: ConversationDTO[],
-  projects: ConversationProjectDTO[],
+  projects: ConversationProjectSubmenuProject[],
   unassignedTitle: string,
+  executionType: "cloud" | "gateway",
 ): RecentConversationGroup[] {
   const itemsByProjectID = new Map<string, ConversationDTO[]>();
   const unknownProjectItems = new Map<string, ConversationDTO[]>();
@@ -386,15 +391,16 @@ function buildConversationGroups(
   const knownProjectIDs = new Set(projects.map((project) => project.publicID));
 
   for (const item of items) {
-    if (!item.projectID) {
+    const projectID = executionType === "cloud" ? item.projectID : item.executionWorkspaceID;
+    if (!projectID) {
       unassignedItems.push(item);
       continue;
     }
-    if (knownProjectIDs.has(item.projectID)) {
-      itemsByProjectID.set(item.projectID, [...(itemsByProjectID.get(item.projectID) ?? []), item]);
+    if (knownProjectIDs.has(projectID)) {
+      itemsByProjectID.set(projectID, [...(itemsByProjectID.get(projectID) ?? []), item]);
       continue;
     }
-    const unknownProjectTitle = item.projectName || item.projectID;
+    const unknownProjectTitle = executionType === "cloud" ? item.projectName || projectID : projectID;
     unknownProjectItems.set(unknownProjectTitle, [...(unknownProjectItems.get(unknownProjectTitle) ?? []), item]);
   }
 
@@ -430,6 +436,8 @@ function buildConversationGroups(
 }
 
 export function RecentList({
+  canManageProjects,
+  executionType,
   loadingInitial,
   filteredItems,
   projects,
@@ -458,8 +466,8 @@ export function RecentList({
 }: RecentListProps) {
   const t = useTranslations("recent");
   const groups = React.useMemo(
-    () => buildConversationGroups(filteredItems, projects, t("projects.unassigned")),
-    [filteredItems, projects, t],
+    () => buildConversationGroups(filteredItems, projects, t("projects.unassigned"), executionType),
+    [executionType, filteredItems, projects, t],
   );
   const rowStateByPublicID = React.useMemo(() => {
     const stateMap = new Map<string, RecentRowState>();
@@ -512,6 +520,7 @@ export function RecentList({
                     key={item.publicID}
                     item={item}
                     projects={projects}
+                    canManageProjects={canManageProjects}
                     hovered={currentState?.hovered ?? false}
                     selected={currentState?.selected ?? false}
                     highlighted={currentState?.highlighted ?? false}

@@ -61,6 +61,36 @@ export async function getAgentWorkspaceResource(
   );
 }
 
+export async function getAgentProfileResource(
+  accessToken: string,
+  deviceId: string,
+  profileId: string,
+  resource: string,
+): Promise<AgentResourceSnapshotDTO> {
+  return authedRequest<AgentResourceSnapshotDTO>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles/${encodeURIComponent(profileId)}/resources/${encodeURIComponent(resource)}`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function refreshAgentProfileResource(
+  accessToken: string,
+  deviceId: string,
+  profileId: string,
+  resource: string,
+): Promise<void> {
+  await authedRequest(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles/${encodeURIComponent(profileId)}/resources/${encodeURIComponent(resource)}/refresh`,
+    {
+      accessToken,
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
+}
+
 export async function refreshAgentWorkspaceResource(
   accessToken: string,
   deviceId: string,

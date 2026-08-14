@@ -16,11 +16,9 @@ import { NavProjects } from "@/features/layouts/components/navigation/nav-projec
 import { NavRecents } from "@/features/layouts/components/navigation/nav-recents";
 import { NavStarred } from "@/features/layouts/components/navigation/nav-starred";
 import { NavUser } from "@/features/layouts/components/navigation/nav-user";
-import { NavWorkspaces } from "@/features/layouts/components/navigation/nav-workspaces";
 import { useOptionalAuthSession } from "@/shared/auth/auth-session-context";
 import { useBranding } from "@/shared/config/branding-provider";
 import { resolveAvatarImageSrc } from "@/shared/lib/avatar";
-import { useChatSession } from "@/features/chat";
 
 export function AppSidebar({
   onCreateConversation,
@@ -30,7 +28,6 @@ export function AppSidebar({
 }) {
   const t = useTranslations("common.navigation");
   const branding = useBranding();
-  const { executionMode } = useChatSession();
   const sessionUser = useOptionalAuthSession()?.user;
   const username = sessionUser?.username.trim() ?? "";
   const user = sessionUser
@@ -59,15 +56,9 @@ export function AppSidebar({
           className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           <LayoutGroup id="sidebar-conversations">
-            {executionMode === "cloud" ? (
-              <>
-                <NavProjects />
-                <NavStarred />
-                <NavRecents />
-              </>
-            ) : (
-              <NavWorkspaces />
-            )}
+            <NavProjects />
+            <NavStarred />
+            <NavRecents />
           </LayoutGroup>
         </motion.div>
       </SidebarContent>

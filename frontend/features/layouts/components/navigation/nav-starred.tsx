@@ -42,6 +42,7 @@ import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { useSettingsChatPreferences } from "@/features/settings";
+import { useChatSession } from "@/features/chat";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutSidebarListFlip } from "@/features/layouts/hooks/use-layout-sidebar-list-flip";
 import { useSidebarConversationNavigation } from "@/features/layouts/hooks/use-sidebar-conversation-navigation";
@@ -63,6 +64,7 @@ export function NavStarred() {
   const t = useTranslations("recent");
   const { isMobile, setOpenMobile } = useSidebar();
   const router = useRouter();
+  const { executionMode } = useChatSession();
   const onNavigate = useSidebarConversationNavigation();
   const activeConversationID = useLayoutActiveConversation();
   const { deleteFilesByDefault } = useSettingsChatPreferences();
@@ -331,7 +333,7 @@ export function NavStarred() {
                           icon: StarOff,
                           onSelect: onUnstar,
                         }}
-                        projectMenu={{
+                        projectMenu={executionMode === "cloud" ? {
                           label: t("row.moveToProject"),
                           unassignedLabel: t("projects.unassigned"),
                           currentProjectID: starredItems.find((conversation) => conversation.publicID === item.publicID)?.projectID,
@@ -339,7 +341,7 @@ export function NavStarred() {
                           onSelect: (targetPublicID, projectID) => {
                             void setProjectByPublicID(targetPublicID, projectID);
                           },
-                        }}
+                        } : undefined}
                         onRename={onRename}
                         isRenaming={renameTarget?.publicID === item.publicID}
                         renameValue={renameTarget?.publicID === item.publicID ? renameValue : item.title}

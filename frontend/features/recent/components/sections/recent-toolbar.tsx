@@ -19,15 +19,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConversationProjectMenuItems } from "@/shared/components/conversation-project-submenu";
+import type { ConversationProjectSubmenuProject } from "@/shared/components/conversation-project-submenu";
 import { cn } from "@/lib/utils";
 import type {
   ConversationShareFilter,
-  ConversationProjectDTO,
   ConversationStarredFilter,
   ConversationStatusFilter,
 } from "@/shared/api/conversation.types";
 
 type RecentToolbarProps = {
+  canManageProjects: boolean;
+  isWork: boolean;
   isSelectionMode: boolean;
   selectedCount: number;
   selectedSharedCount: number;
@@ -36,7 +38,7 @@ type RecentToolbarProps = {
   starredFilter: ConversationStarredFilter;
   shareFilter: ConversationShareFilter;
   allSelectedArchived: boolean;
-  projects: ConversationProjectDTO[];
+  projects: ConversationProjectSubmenuProject[];
   selectedProjectID: string | null;
   movingSelectedToProject: boolean;
   onToggleSelectionMode: (checked: boolean | "indeterminate") => void;
@@ -73,6 +75,8 @@ function ToolbarActionTooltip({
 }
 
 export function RecentToolbar({
+  canManageProjects,
+  isWork,
   isSelectionMode,
   selectedCount,
   selectedSharedCount,
@@ -154,7 +158,7 @@ export function RecentToolbar({
           <>
             <div className="flex w-full min-w-0 items-center gap-4 overflow-x-auto whitespace-nowrap text-foreground/70 [scrollbar-width:none] [-ms-overflow-style:none] md:w-auto md:shrink-0 md:overflow-visible [&::-webkit-scrollbar]:hidden">
               <span>{t("selectedCount", { count: selectedCount })}</span>
-              <ToolbarActionTooltip label={t("moveSelectedToProject")}>
+              {canManageProjects ? <ToolbarActionTooltip label={t("moveSelectedToProject")}>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -191,7 +195,7 @@ export function RecentToolbar({
                     />
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </ToolbarActionTooltip>
+              </ToolbarActionTooltip> : null}
               <ToolbarActionTooltip label={t("closeSelectedShares")}>
                 <Button
                   type="button"
@@ -267,8 +271,8 @@ export function RecentToolbar({
         ) : (
           <>
             <div className="flex w-full min-w-0 items-center justify-start gap-4 text-foreground/60 md:w-auto md:shrink-0">
-              <span className="min-w-0 truncate md:hidden">{t("allConversations")}</span>
-              <span className="hidden md:inline">{t("allConversationsDescription")}</span>
+              <span className="min-w-0 truncate md:hidden">{t(isWork ? "allTasks" : "allConversations")}</span>
+              <span className="hidden md:inline">{t(isWork ? "allTasksDescription" : "allConversationsDescription")}</span>
               <ToolbarActionTooltip label={t("enterSelection")}>
                 <Button
                   type="button"
@@ -281,7 +285,7 @@ export function RecentToolbar({
                   <SquareMousePointer className="size-4" strokeWidth={1.4} />
                 </Button>
               </ToolbarActionTooltip>
-              <ToolbarActionTooltip label={t("exportAll")}>
+              {!isWork ? <ToolbarActionTooltip label={t("exportAll")}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -298,7 +302,7 @@ export function RecentToolbar({
                 >
                   <Download className="size-4" strokeWidth={1.4} />
                 </Button>
-              </ToolbarActionTooltip>
+              </ToolbarActionTooltip> : null}
             </div>
 
             {filterGroups}

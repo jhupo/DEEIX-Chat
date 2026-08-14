@@ -71,6 +71,7 @@ import {
   useSidebarConversations,
 } from "@/entities/conversation";
 import { useChatSession } from "@/features/chat";
+import { useDevices } from "@/features/devices";
 import { ProjectDialog, type ProjectDraft } from "@/features/layouts/components/navigation/project-dialog";
 import { SidebarConversationItem } from "@/features/layouts/components/navigation/sidebar-conversation-item";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
@@ -83,15 +84,26 @@ import type {
 import { useSettingsChatPreferences } from "@/features/settings";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { cn } from "@/lib/utils";
+import {
+  getAgentWorkspaceResource,
+  refreshAgentWorkspaceResource,
+} from "@/shared/api/agent-gateway";
 import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion-content";
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { useStoredBoolean } from "@/shared/hooks/use-stored-boolean";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import type { ConversationProjectDTO } from "@/shared/api/conversation.types";
 
 type ProjectActionTarget = {
   publicID?: string;
   name: string;
 };
+
+type NavigationProject = Pick<ConversationProjectDTO, "name" | "publicID"> & Partial<Pick<
+  ConversationProjectDTO,
+  "defaultMCPToolIDs" | "defaultSkillIDs" | "mcpDefaultMode" | "systemPrompt"
+>>;
 
 const PROJECT_TREE_ACCORDION_TRANSITION: Transition = {
   duration: 0.26,
@@ -103,6 +115,12 @@ const PROJECT_TREE_ACCORDION_MASK_STYLE = {
   overflow: "hidden",
 } satisfies React.CSSProperties;
 const PROJECTS_OPEN_STORAGE_KEY = "deeix.sidebar.projects.open";
+const SESSION_REFRESH_TIMEOUT_MS = 35_000;
+const SESSION_REFRESH_POLL_MS = 750;
+
+function wait(duration: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, duration));
+}
 
 type ProjectFolderIconHandle = {
   startAnimation: () => void;
@@ -122,7 +140,7 @@ function ProjectGroupHeader({
   createLabel: string;
   contentID: string;
   open: boolean;
-  onCreate: () => void;
+  onCreate?: () => void;
   onOpenChange: (open: boolean) => void;
   toggleLabel: string;
 }) {
@@ -153,16 +171,18 @@ function ProjectGroupHeader({
           />
         </Button>
       </SidebarGroupLabel>
-      <SidebarGroupAction
-        type="button"
-        aria-label={createLabel}
-        className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
-        onMouseEnter={() => setCreateHovered(true)}
-        onMouseLeave={() => setCreateHovered(false)}
-        onClick={onCreate}
-      >
-        <PlusIcon aria-hidden size={14} strokeWidth={1.8} animate={createHovered ? "default" : undefined} />
-      </SidebarGroupAction>
+      {onCreate ? (
+        <SidebarGroupAction
+          type="button"
+          aria-label={createLabel}
+          className="relative top-auto right-auto ml-auto size-7 shrink-0 text-sidebar-foreground/45 opacity-100 transition-[color,opacity,transform] duration-150 after:pointer-events-none hover:bg-transparent hover:text-sidebar-foreground dark:hover:bg-transparent md:opacity-0 md:group-hover/project-create:opacity-100 md:group-has-[:focus-visible]/project-create:opacity-100"
+          onMouseEnter={() => setCreateHovered(true)}
+          onMouseLeave={() => setCreateHovered(false)}
+          onClick={onCreate}
+        >
+          <PlusIcon aria-hidden size={14} strokeWidth={1.8} animate={createHovered ? "default" : undefined} />
+        </SidebarGroupAction>
+      ) : null}
     </div>
   );
 }
@@ -390,10 +410,10 @@ export function NavProjects() {
   const searchParams = useSearchParams();
   const activeRecentProjectID = searchParams.get("project") ?? "";
   const activeChatProjectID = searchParams.get("project_id") ?? "";
-  const activeProjectID = pathname === "/chat" ? activeChatProjectID : activeRecentProjectID;
   const activeConversationID = useLayoutActiveConversation();
   const { deleteFilesByDefault: deleteConversationFilesByDefault } = useSettingsChatPreferences();
-  const { requestNewConversation } = useChatSession();
+  const { executionMode, requestNewConversation } = useChatSession();
+  const { defaultDevice, defaultWorkspace, selectDefaultWorkspace, workspaces } = useDevices();
   const {
     items,
     projects,
@@ -410,7 +430,21 @@ export function NavProjects() {
     archiveByPublicID,
     deleteByPublicID,
     touchByPublicID,
+    reload,
   } = useSidebarConversations();
+  const canManageProjects = executionMode === "cloud";
+  const activeProjectID = executionMode === "gateway"
+    ? defaultWorkspace?.workspaceId ?? ""
+    : pathname === "/chat" ? activeChatProjectID : activeRecentProjectID;
+  const navigationProjects = React.useMemo<NavigationProject[]>(
+    () => executionMode === "cloud"
+      ? projects
+      : workspaces.map((workspace) => ({
+          publicID: workspace.workspaceId,
+          name: workspace.name,
+        })),
+    [executionMode, projects, workspaces],
+  );
   const [draft, setDraft] = React.useState<ProjectDraft | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ProjectActionTarget | null>(null);
   const [deleteProjectConversations, setDeleteProjectConversations] = React.useState(false);
@@ -433,9 +467,13 @@ export function NavProjects() {
   const [draggingProjectID, setDraggingProjectID] = React.useState<string | null>(null);
   const [savingProjectOrder, setSavingProjectOrder] = React.useState(false);
   const [projectsOpen, setProjectsOpen] = useStoredBoolean(PROJECTS_OPEN_STORAGE_KEY, true);
+  const refreshScopeRef = React.useRef("");
   const activeConversationProjectID = React.useMemo(
-    () => items.find((item) => item.publicID === activeConversationID)?.projectID ?? "",
-    [activeConversationID, items],
+    () => {
+      const conversation = items.find((item) => item.publicID === activeConversationID);
+      return executionMode === "cloud" ? conversation?.projectID ?? "" : conversation?.executionWorkspaceID ?? "";
+    },
+    [activeConversationID, executionMode, items],
   );
   const {
     ensureProjectExpanded,
@@ -448,7 +486,10 @@ export function NavProjects() {
     activeProjectID,
     items,
     lastChange,
-    projects,
+    projects: navigationProjects,
+    executionDeviceID: defaultDevice?.deviceId ?? "",
+    executionType: executionMode,
+    storageScope: `${executionMode}:${defaultDevice?.deviceId ?? ""}`,
   });
   const deleteProjectConversationsID = React.useId();
   const deleteProjectFilesID = React.useId();
@@ -461,7 +502,7 @@ export function NavProjects() {
     successMessage: tRecent("exported"),
     failureMessage: tRecent("exportFailed"),
   });
-  const projectIDs = React.useMemo(() => projects.map((project) => project.publicID), [projects]);
+  const projectIDs = React.useMemo(() => navigationProjects.map((project) => project.publicID), [navigationProjects]);
   const projectSortSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -550,14 +591,54 @@ export function NavProjects() {
   const startProjectConversation = React.useCallback(
     (projectID: string) => {
       ensureProjectExpanded(projectID, true);
-      requestNewConversation({ projectID });
-      router.push(`/chat?project_id=${encodeURIComponent(projectID)}`);
+      if (executionMode === "gateway") {
+        selectDefaultWorkspace(projectID);
+        requestNewConversation({ projectID: "", workspaceID: projectID });
+        router.push("/chat");
+      } else {
+        requestNewConversation({ projectID });
+        router.push(`/chat?project_id=${encodeURIComponent(projectID)}`);
+      }
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [ensureProjectExpanded, isMobile, requestNewConversation, router, setOpenMobile],
+    [ensureProjectExpanded, executionMode, isMobile, requestNewConversation, router, selectDefaultWorkspace, setOpenMobile],
   );
+
+  React.useEffect(() => {
+    const deviceID = defaultDevice?.deviceId ?? "";
+    const scope = `${deviceID}:${workspaces.map((item) => item.workspaceId).join(",")}`;
+    if (executionMode !== "gateway" || !deviceID || workspaces.length === 0 || refreshScopeRef.current === scope) {
+      return;
+    }
+    refreshScopeRef.current = scope;
+    let cancelled = false;
+
+    async function refreshSessions() {
+      const token = await resolveAccessToken();
+      if (!token || cancelled) return;
+      await Promise.allSettled(workspaces.map(async (workspace) => {
+        const startedAt = Date.now();
+        await refreshAgentWorkspaceResource(token, deviceID, workspace.workspaceId, "sessions");
+        while (!cancelled && Date.now() - startedAt < SESSION_REFRESH_TIMEOUT_MS) {
+          try {
+            const snapshot = await getAgentWorkspaceResource(token, deviceID, workspace.workspaceId, "sessions");
+            if (new Date(snapshot.refreshedAt).getTime() >= startedAt - 1000) return;
+          } catch {
+            // The command may complete before the first snapshot read succeeds.
+          }
+          await wait(SESSION_REFRESH_POLL_MS);
+        }
+      }));
+      if (!cancelled) await reload();
+    }
+
+    void refreshSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultDevice?.deviceId, executionMode, reload, workspaces]);
 
   const onProjectDragStart = React.useCallback((event: DragStartEvent) => {
     setDraggingProjectID(String(event.active.id));
@@ -682,7 +763,7 @@ export function NavProjects() {
     }
   }, [conversationDeleteTarget]);
 
-  if (projects.length === 0) {
+  if (navigationProjects.length === 0) {
     return (
       <>
         <div className="relative z-10 group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:opacity-0">
@@ -693,13 +774,13 @@ export function NavProjects() {
                 createLabel={t("create")}
                 contentID={projectsContentID}
                 open={projectsOpen}
-                onCreate={() => setDraft({
+                onCreate={canManageProjects ? () => setDraft({
                   name: "",
                   systemPrompt: "",
                   mcpDefaultMode: "inherit",
                   defaultMCPToolIDs: [],
                   defaultSkillIDs: [],
-                })}
+                }) : undefined}
                 onOpenChange={setProjectsOpen}
                 toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
               />
@@ -709,7 +790,9 @@ export function NavProjects() {
             </SidebarGroup>
           </Collapsible>
         </div>
-        <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
+        {canManageProjects ? (
+          <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
+        ) : null}
       </>
     );
   }
@@ -724,13 +807,13 @@ export function NavProjects() {
               createLabel={t("create")}
               contentID={projectsContentID}
               open={projectsOpen}
-              onCreate={() => setDraft({
+              onCreate={canManageProjects ? () => setDraft({
                 name: "",
                 systemPrompt: "",
                 mcpDefaultMode: "inherit",
                 defaultMCPToolIDs: [],
                 defaultSkillIDs: [],
-              })}
+              }) : undefined}
               onOpenChange={setProjectsOpen}
               toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
             />
@@ -744,7 +827,7 @@ export function NavProjects() {
               >
                 <SortableContext items={projectIDs} strategy={verticalListSortingStrategy}>
                   <SidebarMenu className="gap-0.5">
-                    {projects.map((project) => {
+                    {navigationProjects.map((project) => {
                       const expanded = expandedProjectIDs.has(project.publicID);
                       const conversationState = projectConversationState[project.publicID];
                       const conversationLoading = expanded && (!conversationState || conversationState.loading);
@@ -759,9 +842,13 @@ export function NavProjects() {
                       const menuHovered = hoveredProjectMenuID === project.publicID;
                       const menuOpen = openProjectMenuID === project.publicID;
                       const rowDragging = draggingProjectID === project.publicID;
-                      const canSortProjects = projects.length >= 2;
-                      const projectActionPaddingClassName = canSortProjects ? "pr-24" : "pr-16";
-                      const projectCreateActionClassName = canSortProjects ? "right-16" : "right-8";
+                      const canSortProjects = canManageProjects && navigationProjects.length >= 2;
+                      const projectActionPaddingClassName = canManageProjects
+                        ? canSortProjects ? "pr-24" : "pr-16"
+                        : "pr-8";
+                      const projectCreateActionClassName = canManageProjects
+                        ? canSortProjects ? "right-16" : "right-8"
+                        : "right-0";
                       const projectMenuActionClassName = canSortProjects ? "right-8" : "right-0";
                       const showProjectActions = isMobile || (!rowDragging && (rowHovered || rowFocused || menuHovered || menuOpen));
                       const projectConversationContentID = `sidebar-project-${project.publicID}-conversations`;
@@ -815,7 +902,7 @@ export function NavProjects() {
                                 >
                                   <PlusIcon aria-hidden size={16} strokeWidth={1.6} animate={createHovered ? "default" : undefined} />
                                 </ProjectInlineAction>
-                                <DropdownMenu
+                                {canManageProjects ? <DropdownMenu
                                   modal={false}
                                   open={menuOpen}
                                   onOpenChange={(open) => setOpenProjectMenuID(open ? project.publicID : null)}
@@ -859,7 +946,7 @@ export function NavProjects() {
                                       {t("delete")}
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
-                                </DropdownMenu>
+                                </DropdownMenu> : null}
                               </div>
                               <AnimatePresence initial={false}>
                                 {expanded ? (
@@ -926,15 +1013,15 @@ export function NavProjects() {
                                                 void setStarByPublicID(targetPublicID, !conversation.isStarred);
                                               },
                                             }}
-                                            projectMenu={{
+                                            projectMenu={canManageProjects ? {
                                               label: tRecent("row.moveToProject"),
                                               unassignedLabel: tRecent("projects.unassigned"),
                                               currentProjectID: conversation.projectID,
-                                              projects,
+                                              projects: navigationProjects,
                                               onSelect: (targetPublicID, targetProjectID) => {
                                                 void setProjectByPublicID(targetPublicID, targetProjectID);
                                               },
-                                            }}
+                                            } : undefined}
                                             isTransferring={false}
                                             isRenaming={conversationRenameTarget?.publicID === conversation.publicID}
                                             renameValue={
@@ -975,7 +1062,9 @@ export function NavProjects() {
         </Collapsible>
       </div>
 
-      <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
+      {canManageProjects ? (
+        <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
+      ) : null}
 
       <AlertDialog
         open={Boolean(deleteTarget)}

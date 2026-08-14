@@ -38,6 +38,7 @@ import { DeleteFilesOption } from "@/shared/components/delete-files-option";
 import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion-content";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { useSettingsChatPreferences } from "@/features/settings";
+import { useChatSession } from "@/features/chat";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutSidebarListFlip } from "@/features/layouts/hooks/use-layout-sidebar-list-flip";
 import { useSidebarConversationNavigation } from "@/features/layouts/hooks/use-sidebar-conversation-navigation";
@@ -57,6 +58,7 @@ export function NavRecents() {
   const t = useTranslations("recent");
   const onNavigate = useSidebarConversationNavigation();
   const router = useRouter();
+  const { executionMode } = useChatSession();
   const activeConversationID = useLayoutActiveConversation();
   const { deleteFilesByDefault } = useSettingsChatPreferences();
 
@@ -280,7 +282,7 @@ export function NavRecents() {
                                 icon: Star,
                                 onSelect: (targetPublicID) => onToggleStar(targetPublicID, !item.isStarred),
                               }}
-                              projectMenu={{
+                              projectMenu={executionMode === "cloud" ? {
                                 label: t("row.moveToProject"),
                                 unassignedLabel: t("projects.unassigned"),
                                 currentProjectID: item.projectID,
@@ -288,7 +290,7 @@ export function NavRecents() {
                                 onSelect: (targetPublicID, projectID) => {
                                   void setProjectByPublicID(targetPublicID, projectID);
                                 },
-                              }}
+                              } : undefined}
                               isTransferring={transferringStarPublicID === publicID}
                               onRename={onRename}
                               isRenaming={renameTarget?.publicID === publicID}

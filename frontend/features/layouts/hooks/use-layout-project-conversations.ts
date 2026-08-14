@@ -9,7 +9,7 @@ import {
 } from "@/entities/conversation";
 import type { SidebarConversationChange } from "@/entities/conversation";
 import { listConversations } from "@/shared/api/conversation";
-import type { ConversationDTO, ConversationProjectDTO } from "@/shared/api/conversation.types";
+import type { ConversationDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 export type ProjectConversationState = {
@@ -24,13 +24,17 @@ type ProjectConversationStateMap = Record<string, ProjectConversationState>;
 const PROJECT_CONVERSATION_PAGE_SIZE = 30;
 const PROJECT_EXPANDED_IDS_STORAGE_KEY = "deeix.sidebar.projects.expanded";
 
-function readStoredProjectIDSet(): Set<string> {
+function projectExpandedIDsStorageKey(scope: string): string {
+  return `${PROJECT_EXPANDED_IDS_STORAGE_KEY}.${scope}`;
+}
+
+function readStoredProjectIDSet(storageKey: string): Set<string> {
   if (typeof window === "undefined") {
     return new Set();
   }
 
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PROJECT_EXPANDED_IDS_STORAGE_KEY) ?? "[]") as unknown;
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as unknown;
     return Array.isArray(parsed)
       ? new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0))
       : new Set();
@@ -39,21 +43,21 @@ function readStoredProjectIDSet(): Set<string> {
   }
 }
 
-function hasStoredProjectIDSet(): boolean {
+function hasStoredProjectIDSet(storageKey: string): boolean {
   if (typeof window === "undefined") {
     return false;
   }
 
   try {
-    return window.localStorage.getItem(PROJECT_EXPANDED_IDS_STORAGE_KEY) !== null;
+    return window.localStorage.getItem(storageKey) !== null;
   } catch {
     return false;
   }
 }
 
-function writeStoredProjectIDSet(value: Set<string>): void {
+function writeStoredProjectIDSet(storageKey: string, value: Set<string>): void {
   try {
-    window.localStorage.setItem(PROJECT_EXPANDED_IDS_STORAGE_KEY, JSON.stringify(Array.from(value)));
+    window.localStorage.setItem(storageKey, JSON.stringify(Array.from(value)));
   } catch {
     // Sidebar persistence is optional when browser storage is unavailable.
   }
@@ -64,20 +68,27 @@ export function useLayoutProjectConversations({
   items,
   lastChange,
   projects,
+  executionDeviceID,
+  executionType,
+  storageScope,
 }: {
   activeProjectID: string;
   items: ConversationDTO[];
   lastChange: SidebarConversationChange | null;
-  projects: ConversationProjectDTO[];
+  projects: Array<{ publicID: string }>;
+  executionDeviceID: string;
+  executionType: "cloud" | "gateway";
+  storageScope: string;
 }) {
-  const [expandedProjectIDs, setExpandedProjectIDs] = React.useState<Set<string>>(readStoredProjectIDSet);
+  const storageKey = projectExpandedIDsStorageKey(storageScope);
+  const [expandedProjectIDs, setExpandedProjectIDs] = React.useState<Set<string>>(() => readStoredProjectIDSet(storageKey));
   const [projectConversationState, setProjectConversationState] = React.useState<ProjectConversationStateMap>({});
   const projectConversationStateRef = React.useRef(projectConversationState);
   const projectConversationRequestVersionRef = React.useRef<Record<string, number>>({});
   const mountedRef = React.useRef(false);
   const expandedProjectIDsRef = React.useRef(expandedProjectIDs);
   const activeRevealedProjectIDsRef = React.useRef(new Set<string>());
-  const hasStoredExpandedProjectIDsRef = React.useRef(hasStoredProjectIDSet());
+  const hasStoredExpandedProjectIDsRef = React.useRef(hasStoredProjectIDSet(storageKey));
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -103,17 +114,31 @@ export function useLayoutProjectConversations({
       if (persist) {
         hasStoredExpandedProjectIDsRef.current = true;
         writeStoredProjectIDSet(
+          storageKey,
           new Set(Array.from(next).filter((projectID) => !activeRevealedProjectIDsRef.current.has(projectID))),
         );
       }
     },
-    [],
+    [storageKey],
   );
 
   const loadProjectConversations = React.useCallback(
     async (projectID: string, force = false) => {
       const current = projectConversationStateRef.current[projectID];
-      if (!force && (current?.loading || current?.loaded)) {
+      if (executionType === "cloud" && !force && (current?.loading || current?.loaded)) {
+        return;
+      }
+
+      if (executionType === "gateway") {
+        updateProjectConversationState((previous) => ({
+          ...previous,
+          [projectID]: {
+            items: sortByUpdatedAtDesc(items.filter((item) => item.executionWorkspaceID === projectID)),
+            loading: false,
+            loaded: true,
+            error: false,
+          },
+        }));
         return;
       }
 
@@ -183,7 +208,7 @@ export function useLayoutProjectConversations({
         }));
       }
     },
-    [updateProjectConversationState],
+    [executionType, items, updateProjectConversationState],
   );
 
   React.useEffect(() => {
@@ -286,7 +311,11 @@ export function useLayoutProjectConversations({
         }
 
         const updated = lastChange.patch ? { ...base, ...lastChange.patch } : base;
-        const belongsToProject = updated.projectID === projectID && updated.status !== "archived";
+        const belongsToProject = (
+          executionType === "cloud"
+            ? updated.projectID === projectID
+            : updated.executionDeviceID === executionDeviceID && updated.executionWorkspaceID === projectID
+        ) && updated.status !== "archived";
         if (belongsToProject) {
           next[projectID] = { ...state, items: upsertByPublicID(state.items, updated, sortByUpdatedAtDesc) };
           changed = true;
@@ -298,7 +327,7 @@ export function useLayoutProjectConversations({
 
       return changed ? next : previous;
     });
-  }, [items, lastChange, updateProjectConversationState]);
+  }, [executionDeviceID, executionType, items, lastChange, updateProjectConversationState]);
 
   const removeProject = React.useCallback(
     (projectID: string) => {

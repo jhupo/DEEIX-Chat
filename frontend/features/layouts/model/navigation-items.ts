@@ -3,6 +3,7 @@ import { MessageCircleMore } from "@/components/animate-ui/icons/message-circle-
 import { PlusIcon } from "@/components/ui/plus";
 import { Search } from "@/components/animate-ui/icons/search";
 import { Blend } from "@/components/animate-ui/icons/blend";
+import { ClipboardList } from "@/components/animate-ui/icons/clipboard-list";
 import type { NavigationItem } from "@/features/layouts/types/navigation";
 
 export const NAVIGATION_ITEMS = [
@@ -27,6 +28,7 @@ export const NAVIGATION_ITEMS = [
     href: "/recent",
     icon: MessageCircleMore,
     group: "secondary",
+    mode: "cloud",
   },
   {
     id: "files",
@@ -34,6 +36,7 @@ export const NAVIGATION_ITEMS = [
     href: "/files",
     icon: Layers,
     group: "secondary",
+    mode: "cloud",
   },
   {
     id: "skillsPrompt",
@@ -41,5 +44,22 @@ export const NAVIGATION_ITEMS = [
     href: "/skills-prompt",
     icon: Blend,
     group: "secondary",
+    mode: "cloud",
+  },
+  {
+    id: "tasks",
+    kind: "link",
+    href: "/recent",
+    icon: ClipboardList,
+    group: "secondary",
+    mode: "gateway",
+  },
+  {
+    id: "devicePlugins",
+    kind: "link",
+    href: "/agent-plugins",
+    icon: Blend,
+    group: "secondary",
+    mode: "gateway",
   },
 ] as const satisfies readonly NavigationItem[];

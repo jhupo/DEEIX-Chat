@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useChatSession } from "@/features/chat";
 
 type RecentHeaderProps = {
   query: string;
@@ -14,14 +15,18 @@ type RecentHeaderProps = {
 
 export function RecentHeader({ query, onQueryChange, onCreateConversation }: RecentHeaderProps) {
   const t = useTranslations("recent");
+  const { executionMode } = useChatSession();
+  const isWork = executionMode === "gateway";
 
   return (
     <div className="ml-0 md:ml-13 md:w-[calc(100%-3.25rem)]">
       <div className="flex items-start justify-between gap-4">
-        <h1 className="text-xl font-semibold tracking-[-0.03em] text-foreground md:text-2xl">{t("allConversations")}</h1>
+        <h1 className="text-xl font-semibold tracking-[-0.03em] text-foreground md:text-2xl">
+          {t(isWork ? "allTasks" : "allConversations")}
+        </h1>
         <Button size="sm" variant="default" className="shrink-0" onClick={() => void onCreateConversation()}>
           <Plus className="size-4" />
-          {t("newChat")}
+          {t(isWork ? "newTask" : "newChat")}
         </Button>
       </div>
 

@@ -54,8 +54,8 @@ export function NavMain({
           ))}
         </SidebarMenu>
 
-        {executionMode === "cloud" ? <SidebarMenu className="mt-4 gap-0.5">
-          {NAVIGATION_ITEMS.filter((item) => item.group === "secondary").map((item) => (
+        <SidebarMenu className="mt-4 gap-0.5">
+          {NAVIGATION_ITEMS.filter((item) => item.group === "secondary" && item.mode === executionMode).map((item) => (
             <NavMainItem
               key={item.id}
               item={item}
@@ -67,7 +67,7 @@ export function NavMain({
               onCloseMobileSidebar={onCloseMobileSidebar}
             />
           ))}
-        </SidebarMenu> : null}
+        </SidebarMenu>
       </SidebarGroup>
 
       <NavigationSearch

@@ -8,9 +8,20 @@ import { RecentHeader } from "@/features/recent/components/sections/recent-heade
 import { RecentList } from "@/features/recent/components/sections/recent-list";
 import { RecentToolbar } from "@/features/recent/components/sections/recent-toolbar";
 import type { RecentBulkConfirmAction } from "@/features/recent/types/recent";
+import { useChatSession } from "@/features/chat";
+import { useDevices } from "@/features/devices";
 
 export function AppRecent() {
   const controller = useRecentPage();
+  const { executionMode } = useChatSession();
+  const { workspaces } = useDevices();
+  const canManageProjects = executionMode === "cloud";
+  const navigationProjects = React.useMemo(
+    () => canManageProjects
+      ? controller.projects
+      : workspaces.map((workspace) => ({ publicID: workspace.workspaceId, name: workspace.name })),
+    [canManageProjects, controller.projects, workspaces],
+  );
   const {
     allSelectedArchived,
     archiveSelected,
@@ -60,6 +71,8 @@ export function AppRecent() {
         />
 
         <RecentToolbar
+          canManageProjects={canManageProjects}
+          isWork={!canManageProjects}
           isSelectionMode={controller.isSelectionMode}
           selectedCount={controller.selectedConversationIDs.length}
           selectedSharedCount={controller.selectedSharedCount}
@@ -68,7 +81,7 @@ export function AppRecent() {
           starredFilter={controller.starredFilter}
           shareFilter={controller.shareFilter}
           allSelectedArchived={controller.allSelectedArchived}
-          projects={controller.projects}
+          projects={navigationProjects}
           selectedProjectID={controller.selectedProjectID}
           movingSelectedToProject={controller.movingSelectedToProject}
           onToggleSelectionMode={controller.toggleSelectionMode}
@@ -86,13 +99,15 @@ export function AppRecent() {
         />
 
         <RecentList
+          canManageProjects={canManageProjects}
+          executionType={executionMode}
           loadingInitial={controller.loadingInitial}
           filteredItems={controller.filteredItems}
           normalizedQuery={controller.normalizedQuery}
           statusFilter={controller.statusFilter}
           starredFilter={controller.starredFilter}
           shareFilter={controller.shareFilter}
-          projects={controller.projects}
+          projects={navigationProjects}
           rowStates={controller.rowStates}
           isSelectionMode={controller.isSelectionMode}
           loadMoreRef={controller.loadMoreRef}
