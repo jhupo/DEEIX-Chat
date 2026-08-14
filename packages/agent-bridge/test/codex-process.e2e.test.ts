@@ -15,10 +15,44 @@ import type { FsGetMetadataResponse } from "../generated/codex-app-server-v0.147
 import type { ThreadLoadedListResponse } from "../generated/codex-app-server-v0.147.0/ts/v2/ThreadLoadedListResponse.js";
 
 const executable = process.env.CODEX_E2E_EXECUTABLE;
+const authenticated = executable && process.env.CODEX_E2E_AUTHENTICATED === "1";
+
+test(
+	"pinned Codex app-server initializes without an authenticated upstream",
+	{ skip: executable ? false : "CODEX_E2E_EXECUTABLE is not set" },
+	async () => {
+		assert.ok(executable);
+		await assertCodexVersion(executable);
+		const appServer = startCodexAppServer(executable);
+		const adapter = new CodexAdapter({
+			profileId: "profile_smoke",
+			rpc: appServer.rpc,
+			sources: new SourceRefRegistry(),
+			closeProcess: appServer.close,
+		});
+		try {
+			const manifest = await adapter.start(async () => undefined, AbortSignal.timeout(15_000));
+			assert.equal(manifest.runtimeVersion, "0.147.0");
+			assert.ok(manifest.commands.includes("turn.start"));
+			const auth = await adapter.execute(
+				{
+					commandId: "command_smoke_auth_status",
+					profileRef: "profile_smoke",
+					kind: "resource.refresh",
+					resource: { scope: "profile", name: "auth-status" },
+				},
+				AbortSignal.timeout(15_000),
+			);
+			assert.equal(auth.kind, "resource");
+		} finally {
+			await adapter.close();
+		}
+	},
+);
 
 test(
 	"pinned Codex app-server initializes, serves resources, and completes a thread lifecycle",
-	{ skip: executable ? false : "CODEX_E2E_EXECUTABLE is not set" },
+	{ skip: authenticated ? false : "authenticated Codex E2E is not enabled" },
 	async () => {
 		assert.ok(executable);
 		await assertCodexVersion(executable);

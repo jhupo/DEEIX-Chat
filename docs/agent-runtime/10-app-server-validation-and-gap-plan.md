@@ -33,6 +33,7 @@
 pnpm.cmd --filter @deeix/agent-bridge check
 pnpm.cmd --filter @deeix/agent-bridge check:schema
 $env:CODEX_E2E_EXECUTABLE = (Resolve-Path '.cache/codex-e2e-v0.147.0/bin/codex-x86_64-pc-windows-msvc.exe').Path
+$env:CODEX_E2E_AUTHENTICATED = '1'
 pnpm.cmd --filter @deeix/agent-bridge test
 ```
 
