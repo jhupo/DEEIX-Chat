@@ -36,14 +36,17 @@ jobs:
       - name: Download pinned Codex
         shell: pwsh
         run: |
-          $url = "https://github.com/openai/codex/releases/download/rust-v0.147.0/codex-x86_64-pc-windows-msvc.exe.zip"
-          Invoke-WebRequest -Uri $url -OutFile codex.zip
-          $actual = (Get-FileHash codex.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne "a1c073ede409178502b1ff11bed635d2b644424352f9d4f3999de8272c6aebbd") {
+          $asset = "codex-package-x86_64-pc-windows-msvc.tar.gz"
+          $url = "https://github.com/openai/codex/releases/download/rust-v0.147.0/$asset"
+          Invoke-WebRequest -Uri $url -OutFile $asset
+          $actual = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "c156c8feb8cb20197bf74d2c6daffed1fec0a8c21a03bc2ca90d7ff81927b0c5") {
             throw "Pinned Codex SHA-256 mismatch"
           }
-          Expand-Archive codex.zip codex-e2e
-          $exe = Get-ChildItem codex-e2e -Recurse -Filter codex-x86_64-pc-windows-msvc.exe | Select-Object -First 1
-          if (-not $exe) { throw "Pinned Codex executable is missing from the asset" }
-          "CODEX_E2E_EXECUTABLE=$($exe.FullName)" | Out-File $env:GITHUB_ENV -Append
+          New-Item -ItemType Directory -Force codex-e2e | Out-Null
+          tar -xzf $asset -C codex-e2e
+          if (-not (Test-Path codex-e2e/bin/codex.exe) -or -not (Test-Path codex-e2e/bin/codex-code-mode-host.exe)) {
+            throw "Pinned Codex runtime is incomplete"
+          }
+          "CODEX_E2E_EXECUTABLE=$((Resolve-Path codex-e2e/bin/codex.exe).Path)" | Out-File $env:GITHUB_ENV -Append
       - run: pnpm --filter @deeix/agent-bridge test

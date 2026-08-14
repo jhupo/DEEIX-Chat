@@ -5,7 +5,7 @@ server=""
 user=""
 workspace=""
 name=""
-codex="codex"
+codex="@bundled"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --server) server="$2"; shift 2 ;;

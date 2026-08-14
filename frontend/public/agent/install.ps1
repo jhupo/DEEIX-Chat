@@ -3,7 +3,7 @@ param(
   [Parameter(Mandatory = $true)][string]$User,
   [Parameter(Mandatory = $true)][string]$Workspace,
   [string]$Name = $env:COMPUTERNAME,
-  [string]$Codex = "codex"
+  [string]$Codex = "@bundled"
 )
 $ErrorActionPreference = "Stop"
 $base = if ($env:DEEIX_AGENT_RELEASE_BASE) { $env:DEEIX_AGENT_RELEASE_BASE } else { "$($Server.TrimEnd('/'))/agent/releases/current" }

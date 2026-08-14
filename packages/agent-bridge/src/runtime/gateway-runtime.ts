@@ -21,6 +21,7 @@ import { OutgoingFrameJournal } from "../wal/outgoing-frame-journal.js";
 export type GatewayRuntimeOptions = {
 	dataDirectory: string;
 	reconnect?: boolean;
+	onConnectionError?: (error: Error) => void;
 };
 
 export async function runGateway(
@@ -91,6 +92,7 @@ export async function runGateway(
 				delay = 1_000;
 			} catch (error) {
 				if (signal.aborted || options.reconnect === false) throw error;
+				options.onConnectionError?.(connectionError(error));
 				await wait(delay, signal);
 				delay = Math.min(delay * 2, 30_000);
 			}
@@ -101,6 +103,16 @@ export async function runGateway(
 		outgoingWal.close();
 		sourceWal.close();
 	}
+}
+
+function connectionError(error: unknown): Error {
+	const message = error instanceof Error ? error.message : "Gateway connection failed";
+	return new Error(
+		[...message]
+			.map((character) => character.charCodeAt(0) < 32 ? " " : character)
+			.join("")
+			.slice(0, 1024),
+	);
 }
 
 function wait(milliseconds: number, signal: AbortSignal): Promise<void> {

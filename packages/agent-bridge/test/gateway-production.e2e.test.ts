@@ -18,15 +18,16 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 	const userPublicId = requiredEnvironment("CODEX_GATEWAY_E2E_USER_PUBLIC_ID");
 	const accessToken = requiredEnvironment("CODEX_GATEWAY_E2E_ACCESS_TOKEN").replace(/^Bearer\s+/i, "");
 	const workspace = resolve(requiredEnvironment("CODEX_GATEWAY_E2E_WORKSPACE"));
-	const marker = `.deeix-gateway-e2e-${randomUUID()}.txt`;
+	const marker = resolve(`.deeix-gateway-e2e-${randomUUID()}.txt`);
+	const markerBase64 = Buffer.from(marker, "utf8").toString("base64");
 	const prompt = process.env.CODEX_GATEWAY_E2E_PROMPT?.trim() ||
-		`Use the terminal tool to run exactly: node -e "require('node:fs').writeFileSync('${marker}', 'P0')". ` +
+		`Use the terminal tool to run exactly: node -e "require('node:fs').writeFileSync(Buffer.from('${markerBase64}', 'base64').toString(), 'P0')". ` +
 		"Do not simulate the command or report completion before the tool finishes.";
 	const codex = process.env.CODEX_GATEWAY_E2E_CODEX?.trim() || "codex";
 	const dataDirectory = await mkdtemp(join(tmpdir(), "deeix-gateway-e2e-"));
 	let deviceId = "";
 	let conversationId = "";
-	let running: { controller: AbortController; done: Promise<void> } | undefined;
+	let running: RunningGateway | undefined;
 
 	const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
 		const response = await fetch(`${server}${path}`, {
@@ -37,7 +38,18 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 				...init.headers,
 			},
 		});
-		const envelope = await response.json() as { errorMsg?: string; data?: T };
+		const rawBody = await response.text();
+		let envelope: { errorMsg?: string; data?: T };
+		try {
+			envelope = JSON.parse(rawBody) as { errorMsg?: string; data?: T };
+		} catch {
+			const contentType = response.headers.get("content-type") ?? "unknown";
+			const preview = [...rawBody]
+				.map((character) => character.charCodeAt(0) < 32 ? " " : character)
+				.join("")
+				.slice(0, 256);
+			throw new Error(`${init.method ?? "GET"} ${path}: ${response.status} non-JSON ${contentType}: ${preview}`);
+		}
 		if (!response.ok) throw new Error(`${init.method ?? "GET"} ${path}: ${response.status} ${envelope.errorMsg ?? "request failed"}`);
 		return envelope.data as T;
 	};
@@ -53,7 +65,7 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 		assert.ok(workspaceId);
 
 		running = startGateway(dataDirectory);
-		await eventually(async () => (await api<{ online: boolean }>(`/api/v1/agent/devices/${deviceId}`)).online);
+		await waitForGatewayOnline(api, deviceId, running, 120_000);
 		const profiles = await api<Array<{ profileId: string; status: string; manifest: ProviderManifest }>>(
 			`/api/v1/agent/devices/${deviceId}/profiles`,
 		);
@@ -78,13 +90,14 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 			method: "POST",
 			body: JSON.stringify({
 				contentType: "text", content: prompt, clientRunID: runId,
-				options: { approvalPolicy: "untrusted", sandboxPolicy: "read-only" },
+				options: { approvalPolicy: "untrusted", sandboxPolicy: "workspace-write" },
 			}),
 		}).catch((error: unknown) => {
 			turnFailure = error;
 		});
 
 		let responded = false;
+		let completedAssistant: Message | undefined;
 		await eventually(async () => {
 			if (turnFailure) throw turnFailure;
 			const interactions = await api<Interaction[]>(`/api/v1/conversations/${conversationId}/interactions?status=pending`);
@@ -101,15 +114,22 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 			const assistant = page.results.find((message) => message.runID === runId && message.role === "assistant");
 			if (assistant && ["error", "interrupted"].includes(assistant.status))
 				throw new Error(`gateway turn ended as ${assistant.status}: ${assistant.errorMessage ?? "unknown error"}`);
+			if (assistant?.status === "success") completedAssistant = assistant;
 			return assistant?.status === "success" && assistant.content.trim().length > 0;
 		}, 4 * 60_000);
 		await turnRequest;
 		if (turnFailure) throw turnFailure;
-		assert.equal(responded, true, "the E2E prompt did not produce a server interaction");
-		assert.equal(await readFile(join(workspace, marker), "utf8"), "P0");
+		const markerContent = await readFile(marker, "utf8").catch(() => "missing");
+		assert.equal(responded, true,
+			`the E2E prompt did not produce a server interaction; marker=${markerContent}; assistant=${completedAssistant?.content ?? "missing"}`);
+		assert.equal(await readFile(marker, "utf8"), "P0");
 
 		await stopGateway(running);
 		running = undefined;
+		await eventually(
+			async () => !(await api<{ online: boolean }>(`/api/v1/agent/devices/${deviceId}`)).online,
+			30_000,
+		);
 		const commandStore = await DurableWalStore.open(join(dataDirectory, "wal", "commands"));
 		const outgoingStore = await DurableWalStore.open(join(dataDirectory, "wal", "outgoing"));
 		try {
@@ -121,23 +141,29 @@ test("production WSS gateway round trip", { skip: !enabled, timeout: 10 * 60_000
 		}
 
 		running = startGateway(dataDirectory);
-		await eventually(async () => (await api<{ online: boolean }>(`/api/v1/agent/devices/${deviceId}`)).online);
+		await waitForGatewayOnline(api, deviceId, running, 120_000);
 		const refreshStartedAt = Date.now();
 		await api(`/api/v1/agent/devices/${deviceId}/workspaces/${workspaceId}/resources/sessions/refresh`, {
 			method: "POST",
 			headers: { "Idempotency-Key": randomUUID() },
 		});
-		await eventually(async () => {
-			const snapshot = await api<{ data: unknown; refreshedAt: string }>(
-				`/api/v1/agent/devices/${deviceId}/workspaces/${workspaceId}/resources/sessions`,
-			);
-			return Date.parse(snapshot.refreshedAt) >= refreshStartedAt - 1_000 && JSON.stringify(snapshot.data).includes(prompt);
-		}, 90_000);
+		try {
+			await eventually(async () => {
+				const snapshot = await api<{ data: unknown; refreshedAt: string }>(
+					`/api/v1/agent/devices/${deviceId}/workspaces/${workspaceId}/resources/sessions`,
+				);
+				return Date.parse(snapshot.refreshedAt) >= refreshStartedAt - 1_000 && JSON.stringify(snapshot.data).includes(prompt);
+			}, 90_000);
+		} catch (error) {
+			throw new Error(`sessions refresh failed; commandWal=${JSON.stringify(await resourceCommandDiagnostics(dataDirectory))}`, {
+				cause: error,
+			});
+		}
 	} finally {
 		if (running) await stopGateway(running);
 		if (conversationId) await api(`/api/v1/conversations/${conversationId}`, { method: "DELETE" }).catch(() => undefined);
 		if (deviceId) await api(`/api/v1/agent/devices/${deviceId}`, { method: "DELETE" }).catch(() => undefined);
-		await rm(join(workspace, marker), { force: true });
+		await rm(marker, { force: true });
 		await rm(dataDirectory, { recursive: true, force: true });
 	}
 });
@@ -161,17 +187,46 @@ type Message = {
 	errorMessage?: string;
 };
 
-function startGateway(dataDirectory: string): { controller: AbortController; done: Promise<void> } {
+type RunningGateway = {
+	controller: AbortController;
+	done: Promise<void>;
+	connectionErrors: string[];
+};
+
+function startGateway(dataDirectory: string): RunningGateway {
 	const controller = new AbortController();
-	const done = runGateway({ dataDirectory, reconnect: true }, controller.signal).catch((error) => {
+	const connectionErrors: string[] = [];
+	const done = runGateway({
+		dataDirectory,
+		reconnect: true,
+		onConnectionError: (error) => connectionErrors.push(error.message),
+	}, controller.signal).catch((error) => {
 		if (!controller.signal.aborted) throw error;
 	});
-	return { controller, done };
+	return { controller, done, connectionErrors };
 }
 
-async function stopGateway(running: { controller: AbortController; done: Promise<void> }): Promise<void> {
+async function stopGateway(running: RunningGateway): Promise<void> {
 	running.controller.abort(new Error("E2E reconnect checkpoint"));
 	await running.done;
+}
+
+async function waitForGatewayOnline(
+	api: <T>(path: string, init?: RequestInit) => Promise<T>,
+	deviceId: string,
+	running: RunningGateway,
+	timeout: number,
+): Promise<void> {
+	try {
+		await eventually(
+			async () => (await api<{ online: boolean }>(`/api/v1/agent/devices/${deviceId}`)).online,
+			timeout,
+		);
+	} catch (error) {
+		throw new Error(`gateway did not come online; connectionErrors=${JSON.stringify(running.connectionErrors.slice(-8))}`, {
+			cause: error,
+		});
+	}
 }
 
 function responseFor(interaction: Interaction): Record<string, unknown> {
@@ -195,6 +250,21 @@ function responseFor(interaction: Interaction): Record<string, unknown> {
 			assert.ok(Object.keys(answers).length > 0, "user input interaction has no question refs");
 			return { kind: "user-input", answers };
 		}
+	}
+}
+
+async function resourceCommandDiagnostics(dataDirectory: string): Promise<unknown[]> {
+	const store = await DurableWalStore.open(join(dataDirectory, "wal", "commands"));
+	try {
+		return store.records()
+			.filter((record) => {
+				const command = Reflect.get(record.payload as object, "command");
+				return record.kind === "command.terminal" ||
+					(typeof command === "object" && command !== null && Reflect.get(command, "kind") === "resource.refresh");
+			})
+			.slice(-6);
+	} finally {
+		store.close();
 	}
 }
 

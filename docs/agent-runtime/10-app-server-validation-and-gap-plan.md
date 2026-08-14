@@ -207,7 +207,7 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 该测试完成 enrollment、runtime proof、manifest/profile 持久化读取、workspace sync、gateway conversation、turn stream、interaction response、WSS ack、Bridge WAL、进程级断线重连、sessions/app-server history 回读和清理。Web API 在重连后读取的 profile、message、interaction 和 resource snapshot 用于验证 PostgreSQL 持久化状态。
 
-运行前，本机 Codex 必须使用 API key 登录，并且该 key 归属于 `CODEX_GATEWAY_E2E_ACCESS_TOKEN` 对应的 Sub2 用户；runtime proof 会验证这层归属关系。测试并发等待同步 turn 请求和 pending interaction，使用 `untrusted` 稳定触发命令审批，再验证审批后真实写入 workspace marker。
+运行前，测试使用 SHA-256 锁定的 Codex 0.147.0 官方完整 `codex-package` 与隔离的临时 `CODEX_HOME`；该目录中的 API key 归属于 `CODEX_GATEWAY_E2E_ACCESS_TOKEN` 对应的 Sub2 用户，runtime proof 会验证这层归属关系。完整包必须同时存在主程序与 `codex-code-mode-host`，避免只测到 app-server 初始化却在首次工具调用时失败。测试并发等待同步 turn 请求和 pending interaction，使用 `untrusted` 与 `workspace-write`，通过写入注册 Workspace 和系统临时目录之外的受控 marker 稳定触发越界命令审批；批准后验证真实文件内容并清理。
 
 ```powershell
 $env:CODEX_GATEWAY_E2E='1'

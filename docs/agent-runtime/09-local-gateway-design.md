@@ -33,9 +33,9 @@ Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurn
 
 ## 2.1 安装、注册与更新
 
-账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Bridge 包一并放入前端静态目录，用户机器不直接连接 GitHub。
+账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Bridge 包一并放入前端静态目录，用户机器不直接连接 GitHub。每个平台包同时携带 SHA-256 锁定的 Codex 0.147.0 官方 `codex-package` 完整 runtime（主程序、code-mode host、命令运行器、sandbox setup 与 `rg`），不依赖用户 PATH 中的 Codex，也不在运行时下载配套程序。
 
-Bridge 配置与 Ed25519 设备私钥保存在用户目录。重复运行安装命令会停止原常驻任务、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows 当前用户计划任务重新启动。程序包与身份数据分目录，客户端更新不会改变设备 ID。
+Bridge 配置与 Ed25519 设备私钥保存在用户目录。配置中的 `@bundled` 只解析到当前 Bridge 安装目录内的 Codex runtime；安装脚本先在 staging 目录完成版本、runtime proof 与 Workspace 校验，再原子替换程序目录。重复运行安装命令会停止原常驻任务、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows 当前用户计划任务重新启动。程序包与身份数据分目录，客户端更新不会改变设备 ID。
 
 ## 3. 强类型命令
 
