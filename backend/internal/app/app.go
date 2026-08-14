@@ -131,6 +131,23 @@ func (a localGatewayAdapter) ResolveExecutionTarget(ctx context.Context, userID 
 	return provider, mapLocalGatewayError(err)
 }
 
+func (a localGatewayAdapter) ListProjects(ctx context.Context, userID uint, deviceID string) ([]conversation.GatewayProject, error) {
+	items, err := a.service.ListWorkspaces(ctx, userID, deviceID)
+	if err != nil {
+		return nil, mapLocalGatewayError(err)
+	}
+	projects := make([]conversation.GatewayProject, 0, len(items))
+	for _, item := range items {
+		projects = append(projects, conversation.GatewayProject{
+			ProjectID: item.WorkspaceID,
+			ProfileID: item.ProfileID,
+			Name:      item.Name,
+			UpdatedAt: item.LastSeenAt,
+		})
+	}
+	return projects, nil
+}
+
 func (a localGatewayAdapter) CreateArtifact(ctx context.Context, userID uint, workspaceID, fileID string) (*conversation.GatewayArtifact, error) {
 	item, err := a.service.CreateArtifact(ctx, userID, workspaceID, fileID)
 	if err != nil {

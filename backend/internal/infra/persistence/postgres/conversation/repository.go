@@ -124,8 +124,16 @@ func (r *Repo) ListConversationsByUser(
 	case "", "all":
 		// 保留全部项目归属。
 	case "unassigned":
-		query = query.Where("project_id IS NULL")
+		if executionType == domainconversation.ExecutionTypeGateway {
+			query = query.Where("execution_workspace_id = ?", "")
+		} else {
+			query = query.Where("project_id IS NULL")
+		}
 	default:
+		if executionType == domainconversation.ExecutionTypeGateway {
+			query = query.Where("execution_workspace_id = ?", normalizedProjectFilter)
+			break
+		}
 		project, err := r.GetConversationProjectByPublicID(ctx, userID, normalizedProjectFilter)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {

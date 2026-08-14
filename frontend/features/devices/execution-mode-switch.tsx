@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 export function ExecutionModeSwitch() {
   const t = useTranslations("common.navigation");
   const { executionMode, setExecutionMode, requestNewConversation } = useChatSession();
-  const { defaultDevice, defaultWorkspace, loading } = useDevices();
+  const { defaultDevice, loading } = useDevices();
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const workAvailable = Boolean(defaultDevice && defaultWorkspace);
+  const workAvailable = Boolean(defaultDevice);
 
   React.useEffect(() => {
     if (!loading && !workAvailable && executionMode === "gateway" && !searchParams.get("conversation_id")) {
@@ -26,7 +26,7 @@ export function ExecutionModeSwitch() {
   const selectMode = React.useCallback((mode: "cloud" | "gateway") => {
     if (mode === executionMode || (mode === "gateway" && !workAvailable)) return;
     setExecutionMode(mode);
-    requestNewConversation({ projectID: "", workspaceID: "" });
+    requestNewConversation({ projectID: "" });
     if (pathname === "/chat") window.history.pushState(null, "", "/chat");
     else router.push("/chat");
   }, [executionMode, pathname, requestNewConversation, router, setExecutionMode, workAvailable]);

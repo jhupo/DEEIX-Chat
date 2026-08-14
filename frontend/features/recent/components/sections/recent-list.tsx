@@ -344,7 +344,6 @@ function RecentConversationRow({
 
 type RecentListProps = {
   canManageProjects: boolean;
-  executionType: "cloud" | "gateway";
   loadingInitial: boolean;
   filteredItems: ConversationDTO[];
   projects: ConversationProjectSubmenuProject[];
@@ -382,7 +381,6 @@ function buildConversationGroups(
   items: ConversationDTO[],
   projects: ConversationProjectSubmenuProject[],
   unassignedTitle: string,
-  executionType: "cloud" | "gateway",
 ): RecentConversationGroup[] {
   const itemsByProjectID = new Map<string, ConversationDTO[]>();
   const unknownProjectItems = new Map<string, ConversationDTO[]>();
@@ -391,7 +389,7 @@ function buildConversationGroups(
   const knownProjectIDs = new Set(projects.map((project) => project.publicID));
 
   for (const item of items) {
-    const projectID = executionType === "cloud" ? item.projectID : item.executionWorkspaceID;
+    const projectID = item.projectID;
     if (!projectID) {
       unassignedItems.push(item);
       continue;
@@ -400,7 +398,7 @@ function buildConversationGroups(
       itemsByProjectID.set(projectID, [...(itemsByProjectID.get(projectID) ?? []), item]);
       continue;
     }
-    const unknownProjectTitle = executionType === "cloud" ? item.projectName || projectID : projectID;
+    const unknownProjectTitle = item.projectName || projectID;
     unknownProjectItems.set(unknownProjectTitle, [...(unknownProjectItems.get(unknownProjectTitle) ?? []), item]);
   }
 
@@ -437,7 +435,6 @@ function buildConversationGroups(
 
 export function RecentList({
   canManageProjects,
-  executionType,
   loadingInitial,
   filteredItems,
   projects,
@@ -466,8 +463,8 @@ export function RecentList({
 }: RecentListProps) {
   const t = useTranslations("recent");
   const groups = React.useMemo(
-    () => buildConversationGroups(filteredItems, projects, t("projects.unassigned"), executionType),
-    [executionType, filteredItems, projects, t],
+    () => buildConversationGroups(filteredItems, projects, t("projects.unassigned")),
+    [filteredItems, projects, t],
   );
   const rowStateByPublicID = React.useMemo(() => {
     const stateMap = new Map<string, RecentRowState>();

@@ -42,11 +42,14 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 	item, err := h.service.CreateConversation(c.Request.Context(), appconversation.CreateConversationInput{
 		UserID: userID, Title: req.Title, ModelName: req.Model, ProjectPublicID: req.ProjectID,
 		ExecutionType: req.Execution.Type, DeviceID: req.Execution.DeviceID,
-		ProfileID: req.Execution.ProfileID, WorkspaceID: req.Execution.WorkspaceID,
 	})
 	if err != nil {
 		if errors.Is(err, appconversation.ErrInvalidExecutionTarget) {
 			response.Error(c, http.StatusBadRequest, "invalid execution target")
+			return
+		}
+		if errors.Is(err, appconversation.ErrExecutionUnavailable) {
+			response.Error(c, http.StatusServiceUnavailable, "execution adapter unavailable")
 			return
 		}
 		if errors.Is(err, appconversation.ErrConversationProjectNotFound) {
@@ -83,6 +86,8 @@ func (h *Handler) CreateConversation(c *gin.Context) {
 // @Param execution query string true "Execution type: cloud|gateway"
 // @Param device query string false "Gateway device public ID"
 // @Success 200 {object} ConversationListResponseDoc
+// @Failure 400 {object} ErrorDoc
+// @Failure 503 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversations [get]
 // ListConversations 查询会话。
@@ -101,6 +106,14 @@ func (h *Handler) ListConversations(c *gin.Context) {
 
 	items, total, err := h.service.ListConversations(c.Request.Context(), userID, page, pageSize, statusFilter, starredFilter, shareFilter, projectFilter, executionType, executionDeviceID, searchQuery)
 	if err != nil {
+		if errors.Is(err, appconversation.ErrInvalidExecutionTarget) {
+			response.Error(c, http.StatusBadRequest, "invalid execution target")
+			return
+		}
+		if errors.Is(err, appconversation.ErrExecutionUnavailable) {
+			response.Error(c, http.StatusServiceUnavailable, "execution adapter unavailable")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "list conversations failed")
 		return
 	}
@@ -125,6 +138,7 @@ func (h *Handler) ListConversations(c *gin.Context) {
 // @Param device query string false "Gateway device public ID"
 // @Success 200 {object} ConversationSearchListResponseDoc
 // @Failure 400 {object} ErrorDoc
+// @Failure 503 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversations/search [get]
 // SearchConversations 搜索会话。
@@ -150,6 +164,14 @@ func (h *Handler) SearchConversations(c *gin.Context) {
 		searchQuery,
 	)
 	if err != nil {
+		if errors.Is(err, appconversation.ErrInvalidExecutionTarget) {
+			response.Error(c, http.StatusBadRequest, "invalid execution target")
+			return
+		}
+		if errors.Is(err, appconversation.ErrExecutionUnavailable) {
+			response.Error(c, http.StatusServiceUnavailable, "execution adapter unavailable")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "search conversations failed")
 		return
 	}

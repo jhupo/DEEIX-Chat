@@ -1223,8 +1223,8 @@ func TestConversationExecutionScopesAreIsolated(t *testing.T) {
 	}
 	conversations := []model.Conversation{
 		{UserID: 1, PublicID: "conv_cloud_scope", Title: "Cloud", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeCloud, SessionKey: "session_cloud_scope", Status: "active"},
-		{UserID: 1, PublicID: "conv_device_a", Title: "Device A", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SessionKey: "session_device_a", Status: "active"},
-		{UserID: 1, PublicID: "conv_device_b", Title: "Device B", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", SessionKey: "session_device_b", Status: "active"},
+		{UserID: 1, PublicID: "conv_device_a", Title: "Device A", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ExecutionWorkspaceID: "workspace_a", SessionKey: "session_device_a", Status: "active"},
+		{UserID: 1, PublicID: "conv_device_b", Title: "Device B", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: "agd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", ExecutionWorkspaceID: "workspace_b", SessionKey: "session_device_b", Status: "active"},
 	}
 	if err := db.Create(&conversations).Error; err != nil {
 		t.Fatalf("create conversations: %v", err)
@@ -1249,6 +1249,26 @@ func TestConversationExecutionScopesAreIsolated(t *testing.T) {
 		})
 	}
 
+	items, total, err := repo.ListConversationsByUser(
+		ctx,
+		1,
+		0,
+		10,
+		"active",
+		"all",
+		"all",
+		"workspace_a",
+		domainconversation.ExecutionTypeGateway,
+		"agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("ListConversationsByUser() workspace filter error = %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].PublicID != "conv_device_a" {
+		t.Fatalf("workspace filtered items = %#v, total = %d", items, total)
+	}
+
 	if _, err := repo.UpdateConversationProjectAssignmentByPublicID(ctx, 1, "conv_device_a", &project.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("gateway project assignment error = %v, want ErrNotFound", err)
 	}
@@ -1262,40 +1282,40 @@ func TestListConversationsForSearchReturnsOrderedWindowWithoutStatusFiltering(t 
 
 	items := []model.Conversation{
 		{
-			BaseModel:  model.BaseModel{UpdatedAt: now.Add(-2 * time.Hour)},
-			UserID:     1,
-			PublicID:   "conv_search_oldest",
-			Title:      "Needle oldest",
-			LabelsJSON: "[]",
-			Model:      "gpt-test",
-			Provider:   "openai",
+			BaseModel:     model.BaseModel{UpdatedAt: now.Add(-2 * time.Hour)},
+			UserID:        1,
+			PublicID:      "conv_search_oldest",
+			Title:         "Needle oldest",
+			LabelsJSON:    "[]",
+			Model:         "gpt-test",
+			Provider:      "openai",
 			ExecutionType: domainconversation.ExecutionTypeCloud,
-			SessionKey: "session_search_oldest",
-			Status:     "active",
+			SessionKey:    "session_search_oldest",
+			Status:        "active",
 		},
 		{
-			BaseModel:  model.BaseModel{UpdatedAt: now.Add(-time.Hour)},
-			UserID:     1,
-			PublicID:   "conv_search_middle",
-			Title:      "Needle middle",
-			LabelsJSON: "[]",
-			Model:      "gpt-test",
-			Provider:   "openai",
+			BaseModel:     model.BaseModel{UpdatedAt: now.Add(-time.Hour)},
+			UserID:        1,
+			PublicID:      "conv_search_middle",
+			Title:         "Needle middle",
+			LabelsJSON:    "[]",
+			Model:         "gpt-test",
+			Provider:      "openai",
 			ExecutionType: domainconversation.ExecutionTypeCloud,
-			SessionKey: "session_search_middle",
-			Status:     "archived",
+			SessionKey:    "session_search_middle",
+			Status:        "archived",
 		},
 		{
-			BaseModel:  model.BaseModel{UpdatedAt: now},
-			UserID:     1,
-			PublicID:   "conv_search_latest",
-			Title:      "Needle latest",
-			LabelsJSON: "[]",
-			Model:      "gpt-test",
-			Provider:   "openai",
+			BaseModel:     model.BaseModel{UpdatedAt: now},
+			UserID:        1,
+			PublicID:      "conv_search_latest",
+			Title:         "Needle latest",
+			LabelsJSON:    "[]",
+			Model:         "gpt-test",
+			Provider:      "openai",
 			ExecutionType: domainconversation.ExecutionTypeCloud,
-			SessionKey: "session_search_latest",
-			Status:     "active",
+			SessionKey:    "session_search_latest",
+			Status:        "active",
 		},
 	}
 	if err := db.Create(&items).Error; err != nil {

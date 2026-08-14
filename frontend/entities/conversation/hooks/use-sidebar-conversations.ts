@@ -229,8 +229,16 @@ async function fetchAllStarred(accessToken: string, executionType: "cloud" | "ga
   return sortByStarredAtDesc(items);
 }
 
-async function fetchActiveProjects(accessToken: string): Promise<ConversationProjectDTO[]> {
-  return listConversationProjects(accessToken, { status: "active" });
+async function fetchActiveProjects(
+  accessToken: string,
+  executionType: "cloud" | "gateway",
+  executionDeviceID: string,
+): Promise<ConversationProjectDTO[]> {
+  return listConversationProjects(accessToken, {
+    status: "active",
+    execution: executionType,
+    deviceId: executionDeviceID,
+  });
 }
 
 export function useSidebarConversationsController({
@@ -386,6 +394,17 @@ export function useSidebarConversationsController({
     loadMoreFailedRef.current = false;
     pageRef.current = 1;
 
+    if (executionType === "gateway" && !executionDeviceID) {
+      setRecentItems([]);
+      setStarredItems([]);
+      setProjectList([]);
+      setStarredTotal(0);
+      setHasMore(false);
+      hasHydratedInitialRef.current = true;
+      setLoadingInitial(false);
+      return;
+    }
+
     const token = await resolveAccessToken();
     if (!token) {
       if (requestVersion !== initialRequestVersionRef.current) {
@@ -405,7 +424,7 @@ export function useSidebarConversationsController({
       const [recentData, starredData, projectData] = await Promise.all([
         fetchRecentPage(token, 1, executionType, executionDeviceID),
         fetchStarredWindow(token, executionType, executionDeviceID),
-        executionType === "cloud" ? fetchActiveProjects(token) : Promise.resolve([]),
+        fetchActiveProjects(token, executionType, executionDeviceID),
       ]);
 
       if (requestVersion !== initialRequestVersionRef.current) {
@@ -490,7 +509,7 @@ export function useSidebarConversationsController({
   const prependNewConversation = React.useCallback(async (
     platformModelName?: string,
     projectID?: string,
-    execution: { type: "cloud" } | { type: "gateway"; deviceID: string; profileID: string; workspaceID: string } = { type: "cloud" },
+    execution: { type: "cloud" } | { type: "gateway"; deviceID: string } = { type: "cloud" },
   ): Promise<ConversationDTO | null> => {
     const token = await resolveAccessToken();
     if (!token) {

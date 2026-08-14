@@ -108,20 +108,6 @@
   "profile": "个人资料",
   "notifications": "通知",
   "memory": "AI 偏好记忆",
-  "agentPlugins": {
-    "title": "插件",
-    "refresh": "刷新插件",
-    "refreshedAt": "更新于 {time}",
-    "noDevice": "请先选择一个设备",
-    "noProfile": "当前设备没有可用的 Codex 运行时",
-    "notSupported": "当前 Codex 运行时未提供插件能力",
-    "empty": "当前设备没有可用插件",
-    "loadFailed": "插件加载失败",
-    "installed": "已安装",
-    "enabled": "已启用",
-    "featured": "推荐",
-    "version": "版本 {version}"
-  },
   "accountPage": {
     "title": "账户",
     "password": "登录密码",

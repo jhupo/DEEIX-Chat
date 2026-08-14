@@ -44,7 +44,7 @@ type CreateConversationInput struct {
 	UserID                            uint
 	Title, ModelName, ProjectPublicID string
 	ExecutionType                     string
-	DeviceID, ProfileID, WorkspaceID  string
+	DeviceID                          string
 }
 
 // CreateConversation 创建用户新会话。
@@ -56,20 +56,39 @@ func (s *Service) CreateConversation(ctx context.Context, input CreateConversati
 
 	normalizedModel := strings.TrimSpace(input.ModelName)
 	executionType := strings.TrimSpace(input.ExecutionType)
-	deviceID, profileID, workspaceID := strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.ProfileID), strings.TrimSpace(input.WorkspaceID)
+	deviceID := strings.TrimSpace(input.DeviceID)
+	profileID, workspaceID := "", ""
 	provider := inferProvider(normalizedModel)
+	var projectID *uint
+	var project *model.ConversationProject
+	var gatewayProject *GatewayProject
 	switch executionType {
 	case model.ExecutionTypeCloud:
-		if deviceID != "" || profileID != "" || workspaceID != "" {
+		if deviceID != "" {
 			return nil, ErrInvalidExecutionTarget
+		}
+		if normalizedProjectID := strings.TrimSpace(input.ProjectPublicID); normalizedProjectID != "" {
+			resolvedProject, err := s.repo.GetConversationProjectByPublicID(ctx, input.UserID, normalizedProjectID)
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return nil, ErrConversationProjectNotFound
+				}
+				return nil, err
+			}
+			project = resolvedProject
+			projectID = &project.ID
 		}
 	case model.ExecutionTypeGateway:
 		if s.gatewayExecutor == nil {
 			return nil, ErrExecutionUnavailable
 		}
-		if strings.TrimSpace(input.ProjectPublicID) != "" {
-			return nil, ErrInvalidExecutionTarget
+		resolvedProject, err := s.resolveGatewayProject(ctx, input.UserID, deviceID, input.ProjectPublicID)
+		if err != nil {
+			return nil, err
 		}
+		gatewayProject = resolvedProject
+		profileID = strings.TrimSpace(gatewayProject.ProfileID)
+		workspaceID = strings.TrimSpace(gatewayProject.ProjectID)
 		resolvedProvider, err := s.gatewayExecutor.ResolveExecutionTarget(ctx, input.UserID, deviceID, profileID, workspaceID)
 		if err != nil || strings.TrimSpace(resolvedProvider) == "" {
 			return nil, ErrInvalidExecutionTarget
@@ -77,19 +96,6 @@ func (s *Service) CreateConversation(ctx context.Context, input CreateConversati
 		provider = strings.TrimSpace(resolvedProvider)
 	default:
 		return nil, ErrInvalidExecutionTarget
-	}
-	var projectID *uint
-	var project *model.ConversationProject
-	if normalizedProjectID := strings.TrimSpace(input.ProjectPublicID); normalizedProjectID != "" {
-		resolvedProject, err := s.repo.GetConversationProjectByPublicID(ctx, input.UserID, normalizedProjectID)
-		if err != nil {
-			if errors.Is(err, repository.ErrNotFound) {
-				return nil, ErrConversationProjectNotFound
-			}
-			return nil, err
-		}
-		project = resolvedProject
-		projectID = &project.ID
 	}
 
 	item := &model.Conversation{
@@ -118,6 +124,9 @@ func (s *Service) CreateConversation(ctx context.Context, input CreateConversati
 		item.ProjectPublicID = project.PublicID
 		item.ProjectName = project.Name
 		item.ProjectSystemPrompt = project.SystemPrompt
+	} else if gatewayProject != nil {
+		item.ProjectPublicID = workspaceID
+		item.ProjectName = strings.TrimSpace(gatewayProject.Name)
 	}
 	return item, nil
 }
@@ -137,7 +146,14 @@ func (s *Service) ListConversations(
 	searchQuery string,
 ) ([]model.Conversation, int64, error) {
 	offset, limit := normalizePage(page, pageSize)
-	return s.repo.ListConversationsByUser(ctx, userID, offset, limit, statusFilter, starredFilter, shareFilter, normalizeConversationProjectFilter(projectFilter), executionType, executionDeviceID, searchQuery)
+	items, total, err := s.repo.ListConversationsByUser(ctx, userID, offset, limit, statusFilter, starredFilter, shareFilter, normalizeConversationProjectFilter(projectFilter), executionType, executionDeviceID, searchQuery)
+	if err != nil || executionType != model.ExecutionTypeGateway {
+		return items, total, err
+	}
+	if err = s.applyGatewayProjectFields(ctx, userID, executionDeviceID, items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 // SearchConversations 分页搜索当前用户的会话，并通过前瞻记录判断是否还有下一页。
@@ -166,6 +182,11 @@ func (s *Service) SearchConversations(
 	hasMore := len(items) > limit
 	if hasMore {
 		items = items[:limit]
+	}
+	if executionType == model.ExecutionTypeGateway {
+		if err = s.applyGatewayProjectFields(ctx, userID, executionDeviceID, items); err != nil {
+			return nil, false, err
+		}
 	}
 
 	results := make([]ConversationSearchResult, 0, len(items))

@@ -18,13 +18,30 @@ import (
 // @Produce json
 // @Security BearerAuth
 // @Param status query string false "状态筛选: active|archived|all"
+// @Param execution query string true "Execution type: cloud|gateway"
+// @Param device query string false "Gateway device public ID"
 // @Success 200 {object} ConversationProjectListResponseDoc
+// @Failure 400 {object} ErrorDoc
 // @Failure 500 {object} ErrorDoc
 // @Router /conversation-projects [get]
 func (h *Handler) ListConversationProjects(c *gin.Context) {
 	userID := middleware.MustUserID(c)
-	items, err := h.service.ListConversationProjects(c.Request.Context(), userID, c.Query("status"))
+	executionType, executionDeviceID, ok := conversationExecutionFilter(c)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListExecutionProjects(
+		c.Request.Context(), userID, c.Query("status"), executionType, executionDeviceID,
+	)
 	if err != nil {
+		if errors.Is(err, appconversation.ErrInvalidExecutionTarget) {
+			response.Error(c, http.StatusBadRequest, "invalid execution target")
+			return
+		}
+		if errors.Is(err, appconversation.ErrExecutionUnavailable) {
+			response.Error(c, http.StatusServiceUnavailable, "execution adapter unavailable")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "list conversation projects failed")
 		return
 	}

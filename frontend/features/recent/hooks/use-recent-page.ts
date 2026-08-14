@@ -103,7 +103,7 @@ export function useRecentPage() {
   const resolveErrorMessage = useLocalizedErrorMessage();
   const router = useRouter();
   const { executionMode, requestNewConversation } = useChatSession();
-  const { defaultDevice, defaultWorkspace } = useDevices();
+  const { defaultDevice } = useDevices();
   const {
     renameByPublicID,
     regenerateTitleByPublicID,
@@ -149,8 +149,8 @@ export function useRecentPage() {
   const isSelectionMode = selectionMode || selectedConversationIDs.length > 0;
 
   React.useEffect(() => {
-    setProjectFilter(executionMode === "cloud" ? searchParams.get("project") || "all" : "all");
-  }, [executionMode, searchParams]);
+    setProjectFilter(searchParams.get("project") || "all");
+  }, [searchParams]);
 
   React.useEffect(() => {
     loadingMoreRef.current = loadingMore;
@@ -234,7 +234,7 @@ export function useRecentPage() {
         status: statusFilter,
         starred: starredFilter,
         share: shareFilter,
-        project: executionMode === "cloud" ? projectFilter : "all",
+        project: projectFilter,
         query: normalizedQuery,
         execution: executionMode,
         deviceId: executionMode === "gateway" ? defaultDevice?.deviceId : undefined,
@@ -349,15 +349,10 @@ export function useRecentPage() {
   }, [exportingAll, t]);
 
   const onCreateConversation = React.useCallback(() => {
-    if (executionMode === "gateway") {
-      requestNewConversation({ projectID: "", workspaceID: defaultWorkspace?.workspaceId ?? "" });
-      router.push("/chat");
-      return;
-    }
     const currentProjectID = projectFilter !== "all" && projectFilter !== "unassigned" ? projectFilter : "";
     requestNewConversation({ projectID: currentProjectID });
     router.push(currentProjectID ? `/chat?project_id=${encodeURIComponent(currentProjectID)}` : "/chat");
-  }, [defaultWorkspace?.workspaceId, executionMode, projectFilter, requestNewConversation, router]);
+  }, [projectFilter, requestNewConversation, router]);
 
   const onProjectFilterChange = React.useCallback(
     (value: ConversationProjectFilter) => {

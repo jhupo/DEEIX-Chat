@@ -313,6 +313,8 @@ type SearchConversationsOptions = {
 
 type ListConversationProjectsOptions = {
   status?: ConversationProjectStatusFilter;
+  execution: "cloud" | "gateway";
+  deviceId?: string;
 };
 
 type DeleteConversationProjectOptions = {
@@ -424,11 +426,15 @@ export async function getConversationDefaultModelCandidate(
 
 export async function listConversationProjects(
   accessToken: string,
-  options: ListConversationProjectsOptions = {},
+  options: ListConversationProjectsOptions,
 ): Promise<ConversationProjectDTO[]> {
   const status = options.status?.trim() || "active";
+  const params = new URLSearchParams({ status, execution: options.execution });
+  if (options.execution === "gateway" && options.deviceId?.trim()) {
+    params.set("device", options.deviceId.trim());
+  }
   return authedRequest<ConversationProjectDTO[]>(
-    `/api/v1/conversation-projects?status=${encodeURIComponent(status)}`,
+    `/api/v1/conversation-projects?${params.toString()}`,
     {
       accessToken,
     },

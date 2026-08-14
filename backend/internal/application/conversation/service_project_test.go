@@ -5,11 +5,85 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 )
+
+type gatewayProjectListerStub struct {
+	projects []GatewayProject
+	err      error
+}
+
+func (s gatewayProjectListerStub) ListProjects(context.Context, uint, string) ([]GatewayProject, error) {
+	return s.projects, s.err
+}
+
+func TestListExecutionProjectsMapsGatewayProjects(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, time.UTC)
+	service := &Service{gatewayProjects: gatewayProjectListerStub{projects: []GatewayProject{
+		{ProjectID: " workspace_deeix ", ProfileID: "profile_codex", Name: " DEEIX ", UpdatedAt: now},
+	}}}
+
+	projects, err := service.ListExecutionProjects(
+		context.Background(),
+		7,
+		"active",
+		domainconversation.ExecutionTypeGateway,
+		"agd_device",
+	)
+	if err != nil {
+		t.Fatalf("ListExecutionProjects() error = %v", err)
+	}
+	if len(projects) != 1 {
+		t.Fatalf("ListExecutionProjects() returned %d projects, want 1", len(projects))
+	}
+	project := projects[0]
+	if project.PublicID != "workspace_deeix" || project.Name != "DEEIX" || project.Status != "active" {
+		t.Fatalf("gateway project = %#v", project)
+	}
+	if !project.UpdatedAt.Equal(now) || project.MCPDefaultMode != domainconversation.ConversationProjectMCPDefaultModeInherit {
+		t.Fatalf("gateway project metadata = %#v", project)
+	}
+	resolved, err := service.resolveGatewayProject(context.Background(), 7, "agd_device", "workspace_deeix")
+	if err != nil {
+		t.Fatalf("resolveGatewayProject() error = %v", err)
+	}
+	if resolved.ProfileID != "profile_codex" {
+		t.Fatalf("resolved gateway project = %#v", resolved)
+	}
+	conversations := []domainconversation.Conversation{{ExecutionWorkspaceID: "workspace_deeix"}}
+	if err = service.applyGatewayProjectFields(context.Background(), 7, "agd_device", conversations); err != nil {
+		t.Fatalf("applyGatewayProjectFields() error = %v", err)
+	}
+	if conversations[0].ProjectPublicID != "workspace_deeix" || conversations[0].ProjectName != "DEEIX" {
+		t.Fatalf("gateway conversation project = %#v", conversations[0])
+	}
+}
+
+func TestListExecutionProjectsRequiresGatewayDevice(t *testing.T) {
+	service := &Service{gatewayProjects: gatewayProjectListerStub{}}
+	_, err := service.ListExecutionProjects(
+		context.Background(),
+		7,
+		"active",
+		domainconversation.ExecutionTypeGateway,
+		"",
+	)
+	if !errors.Is(err, ErrInvalidExecutionTarget) {
+		t.Fatalf("ListExecutionProjects() error = %v, want ErrInvalidExecutionTarget", err)
+	}
+}
+
+func TestResolveGatewayProjectNormalizesMissingBinding(t *testing.T) {
+	service := &Service{gatewayProjects: gatewayProjectListerStub{err: ErrExecutionBindingNotFound}}
+	_, err := service.resolveGatewayProject(context.Background(), 7, "agd_device", "workspace_deeix")
+	if !errors.Is(err, ErrInvalidExecutionTarget) {
+		t.Fatalf("resolveGatewayProject() error = %v, want ErrInvalidExecutionTarget", err)
+	}
+}
 
 func TestNormalizeConversationProjectInputInheritClearsMCPDefaults(t *testing.T) {
 	input, err := normalizeConversationProjectInput(ConversationProjectInput{

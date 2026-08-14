@@ -105,11 +105,12 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 	if shareStatus == "" {
 		shareStatus = "none"
 	}
+	projectID, projectName := conversationProjectFields(item)
 	return ConversationResponse{
 		PublicID:             item.PublicID,
 		UserID:               item.UserID,
-		ProjectID:            item.ProjectPublicID,
-		ProjectName:          item.ProjectName,
+		ProjectID:            projectID,
+		ProjectName:          projectName,
 		Title:                item.Title,
 		LabelsJSON:           labelsJSON,
 		Model:                item.Model,
@@ -141,10 +142,11 @@ func toConversationSearchResultResponse(item appconversation.ConversationSearchR
 	if labelsJSON == "" || labelsJSON == "null" {
 		labelsJSON = "[]"
 	}
+	projectID, projectName := conversationProjectFields(&item.Conversation)
 	return ConversationSearchResultResponse{
 		PublicID:     item.Conversation.PublicID,
-		ProjectID:    item.Conversation.ProjectPublicID,
-		ProjectName:  item.Conversation.ProjectName,
+		ProjectID:    projectID,
+		ProjectName:  projectName,
 		Title:        item.Conversation.Title,
 		LabelsJSON:   labelsJSON,
 		IsStarred:    item.Conversation.IsStarred,
@@ -152,6 +154,16 @@ func toConversationSearchResultResponse(item appconversation.ConversationSearchR
 		Status:       item.Conversation.Status,
 		UpdatedAt:    item.Conversation.UpdatedAt,
 	}
+}
+
+func conversationProjectFields(item *model.Conversation) (string, string) {
+	if item != nil && item.ExecutionType == model.ExecutionTypeGateway {
+		return item.ExecutionWorkspaceID, item.ProjectName
+	}
+	if item == nil {
+		return "", ""
+	}
+	return item.ProjectPublicID, item.ProjectName
 }
 
 func toConversationPreviewMessageResponse(item model.Message) ConversationPreviewMessageResponse {

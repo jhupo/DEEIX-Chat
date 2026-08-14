@@ -538,11 +538,7 @@ export interface ConversationEventResponse {
 export interface ConversationExecutionRequest {
   /** @maxLength 64 */
   deviceID?: string;
-  /** @maxLength 64 */
-  profileID?: string;
   type: "cloud" | "gateway";
-  /** @maxLength 64 */
-  workspaceID?: string;
 }
 
 export interface ConversationExportCompatibilityResponse {
@@ -741,7 +737,7 @@ export interface CreateConversationRequest {
   execution: ConversationExecutionRequest;
   /** @maxLength 128 */
   model?: string;
-  /** @maxLength 32 */
+  /** @maxLength 64 */
   projectID?: string;
   /** @maxLength 255 */
   title?: string;
@@ -5646,6 +5642,10 @@ export namespace ConversationProjects {
   export namespace ConversationProjectsList {
     export type RequestParams = {};
     export type RequestQuery = {
+      /** Gateway device public ID */
+      device?: string;
+      /** Execution type: cloud|gateway */
+      execution: string;
       /** 状态筛选: active|archived|all */
       status?: string;
     };

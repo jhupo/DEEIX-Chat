@@ -40,7 +40,7 @@ export type SidebarConversationsControllerValue = {
   prependNewConversation: (
     platformModelName?: string,
     projectID?: string,
-    execution?: { type: "cloud" } | { type: "gateway"; deviceID: string; profileID: string; workspaceID: string },
+    execution?: { type: "cloud" } | { type: "gateway"; deviceID: string },
   ) => Promise<ConversationDTO | null>;
   touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void;
   renameByPublicID: (publicID: string, title: string) => Promise<ConversationDTO | null>;

@@ -6671,6 +6671,19 @@ const docTemplate = `{
                         "description": "状态筛选: active|archived|all",
                         "name": "status",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Execution type: cloud|gateway",
+                        "name": "execution",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Gateway device public ID",
+                        "name": "device",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -6678,6 +6691,12 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ConversationProjectListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
                         }
                     },
                     "500": {
@@ -7092,8 +7111,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/ConversationListResponseDoc"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
@@ -7338,6 +7369,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/ConversationErrorDoc"
                         }
@@ -12086,20 +12123,12 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 64
                 },
-                "profileID": {
-                    "type": "string",
-                    "maxLength": 64
-                },
                 "type": {
                     "type": "string",
                     "enum": [
                         "cloud",
                         "gateway"
                     ]
-                },
-                "workspaceID": {
-                    "type": "string",
-                    "maxLength": 64
                 }
             }
         },
@@ -12786,7 +12815,7 @@ const docTemplate = `{
                 },
                 "projectID": {
                     "type": "string",
-                    "maxLength": 32
+                    "maxLength": 64
                 },
                 "title": {
                     "type": "string",
@@ -19973,7 +20002,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.33",
+	Version:          "0.4.34",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

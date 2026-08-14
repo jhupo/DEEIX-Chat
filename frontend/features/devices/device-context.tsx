@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { listAgentDevices, listAgentWorkspaces, type AgentDeviceDTO, type AgentWorkspaceDTO } from "@/shared/api/agent-gateway";
+import { listAgentDevices, type AgentDeviceDTO } from "@/shared/api/agent-gateway";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 
@@ -12,12 +12,9 @@ type DeviceContextValue = {
   devices: AgentDeviceDTO[];
   defaultDeviceId: string;
   defaultDevice: AgentDeviceDTO | null;
-  defaultWorkspace: AgentWorkspaceDTO | null;
-  workspaces: AgentWorkspaceDTO[];
   loading: boolean;
   refresh: () => Promise<void>;
   selectDefaultDevice: (deviceId: string) => Promise<void>;
-  selectDefaultWorkspace: (workspaceId: string) => void;
 };
 
 const DeviceContext = React.createContext<DeviceContextValue | null>(null);
@@ -26,8 +23,6 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuthSession();
   const [devices, setDevices] = React.useState<AgentDeviceDTO[]>([]);
   const [defaultDeviceId, setDefaultDeviceId] = React.useState("");
-  const [defaultWorkspace, setDefaultWorkspace] = React.useState<AgentWorkspaceDTO | null>(null);
-  const [workspaces, setWorkspaces] = React.useState<AgentWorkspaceDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   const refresh = React.useCallback(async () => {
@@ -42,20 +37,9 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       const nextDefaultId = active.some((item) => item.deviceId === saved) ? saved : (active[0]?.deviceId ?? "");
       setDevices(nextDevices);
       setDefaultDeviceId(nextDefaultId);
-      if (nextDefaultId) {
-        const workspaces = await listAgentWorkspaces(accessToken, nextDefaultId);
-        const available = workspaces.filter((item) => item.status === "available");
-        setWorkspaces(available);
-        setDefaultWorkspace(available[0] ?? null);
-      } else {
-        setWorkspaces([]);
-        setDefaultWorkspace(null);
-      }
     } catch {
       setDevices([]);
       setDefaultDeviceId("");
-      setWorkspaces([]);
-      setDefaultWorkspace(null);
     } finally {
       setLoading(false);
     }
@@ -68,29 +52,17 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
     if (!selected) return;
     await patchUserSettings(accessToken, { [DEFAULT_DEVICE_KEY]: selected.deviceId });
     setDefaultDeviceId(selected.deviceId);
-    const workspaces = await listAgentWorkspaces(accessToken, selected.deviceId);
-    const available = workspaces.filter((item) => item.status === "available");
-    setWorkspaces(available);
-    setDefaultWorkspace(available[0] ?? null);
   }, [accessToken, devices]);
-
-  const selectDefaultWorkspace = React.useCallback((workspaceId: string) => {
-    const selected = workspaces.find((item) => item.workspaceId === workspaceId) ?? null;
-    if (selected) setDefaultWorkspace(selected);
-  }, [workspaces]);
 
   const defaultDevice = devices.find((item) => item.deviceId === defaultDeviceId) ?? null;
   const value = React.useMemo(() => ({
     devices,
     defaultDeviceId,
     defaultDevice,
-    defaultWorkspace,
-    workspaces,
     loading,
     refresh,
     selectDefaultDevice,
-    selectDefaultWorkspace,
-  }), [defaultDevice, defaultDeviceId, defaultWorkspace, devices, loading, refresh, selectDefaultDevice, selectDefaultWorkspace, workspaces]);
+  }), [defaultDevice, defaultDeviceId, devices, loading, refresh, selectDefaultDevice]);
 
   return <DeviceContext.Provider value={value}>{children}</DeviceContext.Provider>;
 }

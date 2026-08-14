@@ -27,7 +27,9 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 - Runtime Profile 已完成准入证明且未过期。
 - Workspace 属于同一设备和 Profile，状态可用。
 
-聊天与工作是互斥的数据域。Conversation 列表和搜索必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域只返回 Cloud Conversation 和 Cloud Project，工作域只返回所选设备的 Workspace 与 Gateway Conversation。切换模式或设备会清空当前会话、项目和 Workspace 选择，界面不会同时合并或标注两套数据。
+聊天与工作是互斥的数据域。Conversation 列表、搜索和 Project 查询必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域返回 Cloud Conversation 和 Cloud Project；Gateway Adapter 将所选设备的 Workspace 和 Gateway Conversation 投影为相同 Project/Conversation DTO。切换模式或设备会重建数据作用域，界面不会同时合并或标注两套数据。
+
+创建请求只携带统一 `projectID` 和 `execution(type/device)`。Cloud Project 直接解析；Gateway Adapter 校验 Workspace 属于该用户和设备，解析对应 Profile 后写入 Conversation 执行绑定。Web 不提交 `profileID/workspaceID` 组合，也不直接请求 Workspace sessions 来拼装导航。
 
 Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurns=true)` 读取最近的 Codex 线程。Bridge 只上传 opaque thread ref、标题、时间以及裁剪后的用户/助手文本；provider raw ID、本地路径、命令输出和凭据留在设备。Cloud 在接收资源终态的同一事务内创建或增量更新 Conversation/Message 投影，并将 `AgentThread` 绑定到原 opaque thread ref。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
 

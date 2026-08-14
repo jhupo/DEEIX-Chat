@@ -6,15 +6,13 @@ import "encoding/json"
 type CreateConversationRequest struct {
 	Title     string                       `json:"title,omitempty" binding:"max=255"`
 	Model     string                       `json:"model,omitempty" binding:"max=128"`
-	ProjectID string                       `json:"projectID,omitempty" binding:"omitempty,max=32"`
+	ProjectID string                       `json:"projectID,omitempty" binding:"omitempty,max=64"`
 	Execution ConversationExecutionRequest `json:"execution" binding:"required"`
 }
 
 type ConversationExecutionRequest struct {
-	Type        string `json:"type" binding:"required,oneof=cloud gateway"`
-	DeviceID    string `json:"deviceID,omitempty" binding:"omitempty,max=64"`
-	ProfileID   string `json:"profileID,omitempty" binding:"omitempty,max=64"`
-	WorkspaceID string `json:"workspaceID,omitempty" binding:"omitempty,max=64"`
+	Type     string `json:"type" binding:"required,oneof=cloud gateway"`
+	DeviceID string `json:"deviceID,omitempty" binding:"omitempty,max=64"`
 }
 
 // CreateConversationProjectRequest 创建会话项目请求。

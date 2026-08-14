@@ -86,6 +86,115 @@ func (s *Service) ListConversationProjects(ctx context.Context, userID uint, sta
 	return s.repo.ListConversationProjects(ctx, userID, normalizeConversationProjectStatusFilter(statusFilter))
 }
 
+// ListExecutionProjects returns the project representation for the selected execution target.
+func (s *Service) ListExecutionProjects(
+	ctx context.Context,
+	userID uint,
+	statusFilter string,
+	executionType string,
+	executionDeviceID string,
+) ([]model.ConversationProject, error) {
+	switch strings.TrimSpace(executionType) {
+	case model.ExecutionTypeCloud:
+		if strings.TrimSpace(executionDeviceID) != "" {
+			return nil, ErrInvalidExecutionTarget
+		}
+		return s.ListConversationProjects(ctx, userID, statusFilter)
+	case model.ExecutionTypeGateway:
+		if strings.TrimSpace(executionDeviceID) == "" {
+			return nil, ErrInvalidExecutionTarget
+		}
+		if s.gatewayProjects == nil {
+			return nil, ErrExecutionUnavailable
+		}
+		if normalizeConversationProjectStatusFilter(statusFilter) == "archived" {
+			return []model.ConversationProject{}, nil
+		}
+		items, err := s.gatewayProjects.ListProjects(ctx, userID, strings.TrimSpace(executionDeviceID))
+		if err != nil {
+			if errors.Is(err, ErrExecutionBindingNotFound) {
+				return nil, ErrInvalidExecutionTarget
+			}
+			return nil, err
+		}
+		projects := make([]model.ConversationProject, 0, len(items))
+		for index, item := range items {
+			projects = append(projects, model.ConversationProject{
+				PublicID:       strings.TrimSpace(item.ProjectID),
+				Name:           strings.TrimSpace(item.Name),
+				MCPDefaultMode: model.ConversationProjectMCPDefaultModeInherit,
+				SortOrder:      index + 1,
+				Status:         "active",
+				CreatedAt:      item.UpdatedAt,
+				UpdatedAt:      item.UpdatedAt,
+			})
+		}
+		return projects, nil
+	default:
+		return nil, ErrInvalidExecutionTarget
+	}
+}
+
+func (s *Service) resolveGatewayProject(
+	ctx context.Context,
+	userID uint,
+	deviceID string,
+	projectID string,
+) (*GatewayProject, error) {
+	deviceID = strings.TrimSpace(deviceID)
+	projectID = strings.TrimSpace(projectID)
+	if deviceID == "" || projectID == "" {
+		return nil, ErrInvalidExecutionTarget
+	}
+	if s.gatewayProjects == nil {
+		return nil, ErrExecutionUnavailable
+	}
+	projects, err := s.gatewayProjects.ListProjects(ctx, userID, deviceID)
+	if err != nil {
+		if errors.Is(err, ErrExecutionBindingNotFound) {
+			return nil, ErrInvalidExecutionTarget
+		}
+		return nil, err
+	}
+	for index := range projects {
+		if strings.TrimSpace(projects[index].ProjectID) == projectID {
+			return &projects[index], nil
+		}
+	}
+	return nil, ErrInvalidExecutionTarget
+}
+
+func (s *Service) applyGatewayProjectFields(
+	ctx context.Context,
+	userID uint,
+	deviceID string,
+	conversations []model.Conversation,
+) error {
+	if len(conversations) == 0 {
+		return nil
+	}
+	if s.gatewayProjects == nil {
+		return ErrExecutionUnavailable
+	}
+	projects, err := s.gatewayProjects.ListProjects(ctx, userID, strings.TrimSpace(deviceID))
+	if err != nil {
+		if errors.Is(err, ErrExecutionBindingNotFound) {
+			return ErrInvalidExecutionTarget
+		}
+		return err
+	}
+	projectNames := make(map[string]string, len(projects))
+	for _, project := range projects {
+		projectNames[strings.TrimSpace(project.ProjectID)] = strings.TrimSpace(project.Name)
+	}
+	for index := range conversations {
+		projectID := strings.TrimSpace(conversations[index].ExecutionWorkspaceID)
+		conversations[index].ProjectPublicID = projectID
+		conversations[index].ProjectName = projectNames[projectID]
+	}
+	return nil
+}
+
 // UpdateConversationProject 更新当前用户项目分组。
 func (s *Service) UpdateConversationProject(
 	ctx context.Context,

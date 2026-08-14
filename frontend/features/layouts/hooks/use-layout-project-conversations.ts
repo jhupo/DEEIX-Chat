@@ -125,20 +125,7 @@ export function useLayoutProjectConversations({
   const loadProjectConversations = React.useCallback(
     async (projectID: string, force = false) => {
       const current = projectConversationStateRef.current[projectID];
-      if (executionType === "cloud" && !force && (current?.loading || current?.loaded)) {
-        return;
-      }
-
-      if (executionType === "gateway") {
-        updateProjectConversationState((previous) => ({
-          ...previous,
-          [projectID]: {
-            items: sortByUpdatedAtDesc(items.filter((item) => item.executionWorkspaceID === projectID)),
-            loading: false,
-            loaded: true,
-            error: false,
-          },
-        }));
+      if (!force && (current?.loading || current?.loaded)) {
         return;
       }
 
@@ -179,7 +166,8 @@ export function useLayoutProjectConversations({
           status: "active",
           starred: "all",
           project: projectID,
-          execution: "cloud",
+          execution: executionType,
+          deviceId: executionDeviceID,
         });
         if (!mountedRef.current || projectConversationRequestVersionRef.current[projectID] !== requestVersion) {
           return;
@@ -208,7 +196,7 @@ export function useLayoutProjectConversations({
         }));
       }
     },
-    [executionType, items, updateProjectConversationState],
+    [executionDeviceID, executionType, updateProjectConversationState],
   );
 
   React.useEffect(() => {
@@ -311,11 +299,7 @@ export function useLayoutProjectConversations({
         }
 
         const updated = lastChange.patch ? { ...base, ...lastChange.patch } : base;
-        const belongsToProject = (
-          executionType === "cloud"
-            ? updated.projectID === projectID
-            : updated.executionDeviceID === executionDeviceID && updated.executionWorkspaceID === projectID
-        ) && updated.status !== "archived";
+        const belongsToProject = updated.projectID === projectID && updated.status !== "archived";
         if (belongsToProject) {
           next[projectID] = { ...state, items: upsertByPublicID(state.items, updated, sortByUpdatedAtDesc) };
           changed = true;
@@ -327,7 +311,7 @@ export function useLayoutProjectConversations({
 
       return changed ? next : previous;
     });
-  }, [executionDeviceID, executionType, items, lastChange, updateProjectConversationState]);
+  }, [items, lastChange, updateProjectConversationState]);
 
   const removeProject = React.useCallback(
     (projectID: string) => {

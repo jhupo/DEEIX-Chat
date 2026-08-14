@@ -4,12 +4,9 @@
 
 ## 信息架构
 
-继续使用现有左侧 Conversation 列表，不新增 `/agent` 工作台。每个会话条目在标题旁显示短标签：
+继续使用现有左侧 Conversation 列表，不新增 `/agent` 工作台，不增加独立任务入口，也不在会话条目上显示执行位置标签。聊天与工作一次只展示当前 execution context 的项目和会话，不混合两套数据；项目树、最近、置顶、搜索、分享和消息历史使用同一套组件与 Conversation API。
 
-- `聊天`：Sub2API Responses。
-- `工作`：已注册设备上的 app-server。
-
-标签表示执行位置，不表示 Conversation 类型。项目、置顶、搜索、分享、消息历史仍属于同一套会话界面。
+“插件”保留原 `/skills-prompt` 页面。页面未来通过统一 Resource API 获取平台或设备资源，不直接调用 Agent resource endpoint，也不增加设备专用插件页。
 
 ## 新建会话
 
@@ -19,6 +16,8 @@
 2. 工作：使用账户默认设备及其可用 Workspace；没有可用设备时禁用。
 
 切换执行位置会打开新 Conversation。“设置 -> 账户”在活跃会话上方显示活跃设备表，并提供 Windows、macOS、Linux 安装命令；左下用户菜单在语言项下方选择默认设备。
+
+前端创建会话统一提交 `projectID + execution(type/device)`。Cloud 将 `projectID` 解析为 DEEIX Project；Gateway Adapter 将同一字段解析为所选设备的 Workspace/Profile，再把固定的 `deviceID + profileID + workspaceID` 执行绑定写入 Conversation。前端不组装 provider profile/workspace 参数。
 
 目标在创建后锁定。切换目标创建新 Conversation，避免会话历史与本地 provider thread 脱钩。一个用户的多个设备按在线状态、名称和最近使用时间排序；设备离线时仍可查看历史，但发送按钮显示明确原因。
 

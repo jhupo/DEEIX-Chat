@@ -1215,16 +1215,10 @@ definitions:
       deviceID:
         maxLength: 64
         type: string
-      profileID:
-        maxLength: 64
-        type: string
       type:
         enum:
         - cloud
         - gateway
-        type: string
-      workspaceID:
-        maxLength: 64
         type: string
     required:
     - type
@@ -1713,7 +1707,7 @@ definitions:
         maxLength: 128
         type: string
       projectID:
-        maxLength: 32
+        maxLength: 64
         type: string
       title:
         maxLength: 255
@@ -6744,7 +6738,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.33"
+  version: "0.4.34"
 paths:
   /admin/announcements:
     get:
@@ -10939,6 +10933,15 @@ paths:
         in: query
         name: status
         type: string
+      - description: 'Execution type: cloud|gateway'
+        in: query
+        name: execution
+        required: true
+        type: string
+      - description: Gateway device public ID
+        in: query
+        name: device
+        type: string
       produces:
       - application/json
       responses:
@@ -10946,6 +10949,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ConversationProjectListResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
         "500":
           description: Internal Server Error
           schema:
@@ -11210,8 +11217,16 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ConversationListResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/ConversationErrorDoc'
       security:
@@ -12125,6 +12140,10 @@ paths:
             $ref: '#/definitions/ConversationErrorDoc'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/ConversationErrorDoc'
       security:

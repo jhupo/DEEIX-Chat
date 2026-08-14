@@ -114,17 +114,19 @@ deeix-agent doctor
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
-| 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | 任务数据已具备；缺少跨会话任务中心和队列任务恢复 |
+| 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | Run 只作为会话运行状态；本轮不增加独立任务入口 |
 | 模型生成 Plan | `turn/plan/updated`、`item/plan/delta` 已映射 | 当前只作为通用 `execution_event` 传输和 AgentEvent 保存 | 事件已接收，缺少结构化 Plan 投影、历史恢复和步骤 UI |
 | Thread Goal | `thread/goal/updated`、`thread/goal/cleared` 已映射；`set|get|clear` 仍为 extension | 当前只保存通用事件，没有 Goal 状态或控制面 | 本地模型产生的 Goal 可到达 Cloud，Web 尚未展示或管理 |
 | 新建本地项目 | app-server 没有 DEEIX Workspace 注册语义；Bridge 只上报客户端已配置根目录 | Web 只能选择现有 Workspace | 缺口；需要受控的 Workspace 创建/注册流程 |
 | 删除本地会话 | `thread/delete` 已映射并实测 | 当前删除接口只软删除 DEEIX Conversation | 未形成产品闭环；本地 thread 仍存在且可能被再次导入 |
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
 | 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
-| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 在统一“插件”入口中按当前模式读取平台或设备数据 | 已接入；安装、卸载仍未开放 |
+| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 当前“插件”入口仍只读取平台 Skill/Prompt 数据 | 后端能力已具备；统一资源适配接口和 UI 投影待接入 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-“插件”始终使用 `/skills-prompt` 入口。聊天模式读取 DEEIX 服务端 Skill/Prompt 库；工作模式读取选中设备 Codex profile 的 `plugins` snapshot。页面边界按执行模式选择数据实现，不对用户暴露数据来源命名。
+聊天和工作共用原有导航、最近会话、项目树、搜索和“插件”入口。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
+
+本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口并展示平台 Skill/Prompt；本地 Skill/Plugin 在统一资源 adapter 完成前不伪装为另一套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 
 ## 5. Schema 与官方当前文档的边界
 
@@ -291,7 +293,7 @@ deeix-agent doctor
 2. 生命周期 HTTP 接口先校验 conversation 属于当前用户和 gateway execution，再持久化命令；由命令 terminal result 投影最终 Conversation 状态。设备离线时显示 pending，不把排队状态伪装成已完成。
 3. 删除得到设备 ACK 后再软删除 Conversation。保留以 `runtime_profile_id + source_thread_ref` 唯一定位的 AgentThread tombstone；`syncWorkspaceSessions` 使用包含软删除记录的查询，命中 tombstone 时跳过导入，防止已删本地会话重新出现。
 4. Workspace 创建使用客户端配置的 allowlisted parent roots。Web 仅提交 `rootRef`、合法单段目录名和显示名；Bridge 将 opaque root ref 解析为本机根目录，拒绝绝对路径、`.`、`..`、分隔符、符号链接越界和已存在的非目录目标，然后创建目录并同步 Workspace。注册任意现有目录继续由本机 CLI 或原生目录选择器完成，Cloud 不接收绝对路径。
-5. Profile resource client 已接入统一“插件”页面：聊天模式读取平台插件，工作模式使用缓存优先读取当前 device/profile 的插件快照并支持显式刷新；Workspace `skills` 数据仍待接入。
+5. 增加统一 Resource 查询能力，由后端根据 execution context 返回平台 Skill/Prompt 或 device/profile 的 Plugin、Workspace Skill 快照；原“插件”页面只消费统一 DTO。页面不直接调用 profile/workspace resource API，也不增加设备专用 Plugin 页面。
 6. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
 7. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
 
@@ -301,7 +303,7 @@ deeix-agent doctor
 - 归档、恢复和删除在设备在线、离线排队、ACK、失败重试和重复通知下保持 Cloud 与 app-server 一致。
 - 已删除 thread 在后续 `sessions` 刷新中不会重新生成 Conversation。
 - Workspace 创建覆盖合法目录、重复目录、越界、符号链接逃逸和并发创建。
-- Skill/Plugin snapshot 在在线、离线、过期和切换设备时展示正确来源。
+- 统一 Resource DTO 在在线、离线、过期和切换设备时展示正确数据，并保持原“插件”页面交互。
 - Diff 覆盖实时增量、最终 patch、多文件、重连补拉、乱序/重复事件和大内容截断。
 
 #### 6.11 输入队列、生成任务、Plan 与 Goal
@@ -320,7 +322,7 @@ deeix-agent doctor
 6. 将 `turn/plan/updated` 作为 turn 当前 Plan 的权威快照，保存 explanation 与 `pending|inProgress|completed` steps；`item/plan/delta` 仅用于实时显示，不用拼接结果覆盖最终快照。
 7. 将 `thread/goal/updated` 投影为 thread 当前 Goal，保存 objective、`active|paused|blocked|usageLimited|budgetLimited|complete`、token budget/used、time used 和更新时间；`thread/goal/cleared` 清空当前快照并保留审计事件。
 8. 第一阶段 Goal 只读展示。需要 Web 管理目标时，再把 `thread/goal/set|get|clear` 从 extension 提升为 typed command，并同时更新 schema lock、dispatch registry、fixture、权限和审计；Web 不直接提交 raw app-server payload。
-9. 聊天输入框上方继续使用现有紧凑队列样式；任务中心展示跨会话运行。Plan 作为当前回复内的步骤列表，Goal 作为 thread 顶层状态，两者不与输入队列混成一个列表。
+9. 聊天输入框上方继续使用现有紧凑队列样式。Plan 作为当前回复内的步骤列表，Goal 作为 thread 顶层状态，两者不与输入队列混成一个列表；本轮不增加独立任务中心。
 
 验收：
 
@@ -351,29 +353,26 @@ AssistantMessage                        turn scope
     FileChangePopover                   文件名与逐文件增删统计
       UnifiedDiffSheet                  完整 diff
 
-TaskCenter                              user scope，独立于输入框
-  Runs across conversations             跨会话 queued/running/terminal 任务
 ```
 
 实现：
 
 1. 增加一个显式 `ChatComposerStatusStack`，由 Chat runtime 直接传入 goal、active run 和 queue props。它不是动态插件 registry，也不接受任意组件注入；只解决已经存在的三个会话级状态，保持单一数据流。
 2. `GoalStatusBar` 仅在 gateway conversation 存在 Goal 时显示，固定高度、单行截断；显示状态、objective、耗时和预算摘要。第一阶段只读。Goal 管理命令接通后再增加编辑、暂停/继续和清除按钮。
-3. `ActiveRunStatus` 只显示当前 conversation 的运行状态以及待处理 interaction。跨会话运行不堆在输入框上方，统一进入 TaskCenter。
+3. `ActiveRunStatus` 只显示当前 conversation 的运行状态以及待处理 interaction。跨会话运行不堆在输入框上方，也不增加独立导航入口。
 4. 复用现有 QueuedSubmission UI 的编辑、删除和优先操作，抽离到 `QueuedSubmissionList`；改为读取服务端队列 snapshot，并保留乐观更新与失败回滚。
 5. `PlanSteps` 属于产生它的 turn，按 `pending|inProgress|completed` 渲染。默认收进对应 assistant message 底部的 `TurnProgressDock`；点击“第 `X/Y` 步”打开 `PlanProgressPopover`，展示截图中的步骤清单、当前步骤和完成状态。Goal 属于 thread，Plan 属于 turn，两者不合并。
 6. `TurnProgressDock` 是展示容器，不是新的状态模型。它在一条稳定的紧凑控件内并列显示“第 `X/Y` 步”和“`N 个文件已更改 +A -D`”；两段各自是独立按钮，分别打开计划与文件 popover。仅有计划或仅有文件变化时只显示对应按钮，两者都没有时不渲染空占位。
 7. `FileChangePopover` 逐项显示 workspace-relative 文件名和增删统计；选择文件后进入 `UnifiedDiffSheet` 查看完整 diff。完成 turn 后，`TurnProgressDock` 仍从历史 Plan 与 Item/Diff API 恢复，不依赖浏览器内存。
 8. 增删统计从结构化 `FileUpdateChange.diff` 或最终 `turn/diff/updated.diff` 解析；最终汇总按规范 unified diff parser 计算，不用字符串搜索文件名。已废弃且 app-server 不再发送的 `item/fileChange/outputDelta` 在 Bridge 方法表中明确为 `disabled`，不进入事件、存储或 UI 链路。
 9. Diff 中的路径必须转换为 workspace-relative display path；绝对路径、越界路径和无法归属当前 Workspace 的 change 不进入浏览器。超大 diff 显示截断状态并提供按文件分页读取。
-10. TaskCenter 复用 Run 作为列表源，展示 conversation、设备、Workspace、模型、状态、开始时间和耗时；运行中任务可进入对应对话或中断，terminal 任务只读。AgentTurn/AgentItem 作为详情来源，不与 Run 并列成重复任务。
-11. 桌面端 popover 和 sheet 使用项目现有组件；移动端计划、文件列表与 diff 使用全宽 sheet。两个触发按钮均带可访问名称和展开状态，Goal、Plan、Diff 的状态变化使用克制的 live region，不抢占输入焦点。
+10. 桌面端 popover 和 sheet 使用项目现有组件；移动端计划、文件列表与 diff 使用全宽 sheet。两个触发按钮均带可访问名称和展开状态，Goal、Plan、Diff 的状态变化使用克制的 live region，不抢占输入焦点。
 
 验收：
 
 - cloud conversation 不显示设备 Goal/Plan/Diff 占位；切换 conversation、设备或 branch 后没有上一上下文残留。
 - 输入框高度不会因状态刷新抖动；长 Goal、长文件名、100+ 队列项和窄屏下均不溢出或遮挡输入。
-- Plan、Diff 精确绑定 source turn；Goal 精确绑定 source thread；TaskCenter 精确绑定用户和 Run。
+- Plan、Diff 精确绑定 source turn；Goal 精确绑定 source thread；Run 保持 conversation scope。
 - TurnProgressDock 的步骤进度绑定当前 turn 的最终 Plan；文件数与 `+A -D` 绑定同一 turn 的最终 unified diff，rename/add/delete、多 hunk、二进制文件和截断均有测试。
 - 页面刷新和 SSE 重连后，Goal、Plan、队列、任务与 Diff 均由服务端快照恢复，再继续应用新事件。
 - 键盘可分别打开计划清单与文件汇总、浏览步骤和文件、关闭 popover/sheet；屏幕阅读器可获得按钮名称、展开状态和任务状态更新。
@@ -418,9 +417,10 @@ TaskCenter                              user scope，独立于输入框
 | `backend/internal/application/conversation/service_conversation.go` | gateway 会话归档、恢复、删除的生命周期编排 |
 | `backend/internal/application/conversation/service_gateway_projection.go` | 统一 Conversation 流和终态 |
 | `backend/internal/transport/http/agentgateway` | 设备、资源和管理命令 API |
-| `frontend/shared/api/agent-gateway.ts` | Workspace/Profile 资源与生命周期 API client |
-| `frontend/features/layouts/components/navigation/nav-projects.tsx` | 共享项目树；聊天映射 DEEIX Project，工作映射设备 Workspace |
-| `frontend/features/devices/components/agent-plugins-page.tsx` | 统一“插件”入口在工作模式下使用的 Codex Plugin 数据视图 |
+| `backend/internal/application/conversation/service_project.go` | 按 execution context 将 Cloud Project 或设备 Workspace 投影为统一 Project DTO |
+| `frontend/shared/api/agent-gateway.ts` | 仅供设备设置控制面使用的设备 API client |
+| `frontend/shared/api/conversation.ts` | 会话和项目的统一 execution-aware API client |
+| `frontend/features/layouts/components/navigation/nav-projects.tsx` | 原项目树 UI，只消费统一 Project/Conversation DTO |
 | `frontend/features/chat/components/sections/chat-input.tsx` | 输入框与会话级 status stack 的组合边界 |
 | `frontend/features/chat/components/message` | turn-scoped Plan、文件汇总和 unified diff 入口 |
 | `frontend/features/chat/hooks/use-chat-message-submit.ts` | 服务端输入队列、乐观更新和真实 steer |

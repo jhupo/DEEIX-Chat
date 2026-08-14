@@ -29,7 +29,6 @@ import type {
 
 type RecentToolbarProps = {
   canManageProjects: boolean;
-  isWork: boolean;
   isSelectionMode: boolean;
   selectedCount: number;
   selectedSharedCount: number;
@@ -76,7 +75,6 @@ function ToolbarActionTooltip({
 
 export function RecentToolbar({
   canManageProjects,
-  isWork,
   isSelectionMode,
   selectedCount,
   selectedSharedCount,
@@ -271,8 +269,8 @@ export function RecentToolbar({
         ) : (
           <>
             <div className="flex w-full min-w-0 items-center justify-start gap-4 text-foreground/60 md:w-auto md:shrink-0">
-              <span className="min-w-0 truncate md:hidden">{t(isWork ? "allTasks" : "allConversations")}</span>
-              <span className="hidden md:inline">{t(isWork ? "allTasksDescription" : "allConversationsDescription")}</span>
+              <span className="min-w-0 truncate md:hidden">{t("allConversations")}</span>
+              <span className="hidden md:inline">{t("allConversationsDescription")}</span>
               <ToolbarActionTooltip label={t("enterSelection")}>
                 <Button
                   type="button"
@@ -285,7 +283,7 @@ export function RecentToolbar({
                   <SquareMousePointer className="size-4" strokeWidth={1.4} />
                 </Button>
               </ToolbarActionTooltip>
-              {!isWork ? <ToolbarActionTooltip label={t("exportAll")}>
+              <ToolbarActionTooltip label={t("exportAll")}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -302,7 +300,7 @@ export function RecentToolbar({
                 >
                   <Download className="size-4" strokeWidth={1.4} />
                 </Button>
-              </ToolbarActionTooltip> : null}
+              </ToolbarActionTooltip>
             </div>
 
             {filterGroups}

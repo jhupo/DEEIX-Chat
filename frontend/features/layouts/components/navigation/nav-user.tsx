@@ -219,7 +219,7 @@ export function NavUser({
                         void (async () => {
                           await selectDefaultDevice(device.deviceId);
                           if (executionMode === "gateway") {
-                            requestNewConversation({ projectID: "", workspaceID: "" });
+                            requestNewConversation({ projectID: "" });
                             router.push("/chat");
                           }
                         })();

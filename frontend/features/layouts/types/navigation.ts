@@ -13,7 +13,6 @@ export type NavigationIconProps = {
 type NavigationItemBase = {
   icon: React.ComponentType<NavigationIconProps>;
   group: "primary" | "secondary";
-  mode?: "cloud" | "gateway";
   variant?: "primary";
   shortcut?: readonly ShortcutKey[];
 };
@@ -24,7 +23,7 @@ type NavigationCommandItem = NavigationItemBase & {
 };
 
 type NavigationLinkItem = NavigationItemBase & {
-  id: "recent" | "files" | "skillsPrompt" | "tasks";
+  id: "recent" | "files" | "skillsPrompt";
   kind: "link";
   href: string;
 };

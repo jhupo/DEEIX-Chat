@@ -47,19 +47,13 @@ function ProjectLayoutShell({
   }, [isMobile, openMobile, routeKey, setOpenMobile]);
 
   const handleCreateConversation = React.useCallback(() => {
-    requestNewConversation({ projectID: "", workspaceID: "" });
+    requestNewConversation({ projectID: "" });
     if (pathname === "/chat") {
       window.history.pushState(null, "", "/chat");
       return;
     }
     router.push("/chat");
   }, [pathname, requestNewConversation, router]);
-
-  React.useEffect(() => {
-    if (pathname !== "/chat" && executionMode === "gateway") {
-      requestNewConversation({ projectID: "", workspaceID: "" });
-    }
-  }, [executionMode, pathname, requestNewConversation]);
 
   return (
     <>

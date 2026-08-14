@@ -55,8 +55,18 @@ type gatewayExecutor interface {
 	RespondInteraction(context.Context, uint, GatewayInteractionResponse) (*GatewayInteraction, error)
 }
 
+type gatewayProjectLister interface {
+	ListProjects(context.Context, uint, string) ([]GatewayProject, error)
+}
+
 type GatewayArtifact struct{ ArtifactID string }
 type GatewayThread struct{ ThreadID string }
+type GatewayProject struct {
+	ProjectID string
+	ProfileID string
+	Name      string
+	UpdatedAt time.Time
+}
 type GatewayStartThreadInput struct {
 	DeviceID, ProfileID, WorkspaceID string
 	ConversationID                   uint
@@ -156,6 +166,7 @@ type Service struct {
 	skillResolver     skillResolver
 	sub2Resolver      sub2ExecutionResolver
 	gatewayExecutor   gatewayExecutor
+	gatewayProjects   gatewayProjectLister
 	auditWriter       auditWriter
 	storeProvider     appstorage.Provider
 	logger            *zap.Logger
@@ -390,6 +401,7 @@ func (s *Service) SetSub2ExecutionResolver(resolver sub2ExecutionResolver) {
 
 func (s *Service) SetGatewayExecutor(executor gatewayExecutor) {
 	s.gatewayExecutor = executor
+	s.gatewayProjects, _ = executor.(gatewayProjectLister)
 }
 
 // SetAuditWriter 注入会话域审计写入器。
