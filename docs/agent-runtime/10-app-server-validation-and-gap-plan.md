@@ -112,6 +112,11 @@ pnpm.cmd --filter @deeix/agent-bridge test
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
 | 读取本地会话历史 | `thread/list` + `thread/read(includeTurns:true)` 已映射并实测 | `sessions` 刷新会导入 user/assistant/reasoning 消息并显示在对应 Workspace | 已接通，但当前只取最近 30 个未归档会话 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
+| 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
+| 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
+| 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | 任务数据已具备；缺少跨会话任务中心和队列任务恢复 |
+| 模型生成 Plan | `turn/plan/updated`、`item/plan/delta` 已映射 | 当前只作为通用 `execution_event` 传输和 AgentEvent 保存 | 事件已接收，缺少结构化 Plan 投影、历史恢复和步骤 UI |
+| Thread Goal | `thread/goal/updated`、`thread/goal/cleared` 已映射；`set|get|clear` 仍为 extension | 当前只保存通用事件，没有 Goal 状态或控制面 | 本地模型产生的 Goal 可到达 Cloud，Web 尚未展示或管理 |
 | 新建本地项目 | app-server 没有 DEEIX Workspace 注册语义；Bridge 只上报客户端已配置根目录 | Web 只能选择现有 Workspace | 缺口；需要受控的 Workspace 创建/注册流程 |
 | 删除本地会话 | `thread/delete` 已映射并实测 | 当前删除接口只软删除 DEEIX Conversation | 未形成产品闭环；本地 thread 仍存在且可能被再次导入 |
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
@@ -283,15 +288,42 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 - Skill/Plugin snapshot 在在线、离线、过期和切换设备时展示正确来源。
 - Diff 覆盖实时增量、最终 patch、多文件、重连补拉、乱序/重复事件和大内容截断。
 
+#### 6.11 输入队列、生成任务、Plan 与 Goal
+
+现状：聊天输入队列已经支持排队、编辑、删除和“调整方向”，但 `queuedSubmissions` 只存在浏览器 React state。排队项尚未提交 Cloud，因此刷新、关闭标签页或浏览器异常会丢失。队列成为真实请求后才创建持久化 Run。gateway 的 `startGatewayTurn` 又会拒绝分支 parent 字段，因此现有普通聊天队列不能直接视为本地 app-server 队列。“调整方向”当前执行 interrupt 后优先发送下一轮，没有调用已经映射的 `turn/steer`。
+
+每次实际生成已有 Run；gateway 还有 AgentTurn、AgentItem 和 AgentEvent。`turn/plan/updated`、`item/plan/delta`、`thread/goal/updated`、`thread/goal/cleared` 会经 Bridge 到达 Cloud，但 Conversation 只把它们作为通用 `execution_event` 下发。Plan、Goal 没有结构化快照，刷新后页面也没有读取入口。Goal 的 `thread/goal/set|get|clear` 当前仍为 extension。
+
+修改：
+
+1. 增加单一 `ConversationQueuedSubmission` 持久化模型，保存用户、conversation、branch parent、输入、附件引用、生成设置、顺序、状态和 idempotency key。输入与设置继续复用现有 SendMessage 校验，不复制第二套请求结构。
+2. 增加 enqueue/list/update/delete/promote API。队列写入和附件引用在同一事务完成；每个 branch 同时只 dispatch 一个 submission。使用数据库行锁领取任务，服务重启后继续处理 `queued`，卡在 `dispatching` 的项目按 idempotency key 对账。
+3. 普通“排队”在前一 Run 到达 terminal 后创建下一 Run。gateway 队列不携带 Web 分支 parent 给 app-server，而是通过 Conversation 与 AgentThread 绑定继续同一 `sourceThreadRef`，调用新的 `turn/start`。
+4. “调整方向”在目标 AgentTurn 仍活动时生成 `turn.steer`，等待 Bridge command ACK 后从队列移除；活动 turn 已终止时，将该项提升为下一条普通输入。steer 不先调用 interrupt，也不创建第二个并行 turn。
+5. 继续使用 Run 作为跨 cloud/gateway 的唯一模型生成任务。增加用户级分页任务查询，支持 conversation、execution type、task type 和 status 筛选；状态统一为 `queued|running|waiting_interaction|completed|interrupted|failed`。AgentTurn 是 provider 细节，不再创建另一套用户任务实体。
+6. 将 `turn/plan/updated` 作为 turn 当前 Plan 的权威快照，保存 explanation 与 `pending|inProgress|completed` steps；`item/plan/delta` 仅用于实时显示，不用拼接结果覆盖最终快照。
+7. 将 `thread/goal/updated` 投影为 thread 当前 Goal，保存 objective、`active|paused|blocked|usageLimited|budgetLimited|complete`、token budget/used、time used 和更新时间；`thread/goal/cleared` 清空当前快照并保留审计事件。
+8. 第一阶段 Goal 只读展示。需要 Web 管理目标时，再把 `thread/goal/set|get|clear` 从 extension 提升为 typed command，并同时更新 schema lock、dispatch registry、fixture、权限和审计；Web 不直接提交 raw app-server payload。
+9. 聊天输入框上方继续使用现有紧凑队列样式；任务中心展示跨会话运行。Plan 作为当前回复内的步骤列表，Goal 作为 thread 顶层状态，两者不与输入队列混成一个列表。
+
+验收：
+
+- 队列跨刷新、重新登录和服务重启保留，编辑、删除、提升顺序后附件引用与 parent 关系正确。
+- 同一 branch 没有并行 turn；不同 conversation 的并发仍受用户级上限控制。
+- gateway 普通队列连续执行同一 app-server thread；“调整方向”真实发出一次 `turn/steer`，不产生 interrupt + turn/start 组合。
+- Run、AgentTurn、队列项在完成、中断、失败、审批等待、设备离线和重复回执下状态一致。
+- Plan 覆盖增量、最终快照、乱序、重复事件和刷新恢复；最终 steps 以 `turn/plan/updated` 为准。
+- Goal 覆盖 updated、cleared、预算耗尽、暂停、阻塞和完成，并按 user/thread 校验归属。
+
 ### P2：补只读诊断和可选工具面
 
-#### 6.11 Account 与 Config
+#### 6.12 Account 与 Config
 
 当前运行时已验证 `account/read`、`config/read`，产品只使用 `getAuthStatus` 和 HMAC proof。用户账户订阅额度仍由 Sub2API 提供，Codex account 只应作为本机 runtime 诊断。
 
 修改：新增脱敏的 `runtime-account` 与 `runtime-config-summary` profile resource，只保留 auth type、provider、受管要求和 feature flags。API key、token、endpoint secret、绝对路径均不进入 Cloud。
 
-#### 6.12 Filesystem 与 command/exec
+#### 6.13 Filesystem 与 command/exec
 
 官方提供 fs 和独立 command API。当前 Agent 工作已经可通过 turn 工具执行，立即增加第二套 Web terminal 会重复权限、流和审计模型。
 
@@ -318,12 +350,14 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 | `docs/agent-runtime/codex-app-server-*.lock.json` | 版本、生成物和全 union 状态 |
 | `backend/internal/application/agentgateway/service.go` | typed command 创建、响应 union 校验、资源刷新 |
 | `backend/internal/infra/persistence/postgres/agentgateway/repository.go` | thread/turn/item/interaction 状态投影与幂等 |
+| `backend/internal/infra/persistence/models/agent_gateway.go` | AgentTurn Plan 与 AgentThread Goal 当前快照 |
+| `backend/internal/infra/persistence/models/chat.go` | 持久化输入队列与统一 Run 状态 |
 | `backend/internal/application/conversation/service_conversation.go` | gateway 会话归档、恢复、删除的生命周期编排 |
 | `backend/internal/application/conversation/service_gateway_projection.go` | 统一 Conversation 流和终态 |
 | `backend/internal/transport/http/agentgateway` | 设备、资源和管理命令 API |
 | `frontend/shared/api/agent-gateway.ts` | Workspace/Profile 资源与生命周期 API client |
 | `frontend/features/layouts/components/navigation/nav-workspaces.tsx` | 本地 Workspace、会话和设备资源入口 |
-| `frontend/features/chat` | typed execution event、实时 Diff 与历史恢复 UI |
+| `frontend/features/chat` | 持久化输入队列、任务状态、Plan/Goal、typed execution event、实时 Diff 与历史恢复 UI |
 | `packages/agent-bridge/test/codex-adapter.test.ts` | 双向 JSONL fixture |
 | `packages/agent-bridge/test/codex-process.e2e.test.ts` | 真实锁定进程验收 |
 
