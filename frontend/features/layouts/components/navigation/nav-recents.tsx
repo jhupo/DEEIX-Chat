@@ -190,21 +190,17 @@ export function NavRecents() {
   }, [activeConversationID, deleteByPublicID, deleteFiles, deleteTarget, router]);
 
   const visibleItemsSignature = React.useMemo(
-    () => recentItems.filter((item) => !item.projectID).map((item) => item.publicID).join("|"),
+    () => recentItems.map((item) => item.publicID).join("|"),
     [recentItems],
   );
   const showInitialSkeleton = loadingInitial && recentItems.length === 0;
-  const visibleRecentItems = React.useMemo(
-    () => recentItems.filter((item) => !item.projectID),
-    [recentItems],
-  );
   const timeGroups = React.useMemo(
-    () => groupConversationsByTime(visibleRecentItems, {
+    () => groupConversationsByTime(recentItems, {
       yesterday: t("timeGroup.yesterday"),
       lastSevenDays: t("timeGroup.lastSevenDays"),
       earlier: t("timeGroup.earlier"),
     }),
-    [visibleRecentItems, t],
+    [recentItems, t],
   );
 
   useLayoutSidebarListFlip(listContainerRef, {
@@ -249,7 +245,7 @@ export function NavRecents() {
                   className="min-h-0"
                 >
                   <SidebarMenu className="gap-0.5">
-                    {visibleRecentItems.length === 0 ? (
+                    {recentItems.length === 0 ? (
                       <li className="px-2 py-2 text-xs text-muted-foreground">
                         {t("empty")}
                       </li>

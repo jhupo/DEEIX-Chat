@@ -356,10 +356,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         item={item}
         onRetryUserMessage={onRetryUserMessage}
         onEditUserMessage={onEditUserMessage}
-        modelOptions={modelOptions}
-        selectedPlatformModelName={selectedPlatformModelName}
-        onModelChange={onModelChange}
-        onModelCatalogRefresh={onModelCatalogRefresh}
         onCycleMessageBranch={onCycleMessageBranch}
         onCopy={() => void onCopy()}
         copySucceeded={isCopied(copyKey)}

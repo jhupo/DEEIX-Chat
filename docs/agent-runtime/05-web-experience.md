@@ -6,6 +6,10 @@
 
 继续使用现有左侧 Conversation 列表，不新增 `/agent` 工作台，不增加独立任务入口，也不在会话条目上显示执行位置标签。聊天与工作一次只展示当前 execution context 的项目和会话，不混合两套数据；项目树、最近、置顶、搜索、分享和消息历史使用同一套组件与 Conversation API。
 
+项目与对话是两个维度：Gateway 的 Project 来自 canonical `cwd`/Workspace，Conversation 来自 app-server thread。项目树按 Workspace 分组显示其中的对话；“最近”按 thread 更新时间显示当前执行上下文的全部对话，即使该对话属于某个项目也不从最近列表排除。前端不从标题猜测项目，也不为 Gateway 建第二套侧栏。
+
+主输入框只保留两个显式资源触发器：`/` 打开 Skill 选择，`@` 打开 Plugin 能力选择。模型继续使用模型选择器，文件继续使用附件入口，Prompt 不再混入触发菜单。Cloud 当前将 Plugin 能力投影到可执行 MCP 工具；Gateway 的 Workspace Skill、Profile Plugin/App 仍须通过统一 Resource DTO 接入，页面不直接读取 `/agent/*`。
+
 “插件”保留原 `/skills-prompt` 页面。页面未来通过统一 Resource API 获取平台或设备资源，不直接调用 Agent resource endpoint，也不增加设备专用插件页。
 
 ## 新建会话

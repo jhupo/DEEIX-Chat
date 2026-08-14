@@ -415,13 +415,9 @@
     "booleanOff": "关闭",
     "tool": "工具 {id}",
     "mention": {
-      "fileFallback": "文件",
       "sections": {
-        "file": "文件",
-        "tool": "MCP",
-        "model": "模型",
-        "skill": "Skills",
-        "prompt": "Prompts"
+        "plugin": "插件",
+        "skill": "技能"
       }
     },
     "mediaMode": {

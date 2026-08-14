@@ -124,7 +124,7 @@ deeix-agent doctor
 | 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 当前“插件”入口仍只读取平台 Skill/Prompt 数据 | 后端能力已具备；统一资源适配接口和 UI 投影待接入 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-聊天和工作共用原有导航、最近会话、项目树、搜索和“插件”入口。聊天输入框的 `/` 菜单复用现有选择器，统一展示平台 Skill、Prompt、模型和 MCP 功能；工作模式不把这些平台资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
+聊天和工作共用原有导航、最近会话、项目树、搜索和“插件”入口。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation；项目树负责分组，“最近”展示当前 execution context 的全部 thread，不因已有 Project 归属而隐藏。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
 
 本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口并展示平台 Skill/Prompt；本地 Skill/Plugin 在统一资源 adapter 完成前不伪装为另一套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 

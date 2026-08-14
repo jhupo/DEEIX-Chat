@@ -423,13 +423,9 @@
     "booleanOff": "Off",
     "tool": "Tool {id}",
     "mention": {
-      "fileFallback": "File",
       "sections": {
-        "file": "Files",
-        "tool": "MCP",
-        "model": "Models",
-        "skill": "Skills",
-        "prompt": "Prompts"
+        "plugin": "Plugins",
+        "skill": "Skills"
       }
     },
     "mediaMode": {

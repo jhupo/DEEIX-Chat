@@ -2,19 +2,10 @@
 
 import * as React from "react";
 
-import {
-  readMentionFileSearchCache,
-  searchMentionFiles,
-} from "@/features/chat/model/mention-file-search";
-import type { ChatModelOption, PendingAttachment } from "@/features/chat/types/chat-runtime";
-import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
-import { listVisiblePromptPresets } from "@/shared/api/prompt-presets";
-import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { readSessionRevision } from "@/shared/auth/session";
 
 const MENTION_MENU_MAX_HEIGHT = 280;
 const MENTION_MENU_MIN_HEIGHT = 32;
@@ -25,45 +16,17 @@ const MENTION_MENU_SECTION_GAP = 2;
 const MENTION_MENU_CHROME_HEIGHT = 12;
 const MENTION_MENU_VIEWPORT_GUTTER = 16;
 const MENTION_MENU_OFFSET = 8;
-const MENTION_MENU_FILE_QUERY_DELAY_MS = 180;
-const MENTION_MENU_PROMPT_QUERY_DELAY_MS = 180;
-const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = ["model", "file", "tool", "skill", "prompt"];
+const MENTION_MENU_QUERY_DELAY_MS = 180;
+const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = ["plugin", "skill"];
 
-export type ChatMentionMenuKind = "file" | "tool" | "model" | "skill" | "prompt";
+export type ChatMentionMenuKind = "plugin" | "skill";
 
-type ChatMentionFileMenuItem = {
+type ChatMentionPluginMenuItem = {
   id: string;
-  kind: "file";
-  label: string;
-  description: string;
-  file: FileObjectDTO;
-  selected: boolean;
-};
-
-type ChatMentionToolMenuItem = {
-  id: string;
-  kind: "tool";
+  kind: "plugin";
   label: string;
   description: string;
   tool: MCPToolDTO;
-  selected: boolean;
-};
-
-type ChatMentionModelMenuItem = {
-  id: string;
-  kind: "model";
-  label: string;
-  description: string;
-  model: ChatModelOption;
-  selected: boolean;
-};
-
-type ChatMentionPromptMenuItem = {
-  id: string;
-  kind: "prompt";
-  label: string;
-  description: string;
-  prompt: PromptPresetDTO;
   selected: boolean;
 };
 
@@ -77,11 +40,8 @@ type ChatMentionSkillMenuItem = {
 };
 
 export type ChatMentionMenuItem =
-  | ChatMentionFileMenuItem
-  | ChatMentionToolMenuItem
-  | ChatMentionModelMenuItem
-  | ChatMentionSkillMenuItem
-  | ChatMentionPromptMenuItem;
+  | ChatMentionPluginMenuItem
+  | ChatMentionSkillMenuItem;
 
 export type ChatMentionMenuSection = {
   kind: ChatMentionMenuKind;
@@ -102,34 +62,27 @@ type ChatMentionMenuPlacementAnchor = "caret" | "container";
 
 type ChatMentionMenuControllerArgs = {
   availableTools: MCPToolDTO[];
-  attachments: PendingAttachment[];
-  defaultFileLabel: string;
   disabled: boolean;
   draft: string;
   maxSelectedTools: number;
   maxSelectedSkills: number;
-  modelOptions: ChatModelOption[];
   selectedSkills?: SkillSummaryDTO[];
-  selectedPlatformModelName: string;
   selectedToolIDs: number[];
   anchorRef: React.RefObject<HTMLElement | null>;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   toolsDisabled: boolean;
   onDraftChange: (value: string) => void;
   enabledKinds?: readonly ChatMentionMenuKind[];
-  onFileSelect: (file: FileObjectDTO) => void | Promise<void>;
-  onModelChange: (platformModelName: string) => void;
   onSelectedSkillsChange?: (skills: SkillSummaryDTO[]) => void;
   placementAnchor?: ChatMentionMenuPlacementAnchor;
   placementPreference?: ChatMentionMenuPlacementPreference;
-  onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSkillLimitReached?: () => void;
   onToolLimitReached?: () => void;
 };
 
 type ChatMentionTriggerQuery = {
-  kind: "mention" | "prompt";
+  kind: ChatMentionMenuKind;
   query: string;
   range: {
     start: number;
@@ -187,7 +140,7 @@ function resolveTriggerQuery(value: string, caretIndex: number): ChatMentionTrig
   }
 
   return {
-    kind: trigger === "@" ? "mention" : "prompt",
+    kind: trigger === "@" ? "plugin" : "skill",
     query: query.toLowerCase(),
     range: { start: triggerIndex, end },
   };
@@ -286,17 +239,6 @@ function removeTriggerRange(value: string, range: ChatMentionTriggerQuery["range
   };
 }
 
-function replaceTriggerRange(value: string, range: ChatMentionTriggerQuery["range"], content: string): {
-  caretIndex: number;
-  value: string;
-} {
-  const nextContent = content.trim();
-  return {
-    caretIndex: range.start + nextContent.length,
-    value: `${value.slice(0, range.start)}${nextContent}${value.slice(range.end)}`,
-  };
-}
-
 function itemMatchesQuery(values: Array<string | undefined>, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -317,32 +259,6 @@ function resolveToolDescription(tool: MCPToolDTO): string {
   return [serverName, description].filter(Boolean).join(" - ");
 }
 
-function filterModels(modelOptions: ChatModelOption[], query: string): ChatMentionModelMenuItem[] {
-  return modelOptions
-    .filter((model) =>
-      itemMatchesQuery([model.platformModelName, model.vendor], query),
-    )
-    .map((model) => ({
-      id: `model:${model.platformModelName}`,
-      kind: "model" as const,
-      label: model.platformModelName,
-      description: model.vendor,
-      model,
-      selected: false,
-    }));
-}
-
-function promptsToItems(prompts: PromptPresetDTO[]): ChatMentionPromptMenuItem[] {
-  return prompts.map((prompt) => ({
-    id: `prompt:${prompt.id}`,
-    kind: "prompt" as const,
-    label: prompt.trigger || prompt.title,
-    description: prompt.description || prompt.content,
-    prompt,
-    selected: false,
-  }));
-}
-
 function skillsToItems(skills: SkillSummaryDTO[], selectedSkills: SkillSummaryDTO[]): ChatMentionSkillMenuItem[] {
   const selectedIDs = new Set(selectedSkills.map((skill) => skill.id));
   return skills.map((skill) => ({
@@ -355,19 +271,19 @@ function skillsToItems(skills: SkillSummaryDTO[], selectedSkills: SkillSummaryDT
   }));
 }
 
-function filterTools(
+function pluginsToItems(
   availableTools: MCPToolDTO[],
   query: string,
   selectedToolIDs: number[],
-): ChatMentionToolMenuItem[] {
+): ChatMentionPluginMenuItem[] {
   const selectedIDs = new Set(selectedToolIDs);
   return availableTools
     .filter((tool) =>
       itemMatchesQuery([resolveToolLabel(tool), tool.name, tool.serverName, tool.description], query),
     )
     .map((tool) => ({
-      id: `tool:${tool.id}`,
-      kind: "tool" as const,
+      id: `plugin:${tool.id}`,
+      kind: "plugin" as const,
       label: resolveToolLabel(tool),
       description: resolveToolDescription(tool),
       tool,
@@ -375,56 +291,22 @@ function filterTools(
     }));
 }
 
-function filesToItems(
-  files: FileObjectDTO[],
-  attachments: PendingAttachment[],
-  defaultFileLabel: string,
-): ChatMentionFileMenuItem[] {
-  const attachedIDs = new Set(attachments.map((item) => item.fileID));
-  return files.map((file) => ({
-    id: `file:${file.fileID}`,
-    kind: "file" as const,
-    label: file.fileName || defaultFileLabel,
-    description: file.mimeType || file.fileCategory || "",
-    file,
-    selected: attachedIDs.has(file.fileID),
-  }));
-}
-
 function buildSections({
-  attachments,
   availableTools,
-  defaultFileLabel,
-  files,
-  filesQuery,
-  fileLoading,
-  promptLoading,
   skillLoading,
-  modelOptions,
-  prompts,
   skills,
   query,
   queryKind,
-  selectedPlatformModelName,
   selectedSkills = [],
   selectedToolIDs,
   toolsDisabled,
   enabledKinds,
 }: {
-  attachments: PendingAttachment[];
   availableTools: MCPToolDTO[];
-  defaultFileLabel: string;
-  files: FileObjectDTO[];
-  filesQuery: string;
-  fileLoading: boolean;
-  modelOptions: ChatModelOption[];
-  prompts: PromptPresetDTO[];
-  promptLoading: boolean;
   skills: SkillSummaryDTO[];
   skillLoading: boolean;
   query: string | null;
-  queryKind: "mention" | "prompt" | null;
-  selectedPlatformModelName: string;
+  queryKind: ChatMentionMenuKind | null;
   selectedSkills: SkillSummaryDTO[];
   selectedToolIDs: number[];
   toolsDisabled: boolean;
@@ -434,60 +316,17 @@ function buildSections({
     return [];
   }
 
-  const normalizedQuery = query.trim().toLowerCase();
-  if (queryKind === "prompt") {
-    const sections: ChatMentionMenuSection[] = [];
-    if (enabledKinds.has("skill")) {
-      const skillItems = skillLoading ? [] : skillsToItems(skills, selectedSkills);
-      if (skillItems.length > 0) {
-        sections.push({ kind: "skill" as const, items: skillItems });
-      }
-    }
-    if (enabledKinds.has("prompt")) {
-      const promptItems = promptLoading ? [] : promptsToItems(prompts);
-      if (promptItems.length > 0) {
-        sections.push({ kind: "prompt" as const, items: promptItems });
-      }
-    }
-    if (enabledKinds.has("model")) {
-      const modelItems = filterModels(modelOptions, normalizedQuery).map((item) => ({
-        ...item,
-        selected: item.model.platformModelName === selectedPlatformModelName,
-      }));
-      if (modelItems.length > 0) {
-        sections.push({ kind: "model" as const, items: modelItems });
-      }
-    }
-    if (enabledKinds.has("tool") && !toolsDisabled) {
-      const toolItems = filterTools(availableTools, normalizedQuery, selectedToolIDs);
-      if (toolItems.length > 0) {
-        sections.push({ kind: "tool" as const, items: toolItems });
-      }
-    }
-    if (sections.length === 0) {
-      return [];
-    }
-    return sections;
+  if (queryKind === "skill" && enabledKinds.has("skill")) {
+    const items = skillLoading ? [] : skillsToItems(skills, selectedSkills);
+    return items.length > 0 ? [{ kind: "skill", items }] : [];
   }
 
-  const fileItems = enabledKinds.has("file") && !fileLoading && filesQuery === normalizedQuery
-    ? filesToItems(files, attachments, defaultFileLabel)
-    : [];
-  const toolItems = enabledKinds.has("tool") && !toolsDisabled
-    ? filterTools(availableTools, query, selectedToolIDs)
-    : [];
-  const modelItems = enabledKinds.has("model")
-    ? filterModels(modelOptions, query).map((item) => ({
-        ...item,
-        selected: item.model.platformModelName === selectedPlatformModelName,
-      }))
-    : [];
+  if (queryKind === "plugin" && enabledKinds.has("plugin") && !toolsDisabled) {
+    const items = pluginsToItems(availableTools, query, selectedToolIDs);
+    return items.length > 0 ? [{ kind: "plugin", items }] : [];
+  }
 
-  return [
-    { kind: "model" as const, items: modelItems },
-    { kind: "file" as const, items: fileItems },
-    { kind: "tool" as const, items: toolItems },
-  ].filter((section) => section.items.length > 0);
+  return [];
 }
 
 function flattenSections(sections: ChatMentionMenuSection[]): ChatMentionMenuItem[] {
@@ -583,16 +422,12 @@ function mentionMenuLayoutsEqual(
 }
 
 export function useChatMentionMenu({
-  attachments,
   availableTools,
-  defaultFileLabel,
   disabled,
   draft,
   maxSelectedTools,
   maxSelectedSkills,
-  modelOptions,
   selectedSkills = [],
-  selectedPlatformModelName,
   selectedToolIDs,
   anchorRef,
   textareaRef,
@@ -600,11 +435,8 @@ export function useChatMentionMenu({
   onDraftChange,
   onSelectedSkillsChange,
   enabledKinds = DEFAULT_MENTION_MENU_KINDS,
-  onFileSelect,
-  onModelChange,
   placementAnchor = "caret",
   placementPreference = "auto",
-  onModelCatalogRefresh,
   onSelectedToolsChange,
   onSkillLimitReached,
   onToolLimitReached,
@@ -615,24 +447,17 @@ export function useChatMentionMenu({
   const [activeIndex, setActiveIndex] = React.useState(0);
   const [dismissedTriggerKey, setDismissedTriggerKey] = React.useState<string | null>(null);
   const [menuLayout, setMenuLayout] = React.useState<ChatMentionMenuLayout | null>(null);
-  const [files, setFiles] = React.useState<FileObjectDTO[]>([]);
-  const [filesLoading, setFilesLoading] = React.useState(false);
-  const [filesQuery, setFilesQuery] = React.useState("");
-  const [prompts, setPrompts] = React.useState<PromptPresetDTO[]>([]);
-  const [promptsLoading, setPromptsLoading] = React.useState(false);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
   const [skillsLoading, setSkillsLoading] = React.useState(false);
   const [selection, setSelection] = React.useState<ChatMentionSelection>(() => ({
     end: draft.length,
     start: draft.length,
   }));
-  const modelCatalogRefreshRequestedRef = React.useRef(false);
   const enabledKindSet = React.useMemo(() => new Set(enabledKinds), [enabledKinds]);
   const triggerQuery = selection.start === selection.end ? resolveTriggerQuery(draft, selection.start) : null;
-  const mentionQuery = triggerQuery?.kind === "mention" ? triggerQuery.query : null;
-  const promptQuery = triggerQuery?.kind === "prompt" ? triggerQuery.query : null;
-  const query = mentionQuery ?? promptQuery;
-  const queryKind = mentionQuery !== null ? "mention" : promptQuery !== null ? "prompt" : null;
+  const query = triggerQuery?.query ?? null;
+  const queryKind = triggerQuery?.kind ?? null;
+  const skillQuery = queryKind === "skill" ? query : null;
   const triggerKey = triggerQuery
     ? `${draft}:${triggerQuery.kind}:${triggerQuery.range.start}:${triggerQuery.range.end}:${triggerQuery.query}`
     : null;
@@ -651,111 +476,7 @@ export function useChatMentionMenu({
   }, [draft, updateSelection]);
 
   React.useEffect(() => {
-    if (!inputFocused || mentionQuery === null || !enabledKindSet.has("model")) {
-      modelCatalogRefreshRequestedRef.current = false;
-      return;
-    }
-    if (disabled || modelCatalogRefreshRequestedRef.current || !onModelCatalogRefresh) {
-      return;
-    }
-
-    modelCatalogRefreshRequestedRef.current = true;
-    void Promise.resolve(onModelCatalogRefresh()).catch(() => undefined);
-  }, [disabled, enabledKindSet, inputFocused, mentionQuery, onModelCatalogRefresh]);
-
-  React.useEffect(() => {
-    if (mentionQuery === null || disabled || !enabledKindSet.has("file")) {
-      setFiles([]);
-      setFilesQuery("");
-      setFilesLoading(false);
-      return;
-    }
-
-    const sessionRevision = readSessionRevision();
-    const cachedFiles = readMentionFileSearchCache(sessionRevision, mentionQuery);
-    if (cachedFiles) {
-      setFiles(cachedFiles);
-      setFilesQuery(mentionQuery);
-      setFilesLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setFilesLoading(true);
-      void (async () => {
-        try {
-          const token = await resolveAccessToken();
-          if (!token || controller.signal.aborted) {
-            return;
-          }
-          const results = await searchMentionFiles({
-            accessToken: token,
-            query: mentionQuery,
-            sessionRevision,
-          });
-          if (!controller.signal.aborted) {
-            setFiles(results);
-            setFilesQuery(mentionQuery);
-          }
-        } catch {
-          if (!controller.signal.aborted) {
-            setFiles([]);
-          }
-        } finally {
-          if (!controller.signal.aborted) {
-            setFilesLoading(false);
-          }
-        }
-      })();
-    }, MENTION_MENU_FILE_QUERY_DELAY_MS);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [disabled, enabledKindSet, mentionQuery]);
-
-  React.useEffect(() => {
-    if (promptQuery === null || disabled || !enabledKindSet.has("prompt")) {
-      setPrompts([]);
-      setPromptsLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setPromptsLoading(true);
-      void (async () => {
-        try {
-          const token = await resolveAccessToken();
-          if (!token || controller.signal.aborted) {
-            return;
-          }
-          const data = await listVisiblePromptPresets(token, { query: promptQuery, page: 1, pageSize: 50 });
-          if (!controller.signal.aborted) {
-            setPrompts(data.results);
-          }
-        } catch {
-          if (!controller.signal.aborted) {
-            setPrompts([]);
-          }
-        } finally {
-          if (!controller.signal.aborted) {
-            setPromptsLoading(false);
-          }
-        }
-      })();
-    }, MENTION_MENU_PROMPT_QUERY_DELAY_MS);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [disabled, enabledKindSet, promptQuery]);
-
-  React.useEffect(() => {
-    if (promptQuery === null || disabled || !enabledKindSet.has("skill")) {
+    if (skillQuery === null || disabled || !enabledKindSet.has("skill")) {
       setSkills([]);
       setSkillsLoading(false);
       return;
@@ -770,7 +491,7 @@ export function useChatMentionMenu({
           if (!token || controller.signal.aborted) {
             return;
           }
-          const data = await listVisibleSkills(token, { query: promptQuery, page: 1, pageSize: 50 });
+          const data = await listVisibleSkills(token, { query: skillQuery, page: 1, pageSize: 50 });
           if (!controller.signal.aborted) {
             setSkills(data.results);
           }
@@ -784,51 +505,33 @@ export function useChatMentionMenu({
           }
         }
       })();
-    }, MENTION_MENU_PROMPT_QUERY_DELAY_MS);
+    }, MENTION_MENU_QUERY_DELAY_MS);
 
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [disabled, enabledKindSet, promptQuery]);
+  }, [disabled, enabledKindSet, skillQuery]);
 
   const sections = React.useMemo(
     () =>
       buildSections({
-        attachments,
         availableTools,
-        defaultFileLabel,
-        files,
-        filesQuery,
-        fileLoading: filesLoading,
-        modelOptions,
-        prompts,
-        promptLoading: promptsLoading,
         skills,
         skillLoading: skillsLoading,
         query,
         queryKind,
-        selectedPlatformModelName,
         selectedSkills,
         selectedToolIDs,
         toolsDisabled,
         enabledKinds: enabledKindSet,
       }),
     [
-      attachments,
       availableTools,
-      defaultFileLabel,
-      files,
-      filesQuery,
-      filesLoading,
-      modelOptions,
-      prompts,
-      promptsLoading,
       skills,
       skillsLoading,
       query,
       queryKind,
-      selectedPlatformModelName,
       selectedSkills,
       selectedToolIDs,
       toolsDisabled,
@@ -923,23 +626,6 @@ export function useChatMentionMenu({
 
   const select = React.useCallback(
     (item: ChatMentionMenuItem) => {
-      if (item.kind === "model") {
-        onModelChange(item.model.platformModelName);
-        finishSelection();
-        return;
-      }
-
-      if (item.kind === "prompt") {
-        if (!triggerQuery) {
-          return;
-        }
-        const nextDraft = replaceTriggerRange(draft, triggerQuery.range, item.prompt.content);
-        onDraftChange(nextDraft.value);
-        setDismissedTriggerKey(null);
-        focusTextarea(nextDraft.caretIndex);
-        return;
-      }
-
       if (item.kind === "skill") {
         const alreadySelected = selectedSkills.some((skill) => skill.id === item.skill.id);
         if (!alreadySelected && selectedSkills.length >= maxSelectedSkills) {
@@ -955,7 +641,7 @@ export function useChatMentionMenu({
         return;
       }
 
-      if (item.kind === "tool") {
+      if (item.kind === "plugin") {
         const alreadySelected = selectedToolIDs.includes(item.tool.id);
         if (!alreadySelected && selectedToolIDs.length >= maxSelectedTools) {
           onToolLimitReached?.();
@@ -967,28 +653,18 @@ export function useChatMentionMenu({
             : [...selectedToolIDs, item.tool.id],
         );
         finishSelection();
-        return;
       }
-
-      void onFileSelect(item.file);
-      finishSelection();
     },
     [
       finishSelection,
       maxSelectedSkills,
       maxSelectedTools,
-      onFileSelect,
-      onDraftChange,
-      onModelChange,
       onSelectedSkillsChange,
       onSkillLimitReached,
       onSelectedToolsChange,
       onToolLimitReached,
       selectedSkills,
       selectedToolIDs,
-      draft,
-      focusTextarea,
-      triggerQuery,
     ],
   );
 
@@ -1039,7 +715,6 @@ export function useChatMentionMenu({
 
   return {
     activeIndex,
-    filesLoading,
     handleBlur: () => setInputFocused(false),
     handleChange,
     handleFocus: () => {

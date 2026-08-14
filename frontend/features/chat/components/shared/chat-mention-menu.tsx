@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { Box, Check, FileText, ScrollText, Wrench } from "lucide-react";
+import { Box, Check, Plug } from "lucide-react";
 
 import type {
   ChatMentionMenuItem,
@@ -11,8 +11,6 @@ import type {
   ChatMentionMenuLayout,
   ChatMentionMenuSection,
 } from "@/features/chat/hooks/use-chat-mention-menu";
-import { ModelIcon } from "@/shared/components/model-icon";
-import { resolveModelIconURL, resolveModelIdentity } from "@/shared/lib/model-identity";
 
 function ChatMentionMenuItemButton({
   item,
@@ -23,19 +21,6 @@ function ChatMentionMenuItemButton({
   active: boolean;
   onSelect: () => void;
 }) {
-  const platformModelName = item.kind === "model" ? item.model.platformModelName.trim() : "";
-  const identity = React.useMemo(() => {
-    if (item.kind !== "model") {
-      return null;
-    }
-    return resolveModelIdentity({
-      code: item.model.platformModelName,
-      vendor: item.model.vendor,
-      icon: item.model.icon,
-    });
-  }, [item]);
-  const iconURL = React.useMemo(() => identity ? resolveModelIconURL(identity.modelIcon) : "", [identity]);
-
   return (
     <button
       type="button"
@@ -48,23 +33,13 @@ function ChatMentionMenuItemButton({
         onSelect();
       }}
     >
-      {item.kind === "model" ? (
-        <ModelIcon iconUrl={iconURL} label={platformModelName} />
-      ) : item.kind === "file" ? (
+      {item.kind === "plugin" ? (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
-          <FileText className="size-3.5" strokeWidth={1.7} />
-        </span>
-      ) : item.kind === "tool" ? (
-        <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
-          <Wrench className="size-3.5" strokeWidth={1.7} />
-        </span>
-      ) : item.kind === "skill" ? (
-        <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
-          <Box className="size-3.5" strokeWidth={1.7} />
+          <Plug className="size-3.5" strokeWidth={1.7} />
         </span>
       ) : (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
-          <ScrollText className="size-3.5" strokeWidth={1.7} />
+          <Box className="size-3.5" strokeWidth={1.7} />
         </span>
       )}
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
