@@ -34,6 +34,7 @@ Web
 | [06-full-deployment-and-online-update.md](./06-full-deployment-and-online-update.md) | Full Docker 与在线更新 |
 | [08-clean-slate-identity-commerce-runtime.md](./08-clean-slate-identity-commerce-runtime.md) | Sub2API identity/commerce 设计 |
 | [09-local-gateway-design.md](./09-local-gateway-design.md) | Local Bridge、设备、多网关与信任边界 |
+| [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) | app-server 真实进程验收、官方文档差距与实施顺序 |
 | [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) | app-server schema 锁定证据 |
 
 ## 实现入口

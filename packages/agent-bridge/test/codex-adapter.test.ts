@@ -4,6 +4,12 @@ import test from "node:test";
 import { SourceRefRegistry } from "../src/commands/resolve-provider-command.js";
 import { CodexAdapter } from "../src/providers/codex/codex-adapter.js";
 import { JsonLineRpcClient } from "../src/providers/codex/rpc-client.js";
+import type { InteractionResponse } from "../src/protocol/agent-command.js";
+import { CODEX_DISPATCHED_CLIENT_REQUESTS } from "../src/providers/codex/codex-method-policy.js";
+
+test("Codex dispatched registry includes session detail reads", () => {
+	assert.ok(CODEX_DISPATCHED_CLIENT_REQUESTS.includes("thread/read"));
+});
 
 test("Codex adapter initializes, maps IDs, redacts auth tokens, and resolves approvals", async () => {
 	const input = new PassThrough();
@@ -346,6 +352,141 @@ test("Codex notification policy maps, redacts extensions, and drops disabled met
 		data: { message: "extension" },
 	});
 	assert.ok(events.every((event) => !Number.isNaN(Date.parse(event.occurredAt))));
+	await adapter.close();
+});
+
+test("Codex adapter maps every enabled server request and response", async () => {
+	const input = new PassThrough();
+	const output = new PassThrough();
+	const sent = lineReader(input);
+	const sources = new SourceRefRegistry();
+	const events: Array<{ sourceRequestRef?: string; payload: any }> = [];
+	const adapter = new CodexAdapter({
+		profileId: "profile_1",
+		rpc: new JsonLineRpcClient(input, output),
+		sources,
+	});
+	const started = adapter.start(async (event) => {
+		events.push(event);
+	}, AbortSignal.timeout(1000));
+	const initialize = await sent.next();
+	respond(output, initialize.id, {
+		userAgent: "codex-cli/0.147.0",
+		codexHome: "/home/test/.codex",
+		platformFamily: "unix",
+		platformOs: "linux",
+	});
+	await sent.next();
+	await started;
+
+	const cases = [
+		{
+			id: 51,
+			method: "item/fileChange/requestApproval",
+			params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1 },
+			response: { kind: "approval", decision: "decline" },
+			expected: { decision: "decline" },
+		},
+		{
+			id: 52,
+			method: "item/tool/requestUserInput",
+			params: {
+				threadId: "thread-1",
+				turnId: "turn-1",
+				itemId: "item-2",
+				questions: [{ id: "provider-question", header: "Choice", question: "Continue?", options: null }],
+				isBlocking: true,
+				autoResolutionMs: null,
+			},
+			response: (event: { payload: any }) => ({
+				kind: "user-input",
+				answers: { [event.payload.request.questions[0].questionRef]: "yes" },
+			}),
+			expected: { answers: { "provider-question": { answers: ["yes"] } } },
+		},
+		{
+			id: 53,
+			method: "item/permissions/requestApproval",
+			params: {
+				threadId: "thread-1",
+				turnId: "turn-1",
+				itemId: "item-3",
+				environmentId: null,
+				startedAtMs: 1,
+				cwd: "/work",
+				reason: "test",
+				permissions: { network: { enabled: true }, fileSystem: { read: ["/work"], write: [] } },
+			},
+			response: { kind: "permission", decision: "accept", scope: "session" },
+			expected: {
+				permissions: { network: { enabled: true }, fileSystem: { read: ["/work"], write: [] } },
+				scope: "session",
+			},
+		},
+		{
+			id: 54,
+			method: "mcpServer/elicitation/request",
+			params: {
+				threadId: "thread-1",
+				turnId: null,
+				serverName: "test",
+				mode: "form",
+				_meta: null,
+				message: "Enter value",
+				requestedSchema: { type: "object", properties: {} },
+			},
+			response: { kind: "mcp-elicitation", decision: "accept", content: { value: "ok" } },
+			expected: { action: "accept", content: { value: "ok" }, _meta: null },
+		},
+		{
+			id: 55,
+			method: "item/tool/call",
+			params: {
+				threadId: "thread-1",
+				turnId: "turn-1",
+				callId: "call-1",
+				namespace: null,
+				tool: "test_tool",
+				arguments: {},
+			},
+			response: {
+				kind: "dynamic-tool",
+				success: true,
+				content: [{ kind: "text", text: "tool result" }],
+			},
+			expected: {
+				success: true,
+				contentItems: [{ type: "inputText", text: "tool result" }],
+			},
+		},
+	] as const;
+
+	for (const request of cases) {
+		const previousCount = events.length;
+		output.write(`${JSON.stringify({ id: request.id, method: request.method, params: request.params })}\n`);
+		await eventually(() => events.length === previousCount + 1);
+		const event = events.at(-1)!;
+		assert.ok(event.sourceRequestRef);
+		const response = (typeof request.response === "function"
+			? request.response(event)
+			: request.response) as InteractionResponse;
+		await adapter.execute(
+			{
+				kind: "interaction.respond",
+				commandId: `command_${request.id}`,
+				profileRef: "profile_1",
+				canonicalCwd: "/work",
+				providerThreadId: "thread-1",
+				providerTurnId: "turn-1",
+				providerRequestId: sources.resolve("profile_1", "request", event.sourceRequestRef),
+				scope: "turn",
+				response,
+			},
+			AbortSignal.timeout(1000),
+		);
+		assert.deepEqual(await sent.next(), { id: request.id, result: request.expected });
+	}
+
 	await adapter.close();
 });
 

@@ -100,6 +100,7 @@ export const CODEX_DISPATCHED_CLIENT_REQUESTS = [
 	"thread/unarchive",
 	"thread/compact/start",
 	"thread/list",
+	"thread/read",
 	"skills/list",
 	"hooks/list",
 	"plugin/list",

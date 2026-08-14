@@ -14,6 +14,8 @@ pnpm --filter @deeix/agent-bridge build
 pnpm --filter @deeix/agent-bridge check:schema
 ```
 
+Run the pinned real-process suite by setting `CODEX_E2E_EXECUTABLE` to the verified Codex `0.147.0` binary before `pnpm test`. The process suite uses the local API-key session and creates then deletes isolated test threads. See `docs/agent-runtime/10-app-server-validation-and-gap-plan.md` for the current capability and gap matrix.
+
 After building, enroll with the DEEIX public user ID and current workspace, then start the persisted configuration:
 
 ```bash

@@ -1,5 +1,7 @@
 # Codex app-server 接入
 
+> 当前实现与实测状态以 [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) 为准。本文件保留锁定 schema、方法边界和设计背景；表格未标为“当前实现”的内容属于后续设计。
+
 > 本文的 method matrix 与 schema pin 仍是 Bridge 实现依据；Web/API 拓扑以 [统一会话架构](./01-architecture.md) 和 [当前协议](./03-protocol-and-data-model.md) 为准。
 
 ## 1. 接入规则与 schema pin
@@ -19,6 +21,8 @@ The lock file and its exact generated schema are implementation authority. The t
 Official references: [app-server documentation](https://developers.openai.com/codex/app-server/), [app-server source](https://github.com/openai/codex/tree/main/codex-rs/app-server), and [Codex repository](https://github.com/openai/codex).
 
 ## 2. Local adapter boundary
+
+下面的类型片段是边界设计草图，不是编译后的当前合同。当前合同直接查看 `packages/agent-bridge/src/protocol/agent-command.ts`、`resolve-provider-command.ts` 和 `provider-adapter.ts`。
 
 ```ts
 import type { ThreadMetadataUpdateParams as CodexThreadMetadataUpdateParams } from "./generated/codex-app-server-v0.147.0/v2";
@@ -145,7 +149,7 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 
-`ProviderManifest` declares availability as `stable`, `beta`, `experimental`, `under_development`, `disabled`, or `schema_mismatch`. Web controls are capability-gated and the server/Bridge revalidate before dispatch. `under_development` methods are visible as diagnostics only in the first production client.
+当前 `ProviderManifest` 只包含 provider、runtime/protocol version、schema hash 和 command kinds。资源、输入、设置与交互能力的机器可读声明仍是缺口，实施顺序见验收与差距计划。
 
 ## 3. Method matrix
 
@@ -160,13 +164,13 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 | Item/notifications | Stable item notifications include started/delta/completed and `item/fileChange/patchUpdated` (mapped); `item/commandExecution/terminalInteraction` is an extension notification | Lock disposition and generated notification type are authoritative | Upsert mapped AgentItem projections; retain extension payload redacted | Completed supplies item terminal form; extension remains inspectable without promoting a control |
 | Server requests | Stable request union includes command/file/permission approvals, `item/tool/requestUserInput`, MCP elicitation and typed tool calls; `attestation/generate` is disabled | Generated request/response types and maturity metadata in the lock are authoritative | Store local request ID/source request ref in Bridge WAL, project AgentInteraction, and map typed response through `interaction.respond` | Drawer presents mapped typed response; disabled request has no control; browser never sees raw RPC ID |
 | Models/modes | Stable `model/list`, `modelProvider/capabilities/read`, `permissionProfile/list`; unpinned experimental candidate `collaborationMode/list` | Stable entries follow the lock. `collaborationMode/list` is disabled until a separate generated, hashed and exhaustive experimental lock exists | Snapshot profile resources and capability descriptors | Model and permission selectors are disabled while stale/offline; collaboration has no control before its experimental lock |
-| Skills/Hooks | `skills/list`, `skills/extraRoots/set`, `skills/config/write`, `skills/changed`, `hooks/list` | Stable schema may contain mutation methods, but first-release manifest/policy disables `skills/extraRoots/set` and `skills/config/write` | Query using canonical cwd; publish read-only resource snapshot/invalidation; create no mutation command | Workspace resources page lists skills/hooks and refreshes diagnostics; no root/config editing control |
-| Plugins/marketplaces | marketplace add/remove/upgrade; plugin list/read/install/uninstall; `plugin/skill/read` | Plugin lifecycle is under development and excluded from first production mutation UI | Read snapshots may be projected; mutation mapper remains feature-flagged by manifest | Read-only diagnostics in first release; no raw marketplace path or arbitrary install request from browser |
-| Apps | `app/installed`, `app/list`, `app/read` | Stable/beta based on generated schema | Profile resource snapshot and app change event | Installed Apps page reads profile-local state; item events link to safe app ref |
-| MCP | MCP server status/list, resource/tool operations, OAuth, reload, startup notification | Stable schema may contain OAuth/config credential mutation, but first-release manifest/policy disables every MCP OAuth and credential/config mutation; reload is also disabled in favor of read-only state | Project redacted server/resource/tool state and startup diagnostics; create no OAuth/config command | MCP page is read-only diagnostics; secret values stay local and no OAuth start/reload control is rendered |
-| Config | `config/read`, `config/value/write`, `config/batchWrite`, `configRequirements/read` | Stable schema may contain writes, but first-release manifest/policy disables `config/value/write` and `config/batchWrite` | Map allowlisted redacted config summary/requirements; create no write command | Config page is diagnostic/read-only; no secret/plaintext or editing control |
-| Filesystem/command/process | Stable-lock filesystem and command-execution members; process client requests are unpinned experimental candidates | Stable entries follow the lock. Process client requests are disabled until a separate generated, hashed and exhaustive experimental lock exists | Resolve file refs/cwd locally, validate root, normalize outputs | Files panel uses signed file refs; command UI follows sandbox policy; process UI has no control before its experimental lock |
-| Account/auth | `account/read`, `account/login/start`, `account/login/completed`, `account/login/cancel`, `account/logout`, `account/updated`, `account/chatgptAuthTokens/refresh`, `account/rateLimits/read`, `account/rateLimits/updated`, `account/usage/read`, `account/workspaceMessages/read` | Stable schema may contain mutation methods, but first-release manifest/policy disables `account/login/start`, `account/login/cancel`, `account/logout`, and `account/chatgptAuthTokens/refresh` | Project read-only auth mode/status/rate-limit/usage/workspace-message state, omitting tokens; create no auth command | Account diagnostics refresh projection only; no local-auth start/logout/token-refresh control |
+| Skills/Hooks | `skills/list`, `skills/changed`, `hooks/list` | 当前实现只读 list 与 invalidation；extra roots/config write 为 extension | Query using canonical cwd; publish redacted resource snapshot | Skill 显式输入和启停尚未接入 |
+| Plugins/marketplaces | `plugin/list` | 当前只调度 pinned `plugin/list`；官方仍标记 under development | 投影只读列表 | read/install/uninstall/share 尚未接入 |
+| Apps | `app/list` | 当前只调度 list | Profile resource snapshot | `app/installed`、`app/read` 和 mention 输入尚未接入 |
+| MCP | `mcpServerStatus/list` 与 startup notification | 当前只调度 status/list | 投影脱敏状态、工具与资源目录 | resource read、tool call、OAuth 和 reload 尚未接入 |
+| Config | `config/read`、writes、requirements | 当前 Agent 协议未暴露；真实进程只探测了 `config/read` | 无 Cloud config snapshot | 后续只增加脱敏 summary，secret 与本机 path 留在 Bridge |
+| Filesystem/command/process | fs、`command/exec`、process candidates | 当前 Agent 协议未暴露；真实进程只探测了 metadata 和隔离 command | 文件附件走 artifact grant | 集成终端需单独的 workspace-relative command 设计 |
+| Account/auth | `getAuthStatus` 与 account APIs | 当前只调度 `getAuthStatus`；真实进程只探测了 `account/read` | auth mode/status 投影，API key 仅用于本机 HMAC proof | 订阅余额继续由 Sub2API 提供；Codex account 只作 runtime 诊断 |
 | External config/environment | Stable-lock external config members; `environment/info` is an unpinned experimental candidate | Lock disposition governs. `environment/info` is disabled until a separate generated, hashed and exhaustive experimental lock exists | Diagnostic/resource events with field allowlist | Setup diagnostics and guided import status; no environment secret export |
 | Preview extensions | Stable `experimentalFeature/list`, `experimentalFeature/enablement/set`, `windowsSandbox/setupStart` and `feedback/upload` members | Pinned stable members with disabled disposition; they have no dispatch until promoted with a typed mapper and fixtures | Dedicated typed extension mapper, audit each mutation | No control while disabled; failure does not affect normal thread execution |
 
@@ -178,12 +182,12 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 | Union | Members | Dispositions | Labeled examples |
 | --- | ---: | --- | --- |
-| `ClientRequest` | 98 | mapped 53, extension 26, disabled 19 | Full member set and dispositions are in the lock |
+| `ClientRequest` | 98 | mapped 25, extension 54, disabled 19 | mapped 与实际 dispatch registry 严格相等 |
 | `ClientNotification` | 1 | mapped 1 | `initialized` mapped |
 | `ServerRequest` | 10 | mapped 6, extension 1, disabled 3 | `attestation/generate` disabled |
 | `ServerNotification` | 72 | mapped 42, extension 19, disabled 11 | `item/fileChange/patchUpdated` mapped; `item/commandExecution/terminalInteraction` extension |
 
-`mapped` members require a typed mapper and acceptance fixture. `extension` members remain redacted and inspectable without becoming controls; `disabled` members have no dispatch.
+`mapped` ClientRequest 必须同时出现在实际 dispatch registry 并具有验收；`extension` 保留在锁中但没有 AgentCommand；`disabled` 没有 dispatch。ServerRequest 与 notification 的 disposition 由完整 policy object 校验。
 
 `collaborationMode/list`, `environment/info`, process client requests, `thread/turns/list`, `thread/items/list`, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.147.0` schema.
 
@@ -208,4 +212,4 @@ At initialize, the initial stable profile does not set `experimentalApi=true`; i
 
 ## 6. Codex test matrix
 
-Bridge fixtures use recorded, redacted JSONL samples for initialize, thread/turn lifecycle, every interaction kind, no-turn MCP elicitation from request through response to `serverRequest/resolved`, server-initiated `item/tool/requestUserInput` through sourceRequestRef/raw local request correlation and typed `interaction.respond`, item delta ordering, terminal events, command retry and schema mismatch. `tool/requestUserInput` is absent from this stable pin; a separately locked experimental fixture, if introduced, is never decoded as that server request. Each fixture asserts source-ref/raw-ID mapping, WAL write-before-send, thread projection order, Interaction CAS result and browser-visible event shape. A pinned-schema upgrade regenerates these fixtures before capability changes reach Web.
+当前测试分两层：确定性 fixture 覆盖六类 ServerRequest、notification disposition、source ref、WAL、重放与输入校验；真实 pinned 进程覆盖初始化、认证证明、10 种资源、完整线程生命周期、turn start/steer/interrupt、compact、review、历史投影和隔离 command probe。完整命令、结果与剩余环境依赖见 [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md)。

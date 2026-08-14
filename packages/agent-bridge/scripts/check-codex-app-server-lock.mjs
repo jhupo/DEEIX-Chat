@@ -148,9 +148,14 @@ function checkDispatchedClientRequests(source, expected) {
 		throw new Error("dispatched ClientRequest registry is empty or duplicated");
 	for (const method of methods) {
 		const member = expected.members.find((item) => item.name === method);
-		if (!member || member.disposition === "disabled")
-			throw new Error(`dispatched ClientRequest is not enabled by the lock: ${method}`);
+		if (!member || member.disposition !== "mapped")
+			throw new Error(`dispatched ClientRequest is not mapped by the lock: ${method}`);
 	}
+	const mapped = expected.members
+		.filter((member) => member.disposition === "mapped")
+		.map((member) => member.name);
+	if (!sameSet(methods, mapped))
+		throw new Error("mapped ClientRequest methods differ from the dispatched registry");
 }
 
 function extract(source, start, end) {
