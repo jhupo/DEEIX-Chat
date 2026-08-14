@@ -59,6 +59,39 @@ func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T
 	}
 }
 
+func TestRuntimeProofPersistsManifestSnapshot(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentRuntimeProofChallenge{},
+	); err != nil {
+		t.Fatalf("migrate runtime profile tables: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "linux",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	profile, challenge, err := repo.BeginRuntimeProof(context.Background(), device.ID, "codex-default",
+		&domainagent.RuntimeProfile{PublicID: "codex-default", Provider: "codex", Status: domainagent.RuntimeStatusProving},
+		&domainagent.RuntimeProofChallenge{PublicID: "agp_0123456789abcdef0123456789abcdef", Nonce: "nonce", ExpiresAt: now.Add(time.Minute)}, now)
+	if err != nil {
+		t.Fatalf("begin runtime proof: %v", err)
+	}
+	manifest := `{"provider":"codex","runtimeVersion":"0.147.0"}`
+	if err := repo.CompleteRuntimeProof(context.Background(), device.ID, profile.ID, challenge.ID, 31, strings.Repeat("b", 64), manifest, now, now.Add(10*time.Minute)); err != nil {
+		t.Fatalf("complete runtime proof: %v", err)
+	}
+	profiles, err := repo.ListRuntimeProfiles(context.Background(), 7, device.PublicID)
+	if err != nil || len(profiles) != 1 || !jsonEqual(profiles[0].ManifestJSON, manifest) || profiles[0].Status != domainagent.RuntimeStatusReady {
+		t.Fatalf("runtime profile manifest mismatch: %#v %v", profiles, err)
+	}
+}
+
 func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
@@ -150,7 +183,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	earlyCompleted := &domainagent.Event{
 		PublicID: "agev_0123456789abcdef0123456789abcdef", Kind: "turn/completed",
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1",
-		PayloadJSON: `{}`, OccurredAt: now.Add(time.Second),
+		PayloadJSON: `{"turn":{"status":"completed","error":null}}`, OccurredAt: now.Add(time.Second),
 	}
 	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("2", 64), earlyCompleted, now.Add(time.Second)); err != nil || ack.Acknowledged != 1 {
 		t.Fatalf("apply early event: ack=%v err=%v", ack, err)
@@ -201,7 +234,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	interactionEvent := &domainagent.Event{
 		PublicID: "agev_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Kind: "interaction.requested",
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceRequestRef: "request-1",
-		PayloadJSON: `{"method":"item/commandExecution/requestApproval"}`, OccurredAt: now.Add(4 * time.Second),
+		PayloadJSON: `{"method":"item/commandExecution/requestApproval","request":{"command":"git status"}}`, OccurredAt: now.Add(4 * time.Second),
 	}
 	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 4, strings.Repeat("5", 64), interactionEvent, now.Add(4*time.Second)); err != nil || ack.Acknowledged != 4 {
 		t.Fatalf("apply interaction event: ack=%v err=%v", ack, err)
@@ -209,6 +242,13 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	var interaction model.AgentInteraction
 	if err := database.First(&interaction, "source_request_ref = ?", "request-1").Error; err != nil {
 		t.Fatal(err)
+	}
+	if interaction.Kind != "command_approval" || !jsonEqual(interaction.RequestJSON, `{"command":"git status"}`) {
+		t.Fatalf("interaction projection mismatch: %#v", interaction)
+	}
+	wrongResponse := json.RawMessage(`{"kind":"user-input","answers":{"question":"yes"}}`)
+	if _, err := repo.RespondInteraction(context.Background(), "10234567-89ab-4def-8123-456789abcdef", strings.Repeat("a", 64), 7, interaction.PublicID, wrongResponse, &domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "interaction.respond"}, now.Add(5*time.Second)); err == nil {
+		t.Fatal("interaction accepted a response for a different semantic kind")
 	}
 	response := json.RawMessage(`{"kind":"approval","decision":"accept"}`)
 	respondCommand := &domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "interaction.respond"}
@@ -318,4 +358,61 @@ func jsonEqual(left, right string) bool {
 	return json.Unmarshal([]byte(left), &leftValue) == nil &&
 		json.Unmarshal([]byte(right), &rightValue) == nil &&
 		reflect.DeepEqual(leftValue, rightValue)
+}
+
+func TestAgentTurnTerminalPayloads(t *testing.T) {
+	cases := []struct {
+		name, payload, status, code, message string
+	}{
+		{name: "completed", payload: `{"turn":{"status":"completed","error":null}}`, status: "completed"},
+		{name: "interrupted", payload: `{"turn":{"status":"interrupted","error":null}}`, status: "interrupted"},
+		{name: "failed", payload: `{"turn":{"status":"failed","error":{"message":"quota exhausted","codexErrorInfo":"usageLimitExceeded"}}}`, status: "failed", code: "usageLimitExceeded", message: "quota exhausted"},
+		{name: "structured failure", payload: `{"turn":{"status":"failed","error":{"message":"upstream disconnected","codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":503}}}}}`, status: "failed", code: "responseStreamDisconnected", message: "upstream disconnected"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, code, message, err := agentTurnTerminal(test.payload)
+			if err != nil || status != test.status || code != test.code || message != test.message {
+				t.Fatalf("agentTurnTerminal() = %q, %q, %q, %v", status, code, message, err)
+			}
+		})
+	}
+	if _, _, _, err := agentTurnTerminal(`{"turn":{"status":"inProgress"}}`); err == nil {
+		t.Fatal("non-terminal turn status accepted")
+	}
+}
+
+func TestInteractionRequestKinds(t *testing.T) {
+	cases := map[string]string{
+		"item/commandExecution/requestApproval": "command_approval",
+		"item/fileChange/requestApproval":       "file_approval",
+		"item/tool/requestUserInput":            "user_input",
+		"item/permissions/requestApproval":      "permission",
+		"mcpServer/elicitation/request":         "mcp_elicitation",
+		"item/tool/call":                        "dynamic_tool",
+	}
+	responses := map[string]string{
+		"command_approval": `{"kind":"approval","decision":"accept"}`,
+		"file_approval":    `{"kind":"approval","decision":"decline"}`,
+		"user_input":       `{"kind":"user-input","answers":{"question":"yes"}}`,
+		"permission":       `{"kind":"permission","decision":"accept"}`,
+		"mcp_elicitation":  `{"kind":"mcp-elicitation","decision":"decline"}`,
+		"dynamic_tool":     `{"kind":"dynamic-tool","success":true,"content":[]}`,
+	}
+	for method, expectedKind := range cases {
+		kind, request, err := projectInteractionRequest(`{"method":"` + method + `","request":{"title":"fixture"}}`)
+		if err != nil || kind != expectedKind || !jsonEqual(request, `{"title":"fixture"}`) {
+			t.Fatalf("projectInteractionRequest(%q) = %q, %s, %v", method, kind, request, err)
+		}
+		wrong := json.RawMessage(`{"kind":"approval"}`)
+		if kind == "command_approval" || kind == "file_approval" {
+			wrong = json.RawMessage(`{"kind":"user-input"}`)
+		}
+		if !interactionResponseMatchesKind(kind, json.RawMessage(responses[kind])) || interactionResponseMatchesKind(kind, wrong) {
+			t.Fatalf("response kind validation failed for %q", kind)
+		}
+	}
+	if _, _, err := projectInteractionRequest(`{"method":"unknown","request":{}}`); err == nil {
+		t.Fatal("unknown interaction method accepted")
+	}
 }

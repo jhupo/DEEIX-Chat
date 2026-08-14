@@ -67,6 +67,8 @@ Bridge 的设备注册不使用浏览器令牌或配对码。首次注册先调�
 
 服务端以公开 ID 定位用户后，用该用户实时 Sub2 key 列表验证 proof。公开 ID 是稳定的外部关联标识，不是凭据；内部外键仍使用数据库 `user_id`。同一设备私钥重复完成注册返回原设备，已移除设备重新通过 proof 后恢复。安装命令不携带浏览器 token、Sub2 token 或 API key。
 
+Bridge 线协议固定为 `deeix.bridge.v2`，所有帧的 `version` 固定为 `2`。v2 将完整 `ProviderManifest` 作为 runtime proof 的必填字段；服务端和 Bridge 都不保留 v1 分支。
+
 ## 3. 事件合同
 
 `GET /conversations/:id/events?after=N` 返回：
@@ -85,6 +87,8 @@ Bridge 的设备注册不使用浏览器令牌或配对码。首次注册先调�
 
 需要用户输入或审批时，Gateway 事件投影为 Conversation interaction。响应接口要求 `Idempotency-Key`，并由 interaction ownership、状态和 source request ref 共同校验。
 
+`AgentInteraction.kind` 使用六个稳定语义值：`command_approval`、`file_approval`、`user_input`、`permission`、`mcp_elicitation`、`dynamic_tool`。原始 app-server method 只在 Bridge 事件边界用于 allowlist 映射；数据库的 `request_json` 仅保存脱敏后的 request。响应先通过公开 union 校验，再在同一数据库事务内按已存 kind 校验 response kind，错误类型不会进入命令队列。
+
 ## 4. 数据关系
 
 ```text
@@ -102,6 +106,8 @@ AgentThread 1:N AgentItem / AgentInteraction / AgentEvent
 
 - `AgentThread.conversation_id > 0` 且唯一。
 - `AgentTurn.run_id` 非空且唯一。
+- `AgentTurn.status` 的终态只允许 `completed|interrupted|failed`；失败同时保存规范化 error code/message。
+- `AgentRuntimeProfile.manifest_json` 是 runtime proof 时严格校验并持久化的能力快照。
 - Conversation event `source_key` 全局唯一，避免重复投影。
 - Conversation event `(conversation_id, seq)` 唯一。
 - Conversation 的 execution target 不在活动期修改。

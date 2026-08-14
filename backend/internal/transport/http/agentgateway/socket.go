@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	bridgeProtocol     = "deeix.bridge.v1"
+	bridgeProtocol     = "deeix.bridge.v2"
 	authProtocolPrefix = "deeix.auth."
-	bridgeVersion      = 1
+	bridgeVersion      = 2
 	bridgeMaxPayload   = (2 << 20) + (64 << 10)
 	bridgeHelloTimeout = 10 * time.Second
 	bridgeHeartbeat    = 30 * time.Second
@@ -45,6 +45,7 @@ type bridgeFrame struct {
 	Command          json.RawMessage        `json:"command,omitempty"`
 	Outcome          json.RawMessage        `json:"outcome,omitempty"`
 	Event            json.RawMessage        `json:"event,omitempty"`
+	Manifest         json.RawMessage        `json:"manifest,omitempty"`
 	Artifacts        *[]bridgeArtifactGrant `json:"artifacts,omitempty"`
 }
 
@@ -206,7 +207,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		return
 	}
 	ctx, cancel = socketRuntimeAuthContext()
-	leaseExpiresAt, err := h.service.CompleteRuntimeProof(ctx, identity, challenge, proof.Proof)
+	leaseExpiresAt, err := h.service.CompleteRuntimeProof(ctx, identity, challenge, proof.Proof, proof.Manifest)
 	cancel()
 	if err != nil {
 		_ = connection.Close()
@@ -448,7 +449,7 @@ func validAuthProofFrame(frame bridgeFrame) bool {
 	}
 	return frame.AckServerSeq == 0 && frame.AckBridgeSeq == 0 && frame.ServerSeq == 0 &&
 		frame.BridgeSeq == 0 && frame.CommandID == "" && len(frame.Command) == 0 &&
-		len(frame.Outcome) == 0 && len(frame.Event) == 0 && frame.DeviceID == "" &&
+		len(frame.Outcome) == 0 && len(frame.Event) == 0 && len(frame.Manifest) > 0 && frame.DeviceID == "" &&
 		frame.HeartbeatSeconds == 0 && frame.Challenge == "" && frame.ExpiresAt == "" &&
 		frame.LeaseExpiresAt == "" && frame.Artifacts == nil
 }
@@ -458,13 +459,13 @@ func validClientEmpty(frame bridgeFrame) bool {
 		len(frame.Command) == 0 && len(frame.Outcome) == 0 && len(frame.Event) == 0 &&
 		frame.DeviceID == "" && frame.HeartbeatSeconds == 0 && frame.ChallengeID == "" &&
 		frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == "" &&
-		len(frame.Workspaces) == 0 && frame.Artifacts == nil
+		len(frame.Workspaces) == 0 && len(frame.Manifest) == 0 && frame.Artifacts == nil
 }
 
 func validClientMetadataEmpty(frame bridgeFrame) bool {
 	return frame.DeviceID == "" && frame.HeartbeatSeconds == 0 && frame.ChallengeID == "" &&
 		frame.Challenge == "" && frame.ExpiresAt == "" && frame.LeaseExpiresAt == "" &&
-		frame.ProfileID == "" && frame.Proof == "" && len(frame.Workspaces) == 0 && frame.Artifacts == nil
+		frame.ProfileID == "" && frame.Proof == "" && len(frame.Workspaces) == 0 && len(frame.Manifest) == 0 && frame.Artifacts == nil
 
 }
 

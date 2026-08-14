@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.25"
+        "version": "0.4.26"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -15709,6 +15709,111 @@
                 }
             }
         },
+        "ProviderManifestDoc": {
+            "type": "object",
+            "required": [
+                "commands",
+                "inputKinds",
+                "interactionKinds",
+                "protocolVersion",
+                "provider",
+                "resources",
+                "runtimeVersion",
+                "schemaHash",
+                "threadSettings"
+            ],
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputKinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "interactionKinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "protocolVersion": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "resources": {
+                    "$ref": "#/definitions/ProviderResourcesDoc"
+                },
+                "runtimeVersion": {
+                    "type": "string"
+                },
+                "schemaHash": {
+                    "type": "string"
+                },
+                "threadSettings": {
+                    "$ref": "#/definitions/ProviderThreadSettingsDoc"
+                }
+            }
+        },
+        "ProviderResourcesDoc": {
+            "type": "object",
+            "required": [
+                "profile",
+                "workspace"
+            ],
+            "properties": {
+                "profile": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "workspace": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ProviderThreadSettingsDoc": {
+            "type": "object",
+            "required": [
+                "approvalPolicy",
+                "model",
+                "reasoningEffort",
+                "sandboxPolicy"
+            ],
+            "properties": {
+                "approvalPolicy": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "type": "boolean"
+                },
+                "reasoningEffort": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sandboxPolicy": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "PublicModelListResponseDoc": {
             "type": "object",
             "required": [
@@ -16318,6 +16423,7 @@
             "required": [
                 "deviceId",
                 "leaseExpiresAt",
+                "manifest",
                 "profileId",
                 "provider",
                 "status",
@@ -16329,6 +16435,9 @@
                 },
                 "leaseExpiresAt": {
                     "type": "string"
+                },
+                "manifest": {
+                    "$ref": "#/definitions/ProviderManifestDoc"
                 },
                 "profileId": {
                     "type": "string"

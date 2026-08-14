@@ -68,7 +68,7 @@ export async function runGateway(
 	);
 
 	try {
-		await adapter.start((event) => outgoing.appendEvent(event).then(() => undefined), signal);
+		const manifest = await adapter.start((event) => outgoing.appendEvent(event).then(() => undefined), signal);
 		const cloud = new BridgeCloudClient(config.cloudUrl);
 		let delay = 1_000;
 		for (;;) {
@@ -80,6 +80,7 @@ export async function runGateway(
 					token,
 					{
 						profileId: config.profileId,
+						manifest,
 						workspaces: config.workspaces.map(({ workspaceId, name }) => ({ workspaceId, name })),
 						proveRuntimeAuth: (challenge, proofSignal) =>
 							adapter.proveRuntimeAuth(challenge, proofSignal),

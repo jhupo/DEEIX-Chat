@@ -1,6 +1,7 @@
 package agentgateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
@@ -158,6 +159,7 @@ type RuntimeProfileView struct {
 	Status         string
 	VerifiedAt     *time.Time
 	LeaseExpiresAt *time.Time
+	Manifest       json.RawMessage
 }
 
 type WorkspaceView struct {
@@ -368,10 +370,12 @@ func (s *Service) CompleteRuntimeProof(
 	identity *ConnectionIdentity,
 	challenge *RuntimeChallengeResult,
 	proofText string,
+	manifest json.RawMessage,
 ) (time.Time, error) {
 	if identity == nil || challenge == nil || challenge.Profile == nil || challenge.Challenge == nil ||
 		challenge.Profile.UserID != identity.UserID || challenge.Profile.DeviceID != identity.InternalDeviceID ||
-		challenge.Challenge.DeviceID != identity.InternalDeviceID || challenge.Challenge.ExpiresAt.Before(s.now().UTC()) {
+		challenge.Challenge.DeviceID != identity.InternalDeviceID || challenge.Challenge.ExpiresAt.Before(s.now().UTC()) ||
+		!validProviderManifest(manifest, challenge.Profile.Provider) {
 		return time.Time{}, ErrRuntimeAuth
 	}
 	proof, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(proofText))
@@ -392,7 +396,7 @@ func (s *Service) CompleteRuntimeProof(
 	leaseExpiresAt := now.Add(runtimeLeaseTTL)
 	if err = s.repo.CompleteRuntimeProof(
 		ctx, identity.InternalDeviceID, challenge.Profile.ID, challenge.Challenge.ID,
-		remoteKeyID, credentialHash, now, leaseExpiresAt,
+		remoteKeyID, credentialHash, string(manifest), now, leaseExpiresAt,
 	); err != nil {
 		return time.Time{}, ErrRuntimeAuth
 	}
@@ -436,6 +440,7 @@ func (s *Service) ListRuntimeProfiles(ctx context.Context, userID uint, devicePu
 		result = append(result, RuntimeProfileView{
 			ProfileID: item.PublicID, DeviceID: devicePublicID, Provider: item.Provider,
 			Status: item.Status, VerifiedAt: item.VerifiedAt, LeaseExpiresAt: item.LeaseExpiresAt,
+			Manifest: json.RawMessage(item.ManifestJSON),
 		})
 	}
 	return result, nil
@@ -626,6 +631,8 @@ func (s *Service) RespondInteraction(ctx context.Context, userID uint, input Res
 
 func mapResourceError(err error) error {
 	switch {
+	case errors.Is(err, repository.ErrInvalidInput):
+		return ErrInvalidInput
 	case errors.Is(err, repository.ErrNotFound):
 		return ErrResourceNotFound
 	case errors.Is(err, repository.ErrConflict):
@@ -1266,6 +1273,77 @@ func validInteractionResponse(value json.RawMessage) bool {
 	default:
 		return false
 	}
+}
+
+func validProviderManifest(value json.RawMessage, provider string) bool {
+	if len(value) == 0 || len(value) > 64*1024 {
+		return false
+	}
+	var manifest struct {
+		Provider        string   `json:"provider"`
+		RuntimeVersion  string   `json:"runtimeVersion"`
+		ProtocolVersion string   `json:"protocolVersion"`
+		SchemaHash      string   `json:"schemaHash"`
+		Commands        []string `json:"commands"`
+		Resources       struct {
+			Profile   []string `json:"profile"`
+			Workspace []string `json:"workspace"`
+		} `json:"resources"`
+		InputKinds     []string `json:"inputKinds"`
+		ThreadSettings struct {
+			Model           *bool    `json:"model"`
+			ReasoningEffort []string `json:"reasoningEffort"`
+			ApprovalPolicy  []string `json:"approvalPolicy"`
+			SandboxPolicy   []string `json:"sandboxPolicy"`
+		} `json:"threadSettings"`
+		InteractionKinds []string `json:"interactionKinds"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&manifest) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		manifest.Provider != provider || manifest.ThreadSettings.Model == nil ||
+		!validManifestText(manifest.RuntimeVersion, 64) ||
+		!validManifestText(manifest.ProtocolVersion, 64) || len(manifest.SchemaHash) != 64 {
+		return false
+	}
+	if _, err := hex.DecodeString(manifest.SchemaHash); err != nil {
+		return false
+	}
+	return validManifestValues(manifest.Commands, []string{
+		"thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
+		"review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
+	}) && validManifestValues(manifest.Resources.Profile, []string{
+		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
+	}) && validManifestValues(manifest.Resources.Workspace, []string{"sessions", "skills", "hooks"}) &&
+		validManifestValues(manifest.InputKinds, []string{"text", "artifact"}) &&
+		validManifestValues(manifest.ThreadSettings.ReasoningEffort, []string{"low", "medium", "high", "xhigh"}) &&
+		validManifestValues(manifest.ThreadSettings.ApprovalPolicy, []string{"untrusted", "on-request", "never"}) &&
+		validManifestValues(manifest.ThreadSettings.SandboxPolicy, []string{"read-only", "workspace-write"}) &&
+		validManifestValues(manifest.InteractionKinds, []string{
+			"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool",
+		})
+}
+
+func validManifestValues(values, allowed []string) bool {
+	if len(values) == 0 || len(values) > len(allowed) {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if !contains(allowed, value) {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
+
+func validManifestText(value string, limit int) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && len(value) <= limit && utf8.ValidString(value)
 }
 
 func validDecision(raw json.RawMessage) bool {

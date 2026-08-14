@@ -6,14 +6,17 @@ import {
 	parseBridgeCommand,
 	parseBridgeServerFrame,
 	parseBridgeWelcome,
+	BRIDGE_VERSION,
 	type BridgeClientFrame,
 	type BridgeServerFrame,
 } from "../protocol/bridge-envelope.js";
 import type { CommandJournal } from "../wal/command-journal.js";
 import type { OutgoingFrameJournal } from "../wal/outgoing-frame-journal.js";
+import type { ProviderManifest } from "../providers/provider-adapter.js";
 
 export type BridgeSocketRuntime = {
 	profileId: string;
+	manifest: ProviderManifest;
 	workspaces: ReadonlyArray<{ workspaceId: string; name: string }>;
 	proveRuntimeAuth(challenge: string, signal: AbortSignal): Promise<string>;
 	commands: CommandJournal;
@@ -33,7 +36,7 @@ export async function runBridgeSocket(
 
 	const url = new URL("/api/v1/agent/bridge/connect", config.cloudUrl);
 	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-	const socket = new WebSocket(url, ["deeix.bridge.v1", `deeix.auth.${connectionToken}`]);
+	const socket = new WebSocket(url, [`deeix.bridge.v${BRIDGE_VERSION}`, `deeix.auth.${connectionToken}`]);
 	const messages = new SocketMessageQueue(socket);
 	const writer = new SocketWriter(socket);
 	const abort = () => socket.close(1000, "bridge shutdown");
@@ -43,7 +46,7 @@ export async function runBridgeSocket(
 	try {
 		await waitForOpen(socket, 10_000);
 		await writer.send({
-			version: 1,
+			version: BRIDGE_VERSION,
 			type: "hello",
 			profileId: runtime.profileId,
 			ackServerSeq: runtime.commands.contiguousReceipt(),
@@ -57,8 +60,9 @@ export async function runBridgeSocket(
 		if (!/^[A-Za-z0-9_-]{43}$/.test(proof))
 			throw new TypeError("runtime authentication proof is invalid");
 		await writer.send({
-			version: 1, type: "auth.proof", profileId: runtime.profileId,
+			version: BRIDGE_VERSION, type: "auth.proof", profileId: runtime.profileId,
 			challengeId: challenge.challengeId, proof, workspaces: [...runtime.workspaces],
+			manifest: runtime.manifest,
 		});
 		parseBridgeAuthReady(
 			parseSocketJSON(await messages.next(60_000)),
@@ -76,7 +80,7 @@ export async function runBridgeSocket(
 
 		heartbeat = setInterval(() => {
 			if (socket.readyState === WebSocket.OPEN)
-				void writer.send({ version: 1, type: "ping" }).catch(() => socket.close());
+				void writer.send({ version: BRIDGE_VERSION, type: "ping" }).catch(() => socket.close());
 		}, Math.max(1_000, Math.floor((welcome.heartbeatSeconds * 1_000) / 2)));
 
 		for (;;) {
@@ -116,7 +120,7 @@ async function handleServerFrame(
 				command,
 				signal,
 				async (ackServerSeq) =>
-					writer.send({ version: 1, type: "ack.server", ackServerSeq }),
+					writer.send({ version: BRIDGE_VERSION, type: "ack.server", ackServerSeq }),
 				frame.artifacts,
 			).then(
 				(outcome) => runtime.outgoing.appendTerminal(
@@ -167,7 +171,7 @@ class OutgoingFramePump {
 	async flush(): Promise<void> {
 		const result = this.#queue.then(async () => {
 			for (const frame of this.#journal.pending(this.#sentThrough)) {
-				await this.#writer.send({ version: 1, ...frame });
+				await this.#writer.send({ version: BRIDGE_VERSION, ...frame });
 				this.#sentThrough = frame.bridgeSeq;
 			}
 		});

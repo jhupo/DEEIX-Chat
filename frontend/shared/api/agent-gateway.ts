@@ -1,4 +1,4 @@
-import type { DeviceResponseDocData, WorkspaceDoc } from "@deeix/api-contract";
+import type { DeviceResponseDocData, RuntimeProfileDoc, WorkspaceDoc } from "@deeix/api-contract";
 
 import { authedRequest } from "@/shared/api/authed-client";
 
@@ -9,6 +9,7 @@ export type AgentDeviceDTO = Omit<DeviceResponseDocData, "lastSeenAt" | "platfor
 };
 
 export type AgentWorkspaceDTO = WorkspaceDoc;
+export type AgentRuntimeProfileDTO = RuntimeProfileDoc;
 
 export type AgentResourceSnapshotDTO = {
   resource: string;
@@ -27,6 +28,14 @@ export async function listAgentDevices(accessToken: string): Promise<AgentDevice
 export async function listAgentWorkspaces(accessToken: string, deviceId: string): Promise<AgentWorkspaceDTO[]> {
   return authedRequest<AgentWorkspaceDTO[]>(
     `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function listAgentRuntimeProfiles(accessToken: string, deviceId: string): Promise<AgentRuntimeProfileDTO[]> {
+  return authedRequest<AgentRuntimeProfileDTO[]>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles`,
     { accessToken },
     true,
   );

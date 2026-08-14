@@ -3764,6 +3764,79 @@ definitions:
     - data
     - errorMsg
     type: object
+  ProviderManifestDoc:
+    properties:
+      commands:
+        items:
+          type: string
+        type: array
+      inputKinds:
+        items:
+          type: string
+        type: array
+      interactionKinds:
+        items:
+          type: string
+        type: array
+      protocolVersion:
+        type: string
+      provider:
+        type: string
+      resources:
+        $ref: '#/definitions/ProviderResourcesDoc'
+      runtimeVersion:
+        type: string
+      schemaHash:
+        type: string
+      threadSettings:
+        $ref: '#/definitions/ProviderThreadSettingsDoc'
+    required:
+    - commands
+    - inputKinds
+    - interactionKinds
+    - protocolVersion
+    - provider
+    - resources
+    - runtimeVersion
+    - schemaHash
+    - threadSettings
+    type: object
+  ProviderResourcesDoc:
+    properties:
+      profile:
+        items:
+          type: string
+        type: array
+      workspace:
+        items:
+          type: string
+        type: array
+    required:
+    - profile
+    - workspace
+    type: object
+  ProviderThreadSettingsDoc:
+    properties:
+      approvalPolicy:
+        items:
+          type: string
+        type: array
+      model:
+        type: boolean
+      reasoningEffort:
+        items:
+          type: string
+        type: array
+      sandboxPolicy:
+        items:
+          type: string
+        type: array
+    required:
+    - approvalPolicy
+    - model
+    - reasoningEffort
+    - sandboxPolicy
+    type: object
   PublicModelListResponseDoc:
     properties:
       data:
@@ -4199,6 +4272,8 @@ definitions:
         type: string
       leaseExpiresAt:
         type: string
+      manifest:
+        $ref: '#/definitions/ProviderManifestDoc'
       profileId:
         type: string
       provider:
@@ -4210,6 +4285,7 @@ definitions:
     required:
     - deviceId
     - leaseExpiresAt
+    - manifest
     - profileId
     - provider
     - status
@@ -6668,7 +6744,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.25"
+  version: "0.4.26"
 paths:
   /admin/announcements:
     get:

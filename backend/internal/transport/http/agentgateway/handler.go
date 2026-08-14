@@ -410,7 +410,9 @@ func (h *Handler) toDeviceResponse(item appagent.DeviceView) deviceResponse {
 func toRuntimeProfileDocs(items []appagent.RuntimeProfileView) []RuntimeProfileDoc {
 	result := make([]RuntimeProfileDoc, 0, len(items))
 	for _, item := range items {
-		result = append(result, RuntimeProfileDoc{ProfileID: item.ProfileID, DeviceID: item.DeviceID, Provider: item.Provider, Status: item.Status, VerifiedAt: item.VerifiedAt, LeaseExpiresAt: item.LeaseExpiresAt})
+		manifest := ProviderManifestDoc{}
+		_ = json.Unmarshal(item.Manifest, &manifest)
+		result = append(result, RuntimeProfileDoc{ProfileID: item.ProfileID, DeviceID: item.DeviceID, Provider: item.Provider, Status: item.Status, VerifiedAt: item.VerifiedAt, LeaseExpiresAt: item.LeaseExpiresAt, Manifest: manifest})
 	}
 	return result
 }

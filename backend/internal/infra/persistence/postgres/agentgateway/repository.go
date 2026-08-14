@@ -119,7 +119,7 @@ func toDomainThread(v model.AgentThread) *domainagent.Thread {
 }
 
 func toDomainTurn(v model.AgentTurn) *domainagent.Turn {
-	return &domainagent.Turn{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID, RunID: v.RunID, SourceTurnRef: v.SourceTurnRef, Status: v.Status, InputJSON: v.InputJSON, SettingsJSON: v.SettingsJSON, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return &domainagent.Turn{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, ThreadID: v.ThreadID, RunID: v.RunID, SourceTurnRef: v.SourceTurnRef, Status: v.Status, ErrorCode: v.ErrorCode, ErrorMessage: v.ErrorMessage, InputJSON: v.InputJSON, SettingsJSON: v.SettingsJSON, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 func toDomainItem(v model.AgentItem) *domainagent.Item {
@@ -163,7 +163,7 @@ func toDomainRuntimeProfile(v model.AgentRuntimeProfile) *domainagent.RuntimePro
 	return &domainagent.RuntimeProfile{
 		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID,
 		Provider: v.Provider, Status: v.Status, RemoteKeyID: v.RemoteKeyID,
-		CredentialHash: v.CredentialHash, VerifiedAt: v.VerifiedAt,
+		CredentialHash: v.CredentialHash, ManifestJSON: v.ManifestJSON, VerifiedAt: v.VerifiedAt,
 		LeaseExpiresAt: v.LeaseExpiresAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }
@@ -700,16 +700,19 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			Update("turn_id", *command.TurnID).Error; err != nil {
 			return err
 		}
-		var completedCount int64
-		if err := tx.Model(&model.AgentEvent{}).
-			Where("thread_id = ? AND source_turn_ref = ? AND kind = ?", *command.ThreadID, outcome.Result.SourceTurnRef, "turn/completed").
-			Count(&completedCount).Error; err != nil {
-			return err
-		}
-		if completedCount > 0 {
-			if err := tx.Model(&model.AgentTurn{}).Where("id = ?", *command.TurnID).Update("status", "completed").Error; err != nil {
+		var completed model.AgentEvent
+		err := tx.Where("thread_id = ? AND source_turn_ref = ? AND kind = ?", *command.ThreadID, outcome.Result.SourceTurnRef, "turn/completed").
+			Order("thread_seq DESC, id DESC").First(&completed).Error
+		if err == nil {
+			status, code, message, parseErr := agentTurnTerminal(completed.PayloadJSON)
+			if parseErr != nil {
+				return parseErr
+			}
+			if err := updateAgentTurnTerminal(tx, *command.TurnID, status, code, message, now); err != nil {
 				return err
 			}
+		} else if !dberror.IsRecordNotFound(err) {
+			return err
 		}
 	}
 	return nil
@@ -1127,12 +1130,18 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 		if err := tx.Where("thread_id = ? AND source_turn_ref = ?", thread.ID, event.SourceTurnRef).First(&turn).Error; err == nil {
 			event.TurnID = &turn.ID
 			if event.Kind == "turn/started" {
-				if err := tx.Model(&turn).Update("status", "running").Error; err != nil {
+				if err := tx.Model(&turn).
+					Where("status NOT IN ?", []string{"completed", "interrupted", "failed"}).
+					Updates(map[string]any{"status": "running", "error_code": "", "error_message": ""}).Error; err != nil {
 					return err
 				}
 			}
 			if event.Kind == "turn/completed" {
-				if err := tx.Model(&turn).Update("status", "completed").Error; err != nil {
+				status, code, message, err := agentTurnTerminal(event.PayloadJSON)
+				if err != nil {
+					return err
+				}
+				if err := updateAgentTurnTerminal(tx, turn.ID, status, code, message, event.OccurredAt); err != nil {
 					return err
 				}
 			}
@@ -1185,11 +1194,15 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 		}
 	}
 	if event.Kind == "interaction.requested" && event.SourceRequestRef != "" {
+		kind, requestJSON, err := projectInteractionRequest(event.PayloadJSON)
+		if err != nil {
+			return err
+		}
 		interaction := model.AgentInteraction{
 			PublicID: newRepoPublicID("agint"), UserID: event.UserID, ThreadID: thread.ID,
 			TurnID: event.TurnID, RuntimeProfileID: *event.RuntimeProfileID,
-			SourceRequestRef: event.SourceRequestRef, Kind: event.Kind,
-			RequestJSON: event.PayloadJSON, Status: "pending",
+			SourceRequestRef: event.SourceRequestRef, Kind: kind,
+			RequestJSON: requestJSON, Status: "pending",
 		}
 		if err := tx.Where("runtime_profile_id = ? AND source_request_ref = ?", interaction.RuntimeProfileID, interaction.SourceRequestRef).
 			Attrs(interaction).FirstOrCreate(&interaction).Error; err != nil {
@@ -1204,6 +1217,113 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 		}
 	}
 	return nil
+}
+
+func agentTurnTerminal(payloadJSON string) (string, string, string, error) {
+	var payload struct {
+		Turn struct {
+			Status string `json:"status"`
+			Error  *struct {
+				Message        string          `json:"message"`
+				CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
+			} `json:"error"`
+		} `json:"turn"`
+	}
+	if json.Unmarshal([]byte(payloadJSON), &payload) != nil {
+		return "", "", "", repository.ErrConflict
+	}
+	switch payload.Turn.Status {
+	case "completed", "interrupted":
+		return payload.Turn.Status, "", "", nil
+	case "failed":
+		code := "gateway_failed"
+		message := "local execution failed"
+		if payload.Turn.Error != nil {
+			if value := strings.TrimSpace(payload.Turn.Error.Message); value != "" {
+				message = truncateRunes(value, 4096)
+			}
+			if value := codexErrorCode(payload.Turn.Error.CodexErrorInfo); value != "" {
+				code = value
+			}
+		}
+		return payload.Turn.Status, code, message, nil
+	default:
+		return "", "", "", repository.ErrConflict
+	}
+}
+
+func codexErrorCode(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var value string
+	if json.Unmarshal(raw, &value) == nil {
+		value = strings.TrimSpace(value)
+		if value != "" && len(value) <= 128 {
+			return value
+		}
+		return ""
+	}
+	var object map[string]json.RawMessage
+	if json.Unmarshal(raw, &object) != nil || len(object) != 1 {
+		return ""
+	}
+	for key := range object {
+		key = strings.TrimSpace(key)
+		if key != "" && len(key) <= 128 {
+			return key
+		}
+	}
+	return ""
+}
+
+func updateAgentTurnTerminal(tx *gorm.DB, turnID uint, status, code, message string, updatedAt time.Time) error {
+	return tx.Model(&model.AgentTurn{}).Where("id = ?", turnID).Updates(map[string]any{
+		"status": status, "error_code": code, "error_message": message, "updated_at": updatedAt,
+	}).Error
+}
+
+func projectInteractionRequest(payloadJSON string) (string, string, error) {
+	var payload map[string]json.RawMessage
+	if json.Unmarshal([]byte(payloadJSON), &payload) != nil || len(payload) != 2 {
+		return "", "", repository.ErrConflict
+	}
+	var method string
+	if json.Unmarshal(payload["method"], &method) != nil {
+		return "", "", repository.ErrConflict
+	}
+	kind := map[string]string{
+		"item/commandExecution/requestApproval": "command_approval",
+		"item/fileChange/requestApproval":       "file_approval",
+		"item/tool/requestUserInput":            "user_input",
+		"item/permissions/requestApproval":      "permission",
+		"mcpServer/elicitation/request":         "mcp_elicitation",
+		"item/tool/call":                        "dynamic_tool",
+	}[method]
+	request := payload["request"]
+	var object map[string]any
+	if kind == "" || len(request) == 0 || json.Unmarshal(request, &object) != nil || object == nil {
+		return "", "", repository.ErrConflict
+	}
+	return kind, string(request), nil
+}
+
+func interactionResponseMatchesKind(kind string, response json.RawMessage) bool {
+	var payload struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(response, &payload) != nil {
+		return false
+	}
+	expected := map[string]string{
+		"command_approval": "approval",
+		"file_approval":    "approval",
+		"user_input":       "user-input",
+		"permission":       "permission",
+		"mcp_elicitation":  "mcp-elicitation",
+		"dynamic_tool":     "dynamic-tool",
+	}[kind]
+	return expected != "" && payload.Kind == expected
 }
 
 func (r *Repo) BeginRuntimeProof(
@@ -1261,7 +1381,7 @@ func (r *Repo) CompleteRuntimeProof(
 	ctx context.Context,
 	deviceID, profileID, challengeID uint,
 	remoteKeyID int64,
-	credentialHash string,
+	credentialHash, manifestJSON string,
 	now, leaseExpiresAt time.Time,
 ) error {
 	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1278,7 +1398,7 @@ func (r *Repo) CompleteRuntimeProof(
 			Where("id = ? AND device_id = ?", profileID, deviceID).
 			Updates(map[string]any{
 				"status": domainagent.RuntimeStatusReady, "remote_key_id": remoteKeyID,
-				"credential_hash": credentialHash, "verified_at": now,
+				"credential_hash": credentialHash, "manifest_json": manifestJSON, "verified_at": now,
 				"lease_expires_at": leaseExpiresAt,
 			})
 		if result.Error != nil {
@@ -1961,6 +2081,9 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 		}
 		if interaction.Status != "pending" {
 			return repository.ErrConflict
+		}
+		if !interactionResponseMatchesKind(interaction.Kind, response) {
+			return repository.ErrInvalidInput
 		}
 		if err := tx.First(&thread, interaction.ThreadID).Error; err != nil || thread.SourceThreadRef == nil {
 			if err != nil {

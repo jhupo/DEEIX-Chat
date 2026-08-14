@@ -238,6 +238,21 @@ test("interaction response can complete while a turn command is waiting", async 
 	await providers.close();
 });
 
+const TEST_MANIFEST_CAPABILITIES: Pick<
+	ProviderManifest,
+	"resources" | "inputKinds" | "threadSettings" | "interactionKinds"
+> = {
+	resources: { profile: ["models"], workspace: ["sessions"] },
+	inputKinds: ["text"],
+	threadSettings: {
+		model: true,
+		reasoningEffort: ["low"],
+		approvalPolicy: ["on-request"],
+		sandboxPolicy: ["workspace-write"],
+	},
+	interactionKinds: ["command_approval"],
+};
+
 class FakeAdapter implements ProviderAdapter {
 	readonly kind = "codex";
 	calls = 0;
@@ -247,6 +262,7 @@ class FakeAdapter implements ProviderAdapter {
 		protocolVersion: "v2",
 		schemaHash: "fixture",
 		commands: ["thread.create", "resource.refresh"],
+		...TEST_MANIFEST_CAPABILITIES,
 	};
 
 	async start(
@@ -286,6 +302,7 @@ class BlockingAdapter implements ProviderAdapter {
 		protocolVersion: "v2",
 		schemaHash: "fixture",
 		commands: ["turn.start", "interaction.respond"],
+		...TEST_MANIFEST_CAPABILITIES,
 	};
 	#releaseTurn!: () => void;
 	readonly turnStarted = new Promise<void>((resolve) => {

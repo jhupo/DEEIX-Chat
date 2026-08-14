@@ -29,7 +29,7 @@ type AgentGatewayRepository interface {
 	ListPendingConversationEvents(context.Context, uint, int) ([]domainagent.AppliedEventFrame, error)
 	MarkConversationEventProjected(context.Context, uint, time.Time) error
 	BeginRuntimeProof(context.Context, uint, string, *domainagent.RuntimeProfile, *domainagent.RuntimeProofChallenge, time.Time) (*domainagent.RuntimeProfile, *domainagent.RuntimeProofChallenge, error)
-	CompleteRuntimeProof(context.Context, uint, uint, uint, int64, string, time.Time, time.Time) error
+	CompleteRuntimeProof(context.Context, uint, uint, uint, int64, string, string, time.Time, time.Time) error
 	SyncWorkspaces(context.Context, uint, uint, uint, []domainagent.Workspace, time.Time) error
 	ListRuntimeProfiles(context.Context, uint, string) ([]domainagent.RuntimeProfile, error)
 	ListWorkspaces(context.Context, uint, string) ([]domainagent.Workspace, error)

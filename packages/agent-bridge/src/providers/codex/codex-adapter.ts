@@ -127,6 +127,25 @@ export class CodexAdapter implements ProviderAdapter {
 			protocolVersion: "0.147.0/stable",
 			schemaHash: SCHEMA_HASH,
 			commands: COMMANDS,
+			resources: {
+				profile: ["models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status"],
+				workspace: ["sessions", "skills", "hooks"],
+			},
+			inputKinds: ["text", "artifact"],
+			threadSettings: {
+				model: true,
+				reasoningEffort: ["low", "medium", "high", "xhigh"],
+				approvalPolicy: ["untrusted", "on-request", "never"],
+				sandboxPolicy: ["read-only", "workspace-write"],
+			},
+			interactionKinds: [
+				"command_approval",
+				"file_approval",
+				"user_input",
+				"permission",
+				"mcp_elicitation",
+				"dynamic_tool",
+			],
 		};
 	}
 

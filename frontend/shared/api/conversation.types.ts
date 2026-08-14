@@ -14,6 +14,7 @@ import type {
   CreateConversationProjectRequest as ContractCreateConversationProjectRequest,
   CreateConversationRequest as ContractCreateConversationRequest,
   CreateConversationShareRequest as ContractCreateConversationShareRequest,
+  InteractionResponse as ContractInteractionResponse,
   MessageFeedbackResponse,
   MessageProcessTraceResponse,
   MessagePromptTraceBlockResponse,
@@ -43,6 +44,30 @@ import type {
 import type { UserStorageQuotaDTO } from "@/shared/api/file.types";
 
 export type ConversationDTO = ConversationResponse;
+
+export type ConversationInteractionKind =
+  | "command_approval"
+  | "file_approval"
+  | "user_input"
+  | "permission"
+  | "mcp_elicitation"
+  | "dynamic_tool";
+
+export type ConversationInteractionDTO = Omit<ContractInteractionResponse, "kind" | "request"> & {
+  kind: ConversationInteractionKind;
+  request: Record<string, unknown>;
+};
+
+export type ConversationInteractionResponse =
+  | { kind: "approval"; decision: "accept" | "decline" }
+  | { kind: "user-input"; answers: Record<string, string> }
+  | { kind: "permission"; decision: "accept" | "decline"; scope?: "turn" | "session" }
+  | { kind: "mcp-elicitation"; decision: "accept" | "decline"; content?: Record<string, string> }
+  | {
+      kind: "dynamic-tool";
+      success: boolean;
+      content: Array<{ kind: "text"; text: string } | { kind: "image" | "audio"; url: string }>;
+    };
 
 export type ConversationSearchResultDTO = ConversationSearchResultResponse;
 

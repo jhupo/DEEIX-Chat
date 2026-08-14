@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	BRIDGE_VERSION,
 	parseBridgeAuthChallenge,
 	parseBridgeAuthReady,
 	parseBridgeServerFrame,
@@ -11,21 +12,21 @@ const deviceId = "agd_f6f910e920934def9a5cda479fc25251";
 
 test("parseBridgeWelcome accepts the expected device", () => {
 	assert.deepEqual(
-		parseBridgeWelcome({ version: 1, type: "welcome", deviceId, heartbeatSeconds: 30 }, deviceId),
-		{ version: 1, type: "welcome", deviceId, heartbeatSeconds: 30 },
+		parseBridgeWelcome({ version: BRIDGE_VERSION, type: "welcome", deviceId, heartbeatSeconds: 30 }, deviceId),
+		{ version: BRIDGE_VERSION, type: "welcome", deviceId, heartbeatSeconds: 30 },
 	);
 });
 
 test("command frames require explicit artifact grants", () => {
 	assert.deepEqual(parseBridgeServerFrame({
-		version: 1,
+		version: BRIDGE_VERSION,
 		type: "command",
 		serverSeq: 1,
 		commandId: "command_1",
 		command: { kind: "resource.refresh" },
 		artifacts: [],
 	}), {
-		version: 1,
+		version: BRIDGE_VERSION,
 		type: "command",
 		serverSeq: 1,
 		commandId: "command_1",
@@ -33,14 +34,14 @@ test("command frames require explicit artifact grants", () => {
 		artifacts: [],
 	});
 	assert.throws(() => parseBridgeServerFrame({
-		version: 1, type: "command", serverSeq: 1, commandId: "command_1",
+		version: BRIDGE_VERSION, type: "command", serverSeq: 1, commandId: "command_1",
 		command: { kind: "resource.refresh" },
 	}), /missing/);
 });
 
 test("parseBridgeWelcome rejects device substitution", () => {
 	assert.throws(
-		() => parseBridgeWelcome({ version: 1, type: "welcome", deviceId: "agd_0123456789abcdef0123456789abcdef", heartbeatSeconds: 30 }, deviceId),
+		() => parseBridgeWelcome({ version: BRIDGE_VERSION, type: "welcome", deviceId: "agd_0123456789abcdef0123456789abcdef", heartbeatSeconds: 30 }, deviceId),
 		/invalid/,
 	);
 });
@@ -58,13 +59,13 @@ test("runtime auth frames bind the expected profile", () => {
 		String(Math.floor(Date.now() / 1000) + 60),
 	].join("\n");
 	assert.equal(parseBridgeAuthChallenge({
-		version: 1, type: "auth.challenge", profileId,
+		version: BRIDGE_VERSION, type: "auth.challenge", profileId,
 		challengeId: "agp_0123456789abcdef0123456789abcdef", challenge, expiresAt,
 	}, profileId).challenge, challenge);
 	assert.equal(parseBridgeAuthReady({
-		version: 1, type: "auth.ready", profileId, leaseExpiresAt: expiresAt,
+		version: BRIDGE_VERSION, type: "auth.ready", profileId, leaseExpiresAt: expiresAt,
 	}, profileId).profileId, profileId);
 	assert.throws(() => parseBridgeAuthReady({
-		version: 1, type: "auth.ready", profileId: "profile_2", leaseExpiresAt: expiresAt,
+		version: BRIDGE_VERSION, type: "auth.ready", profileId: "profile_2", leaseExpiresAt: expiresAt,
 	}, profileId), /invalid/);
 });

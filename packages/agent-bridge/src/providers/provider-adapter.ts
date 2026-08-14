@@ -1,4 +1,18 @@
 import type { ProviderCommand } from "../commands/resolve-provider-command.js";
+import type {
+	AgentInput,
+	ProfileResource,
+	ThreadSettings,
+	WorkspaceResource,
+} from "../protocol/agent-command.js";
+
+export type ProviderInteractionKind =
+	| "command_approval"
+	| "file_approval"
+	| "user_input"
+	| "permission"
+	| "mcp_elicitation"
+	| "dynamic_tool";
 
 export type ProviderManifest = {
 	provider: string;
@@ -6,6 +20,18 @@ export type ProviderManifest = {
 	protocolVersion: string;
 	schemaHash: string;
 	commands: readonly ProviderCommand["kind"][];
+	resources: {
+		profile: readonly ProfileResource[];
+		workspace: readonly WorkspaceResource[];
+	};
+	inputKinds: readonly AgentInput["kind"][];
+	threadSettings: {
+		model: boolean;
+		reasoningEffort: readonly NonNullable<ThreadSettings["reasoningEffort"]>[];
+		approvalPolicy: readonly NonNullable<ThreadSettings["approvalPolicy"]>[];
+		sandboxPolicy: readonly NonNullable<ThreadSettings["sandboxPolicy"]>[];
+	};
+	interactionKinds: readonly ProviderInteractionKind[];
 };
 
 export type ProviderEvent = {

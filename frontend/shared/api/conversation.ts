@@ -24,6 +24,8 @@ import type {
   CreateConversationProjectRequest,
   CreateConversationRequest,
   CreateConversationShareRequest,
+  ConversationInteractionDTO,
+  ConversationInteractionResponse,
   BatchSetConversationProjectRequest,
   BatchSetConversationProjectResult,
   DeleteConversationData,
@@ -875,6 +877,36 @@ export async function sendMessage(
       method: "POST",
       accessToken,
       body: payload,
+    },
+    true,
+  );
+}
+
+export async function listConversationInteractions(
+  accessToken: string,
+  conversationPublicID: string,
+  status: "pending" | "responding" | "resolved" | "failed" | "" = "pending",
+): Promise<ConversationInteractionDTO[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return authedRequest<ConversationInteractionDTO[]>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/interactions${query}`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function respondConversationInteraction(
+  accessToken: string,
+  interactionID: string,
+  response: ConversationInteractionResponse,
+): Promise<ConversationInteractionDTO> {
+  return authedRequest<ConversationInteractionDTO>(
+    `/api/v1/conversation-interactions/${pathParam(interactionID)}/respond`,
+    {
+      method: "POST",
+      accessToken,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: { response },
     },
     true,
   );

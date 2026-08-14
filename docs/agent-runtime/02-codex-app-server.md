@@ -149,7 +149,26 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 
-当前 `ProviderManifest` 只包含 provider、runtime/protocol version、schema hash 和 command kinds。资源、输入、设置与交互能力的机器可读声明仍是缺口，实施顺序见验收与差距计划。
+当前 `ProviderManifest` 是 Bridge 与 Cloud 共用的唯一能力声明，包含 provider、runtime/protocol version、schema hash、command kinds、profile/workspace resources、input kinds、thread settings 取值以及六类 interaction kinds。Bridge 在 runtime proof 帧中提交该结构；Cloud 严格校验后保存到 `AgentRuntimeProfile.manifest_json`，并通过 profile API 返回同一快照。Bridge 执行命令前仍使用同一 manifest 重新校验 command kind。
+
+```json
+{
+  "provider": "codex",
+  "runtimeVersion": "0.147.0",
+  "protocolVersion": "0.147.0/stable",
+  "schemaHash": "<64-char sha256>",
+  "commands": ["thread.create", "turn.start", "interaction.respond"],
+  "resources": { "profile": ["models"], "workspace": ["sessions"] },
+  "inputKinds": ["text", "artifact"],
+  "threadSettings": {
+    "model": true,
+    "reasoningEffort": ["low", "medium", "high", "xhigh"],
+    "approvalPolicy": ["untrusted", "on-request", "never"],
+    "sandboxPolicy": ["read-only", "workspace-write"]
+  },
+  "interactionKinds": ["command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"]
+}
+```
 
 ## 3. Method matrix
 

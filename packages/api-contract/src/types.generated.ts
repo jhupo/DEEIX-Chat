@@ -1669,6 +1669,30 @@ export interface PromptPresetResponseDoc {
   errorMsg: string;
 }
 
+export interface ProviderManifestDoc {
+  commands: string[];
+  inputKinds: string[];
+  interactionKinds: string[];
+  protocolVersion: string;
+  provider: string;
+  resources: ProviderResourcesDoc;
+  runtimeVersion: string;
+  schemaHash: string;
+  threadSettings: ProviderThreadSettingsDoc;
+}
+
+export interface ProviderResourcesDoc {
+  profile: string[];
+  workspace: string[];
+}
+
+export interface ProviderThreadSettingsDoc {
+  approvalPolicy: string[];
+  model: boolean;
+  reasoningEffort: string[];
+  sandboxPolicy: string[];
+}
+
 export interface PublicModelListResponseDoc {
   data: PublicModelResponse[];
   errorMsg: string;
@@ -1848,6 +1872,7 @@ export interface RunResponse {
 export interface RuntimeProfileDoc {
   deviceId: string;
   leaseExpiresAt: string;
+  manifest: ProviderManifestDoc;
   profileId: string;
   provider: string;
   status: string;

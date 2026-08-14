@@ -1,9 +1,12 @@
 import { assertOpaqueRef, parseAgentCommand, type AgentCommand } from "./agent-command.js";
 import type { TerminalOutcome } from "../wal/command-journal.js";
 import type { ProviderEvent } from "../providers/provider-adapter.js";
+import type { ProviderManifest } from "../providers/provider-adapter.js";
+
+export const BRIDGE_VERSION = 2 as const;
 
 export type BridgeHello = {
-	version: 1;
+	version: typeof BRIDGE_VERSION;
 	type: "hello";
 	profileId: string;
 	ackServerSeq: number;
@@ -11,7 +14,7 @@ export type BridgeHello = {
 };
 
 export type BridgeAuthChallenge = {
-	version: 1;
+	version: typeof BRIDGE_VERSION;
 	type: "auth.challenge";
 	profileId: string;
 	challengeId: string;
@@ -20,14 +23,14 @@ export type BridgeAuthChallenge = {
 };
 
 export type BridgeAuthReady = {
-	version: 1;
+	version: typeof BRIDGE_VERSION;
 	type: "auth.ready";
 	profileId: string;
 	leaseExpiresAt: string;
 };
 
 export type BridgeWelcome = {
-	version: 1;
+	version: typeof BRIDGE_VERSION;
 	type: "welcome";
 	deviceId: string;
 	heartbeatSeconds: number;
@@ -36,7 +39,7 @@ export type BridgeWelcome = {
 };
 
 export type BridgeCommandFrame = {
-	version: 1;
+	version: typeof BRIDGE_VERSION;
 	type: "command";
 	serverSeq: number;
 	commandId: string;
@@ -56,23 +59,24 @@ export type ArtifactGrant = {
 
 export type BridgeServerFrame =
 	| BridgeCommandFrame
-	| { version: 1; type: "pong" }
-	| { version: 1; type: "ack.bridge"; ackBridgeSeq: number };
+	| { version: typeof BRIDGE_VERSION; type: "pong" }
+	| { version: typeof BRIDGE_VERSION; type: "ack.bridge"; ackBridgeSeq: number };
 
 export type BridgeClientFrame =
 	| BridgeHello
 	| {
-		version: 1;
+		version: typeof BRIDGE_VERSION;
 		type: "auth.proof";
 		profileId: string;
 		challengeId: string;
 		proof: string;
 		workspaces: Array<{ workspaceId: string; name: string }>;
+		manifest: ProviderManifest;
 	  }
-	| { version: 1; type: "ping" }
-	| { version: 1; type: "ack.server"; ackServerSeq: number }
+	| { version: typeof BRIDGE_VERSION; type: "ping" }
+	| { version: typeof BRIDGE_VERSION; type: "ack.server"; ackServerSeq: number }
 	| {
-			version: 1;
+			version: typeof BRIDGE_VERSION;
 			type: "terminal";
 			bridgeSeq: number;
 			serverSeq: number;
@@ -80,7 +84,7 @@ export type BridgeClientFrame =
 			outcome: TerminalOutcome;
 	  }
 	| {
-			version: 1;
+			version: typeof BRIDGE_VERSION;
 			type: "event";
 			bridgeSeq: number;
 			event: ProviderEvent;
@@ -94,7 +98,7 @@ export function parseBridgeWelcome(value: unknown, expectedDeviceId: string): Br
 	const deviceId = source.deviceId;
 	const heartbeatSeconds = source.heartbeatSeconds;
 	if (
-		version !== 1 || type !== "welcome" || deviceId !== expectedDeviceId ||
+		version !== BRIDGE_VERSION || type !== "welcome" || deviceId !== expectedDeviceId ||
 		typeof heartbeatSeconds !== "number" || !Number.isSafeInteger(heartbeatSeconds) ||
 		heartbeatSeconds < 5 || heartbeatSeconds > 300
 	) {
@@ -112,7 +116,7 @@ export function parseBridgeAuthChallenge(value: unknown, expectedProfileId: stri
 	const source = object(value, "bridge auth challenge");
 	exact(source, ["version", "type", "profileId", "challengeId", "challenge", "expiresAt"]);
 	if (
-		source.version !== 1 || source.type !== "auth.challenge" || source.profileId !== expectedProfileId ||
+		source.version !== BRIDGE_VERSION || source.type !== "auth.challenge" || source.profileId !== expectedProfileId ||
 		typeof source.challengeId !== "string" || !/^agp_[a-f0-9]{32}$/.test(source.challengeId) ||
 		typeof source.challenge !== "string" || source.challenge.length > 1024 ||
 		!source.challenge.startsWith("deeix-runtime-auth-proof-v1\n") || source.challenge.split("\n").length !== 7 ||
@@ -121,7 +125,7 @@ export function parseBridgeAuthChallenge(value: unknown, expectedProfileId: stri
 		throw new TypeError("bridge auth challenge is invalid");
 	}
 	return {
-		version: 1, type: "auth.challenge", profileId: source.profileId,
+		version: BRIDGE_VERSION, type: "auth.challenge", profileId: source.profileId,
 		challengeId: source.challengeId, challenge: source.challenge, expiresAt: source.expiresAt,
 	};
 }
@@ -130,32 +134,32 @@ export function parseBridgeAuthReady(value: unknown, expectedProfileId: string):
 	const source = object(value, "bridge auth ready");
 	exact(source, ["version", "type", "profileId", "leaseExpiresAt"]);
 	if (
-		source.version !== 1 || source.type !== "auth.ready" || source.profileId !== expectedProfileId ||
+		source.version !== BRIDGE_VERSION || source.type !== "auth.ready" || source.profileId !== expectedProfileId ||
 		typeof source.leaseExpiresAt !== "string" || !validTime(source.leaseExpiresAt)
 	) {
 		throw new TypeError("bridge auth ready is invalid");
 	}
-	return { version: 1, type: "auth.ready", profileId: source.profileId, leaseExpiresAt: source.leaseExpiresAt };
+	return { version: BRIDGE_VERSION, type: "auth.ready", profileId: source.profileId, leaseExpiresAt: source.leaseExpiresAt };
 }
 
 export function parseBridgeServerFrame(value: unknown): BridgeServerFrame {
 	const source = object(value, "bridge frame");
-	if (source.version !== 1 || typeof source.type !== "string")
+	if (source.version !== BRIDGE_VERSION || typeof source.type !== "string")
 		throw new TypeError("bridge frame metadata is invalid");
 	switch (source.type) {
 		case "pong":
 			exact(source, ["version", "type"]);
-			return { version: 1, type: "pong" };
+			return { version: BRIDGE_VERSION, type: "pong" };
 		case "ack.bridge":
 			exact(source, ["version", "type", "ackBridgeSeq"]);
-			return { version: 1, type: "ack.bridge", ackBridgeSeq: positiveCursor(source.ackBridgeSeq, "ack.bridge.ackBridgeSeq") };
+			return { version: BRIDGE_VERSION, type: "ack.bridge", ackBridgeSeq: positiveCursor(source.ackBridgeSeq, "ack.bridge.ackBridgeSeq") };
 		case "command":
 			exact(source, ["version", "type", "serverSeq", "commandId", "command", "artifacts"]);
 			assertOpaqueRef(source.commandId, "commandId");
 			if (!Array.isArray(source.artifacts) || source.artifacts.length > 16)
 				throw new TypeError("command artifacts are invalid");
 			return {
-				version: 1, type: "command",
+				version: BRIDGE_VERSION, type: "command",
 				serverSeq: positiveCursor(source.serverSeq, "command.serverSeq"),
 				commandId: source.commandId,
 				command: source.command,

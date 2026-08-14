@@ -102,6 +102,7 @@ type AgentRuntimeProfile struct {
 	Status         string     `gorm:"size:32;not null;index"`
 	RemoteKeyID    *int64     `gorm:"index"`
 	CredentialHash string     `gorm:"size:64;not null;default:''"`
+	ManifestJSON   string     `gorm:"type:jsonb;not null;default:'{}'"`
 	VerifiedAt     *time.Time `gorm:"index"`
 	LeaseExpiresAt *time.Time `gorm:"index"`
 }
@@ -190,6 +191,8 @@ type AgentTurn struct {
 	RunID         string  `gorm:"size:64;not null;uniqueIndex:uk_agent_turns_run_id;check:chk_agent_turns_run_id,run_id <> ''"`
 	SourceTurnRef *string `gorm:"size:256;uniqueIndex:uk_agent_turns_thread_source,priority:2,where:source_turn_ref IS NOT NULL"`
 	Status        string  `gorm:"size:32;not null;index"`
+	ErrorCode     string  `gorm:"size:128;not null;default:''"`
+	ErrorMessage  string  `gorm:"size:4096;not null;default:''"`
 	InputJSON     string  `gorm:"type:jsonb;not null"`
 	SettingsJSON  string  `gorm:"type:jsonb;not null"`
 }

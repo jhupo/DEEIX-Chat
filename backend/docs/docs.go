@@ -15716,6 +15716,111 @@ const docTemplate = `{
                 }
             }
         },
+        "ProviderManifestDoc": {
+            "type": "object",
+            "required": [
+                "commands",
+                "inputKinds",
+                "interactionKinds",
+                "protocolVersion",
+                "provider",
+                "resources",
+                "runtimeVersion",
+                "schemaHash",
+                "threadSettings"
+            ],
+            "properties": {
+                "commands": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "inputKinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "interactionKinds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "protocolVersion": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "resources": {
+                    "$ref": "#/definitions/ProviderResourcesDoc"
+                },
+                "runtimeVersion": {
+                    "type": "string"
+                },
+                "schemaHash": {
+                    "type": "string"
+                },
+                "threadSettings": {
+                    "$ref": "#/definitions/ProviderThreadSettingsDoc"
+                }
+            }
+        },
+        "ProviderResourcesDoc": {
+            "type": "object",
+            "required": [
+                "profile",
+                "workspace"
+            ],
+            "properties": {
+                "profile": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "workspace": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "ProviderThreadSettingsDoc": {
+            "type": "object",
+            "required": [
+                "approvalPolicy",
+                "model",
+                "reasoningEffort",
+                "sandboxPolicy"
+            ],
+            "properties": {
+                "approvalPolicy": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "model": {
+                    "type": "boolean"
+                },
+                "reasoningEffort": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "sandboxPolicy": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "PublicModelListResponseDoc": {
             "type": "object",
             "required": [
@@ -16325,6 +16430,7 @@ const docTemplate = `{
             "required": [
                 "deviceId",
                 "leaseExpiresAt",
+                "manifest",
                 "profileId",
                 "provider",
                 "status",
@@ -16336,6 +16442,9 @@ const docTemplate = `{
                 },
                 "leaseExpiresAt": {
                     "type": "string"
+                },
+                "manifest": {
+                    "$ref": "#/definitions/ProviderManifestDoc"
                 },
                 "profileId": {
                     "type": "string"
@@ -19864,7 +19973,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.25",
+	Version:          "0.4.26",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

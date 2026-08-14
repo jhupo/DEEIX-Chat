@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,8 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"golang.org/x/net/websocket"
 )
+
+const testProviderManifest = `{"provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["thread.create"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`
 
 func TestConnectionTokenProtocols(t *testing.T) {
 	token, err := connectionToken([]string{bridgeProtocol, authProtocolPrefix + "deeix_connection_value"})
@@ -41,7 +44,7 @@ func TestConnectionTokenProtocols(t *testing.T) {
 
 func TestClientFramesRejectServerArtifactGrants(t *testing.T) {
 	artifacts := []bridgeArtifactGrant{}
-	frame := bridgeFrame{Version: 1, Type: "ping", Artifacts: &artifacts}
+	frame := bridgeFrame{Version: bridgeVersion, Type: "ping", Artifacts: &artifacts}
 	if validPingFrame(frame) {
 		t.Fatal("client frame must not carry server artifact grants")
 	}
@@ -103,6 +106,7 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 		Version: bridgeVersion, Type: "auth.proof", ProfileID: "profile_1",
 		ChallengeID: challenge.ChallengeID, Proof: base64.RawURLEncoding.EncodeToString(mac.Sum(nil)),
 		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "workspace_1"}},
+		Manifest:   json.RawMessage(testProviderManifest),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -321,11 +325,17 @@ func (r *socketRepo) BeginRuntimeProof(_ context.Context, deviceID uint, profile
 	return &profileCopy, &challengeCopy, nil
 }
 
-func (r *socketRepo) CompleteRuntimeProof(_ context.Context, deviceID, profileID, challengeID uint, remoteKeyID int64, credentialHash string, _, _ time.Time) error {
-	if deviceID != r.device.ID || profileID != 21 || challengeID != 22 || remoteKeyID != 31 || len(credentialHash) != 64 {
+func (r *socketRepo) CompleteRuntimeProof(_ context.Context, deviceID, profileID, challengeID uint, remoteKeyID int64, credentialHash, manifestJSON string, _, _ time.Time) error {
+	if deviceID != r.device.ID || profileID != 21 || challengeID != 22 || remoteKeyID != 31 || len(credentialHash) != 64 || !jsonEqualRaw(manifestJSON, testProviderManifest) {
 		return repository.ErrConflict
 	}
 	return nil
+}
+
+func jsonEqualRaw(left, right string) bool {
+	var leftValue, rightValue any
+	return json.Unmarshal([]byte(left), &leftValue) == nil && json.Unmarshal([]byte(right), &rightValue) == nil &&
+		reflect.DeepEqual(leftValue, rightValue)
 }
 
 func (r *socketRepo) SyncWorkspaces(_ context.Context, userID, deviceID, profileID uint, items []domainagent.Workspace, _ time.Time) error {

@@ -151,6 +151,8 @@ type Turn struct {
 	RunID          string
 	SourceTurnRef  *string
 	Status         string
+	ErrorCode      string
+	ErrorMessage   string
 	InputJSON      string
 	SettingsJSON   string
 	CreatedAt      time.Time
@@ -247,6 +249,7 @@ type RuntimeProfile struct {
 	Status         string
 	RemoteKeyID    *int64
 	CredentialHash string
+	ManifestJSON   string
 	VerifiedAt     *time.Time
 	LeaseExpiresAt *time.Time
 	CreatedAt      time.Time

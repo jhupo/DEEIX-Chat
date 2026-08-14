@@ -44,3 +44,8 @@ Web
 - Conversation 执行事件事务：`backend/internal/infra/persistence/postgres/conversation/repository_execution.go`
 - Gateway 应用服务：`backend/internal/application/agentgateway/service.go`
 - Local Bridge：`packages/agent-bridge`
+
+## P0 回归
+
+- 默认回归：`pnpm --filter @deeix/agent-bridge test` 与 `go test ./internal/application/agentgateway ./internal/infra/persistence/postgres/agentgateway ./internal/transport/http/agentgateway`。
+- 生产 WSS 全链路：按 [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) 设置 `CODEX_GATEWAY_E2E_*` 后运行 `pnpm --filter @deeix/agent-bridge test:gateway:e2e`。

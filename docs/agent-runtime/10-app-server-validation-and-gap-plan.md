@@ -161,13 +161,15 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 ## 6. 详细缺口与修改方案
 
-### P0：先修正确性和能力声明
+### P0：正确性和能力声明（已完成）
+
+实现基线：2026-08-14。定向 repository/socket/Adapter 测试已进入默认测试集；真实生产链路测试为显式 opt-in。
 
 #### 6.1 AgentTurn 终态投影不完整
 
-现状：`projectAgentEvent` 收到任何 `turn/completed` 都把 `AgentTurn.status` 写成 `completed`；Conversation 层会解析 `completed`、`interrupted`、`failed`，两个存储口径不一致。
+实现：`projectAgentEvent` 与乱序 terminal result 都解析 `payload.turn.status`，只接受 `completed|interrupted|failed`；`AgentTurn` 同时持久化失败 code/message，迟到的 `turn/started` 不会覆盖终态。
 
-修改：
+已完成：
 
 1. 在 `backend/internal/infra/persistence/postgres/agentgateway/repository.go` 解析 `payload.turn.status`。
 2. 只允许 `completed|interrupted|failed`，同时保存 error code/message。
@@ -177,9 +179,9 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 #### 6.2 Interaction 类型丢失
 
-现状：数据库 `AgentInteraction.Kind` 保存的是统一事件名 `interaction.requested`，真正方法名位于 `payload.method`。API 使用 `Kind` 返回，前端难以稳定区分审批、提问、权限和 MCP。
+实现：事件投影校验六类 method allowlist，并把 `AgentInteraction.Kind` 保存为稳定语义枚举；API 返回脱敏 request 与语义 kind。
 
-修改：
+已完成：
 
 1. 在事件投影时校验 `payload.method` 属于六类 allowlist。
 2. `AgentInteraction.Kind` 保存语义枚举，例如 `command_approval`、`file_approval`、`user_input`、`permission`、`mcp_elicitation`、`dynamic_tool`。
@@ -190,17 +192,27 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 #### 6.3 Manifest 只声明命令名
 
-现状：`ProviderManifest` 只有 provider、runtimeVersion、protocolVersion、schemaHash、commands。资源、输入类型、设置项、审批决策和实验状态没有机器可读声明。
+实现：单一 `ProviderManifest` 已包含 commands、resources、input kinds、thread settings 与 interaction kinds；runtime proof 传输并持久化该快照，profile API 返回同一结构。
 
-修改：扩展单个 manifest 结构，增加 `resources`、`inputKinds`、`threadSettings`、`interactionKinds`。保持一个结构，不创建第二套 capability registry。
+已完成：扩展单个 manifest 结构，增加 `resources`、`inputKinds`、`threadSettings`、`interactionKinds`。未创建第二套 capability registry。
 
 验收：Cloud 持久化 manifest snapshot；API/UI 只根据 manifest 渲染控件；Bridge 仍在执行前重新校验。
 
 #### 6.4 缺少可重复的生产 WSS 全链路测试
 
-现状：本轮真实进程测试覆盖 Adapter；Cloud socket、队列、Conversation 投影主要由 Go fixture 覆盖。
+实现：新增 `packages/agent-bridge/test/gateway-production.e2e.test.ts`，默认跳过，仅在显式设置 `CODEX_GATEWAY_E2E=1` 时连接目标 Full 部署。
 
-修改：新增 opt-in `CODEX_GATEWAY_E2E`，启动测试 Bridge，完成 enrollment、runtime proof、workspace sync、gateway conversation、turn stream、interaction response、断线重连和清理。
+该测试完成 enrollment、runtime proof、manifest/profile 持久化读取、workspace sync、gateway conversation、turn stream、interaction response、WSS ack、Bridge WAL、进程级断线重连、sessions/app-server history 回读和清理。Web API 在重连后读取的 profile、message、interaction 和 resource snapshot 用于验证 PostgreSQL 持久化状态。
+
+```powershell
+$env:CODEX_GATEWAY_E2E='1'
+$env:CODEX_GATEWAY_E2E_URL='https://HOST'
+$env:CODEX_GATEWAY_E2E_USER_PUBLIC_ID='USER_PUBLIC_ID'
+$env:CODEX_GATEWAY_E2E_ACCESS_TOKEN='ACCESS_TOKEN'
+$env:CODEX_GATEWAY_E2E_WORKSPACE='D:\path\to\fixture'
+$env:CODEX_GATEWAY_E2E_CODEX='codex' # optional
+pnpm --filter @deeix/agent-bridge test:gateway:e2e
+```
 
 验收：同一测试同时验证 Web API、PostgreSQL 状态、WSS ack、Bridge WAL、app-server history 和最终 Conversation message。
 

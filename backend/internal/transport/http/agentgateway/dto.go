@@ -12,12 +12,37 @@ type ArtifactDoc struct {
 }
 
 type RuntimeProfileDoc struct {
-	ProfileID      string     `json:"profileId"`
-	DeviceID       string     `json:"deviceId"`
-	Provider       string     `json:"provider"`
-	Status         string     `json:"status"`
-	VerifiedAt     *time.Time `json:"verifiedAt"`
-	LeaseExpiresAt *time.Time `json:"leaseExpiresAt"`
+	ProfileID      string              `json:"profileId"`
+	DeviceID       string              `json:"deviceId"`
+	Provider       string              `json:"provider"`
+	Status         string              `json:"status"`
+	VerifiedAt     *time.Time          `json:"verifiedAt"`
+	LeaseExpiresAt *time.Time          `json:"leaseExpiresAt"`
+	Manifest       ProviderManifestDoc `json:"manifest"`
+}
+
+type ProviderManifestDoc struct {
+	Provider         string                    `json:"provider"`
+	RuntimeVersion   string                    `json:"runtimeVersion"`
+	ProtocolVersion  string                    `json:"protocolVersion"`
+	SchemaHash       string                    `json:"schemaHash"`
+	Commands         []string                  `json:"commands"`
+	Resources        ProviderResourcesDoc      `json:"resources"`
+	InputKinds       []string                  `json:"inputKinds"`
+	ThreadSettings   ProviderThreadSettingsDoc `json:"threadSettings"`
+	InteractionKinds []string                  `json:"interactionKinds"`
+}
+
+type ProviderResourcesDoc struct {
+	Profile   []string `json:"profile"`
+	Workspace []string `json:"workspace"`
+}
+
+type ProviderThreadSettingsDoc struct {
+	Model           bool     `json:"model"`
+	ReasoningEffort []string `json:"reasoningEffort"`
+	ApprovalPolicy  []string `json:"approvalPolicy"`
+	SandboxPolicy   []string `json:"sandboxPolicy"`
 }
 
 type WorkspaceDoc struct {

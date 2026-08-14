@@ -1,6 +1,6 @@
 {
   "name": "@deeix/agent-bridge",
-  "version": "0.4.25",
+  "version": "0.4.26",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -24,7 +24,8 @@
     "check": "tsc -p tsconfig.json --noEmit --pretty false",
     "check:schema": "node scripts/check-codex-app-server-lock.mjs ../../docs/agent-runtime/codex-app-server-v0.147.0.lock.json generated/codex-app-server-v0.147.0/ts generated/codex-app-server-v0.147.0/json",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "test": "pnpm build && node --test dist/test/*.test.js"
+    "test": "pnpm build && node --test dist/test/*.test.js",
+    "test:gateway:e2e": "pnpm build && node --test dist/test/gateway-production.e2e.test.js"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
