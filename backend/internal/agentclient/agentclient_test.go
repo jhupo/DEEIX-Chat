@@ -31,6 +31,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestRuntimeProofDeadline(t *testing.T) {
+	now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
+	want := now.Add(time.Minute)
+	got, err := runtimeProofDeadline(want.Format(time.RFC3339Nano), now)
+	if err != nil || !got.Equal(want) {
+		t.Fatalf("runtimeProofDeadline() = %v, %v, want %v", got, err, want)
+	}
+	for _, value := range []string{"invalid", now.Format(time.RFC3339Nano), now.Add(3 * time.Minute).Format(time.RFC3339Nano)} {
+		if _, err = runtimeProofDeadline(value, now); err == nil {
+			t.Fatalf("runtimeProofDeadline(%q) accepted", value)
+		}
+	}
+}
+
 func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	root := t.TempDir()
 	workspace := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace"}

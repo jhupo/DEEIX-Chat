@@ -76,6 +76,7 @@ type CodexAdapter struct {
 	command    *exec.Cmd
 	version    string
 	onEvent    func(json.RawMessage) error
+	done       chan struct{}
 
 	mu      sync.Mutex
 	pending map[string]*pendingInteraction
@@ -97,7 +98,13 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	}
 	versionContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(versionContext, path, "--version").CombinedOutput()
+	versionCommand := exec.CommandContext(versionContext, path, "--version")
+	cleanup, err := configureCodexCommand(versionCommand)
+	if err != nil {
+		return "", "", err
+	}
+	output, err := versionCommand.CombinedOutput()
+	cleanup()
 	if err != nil {
 		if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(path), `\windowsapps\openai.codex_`) {
 			return "", "", errors.New("the Codex Desktop internal executable is not a standalone CLI; install the official Codex CLI")
@@ -126,13 +133,19 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 		return nil, err
 	}
 	command.Stderr = stderr
+	cleanup, err := configureCodexCommand(command)
+	if err != nil {
+		return nil, err
+	}
 	if err = command.Start(); err != nil {
+		cleanup()
 		return nil, fmt.Errorf("start Codex app-server: %w", err)
 	}
+	cleanup()
 	adapter := &CodexAdapter{
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
-		workspaces: make(map[string]Workspace, len(config.Workspaces)),
+		workspaces: make(map[string]Workspace, len(config.Workspaces)), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -140,6 +153,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	adapter.rpc.SetHandlers(adapter.notification, adapter.serverRequest)
 	go func() {
 		_ = command.Wait()
+		close(adapter.done)
 		adapter.rpc.closeWithError(errors.New("Codex app-server exited"))
 	}()
 	initializeContext, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -521,6 +535,8 @@ func (adapter *CodexAdapter) Close() error {
 	}
 	return nil
 }
+
+func (adapter *CodexAdapter) Done() <-chan struct{} { return adapter.done }
 
 func (adapter *CodexAdapter) requestMap(ctx context.Context, method string, params any) (map[string]any, error) {
 	var result map[string]any

@@ -104,6 +104,11 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		select {
+		case <-adapter.Done():
+			return errors.New("Codex app-server exited")
+		default:
+		}
 		message := publicMessage(tokenErr)
 		logger.Printf("gateway connection failed: %s", message)
 		_ = gateway.writeStatus("reconnecting", message)
@@ -175,6 +180,11 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if err = receiveBridgeFrame(connection, &challenge); err != nil || challenge.Version != bridgeVersion || challenge.Type != "auth.challenge" || challenge.ProfileID != gateway.config.ProfileID || !validPublicID(challenge.ChallengeID, "agp") || !strings.HasPrefix(challenge.Challenge, "deeix-runtime-auth-proof-v1\n") {
 		return errors.New("gateway runtime challenge is invalid")
 	}
+	proofDeadline, err := runtimeProofDeadline(challenge.ExpiresAt, time.Now())
+	if err != nil {
+		return err
+	}
+	_ = connection.SetDeadline(proofDeadline)
 	proofContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	proof, err := gateway.adapter.ProveRuntimeAuth(proofContext, challenge.Challenge)
 	cancel()
@@ -222,6 +232,8 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-gateway.adapter.Done():
+			return errors.New("Codex app-server exited")
 		case <-heartbeat.C:
 			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
 				return err
@@ -271,6 +283,14 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			}
 		}
 	}
+}
+
+func runtimeProofDeadline(value string, now time.Time) (time.Time, error) {
+	expiresAt, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil || !expiresAt.After(now) || expiresAt.After(now.Add(2*time.Minute)) {
+		return time.Time{}, errors.New("gateway runtime challenge expiry is invalid")
+	}
+	return expiresAt, nil
 }
 
 func (gateway *Gateway) commandWorker(ctx context.Context) {

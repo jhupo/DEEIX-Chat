@@ -1,10 +1,13 @@
 package agentgateway
 
 import (
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,5 +31,23 @@ func TestBindStrictJSON(t *testing.T) {
 				t.Fatalf("bindStrictJSON() error = %v, wantErr %v", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestWriteErrorExplainsRuntimeKeyMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	writeError(context, errors.Join(errors.New("verify runtime proof"), appagent.ErrRuntimeAuth), "fallback")
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("writeError() status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "local Codex API key is not active for this DEEIX account") {
+		t.Fatalf("writeError() body = %s", body)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"errorCode":"agent.runtime_key_invalid"`) {
+		t.Fatalf("writeError() body = %s", body)
 	}
 }

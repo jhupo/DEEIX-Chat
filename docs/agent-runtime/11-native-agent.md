@@ -45,11 +45,11 @@ curl -fsSL 'SERVER/agent/install.sh' | sh -s -- --server 'SERVER' --user 'PUBLIC
 - 再次执行且 `server + user` 相同时复用设备身份和 `deviceId`，更新原生程序、Codex CLI 绝对路径，或追加/刷新当前工作区。
 - 已有身份与传入的 server 或 user 不一致时立即终止，不重绑设备。
 - 已有设备配置缺少身份私钥时立即报错，不生成新私钥冒充原设备。
-- Windows 使用当前用户的 `DEEIX Agent` 计划任务，直接执行 `deeix-agent.exe start`。
+- Windows 注册自动启动的 `DEEIX Agent` 系统服务。SCM 只运行一个 `deeix-agent.exe` 服务进程；该进程在已登记用户登录后，以该用户令牌启动唯一必要的 `codex app-server` 子进程，因此项目、Git、MCP、Skills 和 Codex 登录状态仍来自该用户，且不会显示控制台窗口。
 - Linux 使用 `systemd --user` 的 `deeix-agent.service`。
 - macOS 使用 `com.deeix.agent` LaunchAgent。
 
-远程服务地址必须使用 HTTPS；仅本机开发地址 `localhost` 或 loopback IP 可使用 HTTP。操作系统进程名为 `deeix-agent`，Windows 任务管理器中对应 `deeix-agent.exe`。
+远程服务地址必须使用 HTTPS；仅本机开发地址 `localhost` 或 loopback IP 可使用 HTTP。操作系统进程名为 `deeix-agent`，Windows 服务名为 `DEEIXAgent`、显示名为 `DEEIX Agent`。任务管理器中只有一个 `deeix-agent.exe`；运行本地 Codex 时出现的 `codex.exe app-server` 是 provider 子进程，不是第二个 Agent。
 
 用户数据和程序分开保存。Windows 数据目录默认为 `%LOCALAPPDATA%\DEEIX\Agent`，Linux 为 `~/.local/share/deeix-agent`，macOS 为 `~/Library/Application Support/DEEIX/Agent`。更新程序不会删除身份、配置、sourceRef、命令终态或未确认事件。
 

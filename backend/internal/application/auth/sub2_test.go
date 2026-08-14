@@ -48,6 +48,31 @@ type sessionReadErrorRepo struct {
 	err  error
 }
 
+type runtimeAccessTokenRepo struct {
+	repository.AuthRepository
+	user         *domainuser.User
+	sessions     []domainuser.Session
+	sessionReads int
+}
+
+func (r *runtimeAccessTokenRepo) ListActiveSessionsByUserID(context.Context, uint, time.Time) ([]domainuser.Session, error) {
+	return r.sessions, nil
+}
+
+func (r *runtimeAccessTokenRepo) GetByID(context.Context, uint) (*domainuser.User, error) {
+	return r.user, nil
+}
+
+func (r *runtimeAccessTokenRepo) GetSessionByUserAndSessionID(_ context.Context, _ uint, sessionID string) (*domainuser.Session, error) {
+	r.sessionReads++
+	for i := range r.sessions {
+		if r.sessions[i].SessionID == sessionID {
+			return &r.sessions[i], nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
 func (r sessionReadErrorRepo) GetSessionByUserAndSessionID(context.Context, uint, string) (*domainuser.Session, error) {
 	return nil, r.err
 }
@@ -183,6 +208,33 @@ func TestSub2SessionNeedsRevalidation(t *testing.T) {
 	}
 	if !sub2SessionNeedsRevalidation(&domainuser.Session{Sub2VerifiedAt: &now}, now) {
 		t.Fatal("missing access-token expiry must require revalidation")
+	}
+}
+
+func TestSub2AccessTokensForUserStopsAfterFirstUsableSession(t *testing.T) {
+	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "test-data-encryption-key-value-32"
+	encrypted, err := secretbox.EncryptString(key, "runtime-access-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &runtimeAccessTokenRepo{
+		user: &domainuser.User{ID: 1, Sub2UserID: 7, Sub2InstanceID: client.InstanceID()},
+		sessions: []domainuser.Session{
+			{UserID: 1, SessionID: "first", Sub2AccessTokenEncrypted: encrypted, ExpiresAt: time.Now().Add(time.Hour)},
+			{UserID: 1, SessionID: "second", Sub2AccessTokenEncrypted: "invalid", ExpiresAt: time.Now().Add(time.Hour)},
+		},
+	}
+	service := &Service{cfg: config.NewRuntime(config.Config{DataEncryptionKey: key}), sub2: client, repo: repo}
+	tokens, err := service.Sub2AccessTokensForUser(context.Background(), 1)
+	if err != nil || len(tokens) != 1 || tokens[0] != "runtime-access-token" {
+		t.Fatalf("Sub2AccessTokensForUser() = %#v, %v", tokens, err)
+	}
+	if repo.sessionReads != 1 {
+		t.Fatalf("session reads = %d, want 1", repo.sessionReads)
 	}
 }
 

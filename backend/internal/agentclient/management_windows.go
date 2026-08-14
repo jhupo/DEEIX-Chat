@@ -52,11 +52,13 @@ func platformUninstall(dataDir string, purge bool) (UninstallResult, error) {
 		purgeLiteral = "$true"
 	}
 	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
-Unregister-ScheduledTask -TaskName 'DEEIX Agent' -Confirm:$false -ErrorAction SilentlyContinue
 Wait-Process -Id %d -ErrorAction SilentlyContinue
+$service = Start-Process -FilePath '%s' -ArgumentList 'service-uninstall' -Verb RunAs -WindowStyle Hidden -Wait -PassThru
+if ($service.ExitCode -ne 0) { throw 'DEEIX Agent system service removal failed' }
+Unregister-ScheduledTask -TaskName 'DEEIX Agent' -Confirm:$false -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '%s' -Force -ErrorAction SilentlyContinue
 %sif (-not %s) { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue }
-`, os.Getpid(), psLiteral(executable), purgeCommand, purgeLiteral)
+`, os.Getpid(), psLiteral(executable), psLiteral(executable), purgeCommand, purgeLiteral)
 	if err = writeFileAtomic(scriptPath, []byte(script), 0o600); err != nil {
 		return UninstallResult{}, err
 	}

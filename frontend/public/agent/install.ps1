@@ -15,6 +15,9 @@ $temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("deeix-agent-" + [guid
 $download = Join-Path $temporary $asset
 $backup = "$installed.previous"
 $taskName = "DEEIX Agent"
+$userSID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$serviceInstalled = $false
+$hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
 New-Item -ItemType Directory -Force -Path $temporary, $installDir, $dataDir | Out-Null
 try {
   Invoke-WebRequest "$base/$asset" -OutFile $download
@@ -23,44 +26,70 @@ try {
   $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "DEEIX Agent checksum mismatch" }
 
+  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 700
   & $download install --server $Server --user $User --workspace $Workspace --name $Name --codex $Codex --data-dir $dataDir
   if ($LASTEXITCODE -ne 0) { throw "DEEIX Agent configuration failed" }
 
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 700
-  Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $installed) { Move-Item -LiteralPath $installed -Destination $backup }
+  $installedLiteral = $installed.Replace("'", "''")
+  $downloadLiteral = $download.Replace("'", "''")
+  $backupLiteral = $backup.Replace("'", "''")
+  $dataDirLiteral = $dataDir.Replace("'", "''")
+  $userSIDLiteral = $userSID.Replace("'", "''")
+  $errorFile = Join-Path $temporary "service-install.error.txt"
+  $errorFileLiteral = $errorFile.Replace("'", "''")
+  $serviceScript = @"
+`$ErrorActionPreference = 'Stop'
+try {
+  & '$downloadLiteral' service-stop
+  if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent service stop failed' }
+  Remove-Item -LiteralPath '$backupLiteral' -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath '$installedLiteral') { Move-Item -LiteralPath '$installedLiteral' -Destination '$backupLiteral' }
   try {
-    Move-Item -LiteralPath $download -Destination $installed
+    Move-Item -LiteralPath '$downloadLiteral' -Destination '$installedLiteral'
+    & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
+    if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent service installation failed' }
   } catch {
-    if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $installed }
+    if (Test-Path -LiteralPath '$installedLiteral') { & '$installedLiteral' service-uninstall 2>`$null }
+    Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath '$backupLiteral') { Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral' }
     throw
   }
+} catch {
+  [IO.File]::WriteAllText('$errorFileLiteral', `$_.Exception.Message)
+  exit 1
+}
+"@
+  Remove-Item -LiteralPath (Join-Path $dataDir "runtime-status.json") -Force -ErrorAction SilentlyContinue
+  $encodedServiceScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($serviceScript))
+  $elevated = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedServiceScript"
+  if ($elevated.ExitCode -ne 0) {
+    $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "administrator approval was not completed" }
+    throw "DEEIX Agent system service installation failed: $detail"
+  }
+  $serviceInstalled = $true
 
-  try {
-    $action = New-ScheduledTaskAction -Execute $installed -Argument "start --data-dir `"$dataDir`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    $settings = New-ScheduledTaskSettingsSet -RestartCount 20 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Remove-Item -LiteralPath (Join-Path $dataDir "runtime-status.json") -Force -ErrorAction SilentlyContinue
-    Start-ScheduledTask -TaskName $taskName
-    $started = $false
-    for ($attempt = 0; $attempt -lt 15; $attempt++) {
-      Start-Sleep -Seconds 1
-      if (Test-Path -LiteralPath (Join-Path $dataDir "runtime-status.json")) { $started = $true; break }
-    }
-    if (-not $started) { throw "DEEIX Agent did not start; run deeix-agent doctor for details" }
-    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-  } catch {
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $installed -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath $backup) {
-      Move-Item -LiteralPath $backup -Destination $installed
-      Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-    }
-    throw
+  $connected = $false
+  for ($attempt = 0; $attempt -lt 90; $attempt++) {
+    Start-Sleep -Seconds 1
+    $statusPath = Join-Path $dataDir "runtime-status.json"
+    if (-not (Test-Path -LiteralPath $statusPath)) { continue }
+    try {
+      $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
+      if ($status.state -eq "connected") { $connected = $true; break }
+    } catch {}
   }
-  Write-Host "DEEIX Agent is installed and running: $installed"
+  if (-not $connected) {
+    $logPath = Join-Path $dataDir "agent.log"
+    $detail = if (Test-Path -LiteralPath $logPath) { (Get-Content -LiteralPath $logPath -Tail 1) } else { "no runtime log was written" }
+    throw "DEEIX Agent service did not connect: $detail"
+  }
+  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+  Write-Host "DEEIX Agent system service is installed and connected: $installed"
+} catch {
+  if (-not $serviceInstalled -and $hadScheduledTask) { Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+  throw
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -438,8 +438,10 @@ func writeError(c *gin.Context, err error, fallback string) {
 		response.Error(c, http.StatusNotFound, "agent resource not found")
 	case errors.Is(err, appagent.ErrStateConflict), errors.Is(err, appagent.ErrDeviceRevoked):
 		response.Error(c, http.StatusConflict, "agent resource state conflicts with request")
-	case errors.Is(err, appagent.ErrCredential), errors.Is(err, appagent.ErrInvalidSignature), errors.Is(err, appagent.ErrRuntimeAuth):
+	case errors.Is(err, appagent.ErrCredential), errors.Is(err, appagent.ErrInvalidSignature):
 		response.Error(c, http.StatusUnauthorized, "invalid device credential")
+	case errors.Is(err, appagent.ErrRuntimeAuth):
+		response.ErrorWithCode(c, http.StatusUnauthorized, "agent.runtime_key_invalid", "local Codex API key is not active for this DEEIX account")
 	default:
 		response.Error(c, http.StatusInternalServerError, strings.TrimSpace(fallback))
 	}

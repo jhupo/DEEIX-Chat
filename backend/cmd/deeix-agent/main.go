@@ -83,6 +83,34 @@ func run(args []string) error {
 			return nil
 		}
 		return err
+	case "service":
+		flags := flag.NewFlagSet("service", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		dataDir := flags.String("data-dir", "", "agent data directory")
+		userSID := flags.String("user-sid", "", "Windows user SID")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *dataDir == "" || *userSID == "" {
+			return usageError()
+		}
+		return runPlatformService(*dataDir, *userSID)
+	case "service-install":
+		flags := flag.NewFlagSet("service-install", flag.ContinueOnError)
+		flags.SetOutput(io.Discard)
+		dataDir := flags.String("data-dir", "", "agent data directory")
+		userSID := flags.String("user-sid", "", "Windows user SID")
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *dataDir == "" || *userSID == "" {
+			return usageError()
+		}
+		return installPlatformService(*dataDir, *userSID)
+	case "service-stop":
+		if len(args) != 1 {
+			return usageError()
+		}
+		return stopPlatformService()
+	case "service-uninstall":
+		if len(args) != 1 {
+			return usageError()
+		}
+		return uninstallPlatformService()
 	case "doctor":
 		flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 		flags.SetOutput(io.Discard)

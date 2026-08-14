@@ -33,9 +33,9 @@ Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurn
 
 ## 2.1 安装、注册与更新
 
-账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Bridge 包一并放入前端静态目录，用户机器不直接连接 GitHub。Bridge 包只携带桥接程序与 Node；用户机器必须预先安装版本锁定且组件完整的 Codex，并保证 `codex` 位于常驻任务的 PATH 中。也可通过安装命令的 `--codex` / `-Codex` 参数提供明确路径。
+账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Agent 包一并放入前端静态目录，用户机器不直接连接 GitHub。Agent 包只有原生可执行文件，不携带 Node.js 或 Codex；用户机器必须预先安装组件完整的官方 Codex CLI。安装时解析并保存 CLI 绝对路径，也可通过 `--codex` / `-Codex` 明确指定。
 
-Bridge 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与 Workspace 校验，再原子替换程序目录。重复运行安装命令会停止原常驻任务、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows 当前用户计划任务重新启动。程序包与身份数据分目录，客户端更新不会改变设备 ID。
+Agent 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与 Workspace 校验，再原子替换程序目录。重复运行安装命令会停止原常驻进程、校验并覆盖程序、复用私钥完成幂等注册、增加或更新当前 Workspace，最后用 systemd user service、LaunchAgent 或 Windows SCM 系统服务重新启动。Windows SCM 只承载一个 Agent 进程，并以安装用户的活动会话令牌启动 `codex app-server` 子进程。程序包与身份数据分目录，客户端更新不会改变设备 ID。
 
 ## 3. 强类型命令
 
