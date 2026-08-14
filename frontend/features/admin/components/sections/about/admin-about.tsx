@@ -153,6 +153,13 @@ function AdminUpdateCheck() {
     setChecking(true);
     setDialog("checking");
     try {
+      const current = await getAdminUpdateStatus(accessToken);
+      if (current.job && !terminalStatuses.has(current.job.status)) {
+        setStatus(current);
+        cacheCandidate(current);
+        setDialog("job");
+        return;
+      }
       const next = await checkAdminUpdate(accessToken);
       setStatus(next);
       cacheCandidate(next);

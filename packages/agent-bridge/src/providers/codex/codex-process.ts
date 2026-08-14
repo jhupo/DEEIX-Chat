@@ -1,6 +1,4 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from "node:child_process";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { JsonLineRpcClient, type RpcClientOptions } from "./rpc-client.js";
 
@@ -12,13 +10,13 @@ export type CodexProcess = {
 
 const execFileAsync = promisify(execFile);
 const SUPPORTED_CODEX_VERSIONS = new Set(["0.147.0", "0.147.0-alpha.6.6"]);
-export const BUNDLED_CODEX_EXECUTABLE = "@bundled";
 
 export async function assertCodexVersion(
 	executable: string,
 ): Promise<void> {
-	const resolvedExecutable = resolveCodexExecutable(executable);
-	const { stdout } = await execFileAsync(resolvedExecutable, ["--version"], {
+	if (executable.length === 0 || executable.includes("\0"))
+		throw new TypeError("Codex executable is invalid");
+	const { stdout } = await execFileAsync(executable, ["--version"], {
 		windowsHide: true,
 		timeout: 10_000,
 		maxBuffer: 64 * 1024,
@@ -34,22 +32,13 @@ export function parseCodexVersion(output: string): string | undefined {
 	return /^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$/.exec(output)?.[1];
 }
 
-export function resolveCodexExecutable(executable: string): string {
-	if (executable.length === 0 || executable.includes("\0"))
-		throw new TypeError("Codex executable is invalid");
-	if (executable !== BUNDLED_CODEX_EXECUTABLE) return executable;
-	return resolve(
-		dirname(fileURLToPath(import.meta.url)),
-		"../../../../codex/bin",
-		process.platform === "win32" ? "codex.exe" : "codex",
-	);
-}
-
 export function startCodexAppServer(
 	executable: string,
 	options: RpcClientOptions = {},
 ): CodexProcess {
-	const child = spawn(resolveCodexExecutable(executable), ["app-server"], {
+	if (executable.length === 0 || executable.includes("\0"))
+		throw new TypeError("Codex executable is invalid");
+	const child = spawn(executable, ["app-server"], {
 		shell: false,
 		stdio: ["pipe", "pipe", "pipe"],
 		windowsHide: true,

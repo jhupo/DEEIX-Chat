@@ -13,11 +13,7 @@ import {
 import { SourceRefRegistry } from "./commands/resolve-provider-command.js";
 import { DeviceIdentity } from "./identity/device-identity.js";
 import { CodexAdapter } from "./providers/codex/codex-adapter.js";
-import {
-	assertCodexVersion,
-	BUNDLED_CODEX_EXECUTABLE,
-	startCodexAppServer,
-} from "./providers/codex/codex-process.js";
+import { assertCodexVersion, startCodexAppServer } from "./providers/codex/codex-process.js";
 import { runGateway } from "./runtime/gateway-runtime.js";
 import { BridgeCloudClient } from "./transport/cloud-client.js";
 
@@ -39,7 +35,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		const previous = await readOptionalConfig(configPath);
 		if (previous && (previous.cloudUrl !== server || previous.userPublicID !== userPublicID))
 			throw new Error("existing bridge identity belongs to a different server or user");
-		const codexExecutable = option(options, "codex", BUNDLED_CODEX_EXECUTABLE);
+		const codexExecutable = option(options, "codex", "codex");
 		await assertCodexVersion(codexExecutable);
 		const workspaceRoot = await realpath(resolve(required(options, "workspace")));
 		const workspaceId = stableOpaqueId("workspace", workspaceRoot);
