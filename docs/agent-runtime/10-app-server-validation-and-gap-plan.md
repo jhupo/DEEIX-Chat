@@ -103,6 +103,24 @@ pnpm.cmd --filter @deeix/agent-bridge test
 
 真实 MCP/App 环境相关的 elicitation 和 tool call 尚未建立固定测试服务器，因此当前证据是协议 fixture，不是第三方服务器互操作测试。
 
+### 4.5 Web 产品入口状态
+
+下表区分 app-server/Bridge 已有能力与 Web 产品闭环。只有 Cloud 命令、Bridge 调度、本地 app-server、事件投影和 Web 状态恢复全部接通，才记为“已接通”。
+
+| 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
+| --- | --- | --- | --- |
+| 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
+| 读取本地会话历史 | `thread/list` + `thread/read(includeTurns:true)` 已映射并实测 | `sessions` 刷新会导入 user/assistant/reasoning 消息并显示在对应 Workspace | 已接通，但当前只取最近 30 个未归档会话 |
+| 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
+| 新建本地项目 | app-server 没有 DEEIX Workspace 注册语义；Bridge 只上报客户端已配置根目录 | Web 只能选择现有 Workspace | 缺口；需要受控的 Workspace 创建/注册流程 |
+| 删除本地会话 | `thread/delete` 已映射并实测 | 当前删除接口只软删除 DEEIX Conversation | 未形成产品闭环；本地 thread 仍存在且可能被再次导入 |
+| 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
+| 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
+| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 可保存 `plugins` snapshot，前端缺 profile resource client 和页面 | 后端能力已具备，UI 待接入 |
+| 展示文件 Diff | `turn/diff/updated`、`item/fileChange/outputDelta`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
+
+现有“插件”页面属于 DEEIX 服务端 Skill/Prompt 库，不等同于设备上的 Codex Skill、Plugin、App 或 MCP。后续 UI 必须按“平台插件”和“设备能力”分区，避免同名数据混用。
+
 ## 5. Schema 与官方当前文档的边界
 
 ### 5.1 锁定 schema
@@ -242,15 +260,38 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 
 验收：建立仓库内固定 MCP stdio fixture，覆盖 tools/resources/list/read/call、OAuth completion、elicitation 和断线重连。
 
+#### 6.10 本地生命周期、Workspace 注册与 Diff 产品闭环
+
+现状：新建本地会话、导入历史和继续输入已经使用同一 `sourceThreadRef` 闭环。删除与归档页面只修改 DEEIX Conversation，尚未调用已经映射的 `thread/delete|archive|unarchive`。本地 Workspace 只来自 Bridge 配置；Diff 通知虽已进入统一事件流，前端没有结构化展示或刷新恢复。
+
+修改：
+
+1. 在 Conversation 使用的 `gatewayExecutor` 增加单一 typed lifecycle 方法，只允许 `archive|unarchive|delete`，根据 conversation 绑定生成现有 `thread.lifecycle` 命令。
+2. 生命周期 HTTP 接口先校验 conversation 属于当前用户和 gateway execution，再持久化命令；由命令 terminal result 投影最终 Conversation 状态。设备离线时显示 pending，不把排队状态伪装成已完成。
+3. 删除得到设备 ACK 后再软删除 Conversation。保留以 `runtime_profile_id + source_thread_ref` 唯一定位的 AgentThread tombstone；`syncWorkspaceSessions` 使用包含软删除记录的查询，命中 tombstone 时跳过导入，防止已删本地会话重新出现。
+4. Workspace 创建使用客户端配置的 allowlisted parent roots。Web 仅提交 `rootRef`、合法单段目录名和显示名；Bridge 将 opaque root ref 解析为本机根目录，拒绝绝对路径、`.`、`..`、分隔符、符号链接越界和已存在的非目录目标，然后创建目录并同步 Workspace。注册任意现有目录继续由本机 CLI 或原生目录选择器完成，Cloud 不接收绝对路径。
+5. 前端补 profile resource client，用同一资源 snapshot 模式读取 `plugins`；Workspace 面板读取 `skills`。两者显示 device、profile/workspace、刷新时间和 stale/offline 状态，且与 DEEIX 平台插件分区。
+6. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
+7. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
+
+验收：
+
+- 新会话首次输入只创建一个本地 thread；重试使用同一 idempotency key。
+- 归档、恢复和删除在设备在线、离线排队、ACK、失败重试和重复通知下保持 Cloud 与 app-server 一致。
+- 已删除 thread 在后续 `sessions` 刷新中不会重新生成 Conversation。
+- Workspace 创建覆盖合法目录、重复目录、越界、符号链接逃逸和并发创建。
+- Skill/Plugin snapshot 在在线、离线、过期和切换设备时展示正确来源。
+- Diff 覆盖实时增量、最终 patch、多文件、重连补拉、乱序/重复事件和大内容截断。
+
 ### P2：补只读诊断和可选工具面
 
-#### 6.10 Account 与 Config
+#### 6.11 Account 与 Config
 
 当前运行时已验证 `account/read`、`config/read`，产品只使用 `getAuthStatus` 和 HMAC proof。用户账户订阅额度仍由 Sub2API 提供，Codex account 只应作为本机 runtime 诊断。
 
 修改：新增脱敏的 `runtime-account` 与 `runtime-config-summary` profile resource，只保留 auth type、provider、受管要求和 feature flags。API key、token、endpoint secret、绝对路径均不进入 Cloud。
 
-#### 6.11 Filesystem 与 command/exec
+#### 6.12 Filesystem 与 command/exec
 
 官方提供 fs 和独立 command API。当前 Agent 工作已经可通过 turn 工具执行，立即增加第二套 Web terminal 会重复权限、流和审计模型。
 
@@ -277,8 +318,12 @@ Bridge 初始化明确使用 `experimentalApi: false`。升级前必须重新生
 | `docs/agent-runtime/codex-app-server-*.lock.json` | 版本、生成物和全 union 状态 |
 | `backend/internal/application/agentgateway/service.go` | typed command 创建、响应 union 校验、资源刷新 |
 | `backend/internal/infra/persistence/postgres/agentgateway/repository.go` | thread/turn/item/interaction 状态投影与幂等 |
+| `backend/internal/application/conversation/service_conversation.go` | gateway 会话归档、恢复、删除的生命周期编排 |
 | `backend/internal/application/conversation/service_gateway_projection.go` | 统一 Conversation 流和终态 |
 | `backend/internal/transport/http/agentgateway` | 设备、资源和管理命令 API |
+| `frontend/shared/api/agent-gateway.ts` | Workspace/Profile 资源与生命周期 API client |
+| `frontend/features/layouts/components/navigation/nav-workspaces.tsx` | 本地 Workspace、会话和设备资源入口 |
+| `frontend/features/chat` | typed execution event、实时 Diff 与历史恢复 UI |
 | `packages/agent-bridge/test/codex-adapter.test.ts` | 双向 JSONL fixture |
 | `packages/agent-bridge/test/codex-process.e2e.test.ts` | 真实锁定进程验收 |
 
