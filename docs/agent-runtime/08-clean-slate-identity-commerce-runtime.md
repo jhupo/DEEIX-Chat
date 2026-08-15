@@ -361,8 +361,9 @@ expires_at_unix
 返回 base64url proof 后立即释放引用。它不创建或修改 `config.toml`、auth 文件、环境变量或 keychain，也不把 key 暴露给
 Browser、WSS payload 或普通 ProviderCommand。
 
-Cloud 收到 proof 后，使用当前 User 的 Sub2 access token实时读取 `/api/v1/keys`，只保留 `active`、未过期且属于该用户的
-候选项。对每个候选 raw key 计算相同 HMAC，使用常量时间比较并要求恰好一个匹配；随后立即丢弃 response 中的所有 raw keys，
+Cloud 收到 proof 后，使用当前 User 的 Sub2 access token 实时读取 `/api/v1/keys`，只保留属于该用户且符合 Sub2
+身份鉴权语义的候选项：`active`、`expired`、`quota_exhausted`；`disabled` 与未知状态拒绝。`expired` 和
+`quota_exhausted` 只用于证明 key 归属，实际模型请求仍由 Sub2 返回订阅或额度错误。对每个候选 raw key 计算相同 HMAC，使用常量时间比较并要求恰好一个匹配；随后立即丢弃 response 中的所有 raw keys，
 只保存 matched `remote_key_id`、server-keyed credential fingerprint、challenge hash、验证时间和短时 lease expiry。proof 自身不落库。
 这同时证明本地持有的 key 出现在**当前登录用户、当前固定 Sub2 instance** 的 key 集合中；另一个 Sub2 实例或另一用户的 key
 不会匹配。
@@ -487,7 +488,7 @@ Sub2 admin；DEEIX 管理端只提供跳转或只读状态，不持有 Sub2 admi
 - Sub2 outage 会使 Chat 与本地 Codex 的新 model call 失败；不影响本地历史、Agent history、Bridge control connection 或订阅页之外的读取。
 - Bridge/app-server outage 只影响 Work command；不影响订阅页面和普通 Chat。
 - 日志、event、commerce response、Browser cache 和 WSS command 均不得包含 Sub2 token/raw key 或本地 Codex credential。
-- `account/read`、email、auth mode、provider label 与设备自报 gateway URL 都不是信任依据；只有匹配当前 User 实时 Sub2 key list 且未过期的 HMAC proof 可使 profile `ready`。
+- `account/read`、email、auth mode、provider label 与设备自报 gateway URL 都不是信任依据；只有匹配当前 User 实时 Sub2 key list 且未被停用的 HMAC proof 可使 profile `ready`。过期或额度耗尽不改变归属证明，执行错误由 Sub2 返回。
 
 Chat Sub2 client 与 Bridge Codex mapper 输出同一组**展示分类**，但保留各自 transport/provider 原始状态用于脱敏审计：
 
@@ -495,7 +496,8 @@ Chat Sub2 client 与 Bridge Codex mapper 输出同一组**展示分类**，但�
 | --- | --- |
 | `sub2.insufficient_balance` | 当前 Run/Turn 失败，显示余额入口；不换 key |
 | `sub2.subscription_exhausted` | 当前 Run/Turn 失败，显示订阅窗口与刷新入口 |
-| `sub2.key_disabled` / `sub2.key_quota_exceeded` | Chat 标记 binding 需检查；Agent 标记本地 auth 需检查；新执行仍以 Sub2 实时结果为准 |
+| `sub2.key_disabled` | Chat 标记 binding 需检查；Agent 标记本地 auth 需检查 |
+| `sub2.key_quota_exceeded` | 当前 Run/Turn 失败并显示额度入口；RuntimeProfile 保持已验证 |
 | `sub2.rate_limited` | 使用 Sub2 `Retry-After`；不在 DEEIX 制造另一套额度 |
 | `sub2.unavailable` | 当前调用失败，可重试同一用户意图；不切到其他 upstream |
 

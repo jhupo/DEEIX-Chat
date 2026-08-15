@@ -44,7 +44,7 @@ func TestWriteErrorExplainsRuntimeKeyMismatch(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("writeError() status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, "local Codex API key is not active for this DEEIX account") {
+	if body := recorder.Body.String(); !strings.Contains(body, "local Codex API key does not belong to this DEEIX account or has been disabled") {
 		t.Fatalf("writeError() body = %s", body)
 	}
 	if body := recorder.Body.String(); !strings.Contains(body, `"errorCode":"agent.runtime_key_invalid"`) {

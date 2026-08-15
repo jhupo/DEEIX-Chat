@@ -138,7 +138,7 @@ func (s *Service) MatchRuntimeProof(
 			continue
 		}
 		for i := range keys {
-			if !active(keys[i], time.Now()) || strings.TrimSpace(keys[i].Key) == "" {
+			if !runtimeAuthenticatable(keys[i], time.Now()) || strings.TrimSpace(keys[i].Key) == "" {
 				continue
 			}
 			mac := hmac.New(sha256.New, []byte(keys[i].Key))
@@ -616,6 +616,14 @@ func validBindingPublicID(value string) bool {
 }
 func active(k sub2api.APIKey, now time.Time) bool {
 	return strings.EqualFold(k.Status, "active") && (k.ExpiresAt == nil || k.ExpiresAt.After(now))
+}
+func runtimeAuthenticatable(k sub2api.APIKey, now time.Time) bool {
+	switch strings.ToLower(strings.TrimSpace(k.Status)) {
+	case "expired", "quota_exhausted":
+		return true
+	default:
+		return active(k, now)
+	}
 }
 func activeKey(k *domainsub2key.Binding, now time.Time) bool {
 	return k != nil && strings.EqualFold(k.Status, "active") && k.Ciphertext != "" && (k.ExpiresAt == nil || k.ExpiresAt.After(now))

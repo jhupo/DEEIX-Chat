@@ -432,6 +432,7 @@ export interface CleanupLogsResponseDoc {
 
 export interface CommandDoc {
   commandId: string;
+  errorMessage?: string;
   status: string;
 }
 

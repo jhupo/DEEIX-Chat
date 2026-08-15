@@ -235,7 +235,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		case errors.Is(err, appagent.ErrInvalidInput):
 			code, message = "runtime_manifest_rejected", "The Agent runtime manifest is not supported."
 		case errors.Is(err, appagent.ErrRuntimeAuth):
-			code, message = "runtime_key_rejected", "The Codex API key is not an active key for this account."
+			code, message = "runtime_key_rejected", "The Codex API key does not belong to this account or has been disabled."
 		}
 		h.rejectBridge(connection, identity, code, message, err)
 		return

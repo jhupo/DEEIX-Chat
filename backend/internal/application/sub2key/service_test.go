@@ -113,6 +113,22 @@ func TestMatchRuntimeProofUsesLiveActiveSub2Key(t *testing.T) {
 	}
 }
 
+func TestRuntimeAuthenticatableMatchesSub2AuthenticationStates(t *testing.T) {
+	now := time.Now()
+	tests := map[string]bool{
+		"active":          true,
+		"expired":         true,
+		"quota_exhausted": true,
+		"disabled":        false,
+		"unknown":         false,
+	}
+	for status, expected := range tests {
+		if actual := runtimeAuthenticatable(sub2api.APIKey{Status: status}, now); actual != expected {
+			t.Fatalf("runtimeAuthenticatable(%q) = %t, want %t", status, actual, expected)
+		}
+	}
+}
+
 func TestListRemoteRejectsInconsistentTotal(t *testing.T) {
 	service := newKeyTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
