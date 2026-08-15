@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,6 +76,9 @@ type pendingInteraction struct {
 type CodexAdapter struct {
 	profileID   string
 	state       *StateStore
+	authMu      sync.RWMutex
+	authSummary string
+	codexHome   string
 	workspaceMu sync.RWMutex
 	workspaces  map[string]Workspace
 	rpc         *RPCClient
@@ -163,7 +167,9 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	}()
 	initializeContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	var initialized map[string]any
+	var initialized struct {
+		CodexHome string `json:"codexHome"`
+	}
 	if err = adapter.rpc.Request(initializeContext, "initialize", map[string]any{
 		"clientInfo":   map[string]any{"name": "deeix-agent", "title": "DEEIX Agent", "version": version},
 		"capabilities": map[string]any{"experimentalApi": false, "requestAttestation": false, "mcpServerOpenaiFormElicitation": true},
@@ -171,6 +177,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 		_ = adapter.Close()
 		return nil, fmt.Errorf("initialize Codex app-server: %w", err)
 	}
+	adapter.codexHome = sanitizeDiagnosticValue(initialized.CodexHome, 1024)
 	if err = adapter.rpc.Notify("initialized", nil); err != nil {
 		_ = adapter.Close()
 		return nil, err
@@ -314,12 +321,48 @@ func (adapter *CodexAdapter) ProveRuntimeAuth(ctx context.Context, challenge str
 	if err := adapter.rpc.Request(ctx, "getAuthStatus", map[string]any{"includeToken": true, "refreshToken": false}, &auth); err != nil {
 		return "", err
 	}
-	if auth.AuthMethod != "apikey" || strings.TrimSpace(auth.AuthToken) == "" {
+	token := strings.TrimSpace(auth.AuthToken)
+	if auth.AuthMethod != "apikey" || token == "" {
 		return "", errors.New("Codex must be signed in with an API key")
 	}
-	mac := hmac.New(sha256.New, []byte(auth.AuthToken))
+	digest := sha256.Sum256([]byte(token))
+	adapter.authMu.Lock()
+	adapter.authSummary = fmt.Sprintf(
+		"method=apikey key=%s fingerprint=sha256:%s codexHome=%q",
+		maskCredential(token), hex.EncodeToString(digest[:])[:12], adapter.codexHome,
+	)
+	adapter.authMu.Unlock()
+	mac := hmac.New(sha256.New, []byte(token))
 	_, _ = mac.Write([]byte(challenge))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func (adapter *CodexAdapter) RuntimeAuthDiagnostic() string {
+	adapter.authMu.RLock()
+	defer adapter.authMu.RUnlock()
+	return adapter.authSummary
+}
+
+func maskCredential(value string) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) < 9 {
+		return "<redacted>"
+	}
+	return string(runes[:4]) + "..." + string(runes[len(runes)-4:])
+}
+
+func sanitizeDiagnosticValue(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	clean := make([]rune, 0, len(value))
+	for _, character := range value {
+		if character >= 32 && character != 127 {
+			clean = append(clean, character)
+		}
+		if len(clean) == limit {
+			break
+		}
+	}
+	return string(clean)
 }
 
 func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, artifacts map[string]LocalArtifact) (map[string]any, error) {

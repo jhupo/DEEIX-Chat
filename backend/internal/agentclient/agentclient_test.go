@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -487,6 +488,11 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if proof != base64.RawURLEncoding.EncodeToString(mac.Sum(nil)) {
 		t.Fatalf("unexpected runtime proof: %s", proof)
 	}
+	diagnostic := adapter.RuntimeAuthDiagnostic()
+	if strings.Contains(diagnostic, "sub2-test-key") || !strings.Contains(diagnostic, "key=sub2...-key") ||
+		!strings.Contains(diagnostic, "fingerprint=sha256:") || !strings.Contains(diagnostic, "codexHome=") {
+		t.Fatalf("unsafe or incomplete runtime auth diagnostic: %q", diagnostic)
+	}
 	result, err := adapter.Execute(context.Background(), AgentCommand{
 		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID,
 		Resource: &struct {
@@ -545,6 +551,8 @@ func runFakeAppServer() {
 		_ = json.Unmarshal(request["method"], &method)
 		var result any = map[string]any{}
 		switch method {
+		case "initialize":
+			result = map[string]any{"codexHome": os.Getenv("DEEIX_TEST_THREAD_CWD")}
 		case "getAuthStatus":
 			result = map[string]any{"authMethod": "apikey", "authToken": "sub2-test-key", "requiresOpenaiAuth": false}
 		case "model/list":

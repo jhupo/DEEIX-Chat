@@ -223,6 +223,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return errors.New("gateway runtime authorization failed")
 	}
 	if authErr := bridgeAuthError(ready); authErr != nil {
+		if diagnostic := gateway.adapter.RuntimeAuthDiagnostic(); diagnostic != "" {
+			return fmt.Errorf("%w; local Codex auth: %s", authErr, diagnostic)
+		}
 		return authErr
 	}
 	if ready.Version != bridgeVersion || ready.Type != "auth.ready" || ready.ProfileID != gateway.config.ProfileID {
