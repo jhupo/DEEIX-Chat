@@ -323,13 +323,15 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 3, pendingCommand.ServerSeq, pendingCommand.PublicID, strings.Repeat("7", 64), accepted, now.Add(5*time.Second)); err != nil || ack != 3 {
 		t.Fatalf("apply pending-event delete terminal: ack=%d err=%v", ack, err)
 	}
-	if err := database.First(&visible, pendingConversation.ID).Error; err != nil {
+	var pendingVisible model.Conversation
+	if err := database.First(&pendingVisible, pendingConversation.ID).Error; err != nil {
 		t.Fatalf("delete finalized before pending event projection: %v", err)
 	}
 	if err := repo.MarkConversationEventProjected(context.Background(), pendingEvent.ID, now.Add(6*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.First(&hidden, pendingConversation.ID).Error; err == nil {
+	var pendingHidden model.Conversation
+	if err := database.First(&pendingHidden, pendingConversation.ID).Error; err == nil {
 		t.Fatal("last event projection did not finalize the confirmed delete")
 	}
 
