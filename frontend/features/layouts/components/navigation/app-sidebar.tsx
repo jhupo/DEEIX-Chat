@@ -10,7 +10,6 @@ import {
   SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar";
-import { useChatSession } from "@/features/chat";
 import { NavControl } from "@/features/layouts/components/navigation/nav-control";
 import { NavMain } from "@/features/layouts/components/navigation/nav-main";
 import { NavProjects } from "@/features/layouts/components/navigation/nav-projects";
@@ -29,7 +28,6 @@ export function AppSidebar({
 }) {
   const t = useTranslations("common.navigation");
   const branding = useBranding();
-  const { executionMode } = useChatSession();
   const sessionUser = useOptionalAuthSession()?.user;
   const username = sessionUser?.username.trim() ?? "";
   const user = sessionUser
@@ -58,19 +56,9 @@ export function AppSidebar({
           className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           <LayoutGroup id="sidebar-conversations">
-            {executionMode === "gateway" ? (
-              <>
-                <NavStarred />
-                <NavRecents />
-                <NavProjects />
-              </>
-            ) : (
-              <>
-                <NavProjects />
-                <NavStarred />
-                <NavRecents />
-              </>
-            )}
+            <NavProjects />
+            <NavStarred />
+            <NavRecents />
           </LayoutGroup>
         </motion.div>
       </SidebarContent>
