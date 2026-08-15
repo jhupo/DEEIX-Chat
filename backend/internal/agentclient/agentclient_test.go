@@ -105,6 +105,22 @@ func TestCodexProjectWorkspaceCollapsesLinkedWorktree(t *testing.T) {
 	}
 }
 
+func TestCodexProjectWorkspaceRejectsDirectoryWithoutGitBoundary(t *testing.T) {
+	if _, err := codexProjectWorkspace(t.TempDir()); err == nil {
+		t.Fatal("non-Git thread directory was promoted to a project")
+	}
+}
+
+func TestMergeWorkspacePreservesConfiguredSessionRoots(t *testing.T) {
+	workspaces := map[string]Workspace{}
+	mergeWorkspace(workspaces, Workspace{WorkspaceID: "workspace-one", Root: "repo", SessionRoots: []string{"worktree-a"}})
+	mergeWorkspace(workspaces, Workspace{WorkspaceID: "workspace-one", Root: "repo", SessionRoots: []string{"worktree-b", "worktree-a"}})
+	got := workspaces["workspace-one"].SessionRoots
+	if len(got) != 2 || got[0] != "worktree-a" || got[1] != "worktree-b" {
+		t.Fatalf("workspace session roots were not merged: %#v", got)
+	}
+}
+
 func TestCloudBoundaryRejectsMetadataAndRedirects(t *testing.T) {
 	if _, err := NormalizeCloudURL("http://169.254.169.254/latest/meta-data"); err == nil {
 		t.Fatal("metadata endpoint was accepted as a server URL")

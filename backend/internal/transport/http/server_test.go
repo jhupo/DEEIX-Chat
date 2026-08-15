@@ -71,25 +71,36 @@ func TestFrontendStaticFallbackServesExportedPage(t *testing.T) {
 	}
 }
 
-func TestFrontendStaticCachesNextExportData(t *testing.T) {
+func TestFrontendStaticRevalidatesExportRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "__next._tree.txt"), []byte("tree"), 0o644); err != nil {
-		t.Fatalf("write next data: %v", err)
+	if err := os.MkdirAll(filepath.Join(root, "setting"), 0o755); err != nil {
+		t.Fatalf("create route directory: %v", err)
+	}
+	for _, fileName := range []string{"index.html", "__next._tree.txt", filepath.Join("setting", "account.txt")} {
+		if err := os.WriteFile(filepath.Join(root, fileName), []byte("route data"), 0o644); err != nil {
+			t.Fatalf("write next data %s: %v", fileName, err)
+		}
 	}
 
 	engine := gin.New()
 	registerFrontendStatic(engine, root, nil)
 
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/__next._tree.txt?conversation_id=demo&_rsc=abc", nil)
-	engine.ServeHTTP(recorder, request)
+	for _, requestPath := range []string{
+		"/",
+		"/__next._tree.txt?conversation_id=demo&_rsc=abc",
+		"/setting/account.txt?_rsc=abc",
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, requestPath, nil)
+		engine.ServeHTTP(recorder, request)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", recorder.Code)
-	}
-	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=86400, stale-while-revalidate=604800" {
-		t.Fatalf("expected next export data cache header, got %q", got)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d", requestPath, recorder.Code)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Fatalf("expected next export data revalidation for %s, got %q", requestPath, got)
+		}
 	}
 }
 

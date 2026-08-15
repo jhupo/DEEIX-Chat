@@ -272,8 +272,11 @@ Full Compose bundle 是唯一受支持的部署 Profile。以下内容仅说明�
    | --- | --- |
    | `/_next/static/*` | 缓存 1 年，并启用 immutable 静态资源缓存。 |
    | `/logo*.svg`、`/*.ico`、`/*.png`、`/*.jpg`、`/*.webp`、`/*.woff2` | 缓存 1 天到 30 天。 |
-   | `/`、`/*.html`、`/chat*`、`/agent*`、`/recent*`、`/files*`、`/setting*`、`/admin*`、`/share*` | 不做长期缓存，建议使用 `no-cache` 或较短 TTL。 |
+   | 所有导出的 `*.txt` 路由数据，包括 `/__next.*.txt` 和 `/setting/account.txt` 等嵌套文件 | 使用 `no-cache`，每次请求都重新验证。这些文件名跨版本保持稳定，不得设置固定 TTL。 |
+   | `/`、`/*.html`、`/chat*`、`/agent*`、`/recent*`、`/files*`、`/setting*`、`/admin*`、`/share*` | 使用 `no-cache`，每次请求都重新验证。 |
    | `/api/*`、`/healthz`、`/readyz`、`/swagger/*` | 绕过 CDN 缓存，并完整转发请求头、方法、查询参数和请求体。 |
+
+   首次应用这些规则时，需要清理 CDN 中已经缓存的导出 `*.txt` 和 HTML 路由对象，避免旧的一天 TTL 跨越本次部署继续生效。
 
    如果 CDN 从对象存储托管 `frontend/out`，需要开启路由回退，让无扩展名地址命中导出的 `<route>.html` 并保留原查询参数，例如 `/chat` -> `/chat.html`、`/agent` -> `/agent.html`。
 

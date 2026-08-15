@@ -210,10 +210,12 @@ func (h *Handler) RenameDevice(c *gin.Context) {
 // @Success 200 {object} DeviceRevokeResponseDoc
 // @Router /agent/devices/{device_id} [delete]
 func (h *Handler) RevokeDevice(c *gin.Context) {
-	if err := h.service.RevokeDevice(c.Request.Context(), middleware.MustUserID(c), c.Param("device_id")); err != nil {
+	deviceID := c.Param("device_id")
+	if err := h.service.RevokeDevice(c.Request.Context(), middleware.MustUserID(c), deviceID); err != nil {
 		writeError(c, err, "revoke device failed")
 		return
 	}
+	h.hub.disconnect(deviceID)
 	response.Success(c, gin.H{"revoked": true})
 }
 

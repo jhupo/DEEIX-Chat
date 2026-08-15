@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { useChatSession } from "@/features/chat";
@@ -11,17 +11,10 @@ import { cn } from "@/lib/utils";
 export function ExecutionModeSwitch() {
   const t = useTranslations("common.navigation");
   const { executionMode, setExecutionMode, requestNewConversation } = useChatSession();
-  const { defaultDevice, loading } = useDevices();
+  const { defaultDevice } = useDevices();
   const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const workAvailable = Boolean(defaultDevice);
-
-  React.useEffect(() => {
-    if (!loading && !workAvailable && executionMode === "gateway" && !searchParams.get("conversation_id")) {
-      setExecutionMode("cloud");
-    }
-  }, [executionMode, loading, searchParams, setExecutionMode, workAvailable]);
 
   const selectMode = React.useCallback((mode: "cloud" | "gateway") => {
     if (mode === executionMode || (mode === "gateway" && !workAvailable)) return;

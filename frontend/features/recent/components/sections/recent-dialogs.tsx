@@ -184,13 +184,15 @@ export function RecentDialogs({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("deleteDescription", { label: stableDeleteTarget?.label || t("thisConversation") })}
+              {t(stableDeleteTarget?.executionType === "gateway" ? "deleteWorkDescription" : "deleteDescription", { label: stableDeleteTarget?.label || t("thisConversation") })}
             </AlertDialogDescription>
-            <DeleteFilesOption
-              id={deleteFilesID}
-              checked={deleteFiles}
-              onCheckedChange={onDeleteFilesChange}
-            />
+            {stableDeleteTarget?.executionType === "cloud" ? (
+              <DeleteFilesOption
+                id={deleteFilesID}
+                checked={deleteFiles}
+                onCheckedChange={onDeleteFilesChange}
+              />
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>

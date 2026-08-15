@@ -256,6 +256,7 @@ export function AppChatArea() {
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deleteFiles, setDeleteFiles] = React.useState(false);
+  const [deleteExecutionType, setDeleteExecutionType] = React.useState<"cloud" | "gateway">("cloud");
   const deleteFilesID = React.useId();
   const activeConversation = React.useMemo(() => {
     if (!conversationID) {
@@ -943,12 +944,14 @@ export function AppChatArea() {
   );
 
   const onRequestDeleteActiveConversation = React.useCallback(() => {
-    if (!canOperateConversation) {
+    if (!canOperateConversation || !currentConversation) {
       return;
     }
-    setDeleteFiles(deleteFilesByDefault);
+    const targetExecutionType = currentConversation.executionType;
+    setDeleteExecutionType(targetExecutionType);
+    setDeleteFiles(targetExecutionType === "cloud" && deleteFilesByDefault);
     setDeleteDialogOpen(true);
-  }, [canOperateConversation, deleteFilesByDefault]);
+  }, [canOperateConversation, currentConversation, deleteFilesByDefault]);
 
   const onConfirmDeleteActiveConversation = React.useCallback(async () => {
     if (!canOperateConversation) {
@@ -1381,15 +1384,17 @@ export function AppChatArea() {
               <AlertDialogHeader>
                 <AlertDialogTitle>{tRecent("dialogs.deleteTitle")}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  {tRecent("dialogs.deleteDescription", {
+                  {tRecent(deleteExecutionType === "gateway" ? "dialogs.deleteWorkDescription" : "dialogs.deleteDescription", {
                     label: tRecent("deleteConversationLabel", { title: activeConversationTitle }),
                   })}
                 </AlertDialogDescription>
-                <DeleteFilesOption
-                  id={deleteFilesID}
-                  checked={deleteFiles}
-                  onCheckedChange={setDeleteFiles}
-                />
+                {deleteExecutionType === "cloud" ? (
+                  <DeleteFilesOption
+                    id={deleteFilesID}
+                    checked={deleteFiles}
+                    onCheckedChange={setDeleteFiles}
+                  />
+                ) : null}
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>{tRecent("dialogs.cancel")}</AlertDialogCancel>

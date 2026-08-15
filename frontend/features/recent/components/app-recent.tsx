@@ -57,6 +57,7 @@ export function AppRecent() {
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden">
       <div className="mx-auto flex h-full min-h-0 w-full max-w-[912px] flex-1 flex-col px-3 pb-8 pt-6 md:pt-15">
         <RecentHeader
+          title={controller.pageTitle}
           query={controller.query}
           onQueryChange={controller.setQuery}
           onCreateConversation={controller.onCreateConversation}

@@ -350,8 +350,8 @@ func applyFrontendCacheHeaders(c *gin.Context, requestPath string) {
 		c.Header("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
 		return
 	}
-	if isNextExportDataAsset(requestPath) {
-		c.Header("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800")
+	if isNextExportRouteAsset(requestPath) {
+		c.Header("Cache-Control", "no-cache")
 		return
 	}
 	c.Header("Cache-Control", "public, max-age=3600")
@@ -366,9 +366,9 @@ func isVendorIconAsset(requestPath string) bool {
 	return strings.HasPrefix(requestPath, "/vendor/lobehub-icons/")
 }
 
-func isNextExportDataAsset(requestPath string) bool {
-	fileName := path.Base(requestPath)
-	return strings.HasPrefix(fileName, "__next.") && strings.EqualFold(path.Ext(fileName), ".txt")
+func isNextExportRouteAsset(requestPath string) bool {
+	extension := path.Ext(requestPath)
+	return extension == "" || strings.EqualFold(extension, ".html") || strings.EqualFold(extension, ".txt")
 }
 
 func readyzHandler(hc HealthChecker) gin.HandlerFunc {

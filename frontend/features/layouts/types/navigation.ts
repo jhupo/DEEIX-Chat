@@ -47,4 +47,5 @@ export type SidebarConversationRenameTarget = {
 export type SidebarConversationDeleteTarget = {
   publicID: string;
   title: string;
+  executionType: "cloud" | "gateway";
 } | null;

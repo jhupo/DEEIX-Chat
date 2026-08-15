@@ -1,8 +1,19 @@
 "use client";
 
+import * as React from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableEmptyRow, TableHead, TableHeader, TableLoadingRow, TableRow } from "@/components/ui/table";
@@ -29,6 +40,7 @@ export function AccountActiveDevicesSection({
   const t = useTranslations("settings.accountPage.device");
   const { locale } = useAppLocale();
   const activeDevices = devices.filter((item) => item.status === "active");
+  const [revokeTarget, setRevokeTarget] = React.useState<AgentDeviceDTO | null>(null);
 
   return (
     <SettingsSection
@@ -86,7 +98,7 @@ export function AccountActiveDevicesSection({
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
                         disabled={revokingDeviceId === device.deviceId}
-                        onClick={() => onRevoke(device)}
+                        onClick={() => setRevokeTarget(device)}
                       >
                         {t("revoke")}
                       </DropdownMenuItem>
@@ -98,6 +110,31 @@ export function AccountActiveDevicesSection({
           ))}
         </TableBody>
       </Table>
+      <AlertDialog open={revokeTarget !== null} onOpenChange={(open) => !open && setRevokeTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("confirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("confirmDescription", { name: revokeTarget?.name || t("name") })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={!revokeTarget || revokingDeviceId === revokeTarget.deviceId}
+              onClick={() => {
+                if (revokeTarget) {
+                  onRevoke(revokeTarget);
+                }
+                setRevokeTarget(null);
+              }}
+            >
+              {t("confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsSection>
   );
 }

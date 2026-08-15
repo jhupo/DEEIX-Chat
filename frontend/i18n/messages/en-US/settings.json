@@ -126,6 +126,10 @@
       "empty": "No devices have been added.",
       "actions": "Device actions",
       "revoke": "Remove device",
+      "confirmTitle": "Remove device?",
+      "confirmDescription": "Remove {name} and disconnect it now? Existing conversations stay in DEEIX, and local Codex data and workspace files stay on the device.",
+      "cancel": "Cancel",
+      "confirm": "Remove",
       "platforms": { "windows": "Windows", "darwin": "macOS", "linux": "Linux" },
       "install": {
         "title": "Add device",

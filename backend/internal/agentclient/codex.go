@@ -194,7 +194,18 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 }
 
 func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
-	byID := make(map[string]Workspace)
+	byID := make(map[string]Workspace, len(adapter.workspaces))
+	for _, configured := range adapter.workspaces {
+		workspace, err := codexProjectWorkspace(configured.Root)
+		if err != nil {
+			workspace, err = CanonicalWorkspace(configured.Root)
+			workspace.SessionRoots = []string{workspace.Root}
+		}
+		if err != nil {
+			continue
+		}
+		mergeWorkspace(byID, workspace)
+	}
 	for _, archived := range []bool{false, true} {
 		seenCursors := make(map[string]struct{})
 		cursor := ""
@@ -228,14 +239,7 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 				if workspaceErr != nil {
 					continue
 				}
-				sessionRoot := workspace.SessionRoots[0]
-				if existing, exists := byID[workspace.WorkspaceID]; exists {
-					workspace = existing
-					if !slices.Contains(workspace.SessionRoots, sessionRoot) {
-						workspace.SessionRoots = append(workspace.SessionRoots, sessionRoot)
-					}
-				}
-				byID[workspace.WorkspaceID] = workspace
+				mergeWorkspace(byID, workspace)
 				if len(byID) == 128 {
 					break
 				}
@@ -265,6 +269,20 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		return leftName < rightName
 	})
 	return workspaces, nil
+}
+
+func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {
+	existing, ok := workspaces[incoming.WorkspaceID]
+	if !ok {
+		workspaces[incoming.WorkspaceID] = incoming
+		return
+	}
+	for _, root := range incoming.SessionRoots {
+		if !slices.Contains(existing.SessionRoots, root) {
+			existing.SessionRoots = append(existing.SessionRoots, root)
+		}
+	}
+	workspaces[incoming.WorkspaceID] = existing
 }
 
 func (adapter *CodexAdapter) replaceWorkspaces(workspaces []Workspace) {

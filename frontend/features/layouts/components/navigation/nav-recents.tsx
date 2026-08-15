@@ -169,9 +169,13 @@ export function NavRecents() {
   );
 
   const onDelete = React.useCallback((publicID: string, title: string) => {
-    setDeleteFiles(deleteFilesByDefault);
-    setDeleteTarget({ publicID, title });
-  }, [deleteFilesByDefault]);
+    const target = recentItems.find((item) => item.publicID === publicID);
+    if (!target) {
+      return;
+    }
+    setDeleteFiles(target.executionType === "cloud" && deleteFilesByDefault);
+    setDeleteTarget({ publicID, title, executionType: target.executionType });
+  }, [deleteFilesByDefault, recentItems]);
 
   const onShare = React.useCallback((publicID: string, title: string) => {
     setShareTarget({ publicID, title });
@@ -354,13 +358,17 @@ export function NavRecents() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t("dialogs.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("dialogs.deleteDescription", { label: t("deleteConversationLabel", { title: stableDeleteTarget?.title || t("untitled") }) })}
+              {t(stableDeleteTarget?.executionType === "gateway" ? "dialogs.deleteWorkDescription" : "dialogs.deleteDescription", {
+                label: t("deleteConversationLabel", { title: stableDeleteTarget?.title || t("untitled") }),
+              })}
             </AlertDialogDescription>
-            <DeleteFilesOption
-              id={deleteFilesID}
-              checked={deleteFiles}
-              onCheckedChange={setDeleteFiles}
-            />
+            {stableDeleteTarget?.executionType === "cloud" ? (
+              <DeleteFilesOption
+                id={deleteFilesID}
+                checked={deleteFiles}
+                onCheckedChange={setDeleteFiles}
+              />
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("dialogs.cancel")}</AlertDialogCancel>

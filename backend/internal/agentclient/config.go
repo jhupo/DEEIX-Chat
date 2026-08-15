@@ -184,7 +184,11 @@ func codexProjectWorkspace(root string) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, err
 	}
-	project, err := CanonicalWorkspace(gitProjectRoot(session.Root))
+	projectRoot, ok := gitProjectRoot(session.Root)
+	if !ok {
+		return Workspace{}, errors.New("workspace is not inside a Git project")
+	}
+	project, err := CanonicalWorkspace(projectRoot)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -192,24 +196,24 @@ func codexProjectWorkspace(root string) (Workspace, error) {
 	return project, nil
 }
 
-func gitProjectRoot(root string) string {
+func gitProjectRoot(root string) (string, bool) {
 	for current := root; ; current = filepath.Dir(current) {
 		metadataPath := filepath.Join(current, ".git")
 		info, err := os.Stat(metadataPath)
 		if err == nil {
 			if info.IsDir() {
-				return current
+				return current, true
 			}
 			if info.Mode().IsRegular() {
 				if projectRoot, ok := linkedWorktreeProjectRoot(current, metadataPath); ok {
-					return projectRoot
+					return projectRoot, true
 				}
-				return current
+				return current, true
 			}
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
-			return root
+			return "", false
 		}
 	}
 }

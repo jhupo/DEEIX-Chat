@@ -576,6 +576,24 @@ func (s *Service) GetThreadByConversation(ctx context.Context, userID, conversat
 	return &view, nil
 }
 
+func (s *Service) DeleteThread(ctx context.Context, userID uint, threadID, idempotencyKey string) (*CommandView, error) {
+	threadID = strings.TrimSpace(threadID)
+	if userID == 0 || !validPublicID(threadID, "agth") || !validIdempotencyKey(idempotencyKey) {
+		return nil, ErrInvalidInput
+	}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "thread.lifecycle"}
+	request := struct {
+		ThreadID string
+		Action   string
+	}{ThreadID: threadID, Action: "delete"}
+	created, err := s.repo.QueueThreadDelete(ctx, idempotencyKey, requestHash(request), userID, threadID, command, s.now().UTC())
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
 func (s *Service) StartTurn(ctx context.Context, userID uint, input StartTurnInput) (*TurnView, error) {
 	if userID == 0 || normalizeAgentRunID(input.RunID) == "" || !validPublicID(input.ThreadID, "agth") || !validIdempotencyKey(input.IdempotencyKey) ||
 		!validInput(input.Input) || !validSettings(input.Settings) {
@@ -795,6 +813,7 @@ func (s *Service) RevokeDevice(ctx context.Context, userID uint, devicePublicID 
 		}
 		return err
 	}
+	s.notifyUser(userID)
 	return nil
 }
 

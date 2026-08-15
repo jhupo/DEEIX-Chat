@@ -537,6 +537,26 @@ func (s *Service) SetConversationArchived(ctx context.Context, userID uint, publ
 
 // DeleteConversation 删除会话（软删除），并按需清理不再被其他会话引用的文件。
 func (s *Service) DeleteConversation(ctx context.Context, userID uint, publicID string, options DeleteConversationOptions) (*DeleteConversationResult, error) {
+	conversation, err := s.repo.GetConversationByPublicID(ctx, publicID, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+	if conversation.ExecutionType == model.ExecutionTypeGateway {
+		if s.gatewayExecutor == nil {
+			return nil, ErrExecutionUnavailable
+		}
+		thread, threadErr := s.gatewayExecutor.GetThreadByConversation(ctx, userID, conversation.ID)
+		if threadErr != nil {
+			return nil, threadErr
+		}
+		if deleteErr := s.gatewayExecutor.DeleteThread(ctx, userID, thread.ThreadID, uuid.NewString()); deleteErr != nil {
+			return nil, deleteErr
+		}
+		return &DeleteConversationResult{Deleted: true}, nil
+	}
 	cleanupFileIDs, err := s.repo.DeleteConversationByPublicID(ctx, userID, publicID, options.DeleteFiles)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

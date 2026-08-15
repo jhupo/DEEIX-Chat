@@ -17,6 +17,11 @@ import (
 
 type Repo struct{ db *gorm.DB }
 
+const (
+	threadStatusDeletingActive   = "deleting_active"
+	threadStatusDeletingArchived = "deleting_archived"
+)
+
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
 func errFor(err error) error {
@@ -290,8 +295,37 @@ func (r *Repo) RevokeDevice(ctx context.Context, userID uint, publicID string, n
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&model.AgentCredential{}).
-			Where("device_id = ? AND consumed_at IS NULL", device.ID).Update("consumed_at", now).Error
+		if err := tx.Model(&model.AgentCredential{}).
+			Where("device_id = ? AND consumed_at IS NULL", device.ID).Update("consumed_at", now).Error; err != nil {
+			return err
+		}
+		terminalJSON := `{"kind":"error","error":{"message":"device revoked"}}`
+		if err := tx.Model(&model.AgentCommand{}).
+			Where("device_id = ? AND completed_at IS NULL", device.ID).
+			Updates(map[string]any{"state": "failed", "terminal_json": terminalJSON, "completed_at": now}).Error; err != nil {
+			return err
+		}
+		threadIDs := tx.Model(&model.AgentThread{}).Select("id").Where("device_id = ?", device.ID)
+		if err := tx.Model(&model.AgentTurn{}).
+			Where("thread_id IN (?) AND status IN ?", threadIDs, []string{"awaiting_thread", "queued", "running"}).
+			Updates(map[string]any{"status": "failed", "error_code": "device_revoked", "error_message": "device revoked", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AgentInteraction{}).
+			Where("thread_id IN (?) AND status IN ?", threadIDs, []string{"pending", "responding"}).
+			Updates(map[string]any{"status": "failed", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AgentThread{}).Where("device_id = ? AND status = ?", device.ID, "queued").
+			Updates(map[string]any{"status": "failed", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.AgentThread{}).
+			Where("device_id = ? AND status IN ?", device.ID, []string{threadStatusDeletingActive, threadStatusDeletingArchived}).
+			Updates(map[string]any{
+				"status":     gorm.Expr("CASE status WHEN ? THEN ? WHEN ? THEN ? END", threadStatusDeletingActive, "active", threadStatusDeletingArchived, "archived"),
+				"updated_at": now,
+			}).Error
 	}))
 }
 
@@ -366,17 +400,26 @@ func (r *Repo) ConsumeChallengeAndCreateConnection(ctx context.Context, deviceID
 func (r *Repo) ConsumeConnection(ctx context.Context, tokenHash string, now time.Time) (*domainagent.Device, error) {
 	var device model.AgentDevice
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var target model.AgentCredential
+		if err := tx.Select("device_id").
+			Where("kind = ? AND token_hash = ?", domainagent.CredentialKindConnection, tokenHash).
+			First(&target).Error; err != nil {
+			return err
+		}
+		if target.DeviceID == nil {
+			return repository.ErrConflict
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, *target.DeviceID).Error; err != nil {
+			return err
+		}
 		var credential model.AgentCredential
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("kind = ? AND token_hash = ?", domainagent.CredentialKindConnection, tokenHash).
+			Where("kind = ? AND token_hash = ? AND device_id = ?", domainagent.CredentialKindConnection, tokenHash, device.ID).
 			First(&credential).Error; err != nil {
 			return err
 		}
-		if credential.DeviceID == nil || credential.ConsumedAt != nil || !credential.ExpiresAt.After(now) {
+		if credential.ConsumedAt != nil || !credential.ExpiresAt.After(now) {
 			return repository.ErrConflict
-		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, *credential.DeviceID).Error; err != nil {
-			return err
 		}
 		if device.Status != domainagent.DeviceStatusActive || device.CredentialVersion != credential.DeviceCredentialVersion {
 			return repository.ErrConflict
@@ -401,6 +444,10 @@ func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after
 	if limit < 1 || limit > 256 {
 		return nil, repository.ErrInvalidInput
 	}
+	var device model.AgentDevice
+	if err := r.db.WithContext(ctx).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+		return nil, errFor(err)
+	}
 	var rows []model.AgentCommand
 	err := r.db.WithContext(ctx).Where("device_id = ? AND server_seq > ?", deviceID, after).
 		Order("server_seq ASC").Limit(limit).Find(&rows).Error
@@ -415,25 +462,32 @@ func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after
 }
 
 func (r *Repo) MarkCommandDelivered(ctx context.Context, deviceID, commandID uint, now time.Time) error {
-	result := r.db.WithContext(ctx).Model(&model.AgentCommand{}).
-		Where("id = ? AND device_id = ?", commandID, deviceID).
-		Updates(map[string]any{
-			"delivered_at": gorm.Expr("COALESCE(delivered_at, ?)", now),
-			"state":        gorm.Expr("CASE WHEN state = 'queued' THEN 'delivered' ELSE state END"),
-		})
-	if result.Error != nil {
-		return errFor(result.Error)
-	}
-	if result.RowsAffected == 0 {
-		return repository.ErrNotFound
-	}
-	return nil
+	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&model.AgentCommand{}).
+			Where("id = ? AND device_id = ?", commandID, deviceID).
+			Updates(map[string]any{
+				"delivered_at": gorm.Expr("COALESCE(delivered_at, ?)", now),
+				"state":        gorm.Expr("CASE WHEN state = 'queued' THEN 'delivered' ELSE state END"),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return repository.ErrNotFound
+		}
+		return nil
+	}))
 }
 
 func (r *Repo) AckServerCommands(ctx context.Context, deviceID uint, through uint64, now time.Time) error {
 	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, deviceID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		if through <= device.LastAckedServerSeq {
@@ -464,7 +518,7 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 	var acknowledged uint64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, deviceID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		acknowledged = device.LastAckedBridgeSeq
@@ -549,8 +603,13 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			var payload struct {
 				Action string `json:"action"`
 			}
-			if json.Unmarshal([]byte(command.PayloadJSON), &payload) == nil && payload.Action == "fork" {
-				return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error
+			if json.Unmarshal([]byte(command.PayloadJSON), &payload) == nil {
+				switch payload.Action {
+				case "fork":
+					return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error
+				case "delete":
+					return restoreDeletingThread(tx, *command.ThreadID, now)
+				}
 			}
 		}
 		return nil
@@ -614,7 +673,19 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			if json.Unmarshal([]byte(command.PayloadJSON), &payload) != nil {
 				return repository.ErrConflict
 			}
-			status := map[string]string{"resume": "active", "archive": "archived", "unarchive": "active", "delete": "deleted"}[payload.Action]
+			if payload.Action == "delete" {
+				result := tx.Model(&model.AgentThread{}).
+					Where("id = ? AND status IN ?", *command.ThreadID, []string{threadStatusDeletingActive, threadStatusDeletingArchived}).
+					Updates(map[string]any{"status": "deleted", "updated_at": now})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected != 1 {
+					return repository.ErrConflict
+				}
+				return finalizeDeletedThreadConversation(tx, *command.ThreadID, now)
+			}
+			status := map[string]string{"resume": "active", "archive": "archived", "unarchive": "active"}[payload.Action]
 			if status == "" {
 				return repository.ErrConflict
 			}
@@ -673,7 +744,7 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 			}
 			thread.SourceThreadRef = &outcome.Result.SourceThreadRef
 		}
-		if err := projectPendingThreadEvents(tx, &thread); err != nil {
+		if err := projectPendingThreadEvents(tx, &thread, now); err != nil {
 			return err
 		}
 		return enqueueInitialTurn(tx, device, &thread, command, now)
@@ -966,7 +1037,7 @@ func enqueueInitialTurn(tx *gorm.DB, device *model.AgentDevice, thread *model.Ag
 	return tx.Model(&turn).Updates(map[string]any{"status": "queued", "updated_at": now}).Error
 }
 
-func projectPendingThreadEvents(tx *gorm.DB, thread *model.AgentThread) error {
+func projectPendingThreadEvents(tx *gorm.DB, thread *model.AgentThread, projectedAt time.Time) error {
 	var events []model.AgentEvent
 	if err := tx.Where("runtime_profile_id = ? AND source_thread_ref = ? AND thread_id IS NULL", thread.RuntimeProfileID, *thread.SourceThreadRef).
 		Order("bridge_frame_id ASC").Find(&events).Error; err != nil {
@@ -976,14 +1047,22 @@ func projectPendingThreadEvents(tx *gorm.DB, thread *model.AgentThread) error {
 		if err := projectAgentEvent(tx, &events[i]); err != nil {
 			return err
 		}
-		if err := tx.Model(&events[i]).Updates(map[string]any{
+		updates := map[string]any{
 			"thread_id": events[i].ThreadID, "workspace_id": events[i].WorkspaceID,
 			"turn_id": events[i].TurnID, "thread_seq": events[i].ThreadSeq,
-		}).Error; err != nil {
+		}
+		if isThreadOnlyEvent(&events[i]) {
+			updates["conversation_projected_at"] = projectedAt
+		}
+		if err := tx.Model(&events[i]).Updates(updates).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func isThreadOnlyEvent(event *model.AgentEvent) bool {
+	return event.ThreadID != nil && event.SourceTurnRef == ""
 }
 
 func validRepoRef(value string) bool {
@@ -1004,7 +1083,7 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 	var applied domainagent.AppliedEventFrame
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&device, deviceID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		applied.Acknowledged = device.LastAckedBridgeSeq
@@ -1036,6 +1115,9 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 		}
 		if err := projectAgentEvent(tx, &projected); err != nil {
 			return err
+		}
+		if isThreadOnlyEvent(&projected) {
+			projected.ConversationProjectedAt = &now
 		}
 		if err := tx.Create(&projected).Error; err != nil {
 			return err
@@ -1109,22 +1191,24 @@ func (r *Repo) MarkConversationEventProjected(ctx context.Context, eventID uint,
 	if eventID == 0 || projectedAt.IsZero() {
 		return repository.ErrInvalidInput
 	}
-	result := r.db.WithContext(ctx).Model(&model.AgentEvent{}).
-		Where("id = ? AND conversation_projected_at IS NULL", eventID).
-		Update("conversation_projected_at", projectedAt)
-	if result.Error != nil {
-		return errFor(result.Error)
-	}
-	if result.RowsAffected == 0 {
-		var count int64
-		if err := r.db.WithContext(ctx).Model(&model.AgentEvent{}).Where("id = ? AND conversation_projected_at IS NOT NULL", eventID).Count(&count).Error; err != nil {
-			return errFor(err)
+	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var event model.AgentEvent
+		if err := tx.Select("id", "thread_id", "conversation_projected_at").First(&event, eventID).Error; err != nil {
+			return err
 		}
-		if count == 0 {
-			return repository.ErrNotFound
+		if event.ConversationProjectedAt == nil {
+			result := tx.Model(&model.AgentEvent{}).
+				Where("id = ? AND conversation_projected_at IS NULL", eventID).
+				Update("conversation_projected_at", projectedAt)
+			if result.Error != nil {
+				return result.Error
+			}
 		}
-	}
-	return nil
+		if event.ThreadID == nil {
+			return nil
+		}
+		return finalizeDeletedThreadConversation(tx, *event.ThreadID, projectedAt)
+	}))
 }
 
 func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
@@ -1267,6 +1351,37 @@ func agentTurnTerminal(payloadJSON string) (string, string, string, error) {
 	default:
 		return "", "", "", repository.ErrConflict
 	}
+}
+
+func restoreDeletingThread(tx *gorm.DB, threadID uint, now time.Time) error {
+	return tx.Model(&model.AgentThread{}).
+		Where("id = ? AND status IN ?", threadID, []string{threadStatusDeletingActive, threadStatusDeletingArchived}).
+		Updates(map[string]any{
+			"status":     gorm.Expr("CASE status WHEN ? THEN ? WHEN ? THEN ? END", threadStatusDeletingActive, "active", threadStatusDeletingArchived, "archived"),
+			"updated_at": now,
+		}).Error
+}
+
+func finalizeDeletedThreadConversation(tx *gorm.DB, threadID uint, now time.Time) error {
+	var thread model.AgentThread
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id", "conversation_id", "status").First(&thread, threadID).Error; err != nil {
+		return err
+	}
+	if thread.Status != "deleted" {
+		return nil
+	}
+	var pendingEvents int64
+	if err := tx.Model(&model.AgentEvent{}).
+		Where("thread_id = ? AND conversation_projected_at IS NULL", thread.ID).
+		Count(&pendingEvents).Error; err != nil {
+		return err
+	}
+	if pendingEvents != 0 {
+		return nil
+	}
+	return tx.Model(&model.Conversation{}).Where("id = ?", thread.ConversationID).
+		Update("deleted_at", now).Error
 }
 
 func codexErrorCode(raw json.RawMessage) string {
@@ -1749,12 +1864,27 @@ func (r *Repo) QueueTurnInterrupt(
 			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
 		}
 
-		var turn model.AgentTurn
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, turnPublicID).First(&turn).Error; err != nil {
+		var turnTarget model.AgentTurn
+		if err := tx.Select("id", "thread_id").Where("user_id = ? AND public_id = ?", userID, turnPublicID).First(&turnTarget).Error; err != nil {
+			return err
+		}
+		var threadTarget model.AgentThread
+		if err := tx.Select("id", "device_id").First(&threadTarget, turnTarget.ThreadID).Error; err != nil {
+			return err
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ?", threadTarget.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		var thread model.AgentThread
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&thread, turn.ThreadID).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND device_id = ?", threadTarget.ID, userID, device.ID).First(&thread).Error; err != nil {
+			return err
+		}
+		var turn model.AgentTurn
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND thread_id = ?", turnTarget.ID, userID, thread.ID).First(&turn).Error; err != nil {
 			return err
 		}
 		if thread.SourceThreadRef == nil || turn.SourceTurnRef == nil || thread.Status != "active" || turn.Status != "running" {
@@ -1766,10 +1896,6 @@ func (r *Repo) QueueTurnInterrupt(
 		}
 		var workspace model.AgentWorkspace
 		if err := tx.Where("id = ? AND status = ?", thread.WorkspaceID, "available").First(&workspace).Error; err != nil {
-			return err
-		}
-		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", thread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		payload := map[string]any{
@@ -1793,6 +1919,104 @@ func (r *Repo) QueueTurnInterrupt(
 			return err
 		}
 		return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(created), nil
+}
+
+func (r *Repo) QueueThreadDelete(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	threadPublicID string,
+	command *domainagent.Command,
+	now time.Time,
+) (*domainagent.Command, error) {
+	var created model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var operation model.AgentIdempotencyRecord
+		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: command.Kind, Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, command.Kind, idempotencyKey).
+			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
+		}
+
+		var target model.AgentThread
+		if err := tx.Select("id", "device_id").Where("user_id = ? AND public_id = ?", userID, threadPublicID).First(&target).Error; err != nil {
+			return err
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ?", target.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			return err
+		}
+		var thread model.AgentThread
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND device_id = ?", target.ID, userID, device.ID).First(&thread).Error; err != nil {
+			return err
+		}
+		if thread.SourceThreadRef == nil || (thread.Status != "active" && thread.Status != "archived") {
+			return repository.ErrConflict
+		}
+		var pendingLifecycle int64
+		if err := tx.Model(&model.AgentCommand{}).
+			Where("thread_id = ? AND kind = ? AND completed_at IS NULL", thread.ID, "thread.lifecycle").
+			Count(&pendingLifecycle).Error; err != nil {
+			return err
+		}
+		if pendingLifecycle > 0 {
+			return repository.ErrConflict
+		}
+		var activeTurns int64
+		if err := tx.Model(&model.AgentTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"awaiting_thread", "queued", "running"}).Count(&activeTurns).Error; err != nil {
+			return err
+		}
+		if activeTurns > 0 {
+			return repository.ErrConflict
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Where("id = ? AND status = ?", thread.RuntimeProfileID, domainagent.RuntimeStatusReady).First(&profile).Error; err != nil {
+			return err
+		}
+		var workspace model.AgentWorkspace
+		if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "thread.lifecycle", "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"workspaceId": workspace.PublicID, "threadId": thread.PublicID,
+			"sourceThreadRef": *thread.SourceThreadRef, "action": "delete",
+		})
+		if err != nil {
+			return err
+		}
+		created = model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID,
+			ServerSeq: device.NextServerSeq, Kind: command.Kind, PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&operation).Update("result_public_id", created.PublicID).Error; err != nil {
+			return err
+		}
+		deletingStatus := threadStatusDeletingActive
+		if thread.Status == "archived" {
+			deletingStatus = threadStatusDeletingArchived
+		}
+		return tx.Model(&thread).Updates(map[string]any{"status": deletingStatus, "updated_at": now}).Error
 	})
 	if err != nil {
 		return nil, errFor(err)
@@ -1977,8 +2201,18 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		if operation.ResultPublicID != "" {
 			return tx.Where("user_id = ? AND public_id = ?", input.UserID, operation.ResultPublicID).First(&turn).Error
 		}
+		var target model.AgentThread
+		if err := tx.Select("id", "device_id").Where("user_id = ? AND public_id = ?", input.UserID, input.ThreadPublicID).First(&target).Error; err != nil {
+			return err
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND status = ?", target.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			return err
+		}
 		var thread model.AgentThread
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", input.UserID, input.ThreadPublicID).First(&thread).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND device_id = ?", target.ID, input.UserID, device.ID).First(&thread).Error; err != nil {
 			return err
 		}
 		if thread.SourceThreadRef == nil || thread.Status != "active" {
@@ -1993,10 +2227,6 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		}
 		var profile model.AgentRuntimeProfile
 		if err := tx.Where("id = ? AND status = ? AND lease_expires_at > ?", thread.RuntimeProfileID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
-			return err
-		}
-		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", thread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
 			return err
 		}
 		var workspace model.AgentWorkspace
@@ -2096,20 +2326,48 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 			}
 			return nil
 		}
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND public_id = ?", userID, interactionPublicID).First(&interaction).Error; err != nil {
+		var target model.AgentInteraction
+		if err := tx.Select("id", "thread_id").Where("user_id = ? AND public_id = ?", userID, interactionPublicID).First(&target).Error; err != nil {
 			return err
 		}
-		if interaction.Status != "pending" {
-			return repository.ErrConflict
+		var targetThread model.AgentThread
+		if err := tx.Select("id", "device_id").First(&targetThread, target.ThreadID).Error; err != nil {
+			return err
 		}
-		if !interactionResponseMatchesKind(interaction.Kind, response) {
-			return repository.ErrInvalidInput
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", targetThread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			return err
 		}
-		if err := tx.First(&thread, interaction.ThreadID).Error; err != nil || thread.SourceThreadRef == nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&thread, target.ThreadID).Error; err != nil || thread.DeviceID != device.ID || thread.SourceThreadRef == nil {
 			if err != nil {
 				return err
 			}
 			return repository.ErrConflict
+		}
+		if err := tx.Select("id", "thread_id", "turn_id").First(&target, target.ID).Error; err != nil || target.ThreadID != thread.ID {
+			if err != nil {
+				return err
+			}
+			return repository.ErrConflict
+		}
+		var turn model.AgentTurn
+		if target.TurnID != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND thread_id = ?", *target.TurnID, thread.ID).First(&turn).Error; err != nil || turn.SourceTurnRef == nil {
+				if err != nil {
+					return err
+				}
+				return repository.ErrConflict
+			}
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND public_id = ?", target.ID, userID, interactionPublicID).First(&interaction).Error; err != nil {
+			return err
+		}
+		if interaction.ThreadID != thread.ID || (interaction.TurnID == nil) != (target.TurnID == nil) ||
+			(interaction.TurnID != nil && *interaction.TurnID != *target.TurnID) || interaction.Status != "pending" {
+			return repository.ErrConflict
+		}
+		if !interactionResponseMatchesKind(interaction.Kind, response) {
+			return repository.ErrInvalidInput
 		}
 		var profile model.AgentRuntimeProfile
 		if err := tx.Where("id = ? AND status = ? AND lease_expires_at > ?", interaction.RuntimeProfileID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
@@ -2119,10 +2377,6 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 		if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
 			return err
 		}
-		var device model.AgentDevice
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", thread.DeviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
-			return err
-		}
 		payload := map[string]any{
 			"kind": "interaction.respond", "deviceId": device.PublicID, "profileId": profile.PublicID,
 			"workspaceId": workspace.PublicID, "threadId": thread.PublicID,
@@ -2130,13 +2384,6 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 			"sourceRequestRef": interaction.SourceRequestRef, "scope": "thread", "response": response,
 		}
 		if interaction.TurnID != nil {
-			var turn model.AgentTurn
-			if err := tx.First(&turn, *interaction.TurnID).Error; err != nil || turn.SourceTurnRef == nil {
-				if err != nil {
-					return err
-				}
-				return repository.ErrConflict
-			}
 			turnPublicID = turn.PublicID
 			payload["scope"], payload["turnId"], payload["sourceTurnRef"] = "turn", turn.PublicID, *turn.SourceTurnRef
 		}

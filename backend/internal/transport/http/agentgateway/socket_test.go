@@ -218,6 +218,10 @@ func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
 	default:
 		t.Fatal("browser subscriber did not receive the user wake")
 	}
+	hub.disconnect("device-a")
+	if hub.connected("device-a") {
+		t.Fatal("disconnected device remained registered in the bridge hub")
+	}
 }
 
 func (r *socketRepo) ConsumeConnection(_ context.Context, tokenHash string, now time.Time) (*domainagent.Device, error) {
@@ -259,6 +263,9 @@ func (*socketRepo) RenameDevice(context.Context, uint, string, string) (*domaina
 }
 func (*socketRepo) RevokeDevice(context.Context, uint, string, time.Time) error {
 	return repository.ErrNotFound
+}
+func (*socketRepo) QueueThreadDelete(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
+	return nil, repository.ErrNotFound
 }
 func (*socketRepo) CreateDeviceCredential(context.Context, uint, *domainagent.Credential) error {
 	return repository.ErrNotFound

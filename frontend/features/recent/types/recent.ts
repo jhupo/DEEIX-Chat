@@ -1,4 +1,8 @@
-export type RecentDeleteTarget = { ids: string[]; label: string } | null;
+export type RecentDeleteTarget = {
+  ids: string[];
+  label: string;
+  executionType: "cloud" | "gateway";
+} | null;
 export type RecentBulkConfirmAction = "archive" | "unarchive" | "revokeShares";
 
 export type RecentRowState = {

@@ -138,6 +138,7 @@
     "autoRenameFailed": "自动命名失败",
     "deleteTitle": "删除会话",
     "deleteDescription": "确认删除{label}吗？此操作不可撤销。",
+    "deleteWorkDescription": "确认从 DEEIX 和所选设备删除{label}吗？设备上的工作区文件会保留；设备离线时，将在重新连接后完成删除。",
     "deleteFilesLabel": "同时删除会话中的文件",
     "deleteFilesDescription": "仅删除未被其他会话引用的文件；仍被其他会话使用的文件会保留。",
     "thisConversation": "该会话",

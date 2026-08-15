@@ -138,6 +138,7 @@
     "autoRenameFailed": "Auto rename failed",
     "deleteTitle": "Delete conversation",
     "deleteDescription": "Delete {label}? This cannot be undone.",
+    "deleteWorkDescription": "Delete {label} from DEEIX and the selected device? Workspace files stay on the device. If it is offline, deletion finishes after it reconnects.",
     "deleteFilesLabel": "Also delete files in the conversation",
     "deleteFilesDescription": "Only files not referenced by other conversations are deleted. Files still used elsewhere stay available.",
     "thisConversation": "this conversation",

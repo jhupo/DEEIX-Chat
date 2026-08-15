@@ -176,6 +176,11 @@ func (a localGatewayAdapter) GetThreadByConversation(ctx context.Context, userID
 	return &conversation.GatewayThread{ThreadID: item.ThreadID}, nil
 }
 
+func (a localGatewayAdapter) DeleteThread(ctx context.Context, userID uint, threadID, idempotencyKey string) error {
+	_, err := a.service.DeleteThread(ctx, userID, threadID, idempotencyKey)
+	return mapLocalGatewayError(err)
+}
+
 func (a localGatewayAdapter) StartTurn(ctx context.Context, userID uint, input conversation.GatewayStartTurnInput) error {
 	_, err := a.service.StartTurn(ctx, userID, appagentgateway.StartTurnInput{
 		ThreadID: input.ThreadID, RunID: input.RunID, IdempotencyKey: input.IdempotencyKey,

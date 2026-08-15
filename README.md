@@ -282,8 +282,11 @@ The Full Compose bundle is the only supported deployment profile. The following 
    | --- | --- |
    | `/_next/static/*` | Cache for 1 year with immutable assets enabled. |
    | `/logo*.svg`, `/*.ico`, `/*.png`, `/*.jpg`, `/*.webp`, `/*.woff2` | Cache for 1 day to 30 days. |
-   | `/`, `/*.html`, `/chat*`, `/recent*`, `/files*`, `/setting*`, `/admin*`, `/share*` | Do not long-cache. Use `no-cache` or a short TTL. |
+   | Every exported `*.txt` route payload, including `/__next.*.txt` and nested files such as `/setting/account.txt` | Use `no-cache` and revalidate every request. These names are stable across releases and must never use a fixed TTL. |
+   | `/`, `/*.html`, `/chat*`, `/recent*`, `/files*`, `/setting*`, `/admin*`, `/share*` | Use `no-cache` and revalidate every request. |
    | `/api/*`, `/healthz`, `/readyz`, `/swagger/*` | Bypass CDN cache and forward all request headers, methods, query strings, and request bodies. |
+
+   When first applying these rules, purge previously cached exported `*.txt` and HTML route objects so responses stored under the former one-day TTL do not outlive the deployment.
 
    If the CDN serves `frontend/out` from object storage, enable route fallback so clean URLs resolve to their exported `index.html` files, for example `/chat` -> `/chat/index.html`.
 

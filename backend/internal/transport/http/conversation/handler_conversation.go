@@ -637,6 +637,14 @@ func (h *Handler) DeleteConversation(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "conversation not found")
 			return
 		}
+		if errors.Is(err, appconversation.ErrExecutionConflict) {
+			response.Error(c, http.StatusConflict, "work conversation is still processing")
+			return
+		}
+		if errors.Is(err, appconversation.ErrExecutionBindingNotFound) {
+			response.Error(c, http.StatusConflict, "work conversation is not available on the selected device")
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, "delete conversation failed")
 		return
 	}

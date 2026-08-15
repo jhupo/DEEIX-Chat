@@ -16,7 +16,10 @@ import (
 
 func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
 	database := testutil.Postgres(t)
-	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentDeviceEnrollmentChallenge{}, &model.AgentCredential{}); err != nil {
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.AgentDevice{}, &model.AgentDeviceEnrollmentChallenge{}, &model.AgentCredential{},
+		&model.AgentThread{}, &model.AgentTurn{}, &model.AgentInteraction{}, &model.AgentCommand{},
+	); err != nil {
 		t.Fatalf("migrate device enrollment tables: %v", err)
 	}
 	repo := NewRepo(database)
@@ -47,8 +50,58 @@ func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T
 	if err != nil || replayed.PublicID != created.PublicID {
 		t.Fatalf("active enrollment replay changed identity: %#v %v", replayed, err)
 	}
+	conversation := model.Conversation{
+		UserID: 7, PublicID: strings.Repeat("c", 32), Title: "Work", LabelsJSON: "[]", ExecutionType: "gateway",
+		ExecutionDeviceID: created.PublicID, SessionKey: strings.Repeat("c", 32), Status: "active", ContextPolicy: "{}",
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	threadRef := "source-thread"
+	thread := model.AgentThread{
+		PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, DeviceID: created.ID,
+		RuntimeProfileID: 1, WorkspaceID: 1, ConversationID: conversation.ID, SourceThreadRef: &threadRef,
+		Title: "Work", Status: threadStatusDeletingActive,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	turn := model.AgentTurn{
+		PublicID: "agturn_0123456789abcdef0123456789abcdef", UserID: 7, ThreadID: thread.ID,
+		RunID: strings.Repeat("d", 32), Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	interaction := model.AgentInteraction{
+		PublicID: "agint_0123456789abcdef0123456789abcdef", UserID: 7, ThreadID: thread.ID,
+		RuntimeProfileID: 1, SourceRequestRef: "request-1", Kind: "approval", RequestJSON: "{}", Status: "pending",
+	}
+	if err := database.Create(&interaction).Error; err != nil {
+		t.Fatal(err)
+	}
+	command := model.AgentCommand{
+		PublicID: "agcmd_0123456789abcdef0123456789abcdef", UserID: 7, DeviceID: created.ID,
+		ThreadID: &thread.ID, ServerSeq: 1, Kind: "thread.lifecycle", PayloadJSON: `{"action":"delete"}`,
+		State: "queued", TerminalJSON: "{}",
+	}
+	if err := database.Create(&command).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.RevokeDevice(context.Background(), 7, created.PublicID, now); err != nil {
 		t.Fatalf("revoke device: %v", err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.Status != "active" {
+		t.Fatalf("revoke did not restore deleting thread: %#v %v", thread, err)
+	}
+	if err := database.First(&turn, turn.ID).Error; err != nil || turn.Status != "failed" || turn.ErrorCode != "device_revoked" {
+		t.Fatalf("revoke did not fail active turn: %#v %v", turn, err)
+	}
+	if err := database.First(&interaction, interaction.ID).Error; err != nil || interaction.Status != "failed" {
+		t.Fatalf("revoke did not fail interaction: %#v %v", interaction, err)
+	}
+	if err := database.First(&command, command.ID).Error; err != nil || command.State != "failed" || command.CompletedAt == nil {
+		t.Fatalf("revoke did not terminalize command: %#v %v", command, err)
 	}
 	retry := newChallenge("age_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	if err := repo.CreateEnrollmentChallenge(context.Background(), retry); err != nil {
@@ -128,6 +181,174 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	items, err := repo.ListWorkspaces(context.Background(), 7, device.PublicID)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("stale project remained visible: %#v %v", items, err)
+	}
+}
+
+func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{},
+		&model.AgentThread{}, &model.AgentTurn{}, &model.AgentEvent{}, &model.AgentCommand{}, &model.AgentBridgeFrame{}, &model.AgentIdempotencyRecord{},
+	); err != nil {
+		t.Fatalf("migrate thread delete tables: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 4, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-main", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "DEEIX-Chat", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	createThread := func(publicID, sourceRef, conversationPublicID string) (model.Conversation, model.AgentThread) {
+		conversation := model.Conversation{
+			UserID: 7, PublicID: conversationPublicID, Title: "Work", LabelsJSON: "[]", ExecutionType: "gateway",
+			ExecutionDeviceID: device.PublicID, ExecutionProfileID: profile.PublicID, ExecutionWorkspaceID: workspace.PublicID,
+			SessionKey: conversationPublicID, Status: "active", ContextPolicy: "{}",
+		}
+		if err := database.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+		thread := model.AgentThread{
+			PublicID: publicID, UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID,
+			ConversationID: conversation.ID, SourceThreadRef: &sourceRef, Title: "Work", Status: "active",
+		}
+		if err := database.Create(&thread).Error; err != nil {
+			t.Fatal(err)
+		}
+		return conversation, thread
+	}
+
+	repo := NewRepo(database)
+	conversation, thread := createThread("agth_0123456789abcdef0123456789abcdef", "source-thread-1", "0123456789abcdef0123456789abcdef")
+	command, err := repo.QueueThreadDelete(
+		context.Background(), "01234567-89ab-4def-8123-456789abcdef", strings.Repeat("1", 64), 7, thread.PublicID,
+		&domainagent.Command{PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.lifecycle"}, now,
+	)
+	if err != nil || command.State != "queued" || !jsonEqual(command.PayloadJSON, `{"kind":"thread.lifecycle","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","threadId":"agth_0123456789abcdef0123456789abcdef","sourceThreadRef":"source-thread-1","action":"delete"}`) {
+		t.Fatalf("queue thread delete: %#v %v", command, err)
+	}
+	if _, err := repo.QueueThreadDelete(
+		context.Background(), "21234567-89ab-4def-8123-456789abcdef", strings.Repeat("5", 64), 7, thread.PublicID,
+		&domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "thread.lifecycle"}, now,
+	); err == nil {
+		t.Fatal("duplicate pending thread delete was queued")
+	}
+	var visible model.Conversation
+	if err := database.First(&visible, conversation.ID).Error; err != nil {
+		t.Fatalf("queued thread delete hid the conversation before device confirmation: %v", err)
+	}
+	var deletingThread model.AgentThread
+	if err := database.First(&deletingThread, thread.ID).Error; err != nil || deletingThread.Status != threadStatusDeletingActive {
+		t.Fatalf("queued thread delete did not mark the thread deleting: %#v %v", deletingThread, err)
+	}
+	accepted := `{"kind":"result","result":{"kind":"accepted"}}`
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 1, command.ServerSeq, command.PublicID, strings.Repeat("2", 64), accepted, now.Add(time.Second)); err != nil || ack != 1 {
+		t.Fatalf("apply delete terminal: ack=%d err=%v", ack, err)
+	}
+	var deletedThread model.AgentThread
+	if err := database.First(&deletedThread, thread.ID).Error; err != nil || deletedThread.Status != "deleted" {
+		t.Fatalf("thread delete status was not projected: %#v %v", deletedThread, err)
+	}
+	var hidden model.Conversation
+	if err := database.First(&hidden, conversation.ID).Error; err == nil {
+		t.Fatal("confirmed thread delete left the conversation visible")
+	}
+
+	failedConversation, failedThread := createThread("agth_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source-thread-2", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	failedCommand, err := repo.QueueThreadDelete(
+		context.Background(), "11234567-89ab-4def-8123-456789abcdef", strings.Repeat("3", 64), 7, failedThread.PublicID,
+		&domainagent.Command{PublicID: "agcmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Kind: "thread.lifecycle"}, now.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := `{"kind":"error","error":{"message":"device rejected delete"}}`
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 2, failedCommand.ServerSeq, failedCommand.PublicID, strings.Repeat("4", 64), failed, now.Add(3*time.Second)); err != nil || ack != 2 {
+		t.Fatalf("apply failed delete terminal: ack=%d err=%v", ack, err)
+	}
+	var restored model.Conversation
+	if err := database.First(&restored, failedConversation.ID).Error; err != nil {
+		t.Fatalf("failed device delete hid the conversation: %v", err)
+	}
+	var restoredThread model.AgentThread
+	if err := database.First(&restoredThread, failedThread.ID).Error; err != nil || restoredThread.Status != "active" {
+		t.Fatalf("failed device delete did not restore thread: %#v %v", restoredThread, err)
+	}
+
+	pendingConversation, pendingThread := createThread("agth_cccccccccccccccccccccccccccccccc", "source-thread-3", "cccccccccccccccccccccccccccccccc")
+	pendingEvent := model.AgentEvent{
+		PublicID: "agev_0123456789abcdef0123456789abcdef", BridgeFrameID: 99, UserID: 7, DeviceID: device.ID,
+		RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &pendingThread.ID,
+		Kind: "item/completed", SourceThreadRef: "source-thread-3", PayloadJSON: "{}", OccurredAt: now,
+	}
+	if err := database.Create(&pendingEvent).Error; err != nil {
+		t.Fatal(err)
+	}
+	pendingCommand, err := repo.QueueThreadDelete(
+		context.Background(), "31234567-89ab-4def-8123-456789abcdef", strings.Repeat("6", 64), 7, pendingThread.PublicID,
+		&domainagent.Command{PublicID: "agcmd_cccccccccccccccccccccccccccccccc", Kind: "thread.lifecycle"}, now.Add(4*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 3, pendingCommand.ServerSeq, pendingCommand.PublicID, strings.Repeat("7", 64), accepted, now.Add(5*time.Second)); err != nil || ack != 3 {
+		t.Fatalf("apply pending-event delete terminal: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&visible, pendingConversation.ID).Error; err != nil {
+		t.Fatalf("delete finalized before pending event projection: %v", err)
+	}
+	if err := repo.MarkConversationEventProjected(context.Background(), pendingEvent.ID, now.Add(6*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.First(&hidden, pendingConversation.ID).Error; err == nil {
+		t.Fatal("last event projection did not finalize the confirmed delete")
+	}
+
+	threadEventConversation, threadEventThread := createThread("agth_dddddddddddddddddddddddddddddddd", "source-thread-4", "dddddddddddddddddddddddddddddddd")
+	threadEventCommand, err := repo.QueueThreadDelete(
+		context.Background(), "41234567-89ab-4def-8123-456789abcdef", strings.Repeat("8", 64), 7, threadEventThread.PublicID,
+		&domainagent.Command{PublicID: "agcmd_dddddddddddddddddddddddddddddddd", Kind: "thread.lifecycle"}, now.Add(7*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadEvent, err := repo.ApplyEventFrame(
+		context.Background(), device.ID, profile.ID, 4, strings.Repeat("9", 64),
+		&domainagent.Event{
+			PublicID: "agev_dddddddddddddddddddddddddddddddd", UserID: 7, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, Kind: "thread/deleted", SourceThreadRef: "source-thread-4",
+			PayloadJSON: "{}", OccurredAt: now.Add(8 * time.Second),
+		},
+		now.Add(8*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("thread-only event was left pending: %#v %v", threadEvent, err)
+	}
+	var storedThreadEvent model.AgentEvent
+	if err := database.Where("public_id = ?", "agev_dddddddddddddddddddddddddddddddd").First(&storedThreadEvent).Error; err != nil || storedThreadEvent.ConversationProjectedAt == nil {
+		t.Fatalf("thread-only event was not marked projected: %#v %v", storedThreadEvent, err)
+	}
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 5, threadEventCommand.ServerSeq, threadEventCommand.PublicID, strings.Repeat("a", 64), accepted, now.Add(9*time.Second)); err != nil || ack != 5 {
+		t.Fatalf("apply thread-event delete terminal: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&hidden, threadEventConversation.ID).Error; err == nil {
+		t.Fatal("thread-only event blocked confirmed conversation deletion")
 	}
 }
 
@@ -420,6 +641,26 @@ func jsonEqual(left, right string) bool {
 	return json.Unmarshal([]byte(left), &leftValue) == nil &&
 		json.Unmarshal([]byte(right), &rightValue) == nil &&
 		reflect.DeepEqual(leftValue, rightValue)
+}
+
+func TestIsThreadOnlyEvent(t *testing.T) {
+	threadID := uint(1)
+	cases := []struct {
+		name  string
+		event model.AgentEvent
+		want  bool
+	}{
+		{name: "unbound", event: model.AgentEvent{}, want: false},
+		{name: "thread event", event: model.AgentEvent{ThreadID: &threadID}, want: true},
+		{name: "turn pending binding", event: model.AgentEvent{ThreadID: &threadID, SourceTurnRef: "source-turn"}, want: false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isThreadOnlyEvent(&test.event); got != test.want {
+				t.Fatalf("isThreadOnlyEvent() = %v, want %v", got, test.want)
+			}
+		})
+	}
 }
 
 func TestAgentTurnTerminalPayloads(t *testing.T) {

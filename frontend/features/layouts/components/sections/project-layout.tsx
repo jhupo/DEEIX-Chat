@@ -29,8 +29,8 @@ function ProjectLayoutShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
-  const { executionMode, requestNewConversation } = useChatSession();
-  const { defaultDevice } = useDevices();
+  const { executionMode, requestNewConversation, setExecutionMode } = useChatSession();
+  const { defaultDevice, loading: devicesLoading } = useDevices();
   const showModeSwitch = pathname === "/chat";
   const routeKey = `${pathname}?${searchParams.toString()}`;
   const previousRouteKeyRef = React.useRef(routeKey);
@@ -45,6 +45,12 @@ function ProjectLayoutShell({
       setOpenMobile(false);
     }
   }, [isMobile, openMobile, routeKey, setOpenMobile]);
+
+  React.useEffect(() => {
+    if (!devicesLoading && !defaultDevice && executionMode === "gateway" && !searchParams.get("conversation_id")) {
+      setExecutionMode("cloud");
+    }
+  }, [defaultDevice, devicesLoading, executionMode, searchParams, setExecutionMode]);
 
   const handleCreateConversation = React.useCallback(() => {
     requestNewConversation({ projectID: "" });

@@ -126,6 +126,10 @@
       "empty": "还没有添加设备。",
       "actions": "设备操作",
       "revoke": "移除设备",
+      "confirmTitle": "移除设备？",
+      "confirmDescription": "确认移除 {name} 并立即断开连接吗？已有会话会保留在 DEEIX，本地 Codex 数据和工作区文件也会保留在设备上。",
+      "cancel": "取消",
+      "confirm": "移除",
       "platforms": { "windows": "Windows", "darwin": "macOS", "linux": "Linux" },
       "install": {
         "title": "添加设备",

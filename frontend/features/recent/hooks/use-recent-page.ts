@@ -126,7 +126,7 @@ export function useRecentPage() {
   const [starredFilter, setStarredFilter] = React.useState<ConversationStarredFilter>("all");
   const [shareFilter, setShareFilter] = React.useState<ConversationShareFilter>("all");
   const searchParams = useSearchParams();
-  const [projectFilter, setProjectFilter] = React.useState<ConversationProjectFilter>(() => searchParams.get("project") || "all");
+  const projectFilter = searchParams.get("project") || "all";
   const [query, setQuery] = React.useState("");
   const [debouncedQuery, setDebouncedQuery] = React.useState("");
   const [selectionMode, setSelectionMode] = React.useState(false);
@@ -147,10 +147,6 @@ export function useRecentPage() {
   const loadingMoreRef = React.useRef(false);
   const loadMoreFailedRef = React.useRef(false);
   const isSelectionMode = selectionMode || selectedConversationIDs.length > 0;
-
-  React.useEffect(() => {
-    setProjectFilter(searchParams.get("project") || "all");
-  }, [searchParams]);
 
   React.useEffect(() => {
     loadingMoreRef.current = loadingMore;
@@ -356,7 +352,6 @@ export function useRecentPage() {
 
   const onProjectFilterChange = React.useCallback(
     (value: ConversationProjectFilter) => {
-      setProjectFilter(value);
       const href = value === "all" ? "/recent" : `/recent?project=${encodeURIComponent(value)}`;
       router.replace(href);
     },
@@ -497,10 +492,11 @@ export function useRecentPage() {
   );
 
   const onDelete = React.useCallback((item: ConversationDTO) => {
-    setDeleteFiles(deleteFilesByDefault);
+    setDeleteFiles(item.executionType === "cloud" && deleteFilesByDefault);
     setDeleteTarget({
       ids: [item.publicID],
       label: t("deleteConversationLabel", { title: item.title || t("untitled") }),
+      executionType: item.executionType,
     });
   }, [deleteFilesByDefault, t]);
 
@@ -629,6 +625,15 @@ export function useRecentPage() {
     const firstProjectID = selectedItems[0]?.projectID ?? "";
     return selectedItems.every((item) => (item.projectID ?? "") === firstProjectID) ? firstProjectID : null;
   }, [selectedItems]);
+  const pageTitle = React.useMemo(() => {
+    if (projectFilter === "all") {
+      return "";
+    }
+    if (projectFilter === "unassigned") {
+      return t("projects.unassigned");
+    }
+    return projects.find((project) => project.publicID === projectFilter)?.name || t("projects.untitled");
+  }, [projectFilter, projects, t]);
 
   const moveSelectedToProject = React.useCallback(async (projectID?: string) => {
     if (selectedConversationIDs.length === 0 || movingSelectedToProject) {
@@ -763,16 +768,18 @@ export function useRecentPage() {
   }, [projectFilter, selectedSharedItems, shareFilter, starredFilter, statusFilter, t, touchByPublicID]);
 
   const requestDeleteSelected = React.useCallback(() => {
-    if (selectedConversationIDs.length === 0) {
+    if (selectedItems.length === 0) {
       return;
     }
 
-    setDeleteFiles(deleteFilesByDefault);
+    const executionType = selectedItems[0].executionType;
+    setDeleteFiles(executionType === "cloud" && deleteFilesByDefault);
     setDeleteTarget({
       ids: [...selectedConversationIDs],
       label: t("selectedConversationCountLabel", { count: selectedConversationIDs.length }),
+      executionType,
     });
-  }, [deleteFilesByDefault, selectedConversationIDs, t]);
+  }, [deleteFilesByDefault, selectedConversationIDs, selectedItems, t]);
 
   const rowStates = React.useMemo<RecentRowState[]>(
     () =>
@@ -818,6 +825,7 @@ export function useRecentPage() {
     starredFilter,
     shareFilter,
     projectFilter,
+    pageTitle,
     projects,
     query,
     isSelectionMode,

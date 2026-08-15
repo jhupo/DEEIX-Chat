@@ -49,6 +49,7 @@ type gatewayExecutor interface {
 	CreateArtifact(context.Context, uint, string, string) (*GatewayArtifact, error)
 	StartThread(context.Context, uint, GatewayStartThreadInput) error
 	GetThreadByConversation(context.Context, uint, uint) (*GatewayThread, error)
+	DeleteThread(context.Context, uint, string, string) error
 	StartTurn(context.Context, uint, GatewayStartTurnInput) error
 	InterruptRun(context.Context, uint, string, string) error
 	ListInteractions(context.Context, uint, uint, string) ([]GatewayInteraction, error)

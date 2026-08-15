@@ -128,6 +128,16 @@ func (h *bridgeHub) connected(deviceID string) bool {
 	return ok
 }
 
+func (h *bridgeHub) disconnect(deviceID string) {
+	h.mu.Lock()
+	entry := h.connections[deviceID]
+	delete(h.connections, deviceID)
+	h.mu.Unlock()
+	if entry != nil && entry.connection != nil {
+		_ = entry.connection.Close()
+	}
+}
+
 func (h *bridgeHub) subscribeUser(userID uint) (<-chan struct{}, func()) {
 	subscriber := make(chan struct{}, 1)
 	h.mu.Lock()

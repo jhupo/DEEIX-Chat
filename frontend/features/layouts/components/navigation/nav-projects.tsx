@@ -541,7 +541,7 @@ export function NavProjects() {
 
   const onDeleteConversation = React.useCallback((publicID: string, title: string) => {
     setDeleteConversationFiles(deleteConversationFilesByDefault);
-    setConversationDeleteTarget({ publicID, title });
+    setConversationDeleteTarget({ publicID, title, executionType: "cloud" });
   }, [deleteConversationFilesByDefault]);
 
   const confirmDeleteConversation = React.useCallback(async () => {
@@ -572,12 +572,14 @@ export function NavProjects() {
 
   const openProjectConversations = React.useCallback(
     (projectID: string) => {
-      router.push(`/recent?project=${encodeURIComponent(projectID)}`);
+      if (pathname !== "/recent" || activeRecentProjectID !== projectID) {
+        router.push(`/recent?project=${encodeURIComponent(projectID)}`);
+      }
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [isMobile, router, setOpenMobile],
+    [activeRecentProjectID, isMobile, pathname, router, setOpenMobile],
   );
 
   const onProjectDragStart = React.useCallback((event: DragStartEvent) => {
