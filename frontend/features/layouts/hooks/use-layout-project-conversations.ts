@@ -64,6 +64,7 @@ function writeStoredProjectIDSet(storageKey: string, value: Set<string>): void {
 }
 
 export function useLayoutProjectConversations({
+  enabled,
   activeProjectID,
   items,
   lastChange,
@@ -72,6 +73,7 @@ export function useLayoutProjectConversations({
   executionType,
   storageScope,
 }: {
+  enabled: boolean;
   activeProjectID: string;
   items: ConversationDTO[];
   lastChange: SidebarConversationChange | null;
@@ -124,6 +126,9 @@ export function useLayoutProjectConversations({
 
   const loadProjectConversations = React.useCallback(
     async (projectID: string, force = false) => {
+      if (!enabled) {
+        return;
+      }
       const current = projectConversationStateRef.current[projectID];
       if (!force && (current?.loading || current?.loaded)) {
         return;
@@ -196,20 +201,26 @@ export function useLayoutProjectConversations({
         }));
       }
     },
-    [executionDeviceID, executionType, updateProjectConversationState],
+    [enabled, executionDeviceID, executionType, updateProjectConversationState],
   );
 
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const visibleProjectIDs = new Set(projects.map((project) => project.publicID));
     expandedProjectIDs.forEach((projectID) => {
       if (visibleProjectIDs.has(projectID)) {
         void loadProjectConversations(projectID);
       }
     });
-  }, [expandedProjectIDs, loadProjectConversations, projects]);
+  }, [enabled, expandedProjectIDs, loadProjectConversations, projects]);
 
   const ensureProjectExpanded = React.useCallback(
     (projectID: string, persist = false) => {
+      if (!enabled) {
+        return;
+      }
       const shouldLoad = !projectConversationStateRef.current[projectID]?.loaded;
       if (persist) {
         activeRevealedProjectIDsRef.current.delete(projectID);
@@ -226,11 +237,14 @@ export function useLayoutProjectConversations({
         void loadProjectConversations(projectID);
       }
     },
-    [loadProjectConversations, updateExpandedProjectIDs],
+    [enabled, loadProjectConversations, updateExpandedProjectIDs],
   );
 
   const toggleProjectExpanded = React.useCallback(
     (projectID: string) => {
+      if (!enabled) {
+        return;
+      }
       const shouldLoad = !projectConversationStateRef.current[projectID]?.loaded;
       const expandedNext = !expandedProjectIDsRef.current.has(projectID);
       activeRevealedProjectIDsRef.current.delete(projectID);
@@ -247,19 +261,19 @@ export function useLayoutProjectConversations({
         void loadProjectConversations(projectID);
       }
     },
-    [loadProjectConversations, updateExpandedProjectIDs],
+    [enabled, loadProjectConversations, updateExpandedProjectIDs],
   );
 
   React.useEffect(() => {
-    if (!activeProjectID || hasStoredExpandedProjectIDsRef.current || activeRevealedProjectIDsRef.current.has(activeProjectID)) {
+    if (!enabled || !activeProjectID || hasStoredExpandedProjectIDsRef.current || activeRevealedProjectIDsRef.current.has(activeProjectID)) {
       return;
     }
     activeRevealedProjectIDsRef.current.add(activeProjectID);
     ensureProjectExpanded(activeProjectID, false);
-  }, [activeProjectID, ensureProjectExpanded]);
+  }, [activeProjectID, enabled, ensureProjectExpanded]);
 
   React.useEffect(() => {
-    if (!lastChange) {
+    if (!enabled || !lastChange) {
       return;
     }
 
@@ -311,7 +325,7 @@ export function useLayoutProjectConversations({
 
       return changed ? next : previous;
     });
-  }, [items, lastChange, updateProjectConversationState]);
+  }, [enabled, items, lastChange, updateProjectConversationState]);
 
   const removeProject = React.useCallback(
     (projectID: string) => {

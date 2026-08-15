@@ -177,15 +177,15 @@ function ProjectTreeButton({
   expanded,
   name,
   onHoverChange,
-  onToggleExpanded,
+  onActivate,
 }: {
   active: boolean;
   actionPaddingClassName?: string;
-  contentID: string;
-  expanded: boolean;
+  contentID?: string;
+  expanded?: boolean;
   name: string;
   onHoverChange?: (hovered: boolean) => void;
-  onToggleExpanded: () => void;
+  onActivate: () => void;
 }) {
   const iconRef = React.useRef<ProjectFolderIconHandle>(null);
 
@@ -206,7 +206,7 @@ function ProjectTreeButton({
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        onToggleExpanded();
+        onActivate();
       }}
       onMouseEnter={() => {
         onHoverChange?.(true);
@@ -450,6 +450,7 @@ export function NavProjects() {
     removeProject,
     toggleProjectExpanded,
   } = useLayoutProjectConversations({
+    enabled: canManageProjects,
     activeProjectID,
     items,
     lastChange,
@@ -557,14 +558,26 @@ export function NavProjects() {
 
   const startProjectConversation = React.useCallback(
     (projectID: string) => {
-      ensureProjectExpanded(projectID, true);
+      if (canManageProjects) {
+        ensureProjectExpanded(projectID, true);
+      }
       requestNewConversation({ projectID });
       router.push(`/chat?project_id=${encodeURIComponent(projectID)}`);
       if (isMobile) {
         setOpenMobile(false);
       }
     },
-    [ensureProjectExpanded, isMobile, requestNewConversation, router, setOpenMobile],
+    [canManageProjects, ensureProjectExpanded, isMobile, requestNewConversation, router, setOpenMobile],
+  );
+
+  const openProjectConversations = React.useCallback(
+    (projectID: string) => {
+      router.push(`/recent?project=${encodeURIComponent(projectID)}`);
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+    },
+    [isMobile, router, setOpenMobile],
   );
 
   const onProjectDragStart = React.useCallback((event: DragStartEvent) => {
@@ -755,8 +768,8 @@ export function NavProjects() {
                 <SortableContext items={projectIDs} strategy={verticalListSortingStrategy}>
                   <SidebarMenu className="gap-0.5">
                     {projects.map((project) => {
-                      const expanded = expandedProjectIDs.has(project.publicID);
-                      const conversationState = projectConversationState[project.publicID];
+                      const expanded = canManageProjects && expandedProjectIDs.has(project.publicID);
+                      const conversationState = canManageProjects ? projectConversationState[project.publicID] : undefined;
                       const conversationLoading = expanded && (!conversationState || conversationState.loading);
                       const hasActiveChild = Boolean(conversationState?.items.some((item) => item.publicID === activeConversationID));
                       const active =
@@ -778,7 +791,9 @@ export function NavProjects() {
                         : "right-0";
                       const projectMenuActionClassName = canSortProjects ? "right-8" : "right-0";
                       const showProjectActions = isMobile || (!rowDragging && (rowHovered || rowFocused || menuHovered || menuOpen));
-                      const projectConversationContentID = `sidebar-project-${project.publicID}-conversations`;
+                      const projectConversationContentID = canManageProjects
+                        ? `sidebar-project-${project.publicID}-conversations`
+                        : undefined;
                       return (
                         <ProjectSortableItem
                           key={project.publicID}
@@ -815,10 +830,16 @@ export function NavProjects() {
                                   active={active}
                                   actionPaddingClassName={projectActionPaddingClassName}
                                   contentID={projectConversationContentID}
-                                  expanded={expanded}
+                                  expanded={canManageProjects ? expanded : undefined}
                                   name={project.name}
                                   onHoverChange={(hovered) => setHoveredProjectRowID(hovered ? project.publicID : null)}
-                                  onToggleExpanded={() => toggleProjectExpanded(project.publicID)}
+                                  onActivate={() => {
+                                    if (canManageProjects) {
+                                      toggleProjectExpanded(project.publicID);
+                                      return;
+                                    }
+                                    openProjectConversations(project.publicID);
+                                  }}
                                 />
                                 <ProjectInlineAction
                                   label={t("newChatInProject")}
@@ -876,7 +897,7 @@ export function NavProjects() {
                                 </DropdownMenu> : null}
                               </div>
                               <AnimatePresence initial={false}>
-                                {expanded ? (
+                                {canManageProjects && expanded ? (
                                   <motion.div
                                     key={`${project.publicID}-conversations`}
                                     id={projectConversationContentID}
