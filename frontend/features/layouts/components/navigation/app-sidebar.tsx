@@ -56,8 +56,8 @@ export function AppSidebar({
           className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
         >
           <LayoutGroup id="sidebar-conversations">
-            <NavProjects />
             <NavStarred />
+            <NavProjects />
             <NavRecents />
           </LayoutGroup>
         </motion.div>
