@@ -122,11 +122,17 @@ rollback() {
 
 if start_service; then
   attempts=0
-  while [ "$attempts" -lt 15 ] && [ ! -f "$data_dir/runtime-status.json" ]; do
+  connected_seconds=0
+  while [ "$attempts" -lt 120 ] && [ "$connected_seconds" -lt 20 ]; do
     attempts=$((attempts + 1))
     sleep 1
+    if [ -f "$data_dir/runtime-status.json" ] && grep -Eq '"state"[[:space:]]*:[[:space:]]*"connected"' "$data_dir/runtime-status.json"; then
+      connected_seconds=$((connected_seconds + 1))
+    else
+      connected_seconds=0
+    fi
   done
-  if [ ! -f "$data_dir/runtime-status.json" ]; then rollback; exit 1; fi
+  if [ "$connected_seconds" -lt 20 ]; then rollback; exit 1; fi
   rm -f "$backup"
 else
   rollback

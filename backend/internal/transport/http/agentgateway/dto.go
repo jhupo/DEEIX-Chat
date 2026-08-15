@@ -65,8 +65,9 @@ type ResourceSnapshotDoc struct {
 }
 
 type CommandDoc struct {
-	CommandID string `json:"commandId"`
-	Status    string `json:"status"`
+	CommandID    string `json:"commandId"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type EnrollmentChallengeResponseDoc struct {

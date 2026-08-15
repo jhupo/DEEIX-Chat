@@ -1172,6 +1172,8 @@ export function AppChatArea() {
   const chatInputProps = {
     draft,
     executionMode,
+    gatewayReady: executionMode === "cloud" || Boolean(defaultDevice?.online) &&
+      (Boolean(currentConversation) || Boolean(executionProjectID)),
     loading,
     sending: generating,
     uploading,

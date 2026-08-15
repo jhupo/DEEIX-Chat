@@ -121,6 +121,23 @@ func TestGenerationStreamRegistryActiveLeaseLifecycle(t *testing.T) {
 	}
 }
 
+func TestGenerationStreamRegistryExpiresWithoutCancelFunction(t *testing.T) {
+	store := newTestGenerationStreamStore()
+	registry := newGenerationStreamRegistry(store, generationStreamOptions{
+		Retention: time.Minute, ActiveTTL: 20 * time.Millisecond, LeaseTTL: time.Second,
+		LeaseRefresh: time.Second, MaxEvents: 8, SubscriberBuffer: 4,
+	})
+	runID := EnsureMessageGenerationRunID("")
+	registry.register(context.Background(), runID, 7, nil)
+	time.Sleep(60 * time.Millisecond)
+	registry.mu.Lock()
+	_, tracked := registry.active[runID]
+	registry.mu.Unlock()
+	if tracked || registry.hasActive(context.Background(), runID) {
+		t.Fatal("nil-cancel generation remained active after its deadline")
+	}
+}
+
 func TestGenerationStreamStoreActiveLeaseExpires(t *testing.T) {
 	store := newTestGenerationStreamStore()
 	ctx := context.Background()

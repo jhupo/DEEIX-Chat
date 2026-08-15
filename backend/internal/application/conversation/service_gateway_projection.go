@@ -13,18 +13,22 @@ func (s *Service) ProjectGatewayEvent(ctx context.Context, input GatewayExecutio
 	if err != nil {
 		return err
 	}
-	applied, err := s.repo.ProjectExecutionEvent(ctx, event)
-	if err != nil || !applied {
+	_, err = s.repo.ProjectExecutionEvent(ctx, event)
+	if err != nil {
 		return err
 	}
 	payload := gatewayStreamPayload(event)
-	if payload != nil {
-		s.PublishMessageGenerationEvent(event.RunID, payload)
+	if payload != nil && event.TerminalStatus == "" {
+		if err := s.publishMessageGenerationEventReliable(event.RunID, payload); err != nil {
+			return err
+		}
 	}
 	if event.TerminalStatus != "" {
-		s.PublishMessageGenerationEvent(event.RunID, map[string]interface{}{
+		if err := s.publishMessageGenerationEventReliable(event.RunID, map[string]interface{}{
 			"type": "gateway_completed", "status": event.TerminalStatus,
-		})
+		}); err != nil {
+			return err
+		}
 		s.FinishMessageGeneration(event.RunID)
 	}
 	return nil

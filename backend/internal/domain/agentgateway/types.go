@@ -23,6 +23,7 @@ type Device struct {
 	PublicKeyFingerprint string
 	CredentialVersion    uint
 	Status               string
+	Online               bool
 	NextServerSeq        uint64
 	LastAckedServerSeq   uint64
 	LastAckedBridgeSeq   uint64
@@ -241,19 +242,20 @@ type Credential struct {
 }
 
 type RuntimeProfile struct {
-	ID             uint
-	PublicID       string
-	UserID         uint
-	DeviceID       uint
-	Provider       string
-	Status         string
-	RemoteKeyID    *int64
-	CredentialHash string
-	ManifestJSON   string
-	VerifiedAt     *time.Time
-	LeaseExpiresAt *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                uint
+	PublicID          string
+	UserID            uint
+	DeviceID          uint
+	Provider          string
+	Status            string
+	RemoteKeyID       *int64
+	CredentialHash    string
+	ManifestJSON      string
+	VerifiedAt        *time.Time
+	LeaseExpiresAt    *time.Time
+	PresenceExpiresAt *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type RuntimeProofChallenge struct {

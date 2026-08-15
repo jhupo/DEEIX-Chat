@@ -726,10 +726,14 @@ export function useChatMessageSubmit({
       queuedSubmission?: QueuedChatSubmission;
     }) => {
       const payloadContent = content || t("attachmentOnlyContent");
-      const requestPlatformModelName = (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim();
-      const requestKeyBindingID = (queuedSubmission?.keyBindingID ?? selectedKeyBindingID).trim();
-      const requestOptions = queuedSubmission?.options ?? options;
       const requestExecutionMode = queuedSubmission?.conversation?.executionType ?? executionMode;
+      const requestPlatformModelName = requestExecutionMode === "cloud"
+        ? (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim()
+        : "";
+      const requestKeyBindingID = requestExecutionMode === "cloud"
+        ? (queuedSubmission?.keyBindingID ?? selectedKeyBindingID).trim()
+        : "";
+      const requestOptions = requestExecutionMode === "cloud" ? queuedSubmission?.options ?? options : {};
       const requestSelectedToolIDs = requestExecutionMode === "cloud"
         ? queuedSubmission?.selectedToolIDs ?? selectedToolIDs
         : [];
@@ -757,7 +761,9 @@ export function useChatMessageSubmit({
           visibleBranchScopePathRef.current,
           visibleMessagesRef.current,
         );
-      const selectedModel = modelOptions.find((item) => item.platformModelName === requestPlatformModelName) ?? null;
+      const selectedModel = requestExecutionMode === "cloud"
+        ? modelOptions.find((item) => item.platformModelName === requestPlatformModelName) ?? null
+        : null;
       const resolvedBranchReason = branchReason ?? "default";
       const concurrentBranchRun = resolvedBranchReason === "retry" || resolvedBranchReason === "edit";
       const targetConversationHasActiveStream = Array.from(activeStreamsRef.current.values()).some(
@@ -1042,7 +1048,7 @@ export function useChatMessageSubmit({
           touchByPublicID(targetConversationID, { title: optimisticTitle });
         }
         const commonStreamPayload = {
-          model: requestPlatformModelName,
+          model: requestPlatformModelName || undefined,
           options: Object.keys(sanitizedOptions).length > 0 ? sanitizedOptions : undefined,
           clientRunID: clientRunID,
           fileIDs: effectiveAttachments.length > 0 ? effectiveAttachments.map((item) => item.fileID) : undefined,

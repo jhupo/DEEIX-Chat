@@ -94,6 +94,11 @@ func (s *Service) PublishMessageGenerationEvent(runID string, payload map[string
 	return s.generationStreams.publish(context.Background(), normalizeRunID(runID), payload)
 }
 
+func (s *Service) publishMessageGenerationEventReliable(runID string, payload map[string]interface{}) error {
+	_, err := s.generationStreams.publishResult(context.Background(), normalizeRunID(runID), payload)
+	return err
+}
+
 // SubscribeMessageGeneration 订阅用户所属 run 的生成流，返回可回放事件和后续事件通道。
 func (s *Service) SubscribeMessageGeneration(
 	ctx context.Context,
@@ -265,17 +270,25 @@ func (r *generationStreamRegistry) isCanceled(ctx context.Context, runID string)
 }
 
 func (r *generationStreamRegistry) publish(ctx context.Context, runID string, payload map[string]interface{}) map[string]interface{} {
+	actual, _ := r.publishResult(ctx, runID, payload)
+	return actual
+}
+
+func (r *generationStreamRegistry) publishResult(ctx context.Context, runID string, payload map[string]interface{}) (map[string]interface{}, error) {
 	if runID == "" {
-		return payload
+		return payload, nil
 	}
 	r.touchActive(ctx, runID)
 	actual := cloneStreamPayload(payload)
 	persisted, sanitized := generationStreamPayloadForStore(actual)
 	payloadJSON, err := marshalStreamPayload(persisted)
 	if err != nil {
-		return actual
+		return actual, err
 	}
 	record, err := r.append(ctx, r.store, runID, payloadJSON)
+	if err != nil {
+		return actual, err
+	}
 	if err == nil && record.Seq > 0 {
 		actual["seq"] = record.Seq
 		if sanitized {
@@ -283,9 +296,9 @@ func (r *generationStreamRegistry) publish(ctx context.Context, runID string, pa
 		}
 	}
 	if shouldReturnSanitizedGenerationStreamPayload(actual, sanitized) {
-		return persisted
+		return persisted, nil
 	}
-	return actual
+	return actual, nil
 }
 
 func (r *generationStreamRegistry) append(ctx context.Context, store repository.GenerationStreamCacheRepository, runID string, payloadJSON string) (repository.GenerationStreamMessage, error) {
@@ -423,7 +436,7 @@ func (r *generationStreamRegistry) scheduleActiveExpiryLocked(runID string, acti
 		var leaseCancel context.CancelFunc
 		r.mu.Lock()
 		current, ok := r.active[runID]
-		if ok && current == active && current.cancel != nil {
+		if ok && current == active {
 			delete(r.active, runID)
 			cancel = current.cancel
 			leaseCancel = current.leaseCancel

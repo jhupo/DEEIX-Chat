@@ -73,14 +73,15 @@ type pendingInteraction struct {
 }
 
 type CodexAdapter struct {
-	profileID  string
-	state      *StateStore
-	workspaces map[string]Workspace
-	rpc        *RPCClient
-	command    *exec.Cmd
-	version    string
-	onEvent    func(json.RawMessage) error
-	done       chan struct{}
+	profileID   string
+	state       *StateStore
+	workspaceMu sync.RWMutex
+	workspaces  map[string]Workspace
+	rpc         *RPCClient
+	command     *exec.Cmd
+	version     string
+	onEvent     func(json.RawMessage) error
+	done        chan struct{}
 
 	mu      sync.Mutex
 	pending map[string]*pendingInteraction
@@ -180,7 +181,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
 		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
-		Commands:         []string{"thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
+		Commands:         []string{"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
 		InputKinds:       []string{"text", "artifact"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},
 	}
@@ -194,8 +195,14 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 }
 
 func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
-	byID := make(map[string]Workspace, len(adapter.workspaces))
-	for _, configured := range adapter.workspaces {
+	adapter.workspaceMu.RLock()
+	configuredWorkspaces := make([]Workspace, 0, len(adapter.workspaces))
+	for _, workspace := range adapter.workspaces {
+		configuredWorkspaces = append(configuredWorkspaces, workspace)
+	}
+	adapter.workspaceMu.RUnlock()
+	byID := make(map[string]Workspace, len(configuredWorkspaces))
+	for _, configured := range configuredWorkspaces {
 		workspace, err := codexProjectWorkspace(configured.Root)
 		if err != nil {
 			workspace, err = CanonicalWorkspace(configured.Root)
@@ -286,10 +293,13 @@ func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {
 }
 
 func (adapter *CodexAdapter) replaceWorkspaces(workspaces []Workspace) {
-	adapter.workspaces = make(map[string]Workspace, len(workspaces))
+	replacement := make(map[string]Workspace, len(workspaces))
 	for _, workspace := range workspaces {
-		adapter.workspaces[workspace.WorkspaceID] = workspace
+		replacement[workspace.WorkspaceID] = workspace
 	}
+	adapter.workspaceMu.Lock()
+	adapter.workspaces = replacement
+	adapter.workspaceMu.Unlock()
 }
 
 func (adapter *CodexAdapter) ProveRuntimeAuth(ctx context.Context, challenge string) (string, error) {
@@ -319,7 +329,9 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 	if command.Kind == "resource.refresh" && command.Resource.Scope == "profile" {
 		return adapter.resource(ctx, command, Workspace{})
 	}
+	adapter.workspaceMu.RLock()
 	workspace, ok := adapter.workspaces[command.WorkspaceID]
+	adapter.workspaceMu.RUnlock()
 	if !ok {
 		return nil, errors.New("gateway command workspace is not registered")
 	}

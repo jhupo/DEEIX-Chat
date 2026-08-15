@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -38,6 +39,8 @@ type bridgeFrame struct {
 	Outcome          json.RawMessage   `json:"outcome,omitempty"`
 	Event            json.RawMessage   `json:"event,omitempty"`
 	Artifacts        *[]ArtifactGrant  `json:"artifacts,omitempty"`
+	ErrorCode        string            `json:"errorCode,omitempty"`
+	ErrorMessage     string            `json:"errorMessage,omitempty"`
 }
 
 type bridgeWorkspace struct {
@@ -79,6 +82,8 @@ type AgentCommand struct {
 	SourceTurnRef    string             `json:"sourceTurnRef,omitempty"`
 	Action           string             `json:"action,omitempty"`
 	Name             string             `json:"name,omitempty"`
+	Path             string             `json:"path,omitempty"`
+	Create           bool               `json:"create,omitempty"`
 	GitInfo          map[string]*string `json:"gitInfo,omitempty"`
 	Target           map[string]any     `json:"target,omitempty"`
 	Input            []AgentInput       `json:"input,omitempty"`
@@ -132,6 +137,11 @@ func parseAgentCommand(raw json.RawMessage) (AgentCommand, error) {
 	turn := append(append([]string{}, thread...), "turnId", "sourceTurnRef")
 	var allowed []string
 	switch command.Kind {
+	case "workspace.register":
+		allowed = []string{"kind", "deviceId", "profileId", "path", "create"}
+		if !validText(command.Path, 4096) || strings.ContainsRune(command.Path, 0) {
+			return AgentCommand{}, errors.New("workspace path is invalid")
+		}
 	case "thread.create":
 		allowed = append(workspace, "settings")
 		if command.Settings == nil || !validSettings(*command.Settings) {
@@ -224,6 +234,9 @@ var (
 )
 
 func validateTargets(command AgentCommand) bool {
+	if command.Kind == "workspace.register" {
+		return true
+	}
 	if command.Kind == "resource.refresh" && command.Resource != nil && command.Resource.Scope == "profile" {
 		return true
 	}

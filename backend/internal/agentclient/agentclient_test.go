@@ -45,6 +45,38 @@ func TestRuntimeProofDeadline(t *testing.T) {
 	}
 }
 
+func TestJitterReconnectDelayWithinBounds(t *testing.T) {
+	base := 10 * time.Second
+	for range 100 {
+		delay := jitterReconnectDelay(base)
+		if delay < 8*time.Second || delay > 12*time.Second {
+			t.Fatalf("jitterReconnectDelay(%s) = %s", base, delay)
+		}
+	}
+}
+
+func TestBridgeAuthErrorIncludesStableCode(t *testing.T) {
+	err := bridgeAuthError(bridgeFrame{
+		Version: bridgeVersion, Type: "auth.error", ErrorCode: "runtime_key_rejected", ErrorMessage: "key rejected",
+	})
+	if err == nil || err.Error() != "key rejected (runtime_key_rejected)" {
+		t.Fatalf("bridgeAuthError() = %v", err)
+	}
+}
+
+func TestParseWorkspaceRegisterCommand(t *testing.T) {
+	command, err := parseAgentCommand(json.RawMessage(`{
+		"kind":"workspace.register",
+		"deviceId":"agd_0123456789abcdef0123456789abcdef",
+		"profileId":"codex-default",
+		"path":"C:\\source\\project",
+		"create":true
+	}`))
+	if err != nil || command.Path != `C:\source\project` || !command.Create {
+		t.Fatalf("parseAgentCommand() = %#v, %v", command, err)
+	}
+}
+
 func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	root := t.TempDir()
 	workspace := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace"}
@@ -68,6 +100,57 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	if len(loaded.Workspaces) != 1 {
 		t.Fatalf("workspace was duplicated: %#v", loaded.Workspaces)
 	}
+}
+
+func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
+	dataDir := repositoryTestDir(t)
+	initialRoot := repositoryTestDir(t)
+	initial := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: initialRoot, Name: "initial"}
+	config := Config{
+		Version: 1, CloudURL: "https://example.com", UserPublicID: "0123456789abcdef0123456789abcdef",
+		DeviceID: "agd_0123456789abcdef0123456789abcdef", ProfileID: "codex-default", CodexExecutable: os.Args[0],
+		Workspaces: []Workspace{initial},
+	}
+	if err := SaveConfig(filepath.Join(dataDir, "config.json"), config); err != nil {
+		t.Fatal(err)
+	}
+	gateway := &Gateway{
+		config: config, dataDir: dataDir, workspaces: map[string]Workspace{initial.WorkspaceID: initial},
+		adapter: &CodexAdapter{workspaces: map[string]Workspace{initial.WorkspaceID: initial}},
+	}
+	createdPath := filepath.Join(repositoryTestDir(t), "new-project")
+	result, err := gateway.registerWorkspace(AgentCommand{Path: createdPath, Create: true})
+	if err != nil || result["workspaceId"] == "" {
+		t.Fatalf("registerWorkspace() = %#v, %v", result, err)
+	}
+	loaded, err := LoadConfig(filepath.Join(dataDir, "config.json"))
+	if err != nil || len(loaded.Workspaces) != 2 {
+		t.Fatalf("registered config = %#v, %v", loaded.Workspaces, err)
+	}
+	reserved := filepath.Join(dataDir, "reserved-project")
+	if _, err = gateway.registerWorkspace(AgentCommand{Path: reserved, Create: true}); err == nil {
+		t.Fatal("Agent data directory was accepted as a workspace")
+	}
+	if _, err = os.Stat(reserved); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected workspace directory was not rolled back: %v", err)
+	}
+	if _, err = gateway.registerWorkspace(AgentCommand{Path: filepath.Dir(dataDir)}); err == nil {
+		t.Fatal("Agent data directory ancestor was accepted as a workspace")
+	}
+}
+
+func repositoryTestDir(t *testing.T) string {
+	t.Helper()
+	directory, err := os.MkdirTemp(".", ".agent-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(absolute) })
+	return absolute
 }
 
 func TestCodexProjectWorkspaceCollapsesLinkedWorktree(t *testing.T) {

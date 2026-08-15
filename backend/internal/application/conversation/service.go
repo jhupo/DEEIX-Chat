@@ -61,7 +61,10 @@ type gatewayProjectLister interface {
 }
 
 type GatewayArtifact struct{ ArtifactID string }
-type GatewayThread struct{ ThreadID string }
+type GatewayThread struct {
+	ThreadID string
+	Status   string
+}
 type GatewayProject struct {
 	ProjectID string
 	ProfileID string

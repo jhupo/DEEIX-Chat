@@ -90,6 +90,7 @@ type QueuedComposerMessage = {
 type ChatInputProps = {
   draft: string;
   executionMode: "cloud" | "gateway";
+  gatewayReady: boolean;
   loading: boolean;
   sending: boolean;
   uploading: boolean;
@@ -232,6 +233,7 @@ function formatAttachmentMeta(fileName: string, sizeBytes: number) {
 function ChatInputComponent({
   draft,
   executionMode,
+  gatewayReady,
   loading,
   sending,
   uploading,
@@ -388,16 +390,23 @@ function ChatInputComponent({
   }, []);
 
   const selectedModel = React.useMemo(
-    () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
-    [modelOptions, selectedPlatformModelName],
+    () => executionMode === "cloud"
+      ? modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null
+      : null,
+    [executionMode, modelOptions, selectedPlatformModelName],
   );
   const selectedProtocol = requestProtocol.trim();
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
-  const submitDecision = resolveChatSubmitDecision(selectedModel, attachments, options);
+  const submitDecision = resolveChatSubmitDecision(
+    selectedModel,
+    attachments,
+    executionMode === "cloud" ? options : {},
+  );
   const submitTask = submitDecision.task;
-  const requiresCloudRoute = submitTask === "chat" && executionMode === "cloud";
-  const chatRouteReady = executionMode === "gateway" || Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
-  const canSend = hasSubmitContent && !loading && !uploading && (!requiresCloudRoute || chatRouteReady);
+  const chatRouteReady = executionMode === "gateway"
+    ? gatewayReady
+    : Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
+  const canSend = hasSubmitContent && !loading && !uploading && chatRouteReady;
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
@@ -1030,21 +1039,23 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              <ChatModelPicker
-                modelOptions={modelOptions}
-                selectedPlatformModelName={selectedPlatformModelName}
-                loading={modelLoading}
-                disabled={modelDisabled}
-                onModelCatalogRefresh={onModelCatalogRefresh}
-                onModelChange={onModelChange}
-              />
+              {executionMode === "cloud" ? (
+                <ChatModelPicker
+                  modelOptions={modelOptions}
+                  selectedPlatformModelName={selectedPlatformModelName}
+                  loading={modelLoading}
+                  disabled={modelDisabled}
+                  onModelCatalogRefresh={onModelCatalogRefresh}
+                  onModelChange={onModelChange}
+                />
+              ) : null}
 
               <InputGroupButton
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || (requiresCloudRoute && !chatRouteReady) || (!sending && !hasSubmitContent && !speechInput.supported)}
+                disabled={loading || uploading || !chatRouteReady || (!sending && !hasSubmitContent && !speechInput.supported)}
                 onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}

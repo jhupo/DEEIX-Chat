@@ -95,16 +95,17 @@ func (AgentBridgeFrame) TableName() string { return "agent_bridge_frames" }
 
 type AgentRuntimeProfile struct {
 	ControlPlaneModel
-	PublicID       string     `gorm:"size:64;not null;uniqueIndex:uk_agent_runtime_profiles_device_public,priority:2"`
-	UserID         uint       `gorm:"not null;index:idx_agent_runtime_profiles_user"`
-	DeviceID       uint       `gorm:"not null;uniqueIndex:uk_agent_runtime_profiles_device_public,priority:1"`
-	Provider       string     `gorm:"size:32;not null"`
-	Status         string     `gorm:"size:32;not null;index"`
-	RemoteKeyID    *int64     `gorm:"index"`
-	CredentialHash string     `gorm:"size:64;not null;default:''"`
-	ManifestJSON   string     `gorm:"type:jsonb;not null;default:'{}'"`
-	VerifiedAt     *time.Time `gorm:"index"`
-	LeaseExpiresAt *time.Time `gorm:"index"`
+	PublicID          string     `gorm:"size:64;not null;uniqueIndex:uk_agent_runtime_profiles_device_public,priority:2"`
+	UserID            uint       `gorm:"not null;index:idx_agent_runtime_profiles_user"`
+	DeviceID          uint       `gorm:"not null;uniqueIndex:uk_agent_runtime_profiles_device_public,priority:1"`
+	Provider          string     `gorm:"size:32;not null"`
+	Status            string     `gorm:"size:32;not null;index"`
+	RemoteKeyID       *int64     `gorm:"index"`
+	CredentialHash    string     `gorm:"size:64;not null;default:''"`
+	ManifestJSON      string     `gorm:"type:jsonb;not null;default:'{}'"`
+	VerifiedAt        *time.Time `gorm:"index"`
+	LeaseExpiresAt    *time.Time `gorm:"index"`
+	PresenceExpiresAt *time.Time `gorm:"index"`
 }
 
 func (AgentRuntimeProfile) TableName() string { return "agent_runtime_profiles" }

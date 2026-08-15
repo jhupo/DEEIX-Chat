@@ -25,11 +25,11 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 }
 
 func TestGatewayTurnSettingsRejectsUnknownOptions(t *testing.T) {
-	settings, err := gatewayTurnSettings("gpt-5.6", "", map[string]interface{}{"reasoningEffort": "high"})
-	if err != nil || string(settings) != `{"model":"gpt-5.6","reasoningEffort":"high"}` {
+	settings, err := gatewayTurnSettings(map[string]interface{}{"reasoningEffort": "high"})
+	if err != nil || string(settings) != `{"reasoningEffort":"high"}` {
 		t.Fatalf("settings = %s, %v", settings, err)
 	}
-	if _, err := gatewayTurnSettings("gpt-5.6", "", map[string]interface{}{"temperature": 0.5}); err == nil {
+	if _, err := gatewayTurnSettings(map[string]interface{}{"temperature": 0.5}); err == nil {
 		t.Fatal("unknown gateway option was accepted")
 	}
 }

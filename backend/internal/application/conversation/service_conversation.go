@@ -82,6 +82,7 @@ func (s *Service) CreateConversation(ctx context.Context, input CreateConversati
 		if s.gatewayExecutor == nil {
 			return nil, ErrExecutionUnavailable
 		}
+		normalizedModel = ""
 		resolvedProject, err := s.resolveGatewayProject(ctx, input.UserID, deviceID, input.ProjectPublicID)
 		if err != nil {
 			return nil, err

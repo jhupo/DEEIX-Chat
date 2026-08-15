@@ -173,7 +173,7 @@ func (a localGatewayAdapter) GetThreadByConversation(ctx context.Context, userID
 		}
 		return nil, mapLocalGatewayError(err)
 	}
-	return &conversation.GatewayThread{ThreadID: item.ThreadID}, nil
+	return &conversation.GatewayThread{ThreadID: item.ThreadID, Status: item.Status}, nil
 }
 
 func (a localGatewayAdapter) DeleteThread(ctx context.Context, userID uint, threadID, idempotencyKey string) error {

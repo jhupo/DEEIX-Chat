@@ -40,6 +40,7 @@ const (
 	connectionTTL        = 5 * time.Minute
 	runtimeChallengeTTL  = time.Minute
 	runtimeLeaseTTL      = 10 * time.Minute
+	runtimePresenceTTL   = 75 * time.Second
 )
 
 type RuntimeUserResolver interface {
@@ -80,6 +81,7 @@ type DeviceView struct {
 	Name       string
 	Platform   string
 	Status     string
+	Online     bool
 	LastSeenAt *time.Time
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -196,13 +198,19 @@ type ResourceRefreshView struct {
 }
 
 type CommandView struct {
-	CommandID string
-	Status    string
+	CommandID    string
+	Status       string
+	ErrorMessage string
 }
 
 type WorkspaceRegistration struct {
 	WorkspaceID string
 	Name        string
+}
+
+type RegisterWorkspaceInput struct {
+	DeviceID, ProfileID, Path, IdempotencyKey string
+	Create                                    bool
 }
 
 type ThreadView struct {
@@ -374,23 +382,28 @@ func (s *Service) CompleteRuntimeProof(
 ) (time.Time, error) {
 	if identity == nil || challenge == nil || challenge.Profile == nil || challenge.Challenge == nil ||
 		challenge.Profile.UserID != identity.UserID || challenge.Profile.DeviceID != identity.InternalDeviceID ||
-		challenge.Challenge.DeviceID != identity.InternalDeviceID || challenge.Challenge.ExpiresAt.Before(s.now().UTC()) ||
-		!validProviderManifest(manifest, challenge.Profile.Provider) {
-		return time.Time{}, ErrRuntimeAuth
+		challenge.Challenge.DeviceID != identity.InternalDeviceID || challenge.Challenge.ExpiresAt.Before(s.now().UTC()) {
+		return time.Time{}, fmt.Errorf("%w: runtime challenge validation failed", ErrRuntimeAuth)
+	}
+	if !validProviderManifest(manifest, challenge.Profile.Provider) {
+		return time.Time{}, fmt.Errorf("%w: runtime manifest validation failed", ErrInvalidInput)
 	}
 	proof, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(proofText))
 	if err != nil || len(proof) != sha256.Size {
-		return time.Time{}, ErrRuntimeAuth
+		return time.Time{}, fmt.Errorf("%w: proof encoding is invalid", ErrRuntimeAuth)
 	}
 	_, sub2UserID, err := s.users.RuntimeUser(ctx, identity.UserID)
-	if err != nil || sub2UserID <= 0 {
-		return time.Time{}, ErrRuntimeAuth
+	if err != nil {
+		return time.Time{}, fmt.Errorf("runtime user lookup: %w", err)
+	}
+	if sub2UserID <= 0 {
+		return time.Time{}, fmt.Errorf("%w: runtime user is not linked", ErrRuntimeAuth)
 	}
 	remoteKeyID, credentialHash, err := s.proofs.MatchRuntimeProof(
 		ctx, identity.UserID, sub2UserID, []byte(challenge.Canonical), proof,
 	)
 	if err != nil || remoteKeyID <= 0 || len(credentialHash) != sha256.Size*2 {
-		return time.Time{}, ErrRuntimeAuth
+		return time.Time{}, fmt.Errorf("%w: API key ownership proof failed: %v", ErrRuntimeAuth, err)
 	}
 	now := s.now().UTC()
 	leaseExpiresAt := now.Add(runtimeLeaseTTL)
@@ -398,9 +411,17 @@ func (s *Service) CompleteRuntimeProof(
 		ctx, identity.InternalDeviceID, challenge.Profile.ID, challenge.Challenge.ID,
 		remoteKeyID, credentialHash, string(manifest), now, leaseExpiresAt,
 	); err != nil {
-		return time.Time{}, ErrRuntimeAuth
+		return time.Time{}, fmt.Errorf("persist runtime proof: %w", err)
 	}
 	return leaseExpiresAt, nil
+}
+
+func (s *Service) TouchRuntimePresence(ctx context.Context, identity *ConnectionIdentity, profileID uint) error {
+	if identity == nil || identity.InternalDeviceID == 0 || profileID == 0 {
+		return ErrInvalidInput
+	}
+	now := s.now().UTC()
+	return s.repo.TouchRuntimePresence(ctx, identity.InternalDeviceID, profileID, now, now.Add(runtimePresenceTTL))
 }
 
 func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdentity, challenge *RuntimeChallengeResult, registrations []WorkspaceRegistration) error {
@@ -494,6 +515,53 @@ func (s *Service) QueueResourceRefresh(ctx context.Context, userID uint, deviceP
 	}
 	s.notifyUser(userID)
 	return &ResourceRefreshView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) RegisterWorkspace(ctx context.Context, userID uint, input RegisterWorkspaceInput) (*CommandView, error) {
+	input.DeviceID, input.ProfileID, input.Path = strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.ProfileID), strings.TrimSpace(input.Path)
+	if userID == 0 || !validPublicID(input.DeviceID, "agd") || !validOpaqueRef(input.ProfileID) ||
+		!validIdempotencyKey(input.IdempotencyKey) || input.Path == "" || len(input.Path) > 4096 || strings.ContainsRune(input.Path, 0) {
+		return nil, ErrInvalidInput
+	}
+	request := struct {
+		DeviceID, ProfileID, Path string
+		Create                    bool
+	}{input.DeviceID, input.ProfileID, input.Path, input.Create}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "workspace.register"}
+	created, err := s.repo.QueueWorkspaceRegistration(
+		ctx, input.IdempotencyKey, requestHash(request), userID,
+		input.DeviceID, input.ProfileID, input.Path, input.Create, command, s.now().UTC(),
+	)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) GetCommand(ctx context.Context, userID uint, commandID string) (*CommandView, error) {
+	commandID = strings.TrimSpace(commandID)
+	if userID == 0 || !validPublicID(commandID, "agcmd") {
+		return nil, ErrInvalidInput
+	}
+	item, err := s.repo.GetCommand(ctx, userID, commandID)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	view := &CommandView{CommandID: item.PublicID, Status: item.State}
+	if item.CompletedAt != nil {
+		var outcome struct {
+			Kind  string `json:"kind"`
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(item.TerminalJSON), &outcome) == nil && outcome.Kind == "error" {
+			view.Status = "error"
+			view.ErrorMessage = strings.TrimSpace(outcome.Error.Message)
+		}
+	}
+	return view, nil
 }
 
 func (s *Service) GetResourceSnapshot(ctx context.Context, userID uint, devicePublicID, profilePublicID, workspacePublicID, resourceName string) (*ResourceSnapshotView, error) {
@@ -1077,17 +1145,28 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 	return applied.Acknowledged, nil
 }
 
-func (s *Service) flushPendingConversationEvents(ctx context.Context, deviceID uint) error {
-	items, err := s.repo.ListPendingConversationEvents(ctx, deviceID, 1000)
-	if err != nil {
-		return err
+func (s *Service) FlushPendingConversationEvents(ctx context.Context, identity *ConnectionIdentity) error {
+	if identity == nil || identity.InternalDeviceID == 0 {
+		return ErrInvalidInput
 	}
-	for _, item := range items {
-		if err := s.projectConversationEvent(ctx, item); err != nil {
+	return s.flushPendingConversationEvents(ctx, identity.InternalDeviceID)
+}
+
+func (s *Service) flushPendingConversationEvents(ctx context.Context, deviceID uint) error {
+	for {
+		items, err := s.repo.ListPendingConversationEvents(ctx, deviceID, 1000)
+		if err != nil {
 			return err
 		}
+		for _, item := range items {
+			if err := s.projectConversationEvent(ctx, item); err != nil {
+				return err
+			}
+		}
+		if len(items) < 1000 {
+			return nil
+		}
 	}
-	return nil
 }
 
 func (s *Service) projectConversationEvent(ctx context.Context, item domainagent.AppliedEventFrame) error {
@@ -1340,7 +1419,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		return false
 	}
 	return validManifestValues(manifest.Commands, []string{
-		"thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
+		"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
 		"review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
 	}) && validManifestValues(manifest.Resources.Profile, []string{
 		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
@@ -1539,6 +1618,6 @@ func newPublicID(prefix string) string {
 func deviceView(item domainagent.Device, userPublicID string) DeviceView {
 	return DeviceView{
 		DeviceID: item.PublicID, UserID: userPublicID, Name: item.Name, Platform: item.Platform,
-		Status: item.Status, LastSeenAt: item.LastSeenAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		Status: item.Status, Online: item.Online, LastSeenAt: item.LastSeenAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
 }

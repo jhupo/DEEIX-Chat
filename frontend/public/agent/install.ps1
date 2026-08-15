@@ -18,6 +18,7 @@ $taskName = "DEEIX Agent"
 $userSID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $serviceInstalled = $false
 $hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
+$hadService = $null -ne (Get-Service -Name "DEEIXAgent" -ErrorAction SilentlyContinue)
 New-Item -ItemType Directory -Force -Path $temporary, $installDir, $dataDir | Out-Null
 try {
   Invoke-WebRequest "$base/$asset" -OutFile $download
@@ -52,7 +53,13 @@ try {
   } catch {
     if (Test-Path -LiteralPath '$installedLiteral') { & '$installedLiteral' service-uninstall 2>`$null }
     Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
-    if (Test-Path -LiteralPath '$backupLiteral') { Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral' }
+    if (Test-Path -LiteralPath '$backupLiteral') {
+      Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral'
+      if ('$hadService' -eq 'True') {
+        & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
+        if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent previous service restoration failed' }
+      }
+    }
     throw
   }
 } catch {
@@ -70,13 +77,19 @@ try {
   $serviceInstalled = $true
 
   $connected = $false
-  for ($attempt = 0; $attempt -lt 90; $attempt++) {
+  $connectedSeconds = 0
+  for ($attempt = 0; $attempt -lt 120; $attempt++) {
     Start-Sleep -Seconds 1
     $statusPath = Join-Path $dataDir "runtime-status.json"
     if (-not (Test-Path -LiteralPath $statusPath)) { continue }
     try {
       $status = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
-      if ($status.state -eq "connected") { $connected = $true; break }
+      if ($status.state -eq "connected") {
+        $connectedSeconds++
+        if ($connectedSeconds -ge 20) { $connected = $true; break }
+      } else {
+        $connectedSeconds = 0
+      }
     } catch {}
   }
   if (-not $connected) {
@@ -88,7 +101,27 @@ try {
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
   Write-Host "DEEIX Agent system service is installed and connected: $installed"
 } catch {
-  if (-not $serviceInstalled -and $hadScheduledTask) { Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+  if ($serviceInstalled) {
+    $installedLiteral = $installed.Replace("'", "''")
+    $backupLiteral = $backup.Replace("'", "''")
+    $dataDirLiteral = $dataDir.Replace("'", "''")
+    $userSIDLiteral = $userSID.Replace("'", "''")
+    $rollbackScript = @"
+`$ErrorActionPreference = 'Stop'
+if (Test-Path -LiteralPath '$installedLiteral') { & '$installedLiteral' service-uninstall 2>`$null }
+Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath '$backupLiteral') {
+  Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral'
+  if ('$hadService' -eq 'True') {
+    & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
+    if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent previous service restoration failed' }
+  }
+}
+"@
+    $encodedRollback = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($rollbackScript))
+    Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback" | Out-Null
+  }
+  if ($hadScheduledTask) { Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
   throw
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue

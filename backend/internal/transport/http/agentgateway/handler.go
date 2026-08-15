@@ -80,6 +80,11 @@ type connectionResponse struct {
 type createArtifactRequest struct {
 	FileID string `json:"fileId"`
 }
+type registerWorkspaceRequest struct {
+	ProfileID string `json:"profileId"`
+	Path      string `json:"path"`
+	Create    bool   `json:"create"`
+}
 
 const (
 	smallJSONBodyLimit = int64(8 * 1024)
@@ -251,6 +256,33 @@ func (h *Handler) ListWorkspaces(c *gin.Context) {
 	response.Success(c, toWorkspaceDocs(items))
 }
 
+// RegisterWorkspace queues local directory validation and registration on the selected device.
+func (h *Handler) RegisterWorkspace(c *gin.Context) {
+	var request registerWorkspaceRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	result, err := h.service.RegisterWorkspace(c.Request.Context(), middleware.MustUserID(c), appagent.RegisterWorkspaceInput{
+		DeviceID: c.Param("device_id"), ProfileID: request.ProfileID, Path: request.Path, Create: request.Create,
+		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")),
+	})
+	if err != nil {
+		writeError(c, err, "register agent workspace failed")
+		return
+	}
+	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
+}
+
+func (h *Handler) GetCommand(c *gin.Context) {
+	result, err := h.service.GetCommand(c.Request.Context(), middleware.MustUserID(c), c.Param("command_id"))
+	if err != nil {
+		writeError(c, err, "load agent command failed")
+		return
+	}
+	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status, ErrorMessage: result.ErrorMessage})
+}
+
 // QueueProfileResourceRefresh godoc
 // @Summary Refresh a runtime profile resource
 // @Tags agent-gateway
@@ -404,7 +436,7 @@ func (h *Handler) toDeviceResponse(item appagent.DeviceView) deviceResponse {
 	}
 	return deviceResponse{
 		DeviceID: item.DeviceID, UserID: item.UserID, Name: item.Name, Platform: item.Platform,
-		Status: item.Status, Online: h.hub.connected(item.DeviceID), LastSeenAt: lastSeenAt,
+		Status: item.Status, Online: item.Online, LastSeenAt: lastSeenAt,
 		CreatedAt: item.CreatedAt.Format(timeLayout), UpdatedAt: item.UpdatedAt.Format(timeLayout),
 	}
 }

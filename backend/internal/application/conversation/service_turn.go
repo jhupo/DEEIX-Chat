@@ -129,7 +129,10 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	if s.gatewayExecutor == nil {
 		return nil, ErrExecutionUnavailable
 	}
-	if strings.TrimSpace(input.Content) == "" || (input.ContentType != "text" && input.ContentType != "markdown") ||
+	hasFiles := len(input.FileIDs) > 0
+	validContentType := hasFiles && input.ContentType == "mixed" ||
+		!hasFiles && (input.ContentType == "text" || input.ContentType == "markdown")
+	if strings.TrimSpace(input.Content) == "" || !validContentType ||
 		len(input.SelectedToolIDs) != 0 || len(input.SkillIDs) != 0 || input.HTMLVisualPromptEnabled ||
 		strings.TrimSpace(input.ParentMessagePublicID) != "" || strings.TrimSpace(input.SourceMessagePublicID) != "" ||
 		(strings.TrimSpace(input.BranchReason) != "" && strings.TrimSpace(input.BranchReason) != "default") {
@@ -160,7 +163,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 		providerInput = append(providerInput, map[string]string{"kind": "artifact", "artifactRef": artifact.ArtifactID})
 	}
 	encodedInput, _ := json.Marshal(providerInput)
-	settings, err := gatewayTurnSettings(conversation.Model, input.PlatformModelName, input.Options)
+	settings, err := gatewayTurnSettings(input.Options)
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +171,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	run := &model.Run{
 		RunID: runID, RequestID: strings.TrimSpace(input.RequestID), UserID: input.UserID,
 		ConversationID: input.ConversationID, TaskType: "agent", Endpoint: "local_gateway",
-		Provider: strings.TrimSpace(conversation.Provider), ProviderProtocol: "local_gateway", RequestedModelName: strings.TrimSpace(conversation.Model),
-		PlatformModelName: strings.TrimSpace(conversation.Model), Status: "queued", StartedAt: startedAt,
+		Provider: strings.TrimSpace(conversation.Provider), ProviderProtocol: "local_gateway", Status: "queued", StartedAt: startedAt,
 	}
 	pair, err := s.createMessagePairWithRun(ctx, input, runID, preparation, attachments, nil, run)
 	if err != nil {
@@ -190,18 +192,18 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 		pair.user.ErrorMessage, pair.assistant.ErrorMessage = err.Error(), err.Error()
 		return &SendMessageResult{UserMessage: *pair.user, AssistantMessage: *pair.assistant, ExecutionType: model.ExecutionTypeGateway}, err
 	}
-	return &SendMessageResult{UserMessage: *pair.user, AssistantMessage: *pair.assistant, PlatformModelName: conversation.Model, UpstreamModelName: conversation.Model, UpstreamProtocol: "local_gateway", StartedAt: startedAt, ExecutionType: model.ExecutionTypeGateway}, nil
+	return &SendMessageResult{UserMessage: *pair.user, AssistantMessage: *pair.assistant, UpstreamProtocol: "local_gateway", StartedAt: startedAt, ExecutionType: model.ExecutionTypeGateway}, nil
 }
 
 func (s *Service) queueGatewayTurn(ctx context.Context, input SendMessageInput, conversation *model.Conversation, providerInput, settings json.RawMessage, runID string) error {
 	thread, err := s.gatewayExecutor.GetThreadByConversation(ctx, input.UserID, conversation.ID)
-	if err == nil {
+	if err == nil && thread.Status != "failed" {
 		err = s.gatewayExecutor.StartTurn(ctx, input.UserID, GatewayStartTurnInput{
 			ThreadID: thread.ThreadID, RunID: runID, Input: providerInput, Settings: settings, IdempotencyKey: uuid.NewString(),
 		})
 		return err
 	}
-	if !errors.Is(err, ErrExecutionBindingNotFound) {
+	if err != nil && !errors.Is(err, ErrExecutionBindingNotFound) {
 		return err
 	}
 	err = s.gatewayExecutor.StartThread(ctx, input.UserID, GatewayStartThreadInput{
@@ -212,15 +214,8 @@ func (s *Service) queueGatewayTurn(ctx context.Context, input SendMessageInput, 
 	return err
 }
 
-func gatewayTurnSettings(conversationModel, requestedModel string, options map[string]interface{}) (json.RawMessage, error) {
+func gatewayTurnSettings(options map[string]interface{}) (json.RawMessage, error) {
 	settings := map[string]string{}
-	modelName := strings.TrimSpace(requestedModel)
-	if modelName == "" {
-		modelName = strings.TrimSpace(conversationModel)
-	}
-	if modelName != "" {
-		settings["model"] = modelName
-	}
 	allowed := map[string]map[string]bool{
 		"reasoningEffort": {"low": true, "medium": true, "high": true, "xhigh": true},
 		"approvalPolicy":  {"untrusted": true, "on-request": true, "never": true},

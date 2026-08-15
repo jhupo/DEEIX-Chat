@@ -73,6 +73,7 @@ import {
 import { useChatSession } from "@/features/chat";
 import { useDevices } from "@/features/devices";
 import { ProjectDialog, type ProjectDraft } from "@/features/layouts/components/navigation/project-dialog";
+import { WorkspaceDialog } from "@/features/layouts/components/navigation/workspace-dialog";
 import { SidebarConversationItem } from "@/features/layouts/components/navigation/sidebar-conversation-item";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutProjectConversations } from "@/features/layouts/hooks/use-layout-project-conversations";
@@ -400,6 +401,7 @@ export function NavProjects() {
   const {
     items,
     projects,
+    reload,
     lastChange,
     createProject,
     updateProject,
@@ -415,8 +417,10 @@ export function NavProjects() {
     touchByPublicID,
   } = useSidebarConversations();
   const canManageProjects = executionMode === "cloud";
+  const canRegisterWorkspace = executionMode === "gateway" && Boolean(defaultDevice?.online);
   const activeProjectID = pathname === "/chat" ? activeChatProjectID : activeRecentProjectID;
   const [draft, setDraft] = React.useState<ProjectDraft | null>(null);
+  const [workspaceDialogOpen, setWorkspaceDialogOpen] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<ProjectActionTarget | null>(null);
   const [deleteProjectConversations, setDeleteProjectConversations] = React.useState(false);
   const [deleteProjectFiles, setDeleteProjectFiles] = React.useState(false);
@@ -713,16 +717,18 @@ export function NavProjects() {
             <SidebarGroup className="px-2 py-2">
               <ProjectGroupHeader
                 title={t("title")}
-                createLabel={t("create")}
+                createLabel={canManageProjects ? t("create") : t("workspace.create")}
                 contentID={projectsContentID}
                 open={projectsOpen}
-                onCreate={canManageProjects ? () => setDraft({
-                  name: "",
-                  systemPrompt: "",
-                  mcpDefaultMode: "inherit",
-                  defaultMCPToolIDs: [],
-                  defaultSkillIDs: [],
-                }) : undefined}
+                onCreate={canManageProjects
+                  ? () => setDraft({
+                      name: "",
+                      systemPrompt: "",
+                      mcpDefaultMode: "inherit",
+                      defaultMCPToolIDs: [],
+                      defaultSkillIDs: [],
+                    })
+                  : canRegisterWorkspace ? () => setWorkspaceDialogOpen(true) : undefined}
                 onOpenChange={setProjectsOpen}
                 toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
               />
@@ -735,6 +741,14 @@ export function NavProjects() {
         {canManageProjects ? (
           <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
         ) : null}
+        {executionMode === "gateway" && defaultDevice ? (
+          <WorkspaceDialog
+            deviceId={defaultDevice.deviceId}
+            open={workspaceDialogOpen}
+            onOpenChange={setWorkspaceDialogOpen}
+            onQueued={reload}
+          />
+        ) : null}
       </>
     );
   }
@@ -746,16 +760,18 @@ export function NavProjects() {
           <SidebarGroup className="px-2 py-2">
             <ProjectGroupHeader
               title={t("title")}
-              createLabel={t("create")}
+              createLabel={canManageProjects ? t("create") : t("workspace.create")}
               contentID={projectsContentID}
               open={projectsOpen}
-              onCreate={canManageProjects ? () => setDraft({
-                name: "",
-                systemPrompt: "",
-                mcpDefaultMode: "inherit",
-                defaultMCPToolIDs: [],
-                defaultSkillIDs: [],
-              }) : undefined}
+              onCreate={canManageProjects
+                ? () => setDraft({
+                    name: "",
+                    systemPrompt: "",
+                    mcpDefaultMode: "inherit",
+                    defaultMCPToolIDs: [],
+                    defaultSkillIDs: [],
+                  })
+                : canRegisterWorkspace ? () => setWorkspaceDialogOpen(true) : undefined}
               onOpenChange={setProjectsOpen}
               toggleLabel={projectsOpen ? t("collapseSection") : t("expandSection")}
             />
@@ -1014,6 +1030,14 @@ export function NavProjects() {
 
       {canManageProjects ? (
         <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
+      ) : null}
+      {executionMode === "gateway" && defaultDevice ? (
+        <WorkspaceDialog
+          deviceId={defaultDevice.deviceId}
+          open={workspaceDialogOpen}
+          onOpenChange={setWorkspaceDialogOpen}
+          onQueued={reload}
+        />
       ) : null}
 
       <AlertDialog

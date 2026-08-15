@@ -14,6 +14,19 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
+func TestRetriableThreadCreateFailure(t *testing.T) {
+	for _, code := range []string{"provider_error", "source_not_found", "artifact_error"} {
+		if !retriableThreadCreateFailure(code) {
+			t.Fatalf("explicit failure %q was not retryable", code)
+		}
+	}
+	for _, code := range []string{"", "timeout", "outcome_unknown"} {
+		if retriableThreadCreateFailure(code) {
+			t.Fatalf("uncertain failure %q was retryable", code)
+		}
+	}
+}
+
 func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
@@ -162,7 +175,7 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	leaseExpiresAt := now.Add(time.Hour)
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
-		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt,
+		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatal(err)
@@ -378,7 +391,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	leaseExpiresAt := now.Add(10 * time.Minute)
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
-		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt,
+		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatalf("create runtime profile: %v", err)
@@ -567,7 +580,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
 	}
 	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260},{"role":"user","content":"continue","createdAt":1786615320}] }]}}}`
-	if err := projectTerminalResult(database, &device, &model.AgentCommand{
+	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,
 	}, updatedResourceTerminal, now.Add(9*time.Second)); err != nil {
@@ -590,7 +603,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		t.Fatalf("create canonical workspace: %v", err)
 	}
 	shortResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","status":"active","messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}] }]}}}`
-	if err := projectTerminalResult(database, &device, &model.AgentCommand{
+	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &canonicalWorkspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,
 	}, shortResourceTerminal, now.Add(10*time.Second)); err != nil {
@@ -660,6 +673,15 @@ func TestIsThreadOnlyEvent(t *testing.T) {
 				t.Fatalf("isThreadOnlyEvent() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestManifestSupportsWorkspaceRegistration(t *testing.T) {
+	if !manifestSupportsCommand(`{"commands":["thread.create","workspace.register"]}`, "workspace.register") {
+		t.Fatal("workspace registration capability was not detected")
+	}
+	if manifestSupportsCommand(`{"commands":["thread.create"]}`, "workspace.register") {
+		t.Fatal("missing workspace registration capability was accepted")
 	}
 }
 

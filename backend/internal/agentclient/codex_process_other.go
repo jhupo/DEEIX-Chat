@@ -5,3 +5,5 @@ package agentclient
 import "os/exec"
 
 func configureCodexCommand(*exec.Cmd) (func(), error) { return func() {}, nil }
+
+func runAsConfiguredUser(operation func() error) error { return operation() }

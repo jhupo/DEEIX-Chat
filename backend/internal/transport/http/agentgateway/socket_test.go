@@ -170,6 +170,9 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" {
 		t.Fatalf("unexpected pong: %#v, %v", pong, err)
 	}
+	if repo.pendingReads == 0 {
+		t.Fatal("runtime handshake did not drain pending conversation events")
+	}
 
 	secondConfig, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http"), server.URL)
 	if err != nil {
@@ -182,14 +185,56 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	}
 }
 
+func TestBridgeSocketProbeDoesNotStartRuntime(t *testing.T) {
+	const token = "deeix_connection_probe_value"
+	hash := sha256.Sum256([]byte(token))
+	repo := &socketRepo{
+		tokenHash: hex.EncodeToString(hash[:]),
+		device: domainagent.Device{
+			ID: 3, PublicID: "agd_f6f910e920934def9a5cda479fc25251", UserID: 7,
+			Status: domainagent.DeviceStatusActive, CredentialVersion: 1,
+			PublicKeyFingerprint: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		},
+	}
+	service, err := appagent.NewService(repo, "01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(service)
+	server := httptest.NewServer(http.HandlerFunc(handler.connect))
+	defer server.Close()
+
+	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http")+"?probe=1", server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Protocol = []string{bridgeProtocol, authProtocolPrefix + token}
+	connection, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatalf("dial bridge probe: %v", err)
+	}
+	defer connection.Close()
+	var ready bridgeFrame
+	if err = websocket.JSON.Receive(connection, &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Version != bridgeVersion || ready.Type != "probe.ready" || ready.DeviceID != repo.device.PublicID {
+		t.Fatalf("unexpected probe response: %#v", ready)
+	}
+	if repo.serverAck != 0 || repo.bridgeAck != 0 || repo.pendingReads != 0 || len(repo.commands) != 0 {
+		t.Fatalf("probe mutated runtime state: %#v", repo)
+	}
+}
+
 type socketRepo struct {
-	mu        sync.Mutex
-	tokenHash string
-	device    domainagent.Device
-	consumed  bool
-	commands  []domainagent.Command
-	serverAck uint64
-	bridgeAck uint64
+	mu           sync.Mutex
+	tokenHash    string
+	device       domainagent.Device
+	consumed     bool
+	commands     []domainagent.Command
+	serverAck    uint64
+	bridgeAck    uint64
+	pendingReads int
 }
 
 func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
@@ -287,6 +332,9 @@ func (r *socketRepo) ListCommandsForDelivery(_ context.Context, _ uint, after ui
 	}
 	return result, nil
 }
+func (*socketRepo) GetCommand(context.Context, uint, string) (*domainagent.Command, error) {
+	return nil, repository.ErrNotFound
+}
 func (r *socketRepo) MarkCommandDelivered(_ context.Context, _ uint, commandID uint, now time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -325,7 +373,10 @@ func (r *socketRepo) ApplyEventFrame(_ context.Context, _, _ uint, bridgeSeq uin
 	r.bridgeAck = bridgeSeq
 	return &domainagent.AppliedEventFrame{Acknowledged: r.bridgeAck, Event: *event}, nil
 }
-func (*socketRepo) ListPendingConversationEvents(context.Context, uint, int) ([]domainagent.AppliedEventFrame, error) {
+func (r *socketRepo) ListPendingConversationEvents(context.Context, uint, int) ([]domainagent.AppliedEventFrame, error) {
+	r.mu.Lock()
+	r.pendingReads++
+	r.mu.Unlock()
 	return nil, nil
 }
 func (*socketRepo) MarkConversationEventProjected(context.Context, uint, time.Time) error { return nil }
@@ -347,6 +398,9 @@ func (r *socketRepo) CompleteRuntimeProof(_ context.Context, deviceID, profileID
 	if deviceID != r.device.ID || profileID != 21 || challengeID != 22 || remoteKeyID != 31 || len(credentialHash) != 64 || !jsonEqualRaw(manifestJSON, testProviderManifest) {
 		return repository.ErrConflict
 	}
+	return nil
+}
+func (*socketRepo) TouchRuntimePresence(context.Context, uint, uint, time.Time, time.Time) error {
 	return nil
 }
 
@@ -385,6 +439,9 @@ func (r *socketRepo) QueueResourceRefresh(_ context.Context, _, _ string, userID
 	created := *command
 	created.State = "queued"
 	return &created, nil
+}
+func (*socketRepo) QueueWorkspaceRegistration(context.Context, string, string, uint, string, string, string, bool, *domainagent.Command, time.Time) (*domainagent.Command, error) {
+	return nil, repository.ErrNotFound
 }
 func (*socketRepo) GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error) {
 	return nil, repository.ErrNotFound

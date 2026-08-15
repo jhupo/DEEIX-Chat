@@ -22,6 +22,7 @@ type AgentGatewayRepository interface {
 	ConsumeChallengeAndCreateConnection(context.Context, uint, uint, *domainagent.Credential, time.Time) (*domainagent.Credential, error)
 	ConsumeConnection(context.Context, string, time.Time) (*domainagent.Device, error)
 	ListCommandsForDelivery(context.Context, uint, uint64, int) ([]domainagent.Command, error)
+	GetCommand(context.Context, uint, string) (*domainagent.Command, error)
 	MarkCommandDelivered(context.Context, uint, uint, time.Time) error
 	AckServerCommands(context.Context, uint, uint64, time.Time) error
 	ApplyTerminalFrame(context.Context, uint, uint64, uint64, string, string, string, time.Time) (uint64, error)
@@ -30,6 +31,7 @@ type AgentGatewayRepository interface {
 	MarkConversationEventProjected(context.Context, uint, time.Time) error
 	BeginRuntimeProof(context.Context, uint, string, *domainagent.RuntimeProfile, *domainagent.RuntimeProofChallenge, time.Time) (*domainagent.RuntimeProfile, *domainagent.RuntimeProofChallenge, error)
 	CompleteRuntimeProof(context.Context, uint, uint, uint, int64, string, string, time.Time, time.Time) error
+	TouchRuntimePresence(context.Context, uint, uint, time.Time, time.Time) error
 	SyncWorkspaces(context.Context, uint, uint, uint, []domainagent.Workspace, time.Time) error
 	ListRuntimeProfiles(context.Context, uint, string) ([]domainagent.RuntimeProfile, error)
 	ListWorkspaces(context.Context, uint, string) ([]domainagent.Workspace, error)
@@ -38,6 +40,7 @@ type AgentGatewayRepository interface {
 	ListArtifactsForCommand(context.Context, uint, uint, []string) ([]domainagent.Artifact, error)
 	GetArtifactForCommand(context.Context, string, string) (*domainagent.Artifact, *domainagent.Command, error)
 	QueueResourceRefresh(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
+	QueueWorkspaceRegistration(context.Context, string, string, uint, string, string, string, bool, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error)
 	QueueTurnInterrupt(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	QueueThreadDelete(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error)

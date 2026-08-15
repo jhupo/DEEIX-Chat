@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -47,6 +48,8 @@ type bridgeFrame struct {
 	Event            json.RawMessage        `json:"event,omitempty"`
 	Manifest         json.RawMessage        `json:"manifest,omitempty"`
 	Artifacts        *[]bridgeArtifactGrant `json:"artifacts,omitempty"`
+	ErrorCode        string                 `json:"errorCode,omitempty"`
+	ErrorMessage     string                 `json:"errorMessage,omitempty"`
 }
 
 type bridgeWorkspace struct {
@@ -158,6 +161,7 @@ func (h *bridgeHub) subscribeUser(userID uint) (<-chan struct{}, func()) {
 
 func (h *Handler) connect(w http.ResponseWriter, request *http.Request) {
 	var identity *appagent.ConnectionIdentity
+	probe := request.URL.Query().Get("probe") == "1"
 	server := websocket.Server{
 		Handshake: func(config *websocket.Config, req *http.Request) error {
 			token, err := connectionToken(config.Protocol)
@@ -177,6 +181,12 @@ func (h *Handler) connect(w http.ResponseWriter, request *http.Request) {
 				return
 			}
 			connection.MaxPayloadBytes = bridgeMaxPayload
+			if probe {
+				_ = connection.SetDeadline(time.Now().Add(bridgeHelloTimeout))
+				_ = websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "probe.ready", DeviceID: identity.DeviceID})
+				_ = connection.Close()
+				return
+			}
 			h.serveBridge(connection, identity)
 		},
 	}
@@ -197,7 +207,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	challenge, err := h.service.BeginRuntimeProof(ctx, identity, hello.ProfileID)
 	cancel()
 	if err != nil {
-		_ = connection.Close()
+		h.rejectBridge(connection, identity, "runtime_identity_rejected", "The device identity is no longer active.", err)
 		return
 	}
 	if err = websocket.JSON.Send(connection, bridgeFrame{
@@ -213,14 +223,21 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		proof.Version != bridgeVersion || proof.Type != "auth.proof" ||
 		proof.ProfileID != challenge.Profile.PublicID || proof.ChallengeID != challenge.Challenge.PublicID ||
 		!validAuthProofFrame(proof) {
-		_ = connection.Close()
+		h.rejectBridge(connection, identity, "runtime_proof_invalid", "The runtime proof frame is invalid.", err)
 		return
 	}
 	ctx, cancel = socketRuntimeAuthContext()
 	leaseExpiresAt, err := h.service.CompleteRuntimeProof(ctx, identity, challenge, proof.Proof, proof.Manifest)
 	cancel()
 	if err != nil {
-		_ = connection.Close()
+		code, message := "runtime_activation_failed", "The runtime connection could not be activated."
+		switch {
+		case errors.Is(err, appagent.ErrInvalidInput):
+			code, message = "runtime_manifest_rejected", "The Agent runtime manifest is not supported."
+		case errors.Is(err, appagent.ErrRuntimeAuth):
+			code, message = "runtime_key_rejected", "The Codex API key is not an active key for this account."
+		}
+		h.rejectBridge(connection, identity, code, message, err)
 		return
 	}
 	registrations := make([]appagent.WorkspaceRegistration, 0, len(proof.Workspaces))
@@ -231,7 +248,21 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)
 	cancel()
 	if err != nil {
-		_ = connection.Close()
+		h.rejectBridge(connection, identity, "workspace_sync_rejected", "The local workspace list was rejected.", err)
+		return
+	}
+	ctx, cancel = socketRuntimeAuthContext()
+	err = h.service.FlushPendingConversationEvents(ctx, identity)
+	cancel()
+	if err != nil {
+		h.rejectBridge(connection, identity, "runtime_projection_failed", "Pending local events could not be restored.", err)
+		return
+	}
+	ctx, cancel = socketRuntimeAuthContext()
+	err = h.service.TouchRuntimePresence(ctx, identity, challenge.Profile.ID)
+	cancel()
+	if err != nil {
+		h.rejectBridge(connection, identity, "runtime_presence_rejected", "The runtime connection could not be activated.", err)
 		return
 	}
 	if err = websocket.JSON.Send(connection, bridgeFrame{
@@ -301,6 +332,12 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				if !validPingFrame(frame) {
 					return
 				}
+				ctx, cancel = socketOperationContext()
+				err = h.service.TouchRuntimePresence(ctx, identity, challenge.Profile.ID)
+				cancel()
+				if err != nil {
+					return
+				}
 				if err := websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "pong"}); err != nil {
 					return
 				}
@@ -346,6 +383,10 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				}); err != nil {
 					return
 				}
+				sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+				if err != nil {
+					return
+				}
 			case "event":
 				if !validEventFrame(frame) {
 					return
@@ -366,6 +407,17 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 			}
 		}
 	}
+}
+
+func (h *Handler) rejectBridge(connection *websocket.Conn, identity *appagent.ConnectionIdentity, code, message string, cause error) {
+	deviceID := "unknown"
+	if identity != nil && strings.TrimSpace(identity.DeviceID) != "" {
+		deviceID = identity.DeviceID
+	}
+	log.Printf("agent bridge rejected device=%s code=%s: %v", deviceID, code, cause)
+	_ = websocket.JSON.Send(connection, bridgeFrame{
+		Version: bridgeVersion, Type: "auth.error", ErrorCode: code, ErrorMessage: message,
+	})
 }
 
 type bridgeRead struct {

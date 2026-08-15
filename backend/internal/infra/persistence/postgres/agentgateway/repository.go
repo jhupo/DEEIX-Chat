@@ -3,6 +3,8 @@ package agentgateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -169,7 +171,7 @@ func toDomainRuntimeProfile(v model.AgentRuntimeProfile) *domainagent.RuntimePro
 		ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID,
 		Provider: v.Provider, Status: v.Status, RemoteKeyID: v.RemoteKeyID,
 		CredentialHash: v.CredentialHash, ManifestJSON: v.ManifestJSON, VerifiedAt: v.VerifiedAt,
-		LeaseExpiresAt: v.LeaseExpiresAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+		LeaseExpiresAt: v.LeaseExpiresAt, PresenceExpiresAt: v.PresenceExpiresAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }
 
@@ -240,23 +242,41 @@ func (r *Repo) ConsumeEnrollmentChallengeAndEnroll(ctx context.Context, challeng
 }
 
 func (r *Repo) ListDevices(ctx context.Context, userID uint) ([]domainagent.Device, error) {
-	var rows []model.AgentDevice
-	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("id DESC").Find(&rows).Error; err != nil {
+	type row struct {
+		model.AgentDevice
+		Online bool `gorm:"column:online"`
+	}
+	var rows []row
+	now := time.Now().UTC()
+	if err := r.db.WithContext(ctx).Table("agent_devices AS devices").
+		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now).
+		Where("devices.user_id = ?", userID).Order("devices.id DESC").Scan(&rows).Error; err != nil {
 		return nil, errFor(err)
 	}
 	result := make([]domainagent.Device, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, *toDomainDevice(row))
+		item := toDomainDevice(row.AgentDevice)
+		item.Online = row.Online
+		result = append(result, *item)
 	}
 	return result, nil
 }
 
 func (r *Repo) GetDevice(ctx context.Context, userID uint, publicID string) (*domainagent.Device, error) {
-	var row model.AgentDevice
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND public_id = ?", userID, publicID).First(&row).Error; err != nil {
+	type row struct {
+		model.AgentDevice
+		Online bool `gorm:"column:online"`
+	}
+	var item row
+	now := time.Now().UTC()
+	if err := r.db.WithContext(ctx).Table("agent_devices AS devices").
+		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now).
+		Where("devices.user_id = ? AND devices.public_id = ?", userID, publicID).First(&item).Error; err != nil {
 		return nil, errFor(err)
 	}
-	return toDomainDevice(row), nil
+	result := toDomainDevice(item.AgentDevice)
+	result.Online = item.Online
+	return result, nil
 }
 
 func (r *Repo) GetDeviceByPublicID(ctx context.Context, publicID string) (*domainagent.Device, error) {
@@ -461,6 +481,14 @@ func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after
 	return result, nil
 }
 
+func (r *Repo) GetCommand(ctx context.Context, userID uint, publicID string) (*domainagent.Command, error) {
+	var row model.AgentCommand
+	if err := r.db.WithContext(ctx).Where("user_id = ? AND public_id = ?", userID, publicID).First(&row).Error; err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(row), nil
+}
+
 func (r *Repo) MarkCommandDelivered(ctx context.Context, deviceID, commandID uint, now time.Time) error {
 	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
@@ -554,12 +582,14 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 			return err
 		}
 		if command.CompletedAt == nil {
-			if err := projectTerminalResult(tx, &device, &command, payloadJSON, now); err != nil {
+			if err := projectTerminalResult(tx, &device, &frame, &command, payloadJSON, now); err != nil {
 				return err
 			}
-			if err := tx.Model(&command).Updates(map[string]any{
-				"state": "completed", "terminal_json": payloadJSON, "completed_at": now,
-			}).Error; err != nil {
+			updates := map[string]any{"state": "completed", "terminal_json": payloadJSON, "completed_at": now}
+			if command.Kind == "workspace.register" {
+				updates["payload_json"] = `{"kind":"workspace.register"}`
+			}
+			if err := tx.Model(&command).Updates(updates).Error; err != nil {
 				return err
 			}
 		} else if command.TerminalJSON != payloadJSON {
@@ -574,13 +604,19 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 	return acknowledged, errFor(err)
 }
 
-func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *model.AgentCommand, payloadJSON string, now time.Time) error {
+func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.AgentBridgeFrame, command *model.AgentCommand, payloadJSON string, now time.Time) error {
 	var outcome struct {
-		Kind   string `json:"kind"`
+		Kind  string `json:"kind"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 		Result struct {
 			Kind            string          `json:"kind"`
 			SourceThreadRef string          `json:"sourceThreadRef"`
 			SourceTurnRef   string          `json:"sourceTurnRef"`
+			WorkspaceID     string          `json:"workspaceId"`
+			Name            string          `json:"name"`
 			Resource        string          `json:"resource"`
 			Data            json.RawMessage `json:"data"`
 		} `json:"result"`
@@ -589,12 +625,40 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 		return repository.ErrInvalidInput
 	}
 	if outcome.Kind == "error" {
+		message := strings.TrimSpace(outcome.Error.Message)
+		if message == "" {
+			message = "local execution failed"
+		}
+		code := strings.TrimSpace(outcome.Error.Code)
+		if code == "" {
+			code = "gateway_failed"
+		}
 		updates := map[string]any{"status": "failed", "updated_at": now}
 		if command.InteractionID != nil {
 			return tx.Model(&model.AgentInteraction{}).Where("id = ?", *command.InteractionID).Updates(updates).Error
 		}
-		if command.TurnID != nil && (command.Kind == "turn.start" || command.Kind == "review.start") {
-			return tx.Model(&model.AgentTurn{}).Where("id = ?", *command.TurnID).Updates(updates).Error
+		if command.TurnID != nil && (command.Kind == "thread.create" || command.Kind == "turn.start" || command.Kind == "review.start") {
+			turnUpdates := map[string]any{
+				"status": "failed", "error_code": code, "error_message": message, "updated_at": now,
+			}
+			if err := tx.Model(&model.AgentTurn{}).Where("id = ?", *command.TurnID).Updates(turnUpdates).Error; err != nil {
+				return err
+			}
+			if command.Kind == "thread.create" && command.ThreadID != nil {
+				if err := tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+			payload, _ := json.Marshal(map[string]any{"turn": map[string]any{
+				"status": "failed", "error": map[string]string{"code": code, "message": message},
+			}})
+			event := model.AgentEvent{
+				PublicID: newRepoPublicID("agev"), BridgeFrameID: frame.ID, UserID: command.UserID,
+				DeviceID: device.ID, RuntimeProfileID: command.RuntimeProfileID, WorkspaceID: command.WorkspaceID,
+				ThreadID: command.ThreadID, TurnID: command.TurnID, Kind: "turn/completed",
+				PayloadJSON: string(payload), OccurredAt: now,
+			}
+			return tx.Create(&event).Error
 		}
 		if command.ThreadID != nil && command.Kind == "thread.create" {
 			return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error
@@ -620,6 +684,46 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, command *mode
 	if command.InteractionID != nil {
 		return tx.Model(&model.AgentInteraction{}).Where("id = ?", *command.InteractionID).
 			Updates(map[string]any{"status": "resolved", "updated_at": now}).Error
+	}
+	if command.Kind == "workspace.register" && outcome.Result.Kind == "accepted" {
+		workspaceID, name := strings.TrimSpace(outcome.Result.WorkspaceID), strings.TrimSpace(outcome.Result.Name)
+		if command.RuntimeProfileID == nil || !validRepoRef(workspaceID) || name == "" || len(name) > 128 {
+			return repository.ErrConflict
+		}
+		workspace := model.AgentWorkspace{
+			PublicID: workspaceID, UserID: command.UserID, DeviceID: device.ID,
+			RuntimeProfileID: *command.RuntimeProfileID, Name: name, Status: "available", LastSeenAt: now,
+		}
+		if err := tx.Where("device_id = ? AND public_id = ?", device.ID, workspaceID).Attrs(workspace).FirstOrCreate(&workspace).Error; err != nil {
+			return err
+		}
+		if workspace.UserID != command.UserID || workspace.RuntimeProfileID != *command.RuntimeProfileID {
+			return repository.ErrConflict
+		}
+		if err := tx.Model(&workspace).Updates(map[string]any{"name": name, "status": "available", "last_seen_at": now}).Error; err != nil {
+			return err
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.First(&profile, *command.RuntimeProfileID).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "resource.refresh", "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"workspaceId": workspace.PublicID, "resource": map[string]string{"scope": "workspace", "name": "sessions"},
+		})
+		if err != nil {
+			return err
+		}
+		refresh := model.AgentCommand{
+			PublicID: newRepoPublicID("agcmd"), UserID: command.UserID, DeviceID: device.ID,
+			RuntimeProfileID: command.RuntimeProfileID, WorkspaceID: &workspace.ID, ServerSeq: device.NextServerSeq,
+			Kind: "resource.refresh", PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&refresh).Error; err != nil {
+			return err
+		}
+		device.NextServerSeq++
+		return tx.Model(device).Update("next_server_seq", device.NextServerSeq).Error
 	}
 	if outcome.Result.Kind == "accepted" && command.ThreadID != nil {
 		switch command.Kind {
@@ -1079,6 +1183,16 @@ func validRepoRef(value string) bool {
 	return true
 }
 
+func manifestSupportsCommand(value, command string) bool {
+	var manifest struct {
+		Commands []string `json:"commands"`
+	}
+	if json.Unmarshal([]byte(value), &manifest) != nil {
+		return false
+	}
+	return slices.Contains(manifest.Commands, command)
+}
+
 func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID uint, bridgeSeq uint64, payloadHash string, event *domainagent.Event, now time.Time) (*domainagent.AppliedEventFrame, error) {
 	var applied domainagent.AppliedEventFrame
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1484,11 +1598,12 @@ func (r *Repo) BeginRuntimeProof(
 			return repository.ErrConflict
 		}
 		if err := tx.Model(&runtime).Updates(map[string]any{
-			"status":           domainagent.RuntimeStatusProving,
-			"remote_key_id":    nil,
-			"credential_hash":  "",
-			"verified_at":      nil,
-			"lease_expires_at": nil,
+			"status":              domainagent.RuntimeStatusProving,
+			"remote_key_id":       nil,
+			"credential_hash":     "",
+			"verified_at":         nil,
+			"lease_expires_at":    nil,
+			"presence_expires_at": nil,
 		}).Error; err != nil {
 			return err
 		}
@@ -1531,7 +1646,7 @@ func (r *Repo) CompleteRuntimeProof(
 			Updates(map[string]any{
 				"status": domainagent.RuntimeStatusReady, "remote_key_id": remoteKeyID,
 				"credential_hash": credentialHash, "manifest_json": manifestJSON, "verified_at": now,
-				"lease_expires_at": leaseExpiresAt,
+				"lease_expires_at": leaseExpiresAt, "presence_expires_at": nil,
 			})
 		if result.Error != nil {
 			return result.Error
@@ -1540,6 +1655,22 @@ func (r *Repo) CompleteRuntimeProof(
 			return repository.ErrNotFound
 		}
 		return nil
+	}))
+}
+
+func (r *Repo) TouchRuntimePresence(ctx context.Context, deviceID, profileID uint, now, expiresAt time.Time) error {
+	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.AgentRuntimeProfile{}).
+			Where("id = ? AND device_id = ? AND status = ? AND lease_expires_at > ?", profileID, deviceID, domainagent.RuntimeStatusReady, now).
+			Update("presence_expires_at", expiresAt)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return repository.ErrNotFound
+		}
+		return tx.Model(&model.AgentDevice{}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).
+			Update("last_seen_at", now).Error
 	}))
 }
 
@@ -1816,6 +1947,68 @@ func (r *Repo) QueueResourceRefresh(
 	return toDomainCommand(created), nil
 }
 
+func (r *Repo) QueueWorkspaceRegistration(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	devicePublicID, profilePublicID, path string,
+	create bool,
+	command *domainagent.Command,
+	now time.Time,
+) (*domainagent.Command, error) {
+	var created model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var operation model.AgentIdempotencyRecord
+		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: "workspace.register", Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, claim.Operation, idempotencyKey).
+			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND public_id = ? AND status = ?", userID, devicePublicID, domainagent.DeviceStatusActive).
+			First(&device).Error; err != nil {
+			return err
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Where("user_id = ? AND device_id = ? AND public_id = ? AND status = ? AND lease_expires_at > ?", userID, device.ID, profilePublicID, domainagent.RuntimeStatusReady, now).
+			First(&profile).Error; err != nil {
+			return err
+		}
+		if !manifestSupportsCommand(profile.ManifestJSON, "workspace.register") {
+			return repository.ErrConflict
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "workspace.register", "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"path": path, "create": create,
+		})
+		if err != nil {
+			return err
+		}
+		created = model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
+			ServerSeq: device.NextServerSeq, Kind: command.Kind, PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(created), nil
+}
+
 func (r *Repo) GetResourceSnapshot(ctx context.Context, userID uint, devicePublicID, profilePublicID, workspacePublicID, resourceName string) (*domainagent.ResourceSnapshot, error) {
 	type row struct {
 		model.AgentResourceSnapshot
@@ -2074,9 +2267,33 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 				return err
 			}
 		}
-		thread = model.AgentThread{PublicID: input.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: input.ConversationID, Title: input.Title, Status: input.Status}
-		if err := tx.Create(&thread).Error; err != nil {
-			return err
+		var existing model.AgentThread
+		existingErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND conversation_id = ?", input.UserID, input.ConversationID).First(&existing).Error
+		switch {
+		case existingErr == nil:
+			if existing.Status != "failed" || existing.SourceThreadRef != nil || existing.DeviceID != device.ID ||
+				existing.RuntimeProfileID != profile.ID || existing.WorkspaceID != workspace.ID {
+				return repository.ErrConflict
+			}
+			var failedTurn model.AgentTurn
+			if err := tx.Where("thread_id = ? AND status = ?", existing.ID, "failed").Order("id DESC").First(&failedTurn).Error; err != nil {
+				return err
+			}
+			if !retriableThreadCreateFailure(failedTurn.ErrorCode) {
+				return repository.ErrConflict
+			}
+			thread = existing
+			if err := tx.Model(&thread).Updates(map[string]any{"status": input.Status, "title": input.Title, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		case errors.Is(existingErr, gorm.ErrRecordNotFound):
+			thread = model.AgentThread{PublicID: input.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: input.ConversationID, Title: input.Title, Status: input.Status}
+			if err := tx.Create(&thread).Error; err != nil {
+				return err
+			}
+		default:
+			return existingErr
 		}
 		if initialTurn != nil {
 			createdTurn := model.AgentTurn{PublicID: initialTurn.PublicID, UserID: input.UserID, ThreadID: thread.ID, RunID: initialTurn.RunID, Status: initialTurn.Status, InputJSON: initialTurn.InputJSON, SettingsJSON: initialTurn.SettingsJSON}
@@ -2086,6 +2303,9 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 			turn = &createdTurn
 		}
 		commandRow := model.AgentCommand{PublicID: command.PublicID, UserID: input.UserID, DeviceID: device.ID, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID, ServerSeq: device.NextServerSeq, Kind: command.Kind, PayloadJSON: command.PayloadJSON, State: "queued", TerminalJSON: "{}"}
+		if turn != nil {
+			commandRow.TurnID = &turn.ID
+		}
 		if err := tx.Create(&commandRow).Error; err != nil {
 			return err
 		}
@@ -2107,6 +2327,11 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 		resultTurn = toDomainTurn(*turn)
 	}
 	return resultThread, resultTurn, nil
+}
+
+func retriableThreadCreateFailure(code string) bool {
+	code = strings.TrimSpace(code)
+	return code != "" && code != "timeout" && code != "outcome_unknown"
 }
 
 func commandDeviceID(payload string) string {

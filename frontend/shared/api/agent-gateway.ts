@@ -18,3 +18,50 @@ export async function revokeAgentDevice(accessToken: string, deviceId: string): 
     method: "DELETE",
   }, true);
 }
+
+export type AgentRuntimeProfileDTO = {
+  profileId: string;
+  deviceId: string;
+  provider: string;
+  status: "proving" | "ready";
+  manifest: { commands?: string[] };
+};
+
+export async function listAgentRuntimeProfiles(
+  accessToken: string,
+  deviceId: string,
+): Promise<AgentRuntimeProfileDTO[]> {
+  return authedRequest<AgentRuntimeProfileDTO[]>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function registerAgentWorkspace(
+  accessToken: string,
+  deviceId: string,
+  input: { profileId: string; path: string; create: boolean },
+): Promise<{ commandId: string; status: string }> {
+  return authedRequest<{ commandId: string; status: string }>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces`,
+    {
+      accessToken,
+      method: "POST",
+      body: input,
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
+}
+
+export async function getAgentCommand(
+  accessToken: string,
+  commandId: string,
+): Promise<{ commandId: string; status: string; errorMessage?: string }> {
+  return authedRequest<{ commandId: string; status: string; errorMessage?: string }>(
+    `/api/v1/agent/commands/${encodeURIComponent(commandId)}`,
+    { accessToken },
+    true,
+  );
+}

@@ -163,14 +163,32 @@ func Doctor(ctx context.Context, dataDir string, stderr io.Writer) (DoctorReport
 		return DoctorReport{}, err
 	}
 	connectionContext, cancel := context.WithTimeout(ctx, 30*time.Second)
-	_, err = NewCloudClient(config.CloudURL).ConnectionToken(connectionContext, config, identity)
+	token, err := NewCloudClient(config.CloudURL).ConnectionToken(connectionContext, config, identity)
 	cancel()
 	if err != nil {
 		return DoctorReport{}, err
 	}
+	probeContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	err = probeBridgeConnection(probeContext, config.CloudURL, config.DeviceID, token)
+	cancel()
+	if err != nil {
+		return DoctorReport{}, err
+	}
+	status, err := ReadRuntimeStatus(dataDir)
+	if err != nil {
+		return DoctorReport{}, fmt.Errorf("read gateway runtime status: %w", err)
+	}
+	updatedAt, parseErr := time.Parse(time.RFC3339Nano, status.UpdatedAt)
+	if parseErr != nil || status.State != "connected" || time.Since(updatedAt) > 90*time.Second {
+		detail := strings.TrimSpace(status.LastError)
+		if detail == "" {
+			detail = status.State
+		}
+		return DoctorReport{}, fmt.Errorf("gateway runtime is not connected: %s", detail)
+	}
 	return DoctorReport{
 		Healthy: true, DeviceID: config.DeviceID, Server: config.CloudURL, CodexExecutable: config.CodexExecutable,
-		CodexVersion: adapter.version, WorkspaceCount: len(workspaces), Connection: "authenticated",
+		CodexVersion: adapter.version, WorkspaceCount: len(workspaces), Connection: "websocket",
 	}, nil
 }
 

@@ -3,6 +3,7 @@ package agentclient
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,19 +32,22 @@ type RuntimeStatus struct {
 }
 
 type Gateway struct {
-	ctx        context.Context
-	config     Config
-	dataDir    string
-	identity   *DeviceIdentity
-	state      *StateStore
-	cloud      *CloudClient
-	adapter    *CodexAdapter
-	logger     *log.Logger
-	wake       chan struct{}
-	commands   chan queuedCommand
-	activeMu   sync.Mutex
-	active     map[string]bool
-	workspaces map[string]Workspace
+	ctx         context.Context
+	config      Config
+	dataDir     string
+	identity    *DeviceIdentity
+	state       *StateStore
+	cloud       *CloudClient
+	adapter     *CodexAdapter
+	logger      *log.Logger
+	wake        chan struct{}
+	commands    chan queuedCommand
+	activeMu    sync.Mutex
+	active      map[string]bool
+	registerMu  sync.Mutex
+	workspaceMu sync.RWMutex
+	workspaces  map[string]Workspace
+	socketReady bool
 }
 
 type queuedCommand struct {
@@ -110,6 +115,7 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 			logger.Printf("write status: %v", err)
 		}
 		connectContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+		gateway.socketReady = false
 		token, tokenErr := gateway.cloud.ConnectionToken(connectContext, config, identity)
 		cancel()
 		if tokenErr == nil {
@@ -126,10 +132,13 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 		message := publicMessage(tokenErr)
 		logger.Printf("gateway connection failed: %s", message)
 		_ = gateway.writeStatus("reconnecting", message)
+		if gateway.socketReady {
+			delay = time.Second
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-time.After(jitterReconnectDelay(delay)):
 		}
 		if delay < 30*time.Second {
 			delay *= 2
@@ -153,32 +162,19 @@ func (gateway *Gateway) recoverCommands() error {
 			}
 			continue
 		}
-		gateway.enqueue(id, record, command.Kind == "interaction.respond")
+		gateway.enqueue(id, record, concurrentCommand(command.Kind))
 	}
 	return nil
 }
 
 func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
-	endpoint, err := url.Parse(gateway.config.CloudURL)
+	config, err := bridgeWebSocketConfig(gateway.config.CloudURL, token, false)
 	if err != nil {
 		return err
 	}
-	origin := endpoint.Scheme + "://" + endpoint.Host
-	if endpoint.Scheme == "https" {
-		endpoint.Scheme = "wss"
-	} else {
-		endpoint.Scheme = "ws"
-	}
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v1/agent/bridge/connect"
-	endpoint.RawPath = ""
-	endpoint.RawQuery = ""
-	config, err := websocket.NewConfig(endpoint.String(), origin)
-	if err != nil {
-		return err
-	}
-	config.Protocol = []string{bridgeProtocol, "deeix.auth." + token}
-	config.Dialer = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	connection, err := websocket.DialConfig(config)
+	dialContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	connection, err := config.DialContext(dialContext)
+	cancel()
 	if err != nil {
 		return err
 	}
@@ -191,7 +187,13 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return err
 	}
 	var challenge bridgeFrame
-	if err = receiveBridgeFrame(connection, &challenge); err != nil || challenge.Version != bridgeVersion || challenge.Type != "auth.challenge" || challenge.ProfileID != gateway.config.ProfileID || !validPublicID(challenge.ChallengeID, "agp") || !strings.HasPrefix(challenge.Challenge, "deeix-runtime-auth-proof-v1\n") {
+	if err = receiveBridgeFrame(connection, &challenge); err != nil {
+		return errors.New("gateway runtime challenge is invalid")
+	}
+	if authErr := bridgeAuthError(challenge); authErr != nil {
+		return authErr
+	}
+	if challenge.Version != bridgeVersion || challenge.Type != "auth.challenge" || challenge.ProfileID != gateway.config.ProfileID || !validPublicID(challenge.ChallengeID, "agp") || !strings.HasPrefix(challenge.Challenge, "deeix-runtime-auth-proof-v1\n") {
 		return errors.New("gateway runtime challenge is invalid")
 	}
 	proofDeadline, err := runtimeProofDeadline(challenge.ExpiresAt, time.Now())
@@ -205,8 +207,11 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if err != nil {
 		return err
 	}
-	workspaces := make([]bridgeWorkspace, 0, len(gateway.config.Workspaces))
-	for _, workspace := range gateway.config.Workspaces {
+	gateway.workspaceMu.RLock()
+	registeredWorkspaces := append([]Workspace(nil), gateway.config.Workspaces...)
+	gateway.workspaceMu.RUnlock()
+	workspaces := make([]bridgeWorkspace, 0, len(registeredWorkspaces))
+	for _, workspace := range registeredWorkspaces {
 		workspaces = append(workspaces, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
 	}
 	manifest := gateway.adapter.Manifest()
@@ -214,7 +219,13 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return err
 	}
 	var ready bridgeFrame
-	if err = receiveBridgeFrame(connection, &ready); err != nil || ready.Version != bridgeVersion || ready.Type != "auth.ready" || ready.ProfileID != gateway.config.ProfileID {
+	if err = receiveBridgeFrame(connection, &ready); err != nil {
+		return errors.New("gateway runtime authorization failed")
+	}
+	if authErr := bridgeAuthError(ready); authErr != nil {
+		return authErr
+	}
+	if ready.Version != bridgeVersion || ready.Type != "auth.ready" || ready.ProfileID != gateway.config.ProfileID {
 		return errors.New("gateway runtime authorization failed")
 	}
 	var welcome bridgeFrame
@@ -242,6 +253,7 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
 		return err
 	}
+	gateway.socketReady = true
 	for {
 		select {
 		case <-ctx.Done():
@@ -252,6 +264,7 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
 				return err
 			}
+			_ = gateway.writeStatus("connected", "")
 		case <-gateway.wake:
 			if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
 				return err
@@ -290,13 +303,76 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 					return err
 				}
 				if created {
-					gateway.enqueue(frame.CommandID, record, command.Kind == "interaction.respond")
+					gateway.enqueue(frame.CommandID, record, concurrentCommand(command.Kind))
 				}
 			default:
 				return fmt.Errorf("unsupported gateway frame: %s", frame.Type)
 			}
 		}
 	}
+}
+
+func bridgeWebSocketConfig(cloudURL, token string, probe bool) (*websocket.Config, error) {
+	endpoint, err := url.Parse(cloudURL)
+	if err != nil {
+		return nil, err
+	}
+	origin := endpoint.Scheme + "://" + endpoint.Host
+	if endpoint.Scheme == "https" {
+		endpoint.Scheme = "wss"
+	} else {
+		endpoint.Scheme = "ws"
+	}
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/api/v1/agent/bridge/connect"
+	endpoint.RawPath = ""
+	endpoint.RawQuery = ""
+	if probe {
+		query := endpoint.Query()
+		query.Set("probe", "1")
+		endpoint.RawQuery = query.Encode()
+	}
+	config, err := websocket.NewConfig(endpoint.String(), origin)
+	if err != nil {
+		return nil, err
+	}
+	config.Protocol = []string{bridgeProtocol, "deeix.auth." + token}
+	config.Dialer = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return config, nil
+}
+
+func probeBridgeConnection(ctx context.Context, cloudURL, deviceID, token string) error {
+	config, err := bridgeWebSocketConfig(cloudURL, token, true)
+	if err != nil {
+		return err
+	}
+	dialContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	connection, err := config.DialContext(dialContext)
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(10 * time.Second))
+	var ready bridgeFrame
+	if err = receiveBridgeFrame(connection, &ready); err != nil {
+		return err
+	}
+	if ready.Version != bridgeVersion || ready.Type != "probe.ready" || ready.DeviceID != deviceID {
+		return errors.New("gateway websocket probe response is invalid")
+	}
+	return nil
+}
+
+func jitterReconnectDelay(base time.Duration) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	var value [1]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return base
+	}
+	percent := 80 + int(value[0])*41/256
+	return base * time.Duration(percent) / 100
 }
 
 func runtimeProofDeadline(value string, now time.Time) (time.Time, error) {
@@ -354,9 +430,22 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 	defer cancel()
 	var result map[string]any
 	if err == nil {
-		artifacts, downloadErr := gateway.cloud.DownloadArtifacts(ctx, item.ID, command, item.Record.Artifacts, gateway.workspaces)
+		gateway.workspaceMu.RLock()
+		registeredWorkspaces := make(map[string]Workspace, len(gateway.workspaces))
+		for id, workspace := range gateway.workspaces {
+			registeredWorkspaces[id] = workspace
+		}
+		gateway.workspaceMu.RUnlock()
+		var artifacts map[string]LocalArtifact
+		downloadErr := runAsConfiguredUser(func() error {
+			var artifactErr error
+			artifacts, artifactErr = gateway.cloud.DownloadArtifacts(ctx, item.ID, command, item.Record.Artifacts, registeredWorkspaces)
+			return artifactErr
+		})
 		if downloadErr != nil {
 			err = downloadErr
+		} else if command.Kind == "workspace.register" {
+			result, err = gateway.registerWorkspace(command)
 		} else {
 			result, err = gateway.adapter.Execute(ctx, command, artifacts)
 		}
@@ -372,6 +461,125 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 		return
 	}
 	gateway.signalWake()
+}
+
+func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any, error) {
+	gateway.registerMu.Lock()
+	defer gateway.registerMu.Unlock()
+	path := filepath.Clean(strings.TrimSpace(command.Path))
+	volumeRoot := filepath.VolumeName(path) + string(filepath.Separator)
+	if path == "." || !filepath.IsAbs(path) || path == volumeRoot || len(path) > 4096 ||
+		strings.ContainsRune(path, 0) || strings.HasPrefix(path, `\\`) {
+		return nil, errors.New("workspace path must be absolute")
+	}
+	configPath := filepath.Join(gateway.dataDir, "config.json")
+	persisted, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	created := false
+	committed := false
+	defer func() {
+		if created && !committed {
+			_ = runAsConfiguredUser(func() error { return os.Remove(path) })
+		}
+	}()
+	var workspace Workspace
+	err = runAsConfiguredUser(func() error {
+		if command.Create {
+			if len(persisted.Workspaces) >= 128 {
+				return errors.New("workspace limit reached")
+			}
+			parent := filepath.Dir(path)
+			resolvedParent, resolveErr := filepath.EvalSymlinks(parent)
+			if resolveErr != nil {
+				return errors.New("workspace parent directory does not exist")
+			}
+			info, statErr := os.Stat(resolvedParent)
+			if statErr != nil || !info.IsDir() {
+				return errors.New("workspace parent directory does not exist")
+			}
+			path = filepath.Join(resolvedParent, filepath.Base(path))
+			if mkdirErr := os.Mkdir(path, 0o755); mkdirErr != nil && !errors.Is(mkdirErr, os.ErrExist) {
+				return fmt.Errorf("create workspace directory: %w", mkdirErr)
+			} else {
+				created = mkdirErr == nil
+			}
+		}
+		selected, selectErr := CanonicalWorkspace(path)
+		if selectErr != nil {
+			return selectErr
+		}
+		dataRoot, dataErr := filepath.Abs(gateway.dataDir)
+		if dataErr == nil {
+			if resolved, resolveErr := filepath.EvalSymlinks(dataRoot); resolveErr == nil {
+				dataRoot = resolved
+			}
+		}
+		if dataErr != nil || pathWithin(dataRoot, selected.Root) || pathWithin(selected.Root, dataRoot) {
+			return errors.New("workspace path is reserved for Agent data")
+		}
+		probe, probeErr := os.CreateTemp(selected.Root, ".deeix-write-probe-*")
+		if probeErr != nil {
+			return errors.New("workspace directory is not writable by the configured user")
+		}
+		probePath := probe.Name()
+		if closeErr := probe.Close(); closeErr != nil {
+			_ = os.Remove(probePath)
+			return closeErr
+		}
+		if removeErr := os.Remove(probePath); removeErr != nil {
+			return removeErr
+		}
+		workspace, selectErr = codexProjectWorkspace(selected.Root)
+		if selectErr != nil {
+			workspace = selected
+			workspace.SessionRoots = []string{workspace.Root}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	known := false
+	for _, current := range persisted.Workspaces {
+		if current.WorkspaceID == workspace.WorkspaceID {
+			known = true
+			break
+		}
+	}
+	if !known && len(persisted.Workspaces) >= 128 {
+		return nil, errors.New("workspace limit reached")
+	}
+	upsertWorkspace(&persisted.Workspaces, workspace)
+	if err = SaveConfig(configPath, persisted); err != nil {
+		return nil, err
+	}
+	committed = true
+
+	gateway.workspaceMu.Lock()
+	byID := make(map[string]Workspace, len(gateway.config.Workspaces)+1)
+	for _, current := range gateway.config.Workspaces {
+		mergeWorkspace(byID, current)
+	}
+	mergeWorkspace(byID, workspace)
+	registered := make([]Workspace, 0, len(byID))
+	for _, current := range byID {
+		registered = append(registered, current)
+	}
+	sort.Slice(registered, func(i, j int) bool {
+		return registered[i].Name < registered[j].Name
+	})
+	gateway.config.Workspaces = registered
+	gateway.workspaces = byID
+	gateway.adapter.replaceWorkspaces(registered)
+	gateway.workspaceMu.Unlock()
+
+	return map[string]any{"kind": "accepted", "workspaceId": workspace.WorkspaceID, "name": workspace.Name}, nil
+}
+
+func concurrentCommand(kind string) bool {
+	return kind == "interaction.respond" || kind == "workspace.register"
 }
 
 func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint64, error) {
@@ -390,6 +598,20 @@ func (gateway *Gateway) signalWake() {
 	case gateway.wake <- struct{}{}:
 	default:
 	}
+}
+
+func bridgeAuthError(frame bridgeFrame) error {
+	if frame.Version != bridgeVersion || frame.Type != "auth.error" {
+		return nil
+	}
+	message := strings.TrimSpace(frame.ErrorMessage)
+	if message == "" {
+		message = "gateway runtime authorization failed"
+	}
+	if code := strings.TrimSpace(frame.ErrorCode); code != "" {
+		message += " (" + code + ")"
+	}
+	return errors.New(message)
 }
 
 func (gateway *Gateway) writeStatus(state, lastError string) error {

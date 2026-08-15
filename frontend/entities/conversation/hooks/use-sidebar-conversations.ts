@@ -515,8 +515,10 @@ export function useSidebarConversationsController({
     if (!token) {
       return null;
     }
-    const explicitModel = platformModelName?.trim() || "";
-    const modelName = explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
+	const explicitModel = platformModelName?.trim() || "";
+	const modelName = execution.type === "gateway"
+	  ? ""
+	  : explicitModel || (await resolveConversationDefaultModel({ accessToken: token })).platformModelName;
 
     const item = await createConversation(token, {
       title: newConversationTitle,
