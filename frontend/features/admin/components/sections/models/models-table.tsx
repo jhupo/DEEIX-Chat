@@ -1104,11 +1104,11 @@ export function ModelsTable({
     <>
     <Table
       viewportRef={virtualRows.viewportRef}
-      viewportClassName={cn(
-        virtualRows.viewportClassName,
-        "min-h-[clamp(14rem,calc(100svh-18rem),28rem)]",
-      )}
-      viewportStyle={virtualRows.viewportStyle}
+      viewportClassName={virtualRows.viewportClassName}
+      viewportStyle={{
+        ...virtualRows.viewportStyle,
+        height: "clamp(18rem, calc(100svh - 18rem), 40rem)",
+      }}
     >
       <TableHeader>
         <TableRow className="hover:bg-transparent">
