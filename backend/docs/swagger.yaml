@@ -152,7 +152,7 @@ definitions:
     required:
     - message
     type: object
-  AdminPageData-internal_transport_http_admin_AuditLogResponse:
+  AdminPageData-admin_AuditLogResponse:
     properties:
       results:
         items:
@@ -164,7 +164,7 @@ definitions:
     - results
     - total
     type: object
-  AdminPageData-internal_transport_http_admin_AuthEventResponse:
+  AdminPageData-admin_AuthEventResponse:
     properties:
       results:
         items:
@@ -176,7 +176,7 @@ definitions:
     - results
     - total
     type: object
-  AdminPageData-internal_transport_http_admin_ConversationEventResponse:
+  AdminPageData-admin_ConversationEventResponse:
     properties:
       results:
         items:
@@ -188,7 +188,7 @@ definitions:
     - results
     - total
     type: object
-  AdminPageData-internal_transport_http_admin_SystemEventResponse:
+  AdminPageData-admin_SystemEventResponse:
     properties:
       results:
         items:
@@ -200,7 +200,7 @@ definitions:
     - results
     - total
     type: object
-  AdminPageData-internal_transport_http_admin_UserResponse:
+  AdminPageData-admin_UserResponse:
     properties:
       results:
         items:
@@ -431,7 +431,7 @@ definitions:
   AuditLogListResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/AdminPageData-internal_transport_http_admin_AuditLogResponse'
+        $ref: '#/definitions/AdminPageData-admin_AuditLogResponse'
       errorMsg:
         type: string
     required:
@@ -503,7 +503,7 @@ definitions:
   AuthEventListResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/AdminPageData-internal_transport_http_admin_AuthEventResponse'
+        $ref: '#/definitions/AdminPageData-admin_AuthEventResponse'
       errorMsg:
         type: string
     required:
@@ -1121,7 +1121,7 @@ definitions:
   ConversationEventListResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/AdminPageData-internal_transport_http_admin_ConversationEventResponse'
+        $ref: '#/definitions/AdminPageData-admin_ConversationEventResponse'
       errorMsg:
         type: string
     required:
@@ -4973,7 +4973,7 @@ definitions:
   SystemEventListResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/AdminPageData-internal_transport_http_admin_SystemEventResponse'
+        $ref: '#/definitions/AdminPageData-admin_SystemEventResponse'
       errorMsg:
         type: string
     required:
@@ -5874,7 +5874,7 @@ definitions:
   UserListResponseDoc:
     properties:
       data:
-        $ref: '#/definitions/AdminPageData-internal_transport_http_admin_UserResponse'
+        $ref: '#/definitions/AdminPageData-admin_UserResponse'
       errorMsg:
         type: string
     required:
@@ -6738,7 +6738,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.40"
+  version: "0.4.42"
 paths:
   /admin/announcements:
     get:

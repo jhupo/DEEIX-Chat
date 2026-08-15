@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.40"
+        "version": "0.4.42"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -10597,7 +10597,7 @@
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_AuditLogResponse": {
+        "AdminPageData-admin_AuditLogResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10615,7 +10615,7 @@
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_AuthEventResponse": {
+        "AdminPageData-admin_AuthEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10633,7 +10633,7 @@
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_ConversationEventResponse": {
+        "AdminPageData-admin_ConversationEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10651,7 +10651,7 @@
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_SystemEventResponse": {
+        "AdminPageData-admin_SystemEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10669,7 +10669,7 @@
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_UserResponse": {
+        "AdminPageData-admin_UserResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -11000,7 +11000,7 @@
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuditLogResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_AuditLogResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -11100,7 +11100,7 @@
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuthEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_AuthEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -11988,7 +11988,7 @@
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_ConversationEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_ConversationEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -17492,7 +17492,7 @@
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_SystemEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_SystemEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -18768,7 +18768,7 @@
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_UserResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_UserResponse"
                 },
                 "errorMsg": {
                     "type": "string"

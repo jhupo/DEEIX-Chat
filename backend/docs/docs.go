@@ -10604,7 +10604,7 @@ const docTemplate = `{
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_AuditLogResponse": {
+        "AdminPageData-admin_AuditLogResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10622,7 +10622,7 @@ const docTemplate = `{
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_AuthEventResponse": {
+        "AdminPageData-admin_AuthEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10640,7 +10640,7 @@ const docTemplate = `{
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_ConversationEventResponse": {
+        "AdminPageData-admin_ConversationEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10658,7 +10658,7 @@ const docTemplate = `{
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_SystemEventResponse": {
+        "AdminPageData-admin_SystemEventResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -10676,7 +10676,7 @@ const docTemplate = `{
                 }
             }
         },
-        "AdminPageData-internal_transport_http_admin_UserResponse": {
+        "AdminPageData-admin_UserResponse": {
             "type": "object",
             "required": [
                 "results",
@@ -11007,7 +11007,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuditLogResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_AuditLogResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -11107,7 +11107,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_AuthEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_AuthEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -11995,7 +11995,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_ConversationEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_ConversationEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -17499,7 +17499,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_SystemEventResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_SystemEventResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -18775,7 +18775,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/AdminPageData-internal_transport_http_admin_UserResponse"
+                    "$ref": "#/definitions/AdminPageData-admin_UserResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -20002,7 +20002,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.40",
+	Version:          "0.4.42",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

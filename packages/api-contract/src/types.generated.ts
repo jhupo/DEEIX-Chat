@@ -66,27 +66,27 @@ export interface AdminErrorDoc {
   message: string;
 }
 
-export interface AdminPageDataInternalTransportHttpAdminAuditLogResponse {
+export interface AdminPageDataAdminAuditLogResponse {
   results: AuditLogResponse[];
   total: number;
 }
 
-export interface AdminPageDataInternalTransportHttpAdminAuthEventResponse {
+export interface AdminPageDataAdminAuthEventResponse {
   results: AuthEventResponse[];
   total: number;
 }
 
-export interface AdminPageDataInternalTransportHttpAdminConversationEventResponse {
+export interface AdminPageDataAdminConversationEventResponse {
   results: ConversationEventResponse[];
   total: number;
 }
 
-export interface AdminPageDataInternalTransportHttpAdminSystemEventResponse {
+export interface AdminPageDataAdminSystemEventResponse {
   results: SystemEventResponse[];
   total: number;
 }
 
-export interface AdminPageDataInternalTransportHttpAdminUserResponse {
+export interface AdminPageDataAdminUserResponse {
   results: AdminUserResponse[];
   total: number;
 }
@@ -185,7 +185,7 @@ export interface ArtifactResponseDoc {
 }
 
 export interface AuditLogListResponseDoc {
-  data: AdminPageDataInternalTransportHttpAdminAuditLogResponse;
+  data: AdminPageDataAdminAuditLogResponse;
   errorMsg: string;
 }
 
@@ -217,7 +217,7 @@ export interface AuthErrorDoc {
 }
 
 export interface AuthEventListResponseDoc {
-  data: AdminPageDataInternalTransportHttpAdminAuthEventResponse;
+  data: AdminPageDataAdminAuthEventResponse;
   errorMsg: string;
 }
 
@@ -502,7 +502,7 @@ export interface ConversationEventDetailResponseDoc {
 }
 
 export interface ConversationEventListResponseDoc {
-  data: AdminPageDataInternalTransportHttpAdminConversationEventResponse;
+  data: AdminPageDataAdminConversationEventResponse;
   errorMsg: string;
 }
 
@@ -2458,7 +2458,7 @@ export interface SyncUpstreamModelsResponseDoc {
 }
 
 export interface SystemEventListResponseDoc {
-  data: AdminPageDataInternalTransportHttpAdminSystemEventResponse;
+  data: AdminPageDataAdminSystemEventResponse;
   errorMsg: string;
 }
 
@@ -2898,7 +2898,7 @@ export interface UserDataResponseDoc {
 }
 
 export interface UserListResponseDoc {
-  data: AdminPageDataInternalTransportHttpAdminUserResponse;
+  data: AdminPageDataAdminUserResponse;
   errorMsg: string;
 }
 

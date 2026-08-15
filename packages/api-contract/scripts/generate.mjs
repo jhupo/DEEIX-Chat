@@ -28,7 +28,7 @@ if (unknownArguments.length > 0) {
 }
 
 function shortDefinitionName(name) {
-  return name.split(".").at(-1);
+  return name.split(".").at(-1).replaceAll("internal_transport_http_", "");
 }
 
 function namespaceName(name) {
