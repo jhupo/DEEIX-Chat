@@ -240,6 +240,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return errors.New("gateway welcome frame is invalid")
 	}
 	_ = connection.SetDeadline(time.Time{})
+	if err = gateway.state.AcknowledgeServer(welcome.AckServerSeq); err != nil {
+		return err
+	}
 	if welcome.AckBridgeSeq > ackBridge {
 		if err = gateway.state.AcknowledgeBridge(welcome.AckBridgeSeq); err != nil {
 			return err

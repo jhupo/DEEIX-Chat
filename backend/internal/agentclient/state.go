@@ -82,6 +82,21 @@ func (store *StateStore) Cursors() (uint64, uint64) {
 	return store.state.AckServerSeq, store.state.AckBridgeSeq
 }
 
+func (store *StateStore) AcknowledgeServer(through uint64) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if through <= store.state.AckServerSeq {
+		return nil
+	}
+	previous := cloneDurableState(store.state)
+	store.state.AckServerSeq = through
+	if err := store.persistLocked(); err != nil {
+		store.state = previous
+		return err
+	}
+	return nil
+}
+
 func (store *StateStore) Receive(serverSeq uint64, commandID string, command json.RawMessage, artifacts []ArtifactGrant) (commandRecord, bool, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()

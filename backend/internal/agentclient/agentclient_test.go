@@ -343,6 +343,16 @@ func TestStatePersistsCommandOutcomeAndSourceMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = reopened.AcknowledgeServer(3); err != nil {
+		t.Fatal(err)
+	}
+	if server, _ := reopened.Cursors(); server != 3 {
+		t.Fatalf("server cursor was not reconciled: %d", server)
+	}
+	nextCommand := json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"apps"}}`)
+	if _, created, receiveErr := reopened.Receive(4, "agcmd_1123456789abcdef0123456789abcdef", nextCommand, nil); receiveErr != nil || !created {
+		t.Fatalf("receive after server cursor reconciliation failed: created=%v err=%v", created, receiveErr)
+	}
 	resolved, err := reopened.ResolveSource("codex-default", "thread", reference)
 	if err != nil || resolved != "provider-thread-1" {
 		t.Fatalf("source mapping was not durable: %q %v", resolved, err)

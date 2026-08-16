@@ -73,6 +73,8 @@ deeix-agent version
 
 `doctor` 验证配置、设备身份、工作区、Codex CLI、app-server 初始化和设备连接凭据。`status` 读取 `runtime-status.json`，报告 PID、连接状态、Codex 版本、最后错误和更新时间。`update` 使用保存的 server、user、Codex 路径与首个工作区重新执行带校验和回滚的安装流程。`uninstall` 默认保留身份和状态，显式 `--purge` 才删除数据目录。详细运行日志在数据目录的 `agent.log`。
 
+Windows 安装和更新会先停止遗留计划任务并等待其退出，再停止系统服务、替换二进制并重新安装服务。只有新服务连续在线 20 秒才提交更新并删除回滚副本；失败时恢复旧二进制与旧服务。成功输出包含实际运行的 Agent 版本，可用 `deeix-agent version` 再次核对。
+
 ## app-server 映射
 
 原生适配器实现现有 Gateway 合同中的全部命令：thread 创建、恢复、分叉、归档、取消归档、删除、重命名、Git 元数据、压缩和按需历史读取；turn 启动、steer、中断；review；交互响应；profile/workspace 资源刷新。

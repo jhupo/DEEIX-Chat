@@ -26,9 +26,19 @@ try {
   $expected = ((Get-Content "$download.sha256" -Raw).Trim() -split "\s+")[0]
   $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "DEEIX Agent checksum mismatch" }
+  $downloadVersion = ((& $download version 2>&1) | Out-String).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $downloadVersion) { throw "DEEIX Agent version check failed" }
 
   Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  Start-Sleep -Milliseconds 700
+  if ($hadScheduledTask) {
+    $taskStopped = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+      $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      if ($null -eq $task -or $task.State -ne "Running") { $taskStopped = $true; break }
+      Start-Sleep -Seconds 1
+    }
+    if (-not $taskStopped) { throw "DEEIX Agent legacy scheduled task did not stop" }
+  }
   & $download install --server $Server --user $User --workspace $Workspace --name $Name --codex $Codex --data-dir $dataDir
   if ($LASTEXITCODE -ne 0) { throw "DEEIX Agent configuration failed" }
 
@@ -44,6 +54,18 @@ try {
 try {
   & '$downloadLiteral' service-stop
   if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent service stop failed' }
+  `$remaining = @(Get-CimInstance Win32_Process -Filter "Name='deeix-agent.exe'" | Where-Object {
+    [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase)
+  })
+  foreach (`$process in `$remaining) { Stop-Process -Id `$process.ProcessId -Force -ErrorAction SilentlyContinue }
+  for (`$attempt = 0; `$attempt -lt 30; `$attempt++) {
+    `$remaining = @(Get-CimInstance Win32_Process -Filter "Name='deeix-agent.exe'" | Where-Object {
+      [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase)
+    })
+    if (`$remaining.Count -eq 0) { break }
+    Start-Sleep -Seconds 1
+  }
+  if (`$remaining.Count -ne 0) { throw 'DEEIX Agent process did not stop' }
   Remove-Item -LiteralPath '$backupLiteral' -Force -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath '$installedLiteral') { Move-Item -LiteralPath '$installedLiteral' -Destination '$backupLiteral' }
   try {
@@ -99,7 +121,8 @@ try {
   }
   Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-  Write-Host "DEEIX Agent system service is installed and connected: $installed"
+  $installedVersion = ((& $installed version 2>&1) | Out-String).Trim()
+  Write-Host "DEEIX Agent system service is installed and connected: $installedVersion ($installed)"
 } catch {
   if ($serviceInstalled) {
     $installedLiteral = $installed.Replace("'", "''")
