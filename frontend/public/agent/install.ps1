@@ -33,11 +33,17 @@ try {
   $downloadVersion = ((& $download version 2>&1) | Out-String).Trim()
   if ($LASTEXITCODE -ne 0 -or -not $downloadVersion) { throw "DEEIX Agent version check failed" }
 
-  Stop-ScheduledTask -TaskName $taskName, $legacyTaskName -ErrorAction SilentlyContinue
+  @($taskName, $legacyTaskName) | ForEach-Object {
+    Stop-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue
+  }
   if ($hadScheduledTask -or $hadLegacyScheduledTask) {
     $taskStopped = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-      $runningTasks = @(Get-ScheduledTask -TaskName $taskName, $legacyTaskName -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" })
+      $runningTasks = @(
+        @($taskName, $legacyTaskName) | ForEach-Object {
+          Get-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue
+        } | Where-Object { $_.State -eq "Running" }
+      )
       if ($runningTasks.Count -eq 0) { $taskStopped = $true; break }
       Start-Sleep -Seconds 1
     }
@@ -136,7 +142,9 @@ try {
     $detail = if (Test-Path -LiteralPath $logPath) { (Get-Content -LiteralPath $logPath -Tail 1) } else { "no runtime log was written" }
     throw "DEEIX Agent service did not connect: $detail"
   }
-  Unregister-ScheduledTask -TaskName $taskName, $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  @($taskName, $legacyTaskName) | ForEach-Object {
+    Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue
+  }
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
   $installedVersion = ((& $installed version 2>&1) | Out-String).Trim()
   Write-Host "DEEIX Agent system service is installed and connected: $installedVersion ($installed)"
