@@ -219,7 +219,15 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	}
 	_ = connection.SetDeadline(challenge.Challenge.ExpiresAt)
 	var proof bridgeFrame
-	if err = receiveBridgeFrame(connection, &proof); err != nil ||
+	if err = receiveBridgeFrame(connection, &proof); err == nil && proof.Version == bridgeVersion && proof.Type == "auth.error" {
+		message := strings.TrimSpace(proof.ErrorMessage)
+		if message == "" || len(message) > 1024 {
+			message = "the local runtime could not create an authentication proof"
+		}
+		h.rejectBridge(connection, identity, "runtime_proof_unavailable", "The local Codex runtime could not create an authentication proof.", errors.New(message))
+		return
+	}
+	if err != nil ||
 		proof.Version != bridgeVersion || proof.Type != "auth.proof" ||
 		proof.ProfileID != challenge.Profile.PublicID || proof.ChallengeID != challenge.Challenge.PublicID ||
 		!validAuthProofFrame(proof) {

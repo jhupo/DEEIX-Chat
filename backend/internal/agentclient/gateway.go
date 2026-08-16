@@ -205,6 +205,10 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	proof, err := gateway.adapter.ProveRuntimeAuth(proofContext, challenge.Challenge)
 	cancel()
 	if err != nil {
+		_ = writer.send(bridgeFrame{
+			Version: bridgeVersion, Type: "auth.error", ProfileID: gateway.config.ProfileID,
+			ChallengeID: challenge.ChallengeID, ErrorCode: "runtime_proof_unavailable", ErrorMessage: publicMessage(err),
+		})
 		return err
 	}
 	gateway.workspaceMu.RLock()

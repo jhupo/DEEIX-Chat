@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -59,7 +60,7 @@ var dispatchedClientRequests = map[string]bool{
 	"skills/list": true, "hooks/list": true, "plugin/list": true, "app/list": true, "turn/start": true,
 	"turn/steer": true, "turn/interrupt": true, "review/start": true, "model/list": true,
 	"modelProvider/capabilities/read": true, "permissionProfile/list": true, "mcpServerStatus/list": true,
-	"getAuthStatus": true,
+	"account/read": true,
 }
 
 type LocalArtifact struct {
@@ -315,16 +316,20 @@ func (adapter *CodexAdapter) ProveRuntimeAuth(ctx context.Context, challenge str
 	if len(challenge) > 1024 || !(strings.HasPrefix(challenge, "deeix-runtime-auth-proof-v1\n") && lineCount == 7) && !(strings.HasPrefix(challenge, "deeix-device-enrollment-v1\n") && lineCount == 6) {
 		return "", errors.New("runtime authentication challenge is invalid")
 	}
-	var auth struct {
-		AuthMethod string `json:"authMethod"`
-		AuthToken  string `json:"authToken"`
+	var status struct {
+		Account *struct {
+			Type string `json:"type"`
+		} `json:"account"`
 	}
-	if err := adapter.rpc.Request(ctx, "getAuthStatus", map[string]any{"includeToken": true, "refreshToken": false}, &auth); err != nil {
+	if err := adapter.rpc.Request(ctx, "account/read", map[string]any{"refreshToken": false}, &status); err != nil {
 		return "", err
 	}
-	token := strings.TrimSpace(auth.AuthToken)
-	if auth.AuthMethod != "apikey" || token == "" {
+	if status.Account == nil || status.Account.Type != "apiKey" {
 		return "", errors.New("Codex must be signed in with an API key")
+	}
+	token, err := readCodexAPIKey(adapter.codexHome)
+	if err != nil {
+		return "", err
 	}
 	digest := sha256.Sum256([]byte(token))
 	adapter.authMu.Lock()
@@ -336,6 +341,51 @@ func (adapter *CodexAdapter) ProveRuntimeAuth(ctx context.Context, challenge str
 	mac := hmac.New(sha256.New, []byte(token))
 	_, _ = mac.Write([]byte(challenge))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func readCodexAPIKey(codexHome string) (string, error) {
+	codexHome = strings.TrimSpace(codexHome)
+	if !filepath.IsAbs(codexHome) || strings.ContainsRune(codexHome, 0) {
+		return "", errors.New("Codex home is invalid")
+	}
+	const maxAuthFileBytes = 64 << 10
+	var data []byte
+	err := runAsConfiguredUser(func() error {
+		file, err := os.Open(filepath.Join(codexHome, "auth.json"))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxAuthFileBytes {
+			return errors.New("Codex auth file is invalid")
+		}
+		data, err = io.ReadAll(io.LimitReader(file, maxAuthFileBytes+1))
+		if err != nil {
+			return err
+		}
+		if len(data) > maxAuthFileBytes {
+			return errors.New("Codex auth file is too large")
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("read Codex auth file: %w", err)
+	}
+	var auth struct {
+		APIKey string `json:"OPENAI_API_KEY"`
+	}
+	if json.Unmarshal(data, &auth) != nil {
+		return "", errors.New("Codex auth file is invalid")
+	}
+	token := strings.TrimSpace(auth.APIKey)
+	if token == "" || len(token) > 4096 || strings.ContainsAny(token, "\r\n\x00") {
+		return "", errors.New("Codex auth file does not contain a valid API key")
+	}
+	return token, nil
 }
 
 func (adapter *CodexAdapter) RuntimeAuthDiagnostic() string {
@@ -527,7 +577,7 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	cwd := workspace.Root
 	method := map[string]string{
 		"models": "model/list", "model-capabilities": "modelProvider/capabilities/read", "permission-profiles": "permissionProfile/list",
-		"apps": "app/list", "mcp": "mcpServerStatus/list", "plugins": "plugin/list", "auth-status": "getAuthStatus",
+		"apps": "app/list", "mcp": "mcpServerStatus/list", "plugins": "plugin/list", "auth-status": "account/read",
 		"sessions": "thread/list", "skills": "skills/list", "hooks": "hooks/list",
 	}[name]
 	params := map[string]any{}
@@ -537,7 +587,7 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	case "plugins":
 		params["forceRefetch"] = true
 	case "auth-status":
-		params["includeToken"], params["refreshToken"] = false, false
+		params["refreshToken"] = false
 	case "sessions":
 		sessionRoots := workspace.SessionRoots
 		if len(sessionRoots) == 0 {
@@ -564,7 +614,12 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	}
 	if name == "auth-status" {
 		source, _ := data.(map[string]any)
-		data = map[string]any{"authMethod": source["authMethod"], "requiresOpenaiAuth": source["requiresOpenaiAuth"]}
+		account, _ := source["account"].(map[string]any)
+		authMethod, _ := account["type"].(string)
+		if authMethod == "apiKey" {
+			authMethod = "apikey"
+		}
+		data = map[string]any{"authMethod": authMethod, "requiresOpenaiAuth": source["requiresOpenaiAuth"]}
 	} else if name == "sessions" {
 		data, err = adapter.projectSessions(ctx, data)
 		if err != nil {

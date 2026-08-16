@@ -70,7 +70,7 @@ deeix-agent doctor
 | `apps` | `app/list` | 真实进程通过 |
 | `mcp` | `mcpServerStatus/list` | 真实进程通过 |
 | `plugins` | `plugin/list` | 真实进程通过；官方仍标为 under development |
-| `auth-status` | `getAuthStatus` | 真实进程通过；只投影模式和是否需要认证 |
+| `auth-status` | `account/read` | 真实进程通过；只投影模式和是否需要认证 |
 | `sessions` | 分页 `thread/list` 摘要 + 按需 `thread/read` | 真实进程通过；目录与消息历史可恢复 |
 | `skills` | `skills/list` | 真实进程通过 |
 | `hooks` | `hooks/list` | 真实进程通过 |
@@ -81,7 +81,6 @@ deeix-agent doctor
 
 | 方法 | 实测内容 | 当前状态 |
 | --- | --- | --- |
-| `account/read` | 返回认证状态结构 | 仅运行时通过 |
 | `config/read` | 返回 cwd 对应的有效配置 | 仅运行时通过，未向 Cloud 传递内容 |
 | `app/installed` | 返回已安装 App runtime snapshot | 仅运行时通过 |
 | `fs/getMetadata` | 读取测试工作区目录元数据 | 仅运行时通过 |
@@ -380,7 +379,7 @@ AssistantMessage                        turn scope
 
 #### 6.13 Account 与 Config
 
-当前运行时已验证 `account/read`、`config/read`，产品只使用 `getAuthStatus` 和 HMAC proof。用户账户订阅额度仍由 Sub2API 提供，Codex account 只应作为本机 runtime 诊断。
+当前运行时已验证 `account/read`、`config/read`；产品使用官方 `account/read` 确认 API-key 模式，再由 Agent 以配置用户身份只读 `codexHome/auth.json` 生成 HMAC proof。原始 key 不进入 Bridge、Cloud 或日志。用户账户订阅额度仍由 Sub2API 提供，Codex account 只应作为本机 runtime 诊断。
 
 修改：新增脱敏的 `runtime-account` 与 `runtime-config-summary` profile resource，只保留 auth type、provider、受管要求和 feature flags。API key、token、endpoint secret、绝对路径均不进入 Cloud。
 

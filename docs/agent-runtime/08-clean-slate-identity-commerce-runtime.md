@@ -368,8 +368,8 @@ Cloud 收到 proof 后，使用当前 User 的 Sub2 access token 实时读取 `/
 这同时证明本地持有的 key 出现在**当前登录用户、当前固定 Sub2 instance** 的 key 集合中；另一个 Sub2 实例或另一用户的 key
 不会匹配。
 
-该方案依赖本地 DEEIX 客户端能以只读方式取得 Codex 当前 API key。stock app-server 的 `account/read` 不暴露 key，所以实现点在
-DEEIX Local Bridge 的版本固定 Codex auth reader，而不是新建 Sub2 endpoint。若本地 auth mode 不是 API key、读取失败或 key
+该方案依赖本地 DEEIX 客户端能以只读方式取得 Codex 当前 API key。stock app-server 的 `account/read` 不暴露 key，因此 Agent 先用
+`account/read` 确认 API-key 模式，再以配置用户身份只读 `codexHome/auth.json`，而不是调用私有 RPC 或新建 Sub2 endpoint。若本地 auth mode 不是 API key、读取失败或 key
 不在当前用户列表中，profile 状态进入 `auth_unsupported`、`auth_unreadable` 或 `auth_mismatch`，不进入执行态。
 
 App Server 的 `attestation/generate` 继续保持 lock 中的 `disabled` disposition：现有 Sub2 并不验证

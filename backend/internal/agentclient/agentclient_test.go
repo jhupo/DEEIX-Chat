@@ -264,6 +264,14 @@ func TestInstallEnrollsOnceAndReusesDeviceIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	codexHome, err := filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte("{\"OPENAI_API_KEY\":\"sub2-test-key\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEEIX_TEST_THREAD_CWD", codexHome)
 	dataRoot, err := os.MkdirTemp(".", ".agent-install-data-")
 	if err != nil {
 		t.Fatal(err)
@@ -470,6 +478,9 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err = os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err = os.WriteFile(filepath.Join(root, "auth.json"), []byte("{\"OPENAI_API_KEY\":\"sub2-test-key\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("DEEIX_TEST_THREAD_CWD", root)
 	state, err := OpenStateStore(filepath.Join(root, "state.json"))
 	if err != nil {
@@ -618,6 +629,24 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	}
 }
 
+func TestReadCodexAPIKeyRejectsInvalidCredential(t *testing.T) {
+	root, err := os.MkdirTemp(".", ".agent-codex-auth-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	if err = os.WriteFile(filepath.Join(root, "auth.json"), []byte("{\"OPENAI_API_KEY\":\"line\\nkey\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = readCodexAPIKey(root); err == nil {
+		t.Fatal("accepted a multiline Codex API key")
+	}
+}
+
 func assertMappedSet(t *testing.T, members []struct {
 	Name        string `json:"name"`
 	Disposition string `json:"disposition"`
@@ -654,8 +683,8 @@ func runFakeAppServer() {
 		switch method {
 		case "initialize":
 			result = map[string]any{"codexHome": os.Getenv("DEEIX_TEST_THREAD_CWD")}
-		case "getAuthStatus":
-			result = map[string]any{"authMethod": "apikey", "authToken": "sub2-test-key", "requiresOpenaiAuth": false}
+		case "account/read":
+			result = map[string]any{"account": map[string]any{"type": "apiKey"}, "requiresOpenaiAuth": true}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "gpt-test", "displayName": "GPT Test"}}}
 		case "app/list":
