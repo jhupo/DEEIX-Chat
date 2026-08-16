@@ -9,6 +9,7 @@ import { useChatSubmitStream } from "@/features/chat/hooks/use-chat-submit-strea
 import { mergeGatewayAssistantTurns } from "@/features/chat/model/chat-thread";
 import type {
   ConversationDTO,
+  ConversationInputResourceDTO,
   ConversationOptions,
   MessageDTO,
 } from "@/shared/api/conversation.types";
@@ -98,6 +99,7 @@ export function useChatRuntime({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedInputResources,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -128,6 +130,7 @@ export function useChatRuntime({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -198,6 +201,7 @@ export function useChatRuntime({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedInputResources,
     htmlVisualPromptEnabled,
     options,
     draft,

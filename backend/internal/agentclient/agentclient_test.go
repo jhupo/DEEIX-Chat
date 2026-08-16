@@ -462,6 +462,10 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	if err = os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -510,6 +514,26 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err != nil || result["kind"] != "resource" {
 		t.Fatalf("resource request failed: %#v %v", result, err)
 	}
+	apps, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID,
+		Resource: &struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+		}{Scope: "profile", Name: "apps"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appCatalog, _ := apps["data"].(map[string]any)
+	appItems, _ := appCatalog["data"].([]any)
+	if len(appItems) != 1 {
+		t.Fatalf("unexpected app snapshot: %#v", apps)
+	}
+	app, _ := appItems[0].(map[string]any)
+	appRef, _ := app["resourceRef"].(string)
+	if !strings.HasPrefix(appRef, "app_") || app["id"] != nil || strings.Contains(fmt.Sprint(apps), "calendar-private-id") {
+		t.Fatalf("unsafe app snapshot: %#v", apps)
+	}
 	workspaces, err := adapter.DiscoverWorkspaces(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -523,6 +547,43 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 	adapter.replaceWorkspaces(workspaces)
+	skills, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		Resource: &struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+		}{Scope: "workspace", Name: "skills"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skillCatalog, _ := skills["data"].(map[string]any)
+	skillItems, _ := skillCatalog["data"].([]any)
+	if len(skillItems) != 1 {
+		t.Fatalf("unexpected skill snapshot: %#v", skills)
+	}
+	skill, _ := skillItems[0].(map[string]any)
+	skillRef, _ := skill["resourceRef"].(string)
+	if !strings.HasPrefix(skillRef, "skill_") || skill["path"] != nil || strings.Contains(fmt.Sprint(skills), root) {
+		t.Fatalf("unsafe skill snapshot: %#v", skills)
+	}
+	threadRef, err := state.PublishSource(config.ProfileID, "thread", "thread-input-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "turn.start", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		ThreadID: "agth_0123456789abcdef0123456789abcdef", SourceThreadRef: threadRef,
+		Input: []AgentInput{
+			{Kind: "text", Text: "use both resources"},
+			{Kind: "skill", ResourceRef: skillRef},
+			{Kind: "app-mention", ResourceRef: appRef},
+		},
+		Settings: &Settings{},
+	}, nil)
+	if err != nil || turn["kind"] != "turn-started" {
+		t.Fatalf("resource input request failed: %#v %v", turn, err)
+	}
 	sessions, err := adapter.Execute(context.Background(), AgentCommand{
 		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
 		Resource: &struct {
@@ -597,6 +658,25 @@ func runFakeAppServer() {
 			result = map[string]any{"authMethod": "apikey", "authToken": "sub2-test-key", "requiresOpenaiAuth": false}
 		case "model/list":
 			result = map[string]any{"data": []any{map[string]any{"id": "gpt-test", "displayName": "GPT Test"}}}
+		case "app/list":
+			result = map[string]any{"data": []any{map[string]any{"id": "calendar-private-id", "name": "Calendar", "description": "Read calendar events", "enabled": true}}, "nextCursor": nil}
+		case "skills/list":
+			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
+			result = map[string]any{"data": []any{map[string]any{
+				"cwd":    root,
+				"skills": []any{map[string]any{"name": "review", "description": "Review changes", "path": filepath.Join(root, ".codex", "skills", "review", "SKILL.md"), "enabled": true}},
+			}}}
+		case "turn/start":
+			var params struct {
+				Input []map[string]any `json:"input"`
+			}
+			_ = json.Unmarshal(request["params"], &params)
+			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
+			if len(params.Input) == 3 && params.Input[1]["type"] == "skill" && params.Input[1]["name"] == "review" &&
+				params.Input[1]["path"] == filepath.Join(root, ".codex", "skills", "review", "SKILL.md") &&
+				params.Input[2]["type"] == "mention" && params.Input[2]["name"] == "Calendar" && params.Input[2]["path"] == "app://calendar-private-id" {
+				result = map[string]any{"turn": map[string]any{"id": "turn-input-test"}}
+			}
 		case "thread/list":
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
 			var params map[string]any

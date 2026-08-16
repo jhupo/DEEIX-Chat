@@ -108,6 +108,7 @@ type SendMessageRequest struct {
 	FileIDs                 []string               `json:"fileIDs,omitempty" binding:"max=20"`
 	SelectedToolIDs         []uint                 `json:"selectedToolIDs,omitempty" binding:"max=128"`
 	SkillIDs                []uint                 `json:"skillIDs,omitempty" binding:"max=128"`
+	InputResourceRefs       []string               `json:"inputResourceRefs,omitempty" binding:"max=16,dive,max=256"`
 	HTMLVisualPromptEnabled bool                   `json:"htmlVisualPrompt,omitempty"`
 	ParentMessagePublicID   string                 `json:"parentMessagePublicID,omitempty" binding:"omitempty,max=32"`
 	SourceMessagePublicID   string                 `json:"sourceMessagePublicID,omitempty" binding:"omitempty,max=32"`

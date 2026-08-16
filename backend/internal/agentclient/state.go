@@ -358,7 +358,7 @@ func jsonEqual(left, right []byte) bool {
 }
 
 func validSourceKind(value string) bool {
-	return value == "thread" || value == "turn" || value == "item" || value == "request"
+	return value == "thread" || value == "turn" || value == "item" || value == "request" || value == "skill" || value == "app"
 }
 
 func jsonHash(raw json.RawMessage) (string, error) {

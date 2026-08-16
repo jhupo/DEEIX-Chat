@@ -420,6 +420,7 @@ func (s *Service) CompleteRuntimeProof(
 	); err != nil {
 		return time.Time{}, fmt.Errorf("persist runtime proof: %w", err)
 	}
+	challenge.Profile.ManifestJSON = string(manifest)
 	return leaseExpiresAt, nil
 }
 
@@ -457,13 +458,47 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 		return err
 	}
 	bucket := now.Truncate(time.Hour).Format(time.RFC3339)
-	for _, item := range items {
-		key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:v2:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
-		if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "sessions", key); err != nil {
+	if runtimeProfileHasResource(challenge.Profile, "profile", "apps") {
+		appsKey := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:apps:v1:"+identity.DeviceID+":"+challenge.Profile.PublicID+":"+bucket)).String()
+		if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, challenge.Profile.PublicID, "", "apps", appsKey); err != nil {
 			return err
 		}
 	}
+	for _, item := range items {
+		if runtimeProfileHasResource(challenge.Profile, "workspace", "sessions") {
+			key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:v2:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+			if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "sessions", key); err != nil {
+				return err
+			}
+		}
+		if runtimeProfileHasResource(challenge.Profile, "workspace", "skills") {
+			skillsKey := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:skills:v1:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+			if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "skills", skillsKey); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func runtimeProfileHasResource(profile *domainagent.RuntimeProfile, scope, name string) bool {
+	if profile == nil {
+		return false
+	}
+	var manifest struct {
+		Resources struct {
+			Profile   []string `json:"profile"`
+			Workspace []string `json:"workspace"`
+		} `json:"resources"`
+	}
+	if json.Unmarshal([]byte(profile.ManifestJSON), &manifest) != nil {
+		return false
+	}
+	resources := manifest.Resources.Workspace
+	if scope == "profile" {
+		resources = manifest.Resources.Profile
+	}
+	return contains(resources, name)
 }
 
 func (s *Service) ListRuntimeProfiles(ctx context.Context, userID uint, devicePublicID string) ([]RuntimeProfileView, error) {
@@ -1369,6 +1404,14 @@ func validInput(value json.RawMessage) bool {
 			if json.Unmarshal(item["artifactRef"], &artifactRef) != nil || !validPublicID(artifactRef, "agart") {
 				return false
 			}
+		case "skill", "app-mention":
+			if len(item) != 2 {
+				return false
+			}
+			var resourceRef string
+			if json.Unmarshal(item["resourceRef"], &resourceRef) != nil || !validOpaqueRef(resourceRef) || len(resourceRef) > 256 {
+				return false
+			}
 		default:
 			return false
 		}
@@ -1479,7 +1522,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 	}) && validManifestValues(manifest.Resources.Profile, []string{
 		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
 	}) && validManifestValues(manifest.Resources.Workspace, []string{"sessions", "skills", "hooks"}) &&
-		validManifestValues(manifest.InputKinds, []string{"text", "artifact"}) &&
+		validManifestValues(manifest.InputKinds, []string{"text", "artifact", "skill", "app-mention"}) &&
 		validManifestValues(manifest.ThreadSettings.ReasoningEffort, []string{"low", "medium", "high", "xhigh"}) &&
 		validManifestValues(manifest.ThreadSettings.ApprovalPolicy, []string{"untrusted", "on-request", "never"}) &&
 		validManifestValues(manifest.ThreadSettings.SandboxPolicy, []string{"read-only", "workspace-write"}) &&

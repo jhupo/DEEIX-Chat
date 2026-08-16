@@ -24,6 +24,7 @@ import (
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
+var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
 
 var codexInteractiveSourceKinds = []string{"cli", "vscode", "appServer", "unknown"}
 
@@ -189,7 +190,7 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
 		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
 		Commands:         []string{"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
-		InputKinds:       []string{"text", "artifact"},
+		InputKinds:       []string{"text", "artifact", "skill", "app-mention"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},
 	}
 	manifest.Resources.Profile = append([]string(nil), profileResources...)
@@ -452,7 +453,11 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 			}
 			adapter.setActive(providerThreadID, true)
 		}
-		params := map[string]any{"threadId": providerThreadID, "input": codexInput(command.Input, artifacts), "cwd": cwd}
+		input, inputErr := adapter.codexInput(command.Input, artifacts)
+		if inputErr != nil {
+			return nil, inputErr
+		}
+		params := map[string]any{"threadId": providerThreadID, "input": input, "cwd": cwd}
 		applyTurnSettings(params, *command.Settings, cwd)
 		response, requestErr := adapter.requestMap(ctx, "turn/start", params)
 		if requestErr != nil {
@@ -469,7 +474,11 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
-		err = adapter.rpc.Request(ctx, "turn/steer", map[string]any{"threadId": providerThreadID, "expectedTurnId": providerTurnID, "input": codexInput(command.Input, artifacts)}, nil)
+		input, inputErr := adapter.codexInput(command.Input, artifacts)
+		if inputErr != nil {
+			return nil, inputErr
+		}
+		err = adapter.rpc.Request(ctx, "turn/steer", map[string]any{"threadId": providerThreadID, "expectedTurnId": providerTurnID, "input": input}, nil)
 	case "turn.interrupt":
 		providerTurnID, resolveErr := adapter.state.ResolveSource(adapter.profileID, "turn", command.SourceTurnRef)
 		if resolveErr != nil {
@@ -545,6 +554,8 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	var err error
 	if name == "sessions" {
 		data, err = adapter.listSessions(ctx, params)
+	} else if name == "apps" {
+		data, err = adapter.listApps(ctx)
 	} else {
 		data, err = adapter.requestAny(ctx, method, params)
 	}
@@ -559,10 +570,51 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 		if err != nil {
 			return nil, err
 		}
+	} else if name == "skills" || name == "apps" {
+		data, err = adapter.projectInputResources(name, data)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		data = sanitizeResource(data, "")
 	}
 	return map[string]any{"kind": "resource", "resource": name, "data": data}, nil
+}
+
+func (adapter *CodexAdapter) listApps(ctx context.Context) (any, error) {
+	items := make([]any, 0, 100)
+	cursor := ""
+	seenCursors := make(map[string]struct{})
+	for len(items) < 500 {
+		params := map[string]any{"limit": 100}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		page, err := adapter.requestMap(ctx, "app/list", params)
+		if err != nil {
+			return nil, err
+		}
+		pageItems, ok := page["data"].([]any)
+		if !ok {
+			return nil, errors.New("Codex app catalog is invalid")
+		}
+		remaining := 500 - len(items)
+		if len(pageItems) > remaining {
+			pageItems = pageItems[:remaining]
+		}
+		items = append(items, pageItems...)
+		nextCursor, _ := page["nextCursor"].(string)
+		nextCursor = strings.TrimSpace(nextCursor)
+		if nextCursor == "" || len(items) == 500 {
+			break
+		}
+		if _, duplicate := seenCursors[nextCursor]; duplicate {
+			return nil, errors.New("Codex app catalog cursor repeated")
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
+	}
+	return map[string]any{"data": items}, nil
 }
 
 func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string]any) (any, error) {
@@ -883,21 +935,125 @@ func applyTurnSettings(params map[string]any, settings Settings, cwd string) {
 	}
 }
 
-func codexInput(inputs []AgentInput, artifacts map[string]LocalArtifact) []any {
+type inputResourceSource struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func (adapter *CodexAdapter) projectInputResources(resource string, value any) (map[string]any, error) {
+	root, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("Codex %s resource is invalid", resource)
+	}
+	items, ok := root["data"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("Codex %s catalog is invalid", resource)
+	}
+	projected := make([]any, 0, len(items))
+	if resource == "skills" {
+		for _, groupValue := range items {
+			group, _ := groupValue.(map[string]any)
+			skills, _ := group["skills"].([]any)
+			for _, skillValue := range skills {
+				skill, _ := skillValue.(map[string]any)
+				name, _ := skill["name"].(string)
+				path, _ := skill["path"].(string)
+				description, _ := skill["description"].(string)
+				if enabled, exists := skill["enabled"].(bool); exists && !enabled {
+					continue
+				}
+				item, err := adapter.projectInputResource("skill", name, path, description)
+				if err != nil {
+					return nil, err
+				}
+				if item != nil {
+					projected = append(projected, item)
+				}
+			}
+		}
+	} else {
+		for _, appValue := range items {
+			app, _ := appValue.(map[string]any)
+			id, _ := app["id"].(string)
+			name, _ := app["name"].(string)
+			description, _ := app["description"].(string)
+			if enabled, exists := app["enabled"].(bool); exists && !enabled {
+				continue
+			}
+			item, err := adapter.projectInputResource("app", name, id, description)
+			if err != nil {
+				return nil, err
+			}
+			if item != nil {
+				projected = append(projected, item)
+			}
+		}
+	}
+	if len(projected) > 500 {
+		projected = projected[:500]
+	}
+	return map[string]any{"data": projected}, nil
+}
+
+func (adapter *CodexAdapter) projectInputResource(kind, name, value, description string) (map[string]any, error) {
+	name = sanitizeDiagnosticValue(name, 256)
+	value = strings.TrimSpace(value)
+	description = sanitizeDiagnosticValue(description, 1024)
+	if name == "" || value == "" || len(value) > 4096 || kind == "skill" && !filepath.IsAbs(value) || kind == "app" && !codexAppIDPattern.MatchString(value) {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(inputResourceSource{Name: name, Value: value})
+	if err != nil {
+		return nil, err
+	}
+	sourceKind, inputKind := kind, kind
+	if kind == "app" {
+		inputKind = "app-mention"
+	}
+	resourceRef, err := adapter.state.PublishSource(adapter.profileID, sourceKind, string(encoded))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"resourceRef": resourceRef, "kind": inputKind, "name": name, "description": description}, nil
+}
+
+func (adapter *CodexAdapter) codexInput(inputs []AgentInput, artifacts map[string]LocalArtifact) ([]any, error) {
 	result := make([]any, 0, len(inputs))
 	for _, input := range inputs {
-		if input.Kind == "text" {
+		switch input.Kind {
+		case "text":
 			result = append(result, map[string]any{"type": "text", "text": input.Text, "text_elements": []any{}})
-			continue
+		case "artifact":
+			artifact := artifacts[input.ArtifactRef]
+			kind := "localImage"
+			if strings.HasPrefix(artifact.MimeType, "audio/") {
+				kind = "localAudio"
+			}
+			result = append(result, map[string]any{"type": kind, "path": artifact.Path})
+		case "skill", "app-mention":
+			sourceKind := "skill"
+			if input.Kind == "app-mention" {
+				sourceKind = "app"
+			}
+			raw, err := adapter.state.ResolveSource(adapter.profileID, sourceKind, input.ResourceRef)
+			if err != nil {
+				return nil, err
+			}
+			var source inputResourceSource
+			if json.Unmarshal([]byte(raw), &source) != nil || strings.TrimSpace(source.Name) == "" || strings.TrimSpace(source.Value) == "" {
+				return nil, errors.New("Codex input resource mapping is invalid")
+			}
+			if input.Kind == "skill" {
+				if !filepath.IsAbs(source.Value) {
+					return nil, errors.New("Codex skill path is invalid")
+				}
+				result = append(result, map[string]any{"type": "skill", "name": source.Name, "path": source.Value})
+			} else {
+				result = append(result, map[string]any{"type": "mention", "name": source.Name, "path": "app://" + source.Value})
+			}
 		}
-		artifact := artifacts[input.ArtifactRef]
-		kind := "localImage"
-		if strings.HasPrefix(artifact.MimeType, "audio/") {
-			kind = "localAudio"
-		}
-		result = append(result, map[string]any{"type": kind, "path": artifact.Path})
 	}
-	return result
+	return result, nil
 }
 
 func codexReviewTarget(target map[string]any) map[string]any {

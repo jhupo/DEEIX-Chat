@@ -35,7 +35,7 @@ Bridge 启动后先通过无 `cwd` 过滤的 `thread/list` 分页读取本机 Co
 
 Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，分别读取最多 500 个活动线程和 500 个归档线程，只上传 opaque thread ref、标题、预览、状态和时间摘要。Cloud 在资源终态事务中创建或更新 Conversation 与 AgentThread 目录投影，历史状态初始为 `unloaded`。用户打开会话时，Web 通过 Conversation history API 排队强类型 `thread.read`；Bridge 校验 source ref 后调用 `thread/read(includeTurns=true)`，只上传该线程裁剪后的用户/助手消息并把状态改为 `loaded`。provider raw ID、本地路径、命令输出和凭据留在设备。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
 
-每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Workspace 和小时桶幂等下发一次 `sessions` 刷新。首次连接会自动导入历史；同一小时内的 WSS 重连复用原命令，不重复扫描全部线程。
+每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Profile/Workspace 和小时桶幂等下发 `apps`、`skills` 与 `sessions` 刷新。首次连接会自动导入历史和输入资源；同一小时内的 WSS 重连复用原命令，不重复扫描。
 
 ## 2.1 安装、注册与更新
 
@@ -57,7 +57,7 @@ Conversation 当前只会创建：
 
 ## 4. 引用与附件
 
-Cloud command 只携带 opaque source ref 和 artifact ref。Bridge 在执行前校验 source mapping、Workspace 根目录和 symlink 边界，再解析 raw provider ID 与本地文件。下载 grant 与 command、User、Device、Workspace、Artifact 和过期时间绑定，不写入持久 command payload 或 WAL。
+Cloud command 只携带 opaque source ref、artifact ref 和 input resource ref。Conversation 发送前按当前用户、Device、Workspace 快照校验 Skill/App ref；Bridge 再从本机状态解析 skill path 或 App ID。Cloud 快照只保存名称、说明、类型和 ref，不保存本机绝对路径或 `app://id`。附件下载 grant 与 command、User、Device、Workspace、Artifact 和过期时间绑定，不写入持久 command payload 或 WAL。
 
 ## 5. 投影和恢复
 

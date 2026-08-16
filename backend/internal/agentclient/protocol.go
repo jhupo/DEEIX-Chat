@@ -69,6 +69,7 @@ type AgentInput struct {
 	Kind        string `json:"kind"`
 	Text        string `json:"text,omitempty"`
 	ArtifactRef string `json:"artifactRef,omitempty"`
+	ResourceRef string `json:"resourceRef,omitempty"`
 }
 
 type AgentCommand struct {
@@ -272,12 +273,16 @@ func validInputs(inputs []AgentInput) bool {
 	for _, input := range inputs {
 		switch input.Kind {
 		case "text":
-			if input.ArtifactRef != "" || !validText(input.Text, 1<<20) {
+			if input.ArtifactRef != "" || input.ResourceRef != "" || !validText(input.Text, 1<<20) {
 				return false
 			}
 			total += len(input.Text)
 		case "artifact":
-			if input.Text != "" || !validRef(input.ArtifactRef, 256) {
+			if input.Text != "" || input.ResourceRef != "" || !validRef(input.ArtifactRef, 256) {
+				return false
+			}
+		case "skill", "app-mention":
+			if input.Text != "" || input.ArtifactRef != "" || !validRef(input.ResourceRef, 256) {
 				return false
 			}
 		default:

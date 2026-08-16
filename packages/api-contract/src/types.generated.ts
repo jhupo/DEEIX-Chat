@@ -575,6 +575,23 @@ export interface ConversationHistoryResponseDoc {
   errorMsg: string;
 }
 
+export interface ConversationInputResourceCatalogResponse {
+  items: ConversationInputResourceResponse[];
+  ready: boolean;
+}
+
+export interface ConversationInputResourceListResponseDoc {
+  data: ConversationInputResourceCatalogResponse;
+  errorMsg: string;
+}
+
+export interface ConversationInputResourceResponse {
+  description: string;
+  kind: "skill" | "app-mention";
+  name: string;
+  resourceRef: string;
+}
+
 export interface ConversationListResponseDoc {
   data: {
     results: ConversationResponse[];
@@ -1900,6 +1917,8 @@ export interface SendMessageRequest {
   /** @maxItems 20 */
   fileIDs?: string[];
   htmlVisualPrompt?: boolean;
+  /** @maxItems 16 */
+  inputResourceRefs?: string[];
   /** @maxLength 64 */
   keyBindingID?: string;
   /** @maxLength 128 */
@@ -5614,6 +5633,31 @@ export namespace ContextArtifacts {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ContextArtifactResponseDoc;
+  }
+}
+
+export namespace ConversationInputResources {
+  /**
+   * No description
+   * @tags chat
+   * @name ConversationInputResourcesList
+   * @summary List local input resources for a Work workspace
+   * @request GET:/conversation-input-resources
+   * @secure
+   */
+  export namespace ConversationInputResourcesList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** Gateway device public ID */
+      device: string;
+      /** Name or description filter */
+      query?: string;
+      /** Gateway workspace public ID */
+      workspace: string;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationInputResourceListResponseDoc;
   }
 }
 

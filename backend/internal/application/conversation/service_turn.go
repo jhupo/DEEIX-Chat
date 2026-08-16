@@ -53,6 +53,9 @@ func (s *Service) StreamTurn(ctx context.Context, input SendMessageInput, onDelt
 }
 
 func (s *Service) executeCloudTurn(ctx context.Context, input SendMessageInput, onDelta func(string) error, stream bool) (*SendMessageResult, error) {
+	if len(input.InputResourceRefs) != 0 {
+		return nil, ErrInvalidMessageContent
+	}
 	originalOnEvent := input.OnEvent
 	input.OnEvent = func(kind string, payload map[string]interface{}) error {
 		if durableCloudEvent(kind) {
@@ -133,7 +136,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	validContentType := hasFiles && input.ContentType == "mixed" ||
 		!hasFiles && (input.ContentType == "text" || input.ContentType == "markdown")
 	if strings.TrimSpace(input.Content) == "" || !validContentType ||
-		len(input.SelectedToolIDs) != 0 || len(input.SkillIDs) != 0 || input.HTMLVisualPromptEnabled ||
+		len(input.SelectedToolIDs) != 0 || len(input.SkillIDs) != 0 || len(input.InputResourceRefs) > 16 || input.HTMLVisualPromptEnabled ||
 		strings.TrimSpace(input.ParentMessagePublicID) != "" || strings.TrimSpace(input.SourceMessagePublicID) != "" ||
 		(strings.TrimSpace(input.BranchReason) != "" && strings.TrimSpace(input.BranchReason) != "default") {
 		return nil, ErrInvalidMessageContent
@@ -153,8 +156,24 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	if err != nil {
 		return nil, err
 	}
-	providerInput := make([]map[string]string, 0, len(attachments)+1)
+	selectedResources := make([]GatewayInputResource, 0, len(input.InputResourceRefs))
+	if len(input.InputResourceRefs) > 0 {
+		availableResources, resourceErr := s.gatewayExecutor.ListInputResources(
+			ctx, input.UserID, conversation.ExecutionDeviceID, conversation.ExecutionWorkspaceID,
+		)
+		if resourceErr != nil {
+			return nil, resourceErr
+		}
+		selectedResources, resourceErr = selectGatewayInputResources(input.InputResourceRefs, availableResources.Items)
+		if resourceErr != nil {
+			return nil, resourceErr
+		}
+	}
+	providerInput := make([]map[string]string, 0, len(attachments)+len(selectedResources)+1)
 	providerInput = append(providerInput, map[string]string{"kind": "text", "text": input.Content})
+	for _, item := range selectedResources {
+		providerInput = append(providerInput, map[string]string{"kind": item.Kind, "resourceRef": item.ResourceRef})
+	}
 	for _, attachment := range attachments {
 		artifact, artifactErr := s.gatewayExecutor.CreateArtifact(ctx, input.UserID, conversation.ExecutionWorkspaceID, attachment.FileID)
 		if artifactErr != nil {

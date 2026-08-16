@@ -3,6 +3,8 @@ import type {
   BatchSetConversationProjectResponse,
   ContextArtifactResponse,
   ConversationDefaultModelCandidateResponse,
+  ConversationInputResourceResponse,
+  ConversationInputResourceCatalogResponse,
   ConversationDeleteResponse,
   ConversationExportResponse,
   ConversationProjectResponse,
@@ -88,6 +90,14 @@ export type ConversationProjectMCPDefaultMode = "inherit" | "custom";
 
 export type ConversationProjectDTO = Omit<ConversationProjectResponse, "mcpDefaultMode"> & {
   mcpDefaultMode: ConversationProjectMCPDefaultMode;
+};
+
+export type ConversationInputResourceDTO = Omit<ConversationInputResourceResponse, "kind"> & {
+  kind: "skill" | "app-mention";
+};
+
+export type ConversationInputResourceCatalogDTO = Omit<ConversationInputResourceCatalogResponse, "items"> & {
+  items: ConversationInputResourceDTO[];
 };
 
 export type MessageDTO = Omit<

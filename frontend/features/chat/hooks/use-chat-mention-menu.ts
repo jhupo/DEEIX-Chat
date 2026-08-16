@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import type { ConversationInputResourceDTO } from "@/shared/api/conversation.types";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -39,9 +40,19 @@ type ChatMentionSkillMenuItem = {
   selected: boolean;
 };
 
+type ChatMentionInputResourceMenuItem = {
+  id: string;
+  kind: ChatMentionMenuKind;
+  label: string;
+  description: string;
+  resource: ConversationInputResourceDTO;
+  selected: boolean;
+};
+
 export type ChatMentionMenuItem =
   | ChatMentionPluginMenuItem
-  | ChatMentionSkillMenuItem;
+  | ChatMentionSkillMenuItem
+  | ChatMentionInputResourceMenuItem;
 
 export type ChatMentionMenuSection = {
   kind: ChatMentionMenuKind;
@@ -62,11 +73,13 @@ type ChatMentionMenuPlacementAnchor = "caret" | "container";
 
 type ChatMentionMenuControllerArgs = {
   availableTools: MCPToolDTO[];
+  inputResources?: ConversationInputResourceDTO[];
   disabled: boolean;
   draft: string;
   maxSelectedTools: number;
   maxSelectedSkills: number;
   selectedSkills?: SkillSummaryDTO[];
+  selectedInputResources?: ConversationInputResourceDTO[];
   selectedToolIDs: number[];
   anchorRef: React.RefObject<HTMLElement | null>;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -74,6 +87,7 @@ type ChatMentionMenuControllerArgs = {
   onDraftChange: (value: string) => void;
   enabledKinds?: readonly ChatMentionMenuKind[];
   onSelectedSkillsChange?: (skills: SkillSummaryDTO[]) => void;
+  onSelectedInputResourcesChange?: (resources: ConversationInputResourceDTO[]) => void;
   placementAnchor?: ChatMentionMenuPlacementAnchor;
   placementPreference?: ChatMentionMenuPlacementPreference;
   onSelectedToolsChange: (toolIDs: number[]) => void;
@@ -291,23 +305,47 @@ function pluginsToItems(
     }));
 }
 
+function inputResourcesToItems(
+  resources: ConversationInputResourceDTO[],
+  kind: ChatMentionMenuKind,
+  query: string,
+  selectedResources: ConversationInputResourceDTO[],
+): ChatMentionInputResourceMenuItem[] {
+  const resourceKind = kind === "skill" ? "skill" : "app-mention";
+  const selectedRefs = new Set(selectedResources.map((item) => item.resourceRef));
+  return resources
+    .filter((item) => item.kind === resourceKind && itemMatchesQuery([item.name, item.description], query))
+    .map((resource) => ({
+      id: `resource:${resource.resourceRef}`,
+      kind,
+      label: resource.name,
+      description: resource.description,
+      resource,
+      selected: selectedRefs.has(resource.resourceRef),
+    }));
+}
+
 function buildSections({
   availableTools,
+  inputResources,
   skillLoading,
   skills,
   query,
   queryKind,
   selectedSkills = [],
+  selectedInputResources = [],
   selectedToolIDs,
   toolsDisabled,
   enabledKinds,
 }: {
   availableTools: MCPToolDTO[];
+  inputResources?: ConversationInputResourceDTO[];
   skills: SkillSummaryDTO[];
   skillLoading: boolean;
   query: string | null;
   queryKind: ChatMentionMenuKind | null;
   selectedSkills: SkillSummaryDTO[];
+  selectedInputResources: ConversationInputResourceDTO[];
   selectedToolIDs: number[];
   toolsDisabled: boolean;
   enabledKinds: ReadonlySet<ChatMentionMenuKind>;
@@ -317,11 +355,19 @@ function buildSections({
   }
 
   if (queryKind === "skill" && enabledKinds.has("skill")) {
+    if (inputResources !== undefined) {
+      const items = inputResourcesToItems(inputResources, "skill", query, selectedInputResources);
+      return items.length > 0 ? [{ kind: "skill", items }] : [];
+    }
     const items = skillLoading ? [] : skillsToItems(skills, selectedSkills);
     return items.length > 0 ? [{ kind: "skill", items }] : [];
   }
 
   if (queryKind === "plugin" && enabledKinds.has("plugin") && !toolsDisabled) {
+    if (inputResources !== undefined) {
+      const items = inputResourcesToItems(inputResources, "plugin", query, selectedInputResources);
+      return items.length > 0 ? [{ kind: "plugin", items }] : [];
+    }
     const items = pluginsToItems(availableTools, query, selectedToolIDs);
     return items.length > 0 ? [{ kind: "plugin", items }] : [];
   }
@@ -423,17 +469,20 @@ function mentionMenuLayoutsEqual(
 
 export function useChatMentionMenu({
   availableTools,
+  inputResources,
   disabled,
   draft,
   maxSelectedTools,
   maxSelectedSkills,
   selectedSkills = [],
+  selectedInputResources = [],
   selectedToolIDs,
   anchorRef,
   textareaRef,
   toolsDisabled,
   onDraftChange,
   onSelectedSkillsChange,
+  onSelectedInputResourcesChange,
   enabledKinds = DEFAULT_MENTION_MENU_KINDS,
   placementAnchor = "caret",
   placementPreference = "auto",
@@ -476,7 +525,7 @@ export function useChatMentionMenu({
   }, [draft, updateSelection]);
 
   React.useEffect(() => {
-    if (skillQuery === null || disabled || !enabledKindSet.has("skill")) {
+    if (inputResources !== undefined || skillQuery === null || disabled || !enabledKindSet.has("skill")) {
       setSkills([]);
       setSkillsLoading(false);
       return;
@@ -511,28 +560,32 @@ export function useChatMentionMenu({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [disabled, enabledKindSet, skillQuery]);
+  }, [disabled, enabledKindSet, inputResources, skillQuery]);
 
   const sections = React.useMemo(
     () =>
       buildSections({
         availableTools,
+        inputResources,
         skills,
         skillLoading: skillsLoading,
         query,
         queryKind,
         selectedSkills,
+        selectedInputResources,
         selectedToolIDs,
         toolsDisabled,
         enabledKinds: enabledKindSet,
       }),
     [
       availableTools,
+      inputResources,
       skills,
       skillsLoading,
       query,
       queryKind,
       selectedSkills,
+      selectedInputResources,
       selectedToolIDs,
       toolsDisabled,
       enabledKindSet,
@@ -626,6 +679,22 @@ export function useChatMentionMenu({
 
   const select = React.useCallback(
     (item: ChatMentionMenuItem) => {
+      if ("resource" in item) {
+        const alreadySelected = selectedInputResources.some(
+          (resource) => resource.resourceRef === item.resource.resourceRef,
+        );
+        if (!alreadySelected && selectedInputResources.length >= maxSelectedSkills) {
+          onSkillLimitReached?.();
+          return;
+        }
+        onSelectedInputResourcesChange?.(
+          alreadySelected
+            ? selectedInputResources.filter((resource) => resource.resourceRef !== item.resource.resourceRef)
+            : [...selectedInputResources, item.resource],
+        );
+        finishSelection();
+        return;
+      }
       if (item.kind === "skill") {
         const alreadySelected = selectedSkills.some((skill) => skill.id === item.skill.id);
         if (!alreadySelected && selectedSkills.length >= maxSelectedSkills) {
@@ -660,10 +729,12 @@ export function useChatMentionMenu({
       maxSelectedSkills,
       maxSelectedTools,
       onSelectedSkillsChange,
+      onSelectedInputResourcesChange,
       onSkillLimitReached,
       onSelectedToolsChange,
       onToolLimitReached,
       selectedSkills,
+      selectedInputResources,
       selectedToolIDs,
     ],
   );

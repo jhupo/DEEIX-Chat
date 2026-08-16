@@ -13,7 +13,7 @@
 - 六类服务端主动请求：命令审批、文件审批、用户提问、权限申请、MCP elicitation、动态工具调用的请求投影和响应映射全部通过 fixture。
 - 测试线程由 `finally` 删除，没有保留测试会话或测试文件。
 
-这表示当前适配器基础链路可用，但还不是官方 app-server 的完整产品能力。主要缺口是输入类型、审批决策、App/Skill/MCP 操作、线程分页、账户与配置资源、终端/文件能力，以及官方当前文档相对 `0.147.0` 的实验 API 漂移。
+这表示当前适配器基础链路可用，但还不是官方 app-server 的完整产品能力。主要缺口是审批决策、App/Skill/MCP 管理操作、账户与配置资源、终端/文件能力，以及官方当前文档相对 `0.147.0` 的实验 API 漂移。
 
 ## 2. 验收口径
 
@@ -111,7 +111,7 @@ deeix-agent doctor
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
 | 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
-| 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
+| 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；支持文本、已授权附件、Workspace Skill 与 App mention |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
 | 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | Run 只作为会话运行状态；本轮不增加独立任务入口 |
@@ -120,13 +120,14 @@ deeix-agent doctor
 | 新建本地项目 | Bridge 提供 `workspace.register`，本机完成路径校验、配置持久化和 Workspace 同步 | Web 在所选在线设备上添加本地文件夹，等待命令终态后刷新项目树 | 已接通；路径操作以配置用户身份执行，命令终态后 Cloud 清除暂存路径 |
 | 删除本地会话 | `thread/delete` 已映射并实测 | Web 通过持久化 `thread.lifecycle` 命令删除本机 thread，设备确认且待投影事件清空后再软删除 Conversation | 已接通；本地工作区文件保留，设备拒绝时恢复会话状态 |
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | Web 归档通过持久化 `thread.lifecycle` 命令同步到设备；本机 Codex 的归档/恢复通知同步更新 Conversation | 已接通；命令失败时回滚 Thread 与 Conversation 状态 |
-| 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
-| 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 当前“插件”入口仍只读取平台 Skill/Prompt 数据 | 后端能力已具备；统一资源适配接口和 UI 投影待接入 |
+| 使用本地 Skill | Workspace `skills/list` 已映射并实测 | `/` 从 Conversation Resource API 读取当前设备/Workspace 快照，并提交 opaque ref | 已接通；Bridge 在本机解析为 `UserInput.skill`，路径不进入 Cloud |
+| 使用本地 App | Profile `app/list` 已映射并实测 | `@` 以“插件”交互展示可 mention 的 App，并提交 opaque ref | 已接通；Bridge 在本机解析为 `UserInput.mention` 的 `app://id` |
+| 管理本地 Plugin 包 | Profile `plugin/list` 已映射并实测 | Web 不把只读 Plugin 包伪装成可执行 mention | 只读快照已具备；read/install/uninstall/share 仍待独立管理接口 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
 聊天和工作共用原有导航、最近会话、项目、搜索和“插件”入口，并保持相同的“置顶、项目、最近”顺序；没有置顶会话时不显示“置顶”区。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation。Cloud Project 与设备 Workspace 都使用可展开项目树；项目会话只显示在所属项目节点中，不重复进入“最近”，但允许出现在全局“置顶”区。“最近”只读取未归档、未置顶且未分配项目的会话；归档会话只在“所有对话”的归档筛选中显示。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
 
-本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口并展示平台 Skill/Prompt；本地 Skill/Plugin 在统一资源 adapter 完成前不伪装为另一套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
+本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口展示平台 Skill/Prompt；工作输入框通过 Conversation Resource API 使用本地 Workspace Skill 与可 mention App，不新增第二套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 
 ## 5. Schema 与官方当前文档的边界
 
@@ -224,17 +225,18 @@ deeix-agent doctor
 
 ### P1：补齐 Web 端本地 Codex 的核心体验
 
-#### 6.5 输入类型不足
+#### 6.5 Skill 与 App mention 输入
 
-官方 `UserInput` 支持 text、image URL、localImage、audio URL、localAudio、skill 和 mention。DEEIX 当前只有 text 与 artifact；artifact 仅落为 localImage/localAudio。
+已完成：
 
-修改：
+- `AgentInput` 已增加 `skill` 和 `app-mention`，Cloud 命令只保存资源 snapshot 中的 opaque ref。
+- Runtime proof 后按小时桶自动刷新 Profile `apps` 与每个 Workspace 的 `skills`；快照只保存名称、说明、类型与 ref。
+- Conversation Resource API 按登录用户、所选设备与 Workspace 返回 `ready + items` 统一目录；设备在线且快照未齐时 Web 继续轮询，两个快照都存在后停止。发送前再次用当前快照校验 ref，伪造、跨 Workspace、重复或已替换 ref 均被拒绝。
+- Bridge 在本机状态中把 ref 解析为 skill 绝对路径或 `app://id`，再生成官方 `UserInput.skill` / `UserInput.mention`。本机路径与 App ID 不进入 Cloud。
+- Web 复用原输入框：工作模式 `/` 选择 Skill，`@` 选择可 mention App；Cloud 模式继续使用平台 Skill/MCP。
+- 远程图片/音频仍先进入 DEEIX 文件系统并做 size/SHA-256 校验，再下发 artifact grant；不直接把任意 URL 交给本机。
 
-- `AgentInput` 增加 `skill` 和 `app-mention`，字段只用资源 snapshot 中的 opaque ref。
-- Bridge 用本机 snapshot 将 ref 解析为 skill path 或 `app://id`，浏览器不提交本机路径。
-- 远程 URL 图片继续先进入 DEEIX 文件系统并做 size/SHA-256 校验，再下发 artifact grant；不直接把任意 URL 交给本机。
-
-验收：显式 skill item 和 `$skill-name` 同时发送；App mention 与 `app://id` 一致；伪造 ref、跨 workspace ref 和过期 snapshot 被拒绝。
+验收证据：原生 Adapter fixture 同时验证脱敏快照、skill path 恢复和 `mention(app://id)`；Conversation 单测覆盖当前 ref、未知 ref 与重复 ref。
 
 #### 6.6 Turn 设置项不足
 
@@ -267,14 +269,13 @@ deeix-agent doctor
 
 #### 6.9 App、Skill、Plugin 和 MCP 目前以列表为主
 
-现状：App 仅 `app/list`，Skill 仅 list，Plugin 仅 list，MCP 仅 status/list。`app/installed`、`app/read`、skill 启停、MCP resource/tool/OAuth/reload 未进入命令层。
+现状：App/Skill 已支持只读列表和显式输入；Plugin 仍仅 list，MCP 仍仅 status/list。`app/installed`、`app/read`、skill 启停、MCP resource/tool/OAuth/reload 未进入命令层。
 
 修改顺序：
 
 1. 先加只读 `app/installed`、`app/read`、plugin read、MCP resource read。
-2. 再加显式 Skill/App 输入。
-3. MCP tool call 仅从已加载 tool snapshot 生成 typed command。
-4. OAuth、reload、skill config 和 plugin install 作为独立管理命令，带审计与管理员/设备所有者策略。
+2. MCP tool call 仅从已加载 tool snapshot 生成 typed command。
+3. OAuth、reload、skill config 和 plugin install 作为独立管理命令，带审计与管理员/设备所有者策略。
 
 验收：建立仓库内固定 MCP stdio fixture，覆盖 tools/resources/list/read/call、OAuth completion、elicitation 和断线重连。
 
@@ -287,12 +288,13 @@ deeix-agent doctor
 3. 删除在设备确认且待投影事件清空后才软删除 Conversation。本地 Workspace 文件保留；失败时恢复会话状态，已删除 thread 不会被后续 `sessions` 刷新重新导入。
 4. Bridge 支持 `workspace.register`。路径解析、目录创建、配置持久化和附件落盘都以配置用户身份执行；命令终态后 Cloud 清除暂存的本机路径，并刷新 Workspace 与 sessions 投影。
 5. `sessions` 同时分页读取活动与归档目录。当前每个 Workspace 每种状态最多投影 500 条摘要，打开 Conversation 时才读取单个 thread 的完整历史；归档 Conversation 不进入项目树、置顶或最近，只能在“所有对话”的归档筛选中查看。
+6. Conversation Resource API 已按 execution context 返回设备 Profile App 与 Workspace Skill 的统一 DTO；输入框消费该接口并只提交 opaque ref。
 
 仍待完成：
 
-1. 增加统一 Resource 查询能力，由后端根据 execution context 返回平台 Skill/Prompt 或 device/profile 的 Plugin、Workspace Skill 快照；原“插件”页面只消费统一 DTO。
-2. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
-3. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
+1. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
+2. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
+3. 原“插件”管理页如需展示设备 Plugin 包，继续复用统一 DTO 思路，但必须与可执行 App mention 明确区分。
 
 验收：
 

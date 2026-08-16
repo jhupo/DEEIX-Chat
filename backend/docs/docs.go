@@ -6577,6 +6577,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/conversation-input-resources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "List local input resources for a Work workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Gateway device public ID",
+                        "name": "device",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Gateway workspace public ID",
+                        "name": "workspace",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Name or description filter",
+                        "name": "query",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationInputResourceListResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/conversation-interactions/{interaction_id}/respond": {
             "post": {
                 "security": [
@@ -12352,6 +12410,66 @@ const docTemplate = `{
                 }
             }
         },
+        "ConversationInputResourceCatalogResponse": {
+            "type": "object",
+            "required": [
+                "items",
+                "ready"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ConversationInputResourceResponse"
+                    }
+                },
+                "ready": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ConversationInputResourceListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ConversationInputResourceCatalogResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConversationInputResourceResponse": {
+            "type": "object",
+            "required": [
+                "description",
+                "kind",
+                "name",
+                "resourceRef"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "skill",
+                        "app-mention"
+                    ]
+                },
+                "name": {
+                    "type": "string"
+                },
+                "resourceRef": {
+                    "type": "string"
+                }
+            }
+        },
         "ConversationListResponseDoc": {
             "type": "object",
             "required": [
@@ -16683,6 +16801,13 @@ const docTemplate = `{
                 "htmlVisualPrompt": {
                     "type": "boolean"
                 },
+                "inputResourceRefs": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "keyBindingID": {
                     "type": "string",
                     "maxLength": 64
@@ -20136,7 +20261,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.50",
+	Version:          "0.4.51",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

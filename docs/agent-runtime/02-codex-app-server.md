@@ -145,7 +145,7 @@ export interface ProviderAdapter {
 }
 ```
 
-Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants only. `thread.create` has no user input and no `sourceThreadRef` until its Bridge result/event binds it; Browser initial input appears solely in the follow-on `turn.start` command. Thread lifecycle/name/compact/review and turn start carry `sourceThreadRef`; steer/interrupt also carry `sourceTurnRef`; interaction response carries `sourceRequestRef`. Commands contain no canonical cwd, raw provider ID, raw RPC method, credential or secret. An attachment is an opaque `artifactRef`; Cloud validates its User/workspace binding, the WSS envelope adds a short-lived command-bound grant, and Bridge maps the downloaded image/audio to `localImage`/`localAudio`. Adapter receives a `kind`-narrowed union with no `unknown` payload. Bridge de-duplicates by command ID/result cache.
+Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants only. `thread.create` has no user input and no `sourceThreadRef` until its Bridge result/event binds it; Browser initial input appears solely in the follow-on `turn.start` command. Thread lifecycle/name/compact/review and turn start carry `sourceThreadRef`; steer/interrupt also carry `sourceTurnRef`; interaction response carries `sourceRequestRef`. Commands contain no canonical cwd, raw provider ID, raw RPC method, credential or secret. An attachment is an opaque `artifactRef`; Cloud validates its User/workspace binding, the WSS envelope adds a short-lived command-bound grant, and Bridge maps the downloaded image/audio to `localImage`/`localAudio`. Skill and App inputs carry only `resourceRef`; Bridge resolves its local mapping to a skill path or `app://id`. Adapter receives a `kind`-narrowed union with no `unknown` payload. Bridge de-duplicates by command ID/result cache.
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 
@@ -159,7 +159,7 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
   "schemaHash": "<64-char sha256>",
   "commands": ["thread.create", "turn.start", "interaction.respond"],
   "resources": { "profile": ["models"], "workspace": ["sessions"] },
-  "inputKinds": ["text", "artifact"],
+  "inputKinds": ["text", "artifact", "skill", "app-mention"],
   "threadSettings": {
     "model": true,
     "reasoningEffort": ["low", "medium", "high", "xhigh"],
@@ -183,9 +183,9 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 | Item/notifications | Stable item notifications include started/delta/completed and `item/fileChange/patchUpdated` (mapped); `item/commandExecution/terminalInteraction` is an extension notification | Lock disposition and generated notification type are authoritative | Upsert mapped AgentItem projections; retain extension payload redacted | Completed supplies item terminal form; extension remains inspectable without promoting a control |
 | Server requests | Stable request union includes command/file/permission approvals, `item/tool/requestUserInput`, MCP elicitation and typed tool calls; `attestation/generate` is disabled | Generated request/response types and maturity metadata in the lock are authoritative | Store local request ID/source request ref in Bridge WAL, project AgentInteraction, and map typed response through `interaction.respond` | Drawer presents mapped typed response; disabled request has no control; browser never sees raw RPC ID |
 | Models/modes | Stable `model/list`, `modelProvider/capabilities/read`, `permissionProfile/list`; unpinned experimental candidate `collaborationMode/list` | Stable entries follow the lock. `collaborationMode/list` is disabled until a separate generated, hashed and exhaustive experimental lock exists | Snapshot profile resources and capability descriptors | Model and permission selectors are disabled while stale/offline; collaboration has no control before its experimental lock |
-| Skills/Hooks | `skills/list`, `skills/changed`, `hooks/list` | 当前实现只读 list 与 invalidation；extra roots/config write 为 extension | Query using canonical cwd; publish redacted resource snapshot | Skill 显式输入和启停尚未接入 |
+| Skills/Hooks | `skills/list`, `skills/changed`, `hooks/list` | 当前实现只读 list 与显式 Skill input；extra roots/config write 为 extension | Query using canonical cwd; publish opaque resource ref，路径留在 Bridge | `/` 选择 Skill；启停尚未接入 |
 | Plugins/marketplaces | `plugin/list` | 当前只调度 pinned `plugin/list`；官方仍标记 under development | 投影只读列表 | read/install/uninstall/share 尚未接入 |
-| Apps | `app/list` | 当前只调度 list | Profile resource snapshot | `app/installed`、`app/read` 和 mention 输入尚未接入 |
+| Apps | 分页 `app/list` | 当前调度 list 与显式 mention input | Profile resource snapshot 只含 opaque ref，App ID 留在 Bridge | `@` 选择 App mention；`app/installed`、`app/read` 尚未接入 |
 | MCP | `mcpServerStatus/list` 与 startup notification | 当前只调度 status/list | 投影脱敏状态、工具与资源目录 | resource read、tool call、OAuth 和 reload 尚未接入 |
 | Config | `config/read`、writes、requirements | 当前 Agent 协议未暴露；真实进程只探测了 `config/read` | 无 Cloud config snapshot | 后续只增加脱敏 summary，secret 与本机 path 留在 Bridge |
 | Filesystem/command/process | fs、`command/exec`、process candidates | 当前 Agent 协议未暴露；真实进程只探测了 metadata 和隔离 command | 文件附件走 artifact grant | 集成终端需单独的 workspace-relative command 设计 |

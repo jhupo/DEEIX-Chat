@@ -11,6 +11,7 @@ import type {
   ConversationDefaultModelCandidateDTO,
   ConversationExportDTO,
   ConversationProjectDTO,
+  ConversationInputResourceCatalogDTO,
   ConversationProjectFilter,
   ConversationProjectStatusFilter,
   ConversationPreviewMessageDTO,
@@ -884,6 +885,20 @@ export async function sendMessage(
       accessToken,
       body: payload,
     },
+    true,
+  );
+}
+
+export async function listConversationInputResources(
+  accessToken: string,
+  deviceID: string,
+  workspaceID: string,
+  signal?: AbortSignal,
+): Promise<ConversationInputResourceCatalogDTO> {
+  const params = new URLSearchParams({ device: deviceID, workspace: workspaceID });
+  return authedRequest<ConversationInputResourceCatalogDTO>(
+    `/api/v1/conversation-input-resources?${params.toString()}`,
+    { accessToken, signal },
     true,
   );
 }

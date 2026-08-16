@@ -68,6 +68,23 @@ type ConversationHistoryResponse struct {
 	Error  string `json:"error"`
 }
 
+type ConversationInputResourceResponse struct {
+	ResourceRef string `json:"resourceRef"`
+	Kind        string `json:"kind" enums:"skill,app-mention"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type ConversationInputResourceCatalogResponse struct {
+	Ready bool                                `json:"ready"`
+	Items []ConversationInputResourceResponse `json:"items"`
+}
+
+type ConversationInputResourceListResponseDoc struct {
+	ErrorMsg string                                   `json:"errorMsg"`
+	Data     ConversationInputResourceCatalogResponse `json:"data"`
+}
+
 // ConversationPreviewMessageResponse 会话搜索预览使用的轻量消息 DTO。
 type ConversationPreviewMessageResponse struct {
 	PublicID     string `json:"publicID"`

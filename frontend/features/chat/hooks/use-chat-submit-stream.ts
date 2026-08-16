@@ -12,6 +12,7 @@ import type {
 } from "@/features/chat/types/chat-runtime";
 import type {
   ConversationDTO,
+  ConversationInputResourceDTO,
   ConversationOptions,
   MessageDTO,
 } from "@/shared/api/conversation.types";
@@ -27,6 +28,7 @@ export function useChatSubmitStream({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedInputResources,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -67,6 +69,7 @@ export function useChatSubmitStream({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -112,6 +115,7 @@ export function useChatSubmitStream({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedInputResources,
     htmlVisualPromptEnabled,
     options,
     draft,

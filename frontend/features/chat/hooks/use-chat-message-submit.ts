@@ -51,6 +51,7 @@ import {
 } from "@/shared/api/conversation";
 import type {
   ConversationDTO,
+  ConversationInputResourceDTO,
   ConversationOptions,
   MediaImageRequest,
   MediaVideoRequest,
@@ -199,6 +200,7 @@ type QueuedChatSubmission = BranchScope & {
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  inputResourceRefs: string[];
   htmlVisualPromptEnabled: boolean;
 };
 
@@ -451,6 +453,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedInputResources,
   htmlVisualPromptEnabled,
   options,
   draft,
@@ -497,6 +500,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
   draft: string;
@@ -739,6 +743,9 @@ export function useChatMessageSubmit({
         : [];
       const requestSelectedSkills = requestExecutionMode === "cloud"
         ? queuedSubmission?.selectedSkills ?? selectedSkills
+        : [];
+      const requestInputResourceRefs = requestExecutionMode === "gateway"
+        ? queuedSubmission?.inputResourceRefs ?? selectedInputResources.map((item) => item.resourceRef)
         : [];
       const requestHTMLVisualPromptEnabled = requestExecutionMode === "cloud" &&
         (queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled);
@@ -1149,6 +1156,7 @@ export function useChatMessageSubmit({
             keyBindingID: requestKeyBindingID,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
+            inputResourceRefs: requestInputResourceRefs.length > 0 ? requestInputResourceRefs : undefined,
             htmlVisualPrompt: requestHTMLVisualPromptEnabled || undefined,
           };
           completed = await streamConversationMessage(token, targetConversationID, chatPayload, streamOptions);
@@ -1477,6 +1485,7 @@ export function useChatMessageSubmit({
       modelOptions,
       selectedToolIDs,
       selectedSkills,
+      selectedInputResources,
       executionMode,
       htmlVisualPromptEnabled,
       selectedPlatformModelName,
@@ -1577,6 +1586,9 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
+          inputResourceRefs: executionMode === "gateway"
+            ? selectedInputResources.map((item) => item.resourceRef)
+            : [],
           htmlVisualPromptEnabled,
         },
       ];
@@ -1592,11 +1604,13 @@ export function useChatMessageSubmit({
     currentLeafMessage?.runID,
     currentLeafMessage?.status,
     draft,
+    executionMode,
     htmlVisualPromptEnabled,
     options,
     selectedPlatformModelName,
     selectedKeyBindingID,
     selectedSkills,
+    selectedInputResources,
     selectedToolIDs,
     setAttachments,
     setDraft,

@@ -46,6 +46,7 @@ type sub2ExecutionResolver interface {
 
 type gatewayExecutor interface {
 	ResolveExecutionTarget(context.Context, uint, string, string, string) (string, error)
+	ListInputResources(context.Context, uint, string, string) (*GatewayInputResourceCatalog, error)
 	CreateArtifact(context.Context, uint, string, string) (*GatewayArtifact, error)
 	StartThread(context.Context, uint, GatewayStartThreadInput) error
 	GetThreadByConversation(context.Context, uint, uint) (*GatewayThread, error)
@@ -63,6 +64,16 @@ type gatewayProjectLister interface {
 }
 
 type GatewayArtifact struct{ ArtifactID string }
+type GatewayInputResource struct {
+	ResourceRef string
+	Kind        string
+	Name        string
+	Description string
+}
+type GatewayInputResourceCatalog struct {
+	Items []GatewayInputResource
+	Ready bool
+}
 type GatewayThread struct {
 	ThreadID      string
 	Status        string
@@ -245,6 +256,7 @@ type SendMessageInput struct {
 	FileIDs                 []string
 	SelectedToolIDs         []uint
 	SkillIDs                []uint
+	InputResourceRefs       []string
 	HTMLVisualPromptEnabled bool
 	ParentMessagePublicID   string
 	SourceMessagePublicID   string

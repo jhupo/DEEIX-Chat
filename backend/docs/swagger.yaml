@@ -1310,6 +1310,47 @@ definitions:
     - data
     - errorMsg
     type: object
+  ConversationInputResourceCatalogResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/ConversationInputResourceResponse'
+        type: array
+      ready:
+        type: boolean
+    required:
+    - items
+    - ready
+    type: object
+  ConversationInputResourceListResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ConversationInputResourceCatalogResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ConversationInputResourceResponse:
+    properties:
+      description:
+        type: string
+      kind:
+        enum:
+        - skill
+        - app-mention
+        type: string
+      name:
+        type: string
+      resourceRef:
+        type: string
+    required:
+    - description
+    - kind
+    - name
+    - resourceRef
+    type: object
   ConversationListResponseDoc:
     properties:
       data:
@@ -4352,6 +4393,11 @@ definitions:
         type: array
       htmlVisualPrompt:
         type: boolean
+      inputResourceRefs:
+        items:
+          type: string
+        maxItems: 16
+        type: array
       keyBindingID:
         maxLength: 64
         type: string
@@ -6765,7 +6811,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.50"
+  version: "0.4.51"
 paths:
   /admin/announcements:
     get:
@@ -10903,6 +10949,43 @@ paths:
       security:
       - BearerAuth: []
       summary: 查询上下文证据详情
+      tags:
+      - chat
+  /conversation-input-resources:
+    get:
+      parameters:
+      - description: Gateway device public ID
+        in: query
+        name: device
+        required: true
+        type: string
+      - description: Gateway workspace public ID
+        in: query
+        name: workspace
+        required: true
+        type: string
+      - description: Name or description filter
+        in: query
+        name: query
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationInputResourceListResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: List local input resources for a Work workspace
       tags:
       - chat
   /conversation-interactions/{interaction_id}/respond:

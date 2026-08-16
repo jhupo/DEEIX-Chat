@@ -14,6 +14,34 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ListInputResources godoc
+// @Summary List local input resources for a Work workspace
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param device query string true "Gateway device public ID"
+// @Param workspace query string true "Gateway workspace public ID"
+// @Param query query string false "Name or description filter"
+// @Success 200 {object} ConversationInputResourceListResponseDoc
+// @Failure 400,404 {object} ErrorDoc
+// @Router /conversation-input-resources [get]
+func (h *Handler) ListInputResources(c *gin.Context) {
+	catalog, err := h.service.ListInputResources(
+		c.Request.Context(), middleware.MustUserID(c), c.Query("device"), c.Query("workspace"), c.Query("query"),
+	)
+	if err != nil {
+		handleSendMessageError(c, err)
+		return
+	}
+	result := make([]ConversationInputResourceResponse, 0, len(catalog.Items))
+	for _, item := range catalog.Items {
+		result = append(result, ConversationInputResourceResponse{
+			ResourceRef: item.ResourceRef, Kind: item.Kind, Name: item.Name, Description: item.Description,
+		})
+	}
+	response.Success(c, ConversationInputResourceCatalogResponse{Ready: catalog.Ready, Items: result})
+}
+
 // ListExecutionEvents godoc
 // @Summary List conversation execution events
 // @Tags chat

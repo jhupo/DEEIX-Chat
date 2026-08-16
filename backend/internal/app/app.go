@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -146,6 +148,60 @@ func (a localGatewayAdapter) ListProjects(ctx context.Context, userID uint, devi
 		})
 	}
 	return projects, nil
+}
+
+func (a localGatewayAdapter) ListInputResources(ctx context.Context, userID uint, deviceID, workspaceID string) (*conversation.GatewayInputResourceCatalog, error) {
+	workspaces, err := a.service.ListWorkspaces(ctx, userID, deviceID)
+	if err != nil {
+		return nil, mapLocalGatewayError(err)
+	}
+	profileID := ""
+	for _, workspace := range workspaces {
+		if workspace.WorkspaceID == workspaceID {
+			profileID = workspace.ProfileID
+			break
+		}
+	}
+	if profileID == "" {
+		return nil, conversation.ErrExecutionBindingNotFound
+	}
+	targets := []struct {
+		profileID, workspaceID, resource string
+	}{
+		{profileID: profileID, resource: "apps"},
+		{workspaceID: workspaceID, resource: "skills"},
+	}
+	result := make([]conversation.GatewayInputResource, 0)
+	ready := true
+	for _, target := range targets {
+		snapshot, snapshotErr := a.service.GetResourceSnapshot(ctx, userID, deviceID, target.profileID, target.workspaceID, target.resource)
+		if errors.Is(snapshotErr, appagentgateway.ErrResourceNotFound) {
+			ready = false
+			continue
+		}
+		if snapshotErr != nil {
+			return nil, mapLocalGatewayError(snapshotErr)
+		}
+		var catalog struct {
+			Data []conversation.GatewayInputResource `json:"data"`
+		}
+		if json.Unmarshal(snapshot.Data, &catalog) != nil {
+			return nil, errors.New("stored gateway input resources are invalid")
+		}
+		for _, item := range catalog.Data {
+			item.ResourceRef = strings.TrimSpace(item.ResourceRef)
+			item.Kind = strings.TrimSpace(item.Kind)
+			item.Name = strings.TrimSpace(item.Name)
+			if item.ResourceRef == "" || item.Name == "" ||
+				item.Kind == "skill" && !strings.HasPrefix(item.ResourceRef, "skill_") ||
+				item.Kind == "app-mention" && !strings.HasPrefix(item.ResourceRef, "app_") ||
+				item.Kind != "skill" && item.Kind != "app-mention" {
+				return nil, errors.New("stored gateway input resource is invalid")
+			}
+			result = append(result, item)
+		}
+	}
+	return &conversation.GatewayInputResourceCatalog{Items: result, Ready: ready}, nil
 }
 
 func (a localGatewayAdapter) CreateArtifact(ctx context.Context, userID uint, workspaceID, fileID string) (*conversation.GatewayArtifact, error) {

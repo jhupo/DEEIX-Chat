@@ -89,7 +89,7 @@ func TestEnrollmentChallengeBindsPublicIdentityAndDevice(t *testing.T) {
 
 func TestAgentWorkPayloadValidation(t *testing.T) {
 	validSettingsJSON := json.RawMessage(`{"model":"gpt-5.6","reasoningEffort":"high","approvalPolicy":"on-request","sandboxPolicy":"workspace-write"}`)
-	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`)
+	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"},{"kind":"skill","resourceRef":"skill_0123456789abcdef0123456789abcdef"},{"kind":"app-mention","resourceRef":"app_0123456789abcdef0123456789abcdef"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`)
 	validResponseJSON := json.RawMessage(`{"kind":"approval","decision":"accept"}`)
 	if !validSettings(validSettingsJSON) || !validInput(validInputJSON) || !validInteractionResponse(validResponseJSON) {
 		t.Fatal("valid agent work payload rejected")
@@ -110,6 +110,7 @@ func TestAgentWorkPayloadValidation(t *testing.T) {
 		json.RawMessage(`[]`),
 		json.RawMessage(`[{"kind":"artifact","path":"C:/secret"}]`),
 		json.RawMessage(`[{"kind":"text","text":"ok","extra":true}]`),
+		json.RawMessage(`[{"kind":"skill","resourceRef":"../../secret"}]`),
 	}
 	for _, value := range invalidInputs {
 		if validInput(value) {
@@ -142,5 +143,17 @@ func TestProviderManifestValidation(t *testing.T) {
 		if validProviderManifest(value, "codex") {
 			t.Fatalf("invalid provider manifest accepted: %s", value)
 		}
+	}
+}
+
+func TestRuntimeProfileResourceCapabilities(t *testing.T) {
+	profile := &domainagent.RuntimeProfile{ManifestJSON: `{"resources":{"profile":["apps"],"workspace":["sessions","skills"]}}`}
+	for _, target := range []struct{ scope, name string }{{"profile", "apps"}, {"workspace", "sessions"}, {"workspace", "skills"}} {
+		if !runtimeProfileHasResource(profile, target.scope, target.name) {
+			t.Fatalf("missing resource capability: %s/%s", target.scope, target.name)
+		}
+	}
+	if runtimeProfileHasResource(profile, "profile", "skills") || runtimeProfileHasResource(profile, "workspace", "apps") {
+		t.Fatal("resource capability crossed manifest scope")
 	}
 }

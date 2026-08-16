@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, Trash2 } from "lucide-react";
+import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, Plug, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -68,7 +68,7 @@ import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { cn } from "@/lib/utils";
-import type { ConversationOptions } from "@/shared/api/conversation.types";
+import type { ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
@@ -106,8 +106,10 @@ type ChatInputProps = {
   selectedKeyBindingID: string;
   selectedPlatformModelName: string;
   availableTools: MCPToolDTO[];
+  inputResources?: ConversationInputResourceDTO[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedInputResources: ConversationInputResourceDTO[];
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
   htmlVisualPromptEnabled: boolean;
@@ -125,6 +127,7 @@ type ChatInputProps = {
   onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
+  onSelectedInputResourcesChange: (resources: ConversationInputResourceDTO[]) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
   onHTMLVisualPromptChange: (enabled: boolean) => void;
   onOptionsChange: React.Dispatch<React.SetStateAction<ConversationOptions>>;
@@ -248,8 +251,10 @@ function ChatInputComponent({
   selectedKeyBindingID,
   selectedPlatformModelName,
   availableTools,
+  inputResources,
   selectedToolIDs,
   selectedSkills,
+  selectedInputResources,
   defaultToolIDs,
   queuedMessages,
   htmlVisualPromptEnabled,
@@ -267,6 +272,7 @@ function ChatInputComponent({
   onModelCatalogRefresh,
   onSelectedToolsChange,
   onSelectedSkillsChange,
+  onSelectedInputResourcesChange,
   onDefaultToolsChange,
   onHTMLVisualPromptChange,
   onOptionsChange,
@@ -414,7 +420,7 @@ function ChatInputComponent({
   const showMCPToolsButton = availableTools.length > 0 && !isMediaMode;
   const showHTMLVisualPromptButton = executionMode === "cloud" && !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
-  const showSelectedSkills = selectedSkills.length > 0 && !isMediaMode;
+  const showSelectedResources = (selectedSkills.length > 0 || selectedInputResources.length > 0) && !isMediaMode;
   const {
     activeIndex: mentionActiveIndex,
     handleBlur: handleMentionBlur,
@@ -431,17 +437,20 @@ function ChatInputComponent({
     select: selectMentionItem,
   } = useChatMentionMenu({
     availableTools,
+    inputResources,
     disabled: loading || uploading || modelLoading || modelDisabled,
     draft,
     maxSelectedTools,
     maxSelectedSkills,
     selectedSkills,
+    selectedInputResources,
     selectedToolIDs,
     anchorRef: inputGroupRef,
     textareaRef,
     toolsDisabled: isMediaMode,
     onDraftChange,
     onSelectedSkillsChange,
+    onSelectedInputResourcesChange,
     placementAnchor: "container",
     placementPreference: isConversationMode ? "top" : "bottom",
     onSelectedToolsChange,
@@ -655,7 +664,7 @@ function ChatInputComponent({
         style={inputGroupHeight === null ? undefined : { height: inputGroupHeight }}
       >
         <div ref={inputGroupMeasureRef} className="flex w-full flex-col">
-          {showSelectedSkills ? (
+          {showSelectedResources ? (
             <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
               {selectedSkills.map((skill) => (
                 <button
@@ -675,6 +684,29 @@ function ChatInputComponent({
                   />
                 </button>
               ))}
+              {selectedInputResources.map((resource) => {
+                const ResourceIcon = resource.kind === "skill" ? Box : Plug;
+                return (
+                  <button
+                    key={resource.resourceRef}
+                    type="button"
+                    className="group inline-flex h-6 max-w-48 items-center gap-1.5 text-sm font-medium text-primary transition-colors hover:text-primary/85 disabled:opacity-60"
+                    disabled={loading || uploading}
+                    onClick={() => onSelectedInputResourcesChange(
+                      selectedInputResources.filter((item) => item.resourceRef !== resource.resourceRef),
+                    )}
+                    aria-label={resource.name}
+                  >
+                    <ResourceIcon className="size-4 shrink-0" strokeWidth={1.7} />
+                    <span className="min-w-0 truncate">{resource.name}</span>
+                    <XIcon
+                      size={12}
+                      strokeWidth={1.7}
+                      className="shrink-0 opacity-45 transition-opacity group-hover:opacity-80"
+                    />
+                  </button>
+                );
+              })}
             </div>
           ) : null}
 
@@ -807,7 +839,7 @@ function ChatInputComponent({
             style={{ fontFamily: "var(--font-chat)", fontWeight: "var(--font-chat-weight)" }}
             className={cn(
               "rounded-3xl min-h-12 overflow-y-auto px-5 text-[15px] leading-6 placeholder:text-muted-foreground placeholder:font-[inherit] placeholder:leading-[inherit]",
-              showSelectedSkills || hasComposerAttachments ? "pt-2" : "pt-4",
+              showSelectedResources || hasComposerAttachments ? "pt-2" : "pt-4",
               inputHeightClassName,
               speechInput.active ? "placeholder:font-normal placeholder:text-muted-foreground" : "",
             )}

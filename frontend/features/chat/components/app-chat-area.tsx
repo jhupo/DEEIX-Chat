@@ -51,11 +51,11 @@ import {
 import { useChatData } from "@/features/chat/hooks/use-chat-data";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
-import { getConversation } from "@/shared/api/conversation";
+import { getConversation, listConversationInputResources } from "@/shared/api/conversation";
 import { listAvailableMCPTools } from "@/shared/api/mcp";
 import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import type { ConversationDTO, ConversationOptions } from "@/shared/api/conversation.types";
+import type { ConversationDTO, ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import {
@@ -175,7 +175,7 @@ export function AppChatArea() {
   const routeConversationID = searchParams.get("conversation_id")?.trim() || null;
   const routeProjectID = searchParams.get("project_id")?.trim() || null;
   const { newConversationRevision, newConversationProjectID: requestedNewConversationProjectID, requestNewConversation, executionMode, setExecutionMode } = useChatSession();
-  const { defaultDevice, selectDefaultDevice } = useDevices();
+  const { defaultDevice, devices, selectDefaultDevice } = useDevices();
   const [locallyCreatedConversationID, setLocallyCreatedConversationID] = React.useState<string | null>(null);
   const [newConversationOverride, setNewConversationOverride] = React.useState<{
     ignoredConversationID: string | null;
@@ -392,14 +392,82 @@ export function AppChatArea() {
   const {
     selectedToolIDs,
     selectedSkills,
+    selectedInputResources,
     setSelectedToolIDs,
     setSelectedSkills,
+    setSelectedInputResources,
   } = useChatComposerSelection({
     conversationKey,
     createdConversationID: locallyCreatedConversationID,
     resetToken: newConversationRevision,
     hasConversation: Boolean(conversationID),
   });
+  const [inputResources, setInputResources] = React.useState<ConversationInputResourceDTO[]>([]);
+  const [inputResourceScope, setInputResourceScope] = React.useState("");
+  const [inputResourcesReady, setInputResourcesReady] = React.useState(false);
+  const inputResourceDeviceID = currentConversation?.executionType === "gateway"
+    ? currentConversation.executionDeviceID
+    : executionMode === "gateway" ? defaultDevice?.deviceId ?? "" : "";
+  const inputResourceWorkspaceID = currentConversation?.executionType === "gateway"
+    ? currentConversation.executionWorkspaceID
+    : executionMode === "gateway" ? executionProjectID : "";
+  const inputResourceDeviceOnline = devices.some(
+    (device) => device.deviceId === inputResourceDeviceID && device.online,
+  );
+  React.useEffect(() => {
+    if (!inputResourceDeviceID || !inputResourceWorkspaceID) {
+      setInputResources([]);
+      setInputResourceScope("");
+      setInputResourcesReady(false);
+      return;
+    }
+    const scope = `${inputResourceDeviceID}:${inputResourceWorkspaceID}`;
+    setInputResources([]);
+    setInputResourceScope("");
+    setInputResourcesReady(false);
+    const controller = new AbortController();
+    void (async () => {
+      while (!controller.signal.aborted) {
+        const token = await resolveAccessToken();
+        if (!token || controller.signal.aborted) {
+          return;
+        }
+        const catalog = await listConversationInputResources(
+          token,
+          inputResourceDeviceID,
+          inputResourceWorkspaceID,
+          controller.signal,
+        );
+        if (controller.signal.aborted) {
+          return;
+        }
+        setInputResources(catalog.items);
+        setInputResourceScope(scope);
+        setInputResourcesReady(catalog.ready);
+        if (catalog.ready || !inputResourceDeviceOnline) {
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      }
+    })().catch(() => {
+      if (!controller.signal.aborted) {
+        setInputResources([]);
+        setInputResourceScope(scope);
+        setInputResourcesReady(false);
+      }
+    });
+    return () => controller.abort();
+  }, [inputResourceDeviceID, inputResourceDeviceOnline, inputResourceWorkspaceID]);
+  React.useEffect(() => {
+    if (executionMode !== "gateway") {
+      return;
+    }
+    if (!inputResourcesReady || inputResourceScope !== `${inputResourceDeviceID}:${inputResourceWorkspaceID}`) {
+      return;
+    }
+    const availableRefs = new Set(inputResources.map((item) => item.resourceRef));
+    setSelectedInputResources((current) => current.filter((item) => availableRefs.has(item.resourceRef)));
+  }, [executionMode, inputResourceDeviceID, inputResourceScope, inputResourceWorkspaceID, inputResources, inputResourcesReady, setSelectedInputResources]);
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
   const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
@@ -659,6 +727,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedInputResources,
     htmlVisualPromptEnabled: executionMode === "cloud" && htmlVisualPrompt.enabled,
     options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
     draft,
@@ -1189,8 +1258,10 @@ export function AppChatArea() {
     selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
     selectedPlatformModelName,
     availableTools: executionMode === "cloud" ? availableTools : [],
+    inputResources: executionMode === "gateway" ? inputResources : undefined,
     selectedToolIDs: executionMode === "cloud" ? selectedToolIDs : [],
     selectedSkills: executionMode === "cloud" ? selectedSkills : [],
+    selectedInputResources: executionMode === "gateway" ? selectedInputResources : [],
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,
@@ -1207,6 +1278,7 @@ export function AppChatArea() {
     onSelectedToolsChange,
     maxSelectedSkills: mcpMaxSelectedTools,
     onSelectedSkillsChange,
+    onSelectedInputResourcesChange: setSelectedInputResources,
     onDefaultToolsChange: onDefaultToolIDsChange,
     onHTMLVisualPromptChange: htmlVisualPrompt.setEnabled,
     onOptionsChange: setModelOptions,
