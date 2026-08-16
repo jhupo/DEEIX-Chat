@@ -15,12 +15,16 @@ $temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("deeix-agent-" + [guid
 $download = Join-Path $temporary $asset
 $backup = "$installed.previous"
 $taskName = "DEEIX Agent"
+$legacyTaskName = "DEEIX Agent Bridge"
+$legacyInstallDir = Join-Path $env:LOCALAPPDATA "DEEIX\AgentBridge"
 $userSID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $serviceInstalled = $false
 $hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
+$hadLegacyScheduledTask = $null -ne (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue)
 $hadService = $null -ne (Get-Service -Name "DEEIXAgent" -ErrorAction SilentlyContinue)
 New-Item -ItemType Directory -Force -Path $temporary, $installDir, $dataDir | Out-Null
 try {
+  Write-Host "DEEIX Agent: downloading and verifying the current release..."
   Invoke-WebRequest "$base/$asset" -OutFile $download
   Invoke-WebRequest "$base/$asset.sha256" -OutFile "$download.sha256"
   $expected = ((Get-Content "$download.sha256" -Raw).Trim() -split "\s+")[0]
@@ -29,16 +33,17 @@ try {
   $downloadVersion = ((& $download version 2>&1) | Out-String).Trim()
   if ($LASTEXITCODE -ne 0 -or -not $downloadVersion) { throw "DEEIX Agent version check failed" }
 
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  if ($hadScheduledTask) {
+  Stop-ScheduledTask -TaskName $taskName, $legacyTaskName -ErrorAction SilentlyContinue
+  if ($hadScheduledTask -or $hadLegacyScheduledTask) {
     $taskStopped = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-      $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-      if ($null -eq $task -or $task.State -ne "Running") { $taskStopped = $true; break }
+      $runningTasks = @(Get-ScheduledTask -TaskName $taskName, $legacyTaskName -ErrorAction SilentlyContinue | Where-Object { $_.State -eq "Running" })
+      if ($runningTasks.Count -eq 0) { $taskStopped = $true; break }
       Start-Sleep -Seconds 1
     }
-    if (-not $taskStopped) { throw "DEEIX Agent legacy scheduled task did not stop" }
+    if (-not $taskStopped) { throw "DEEIX Agent scheduled tasks did not stop" }
   }
+  Write-Host "DEEIX Agent: configuring this device..."
   & $download install --server $Server --user $User --workspace $Workspace --name $Name --codex $Codex --data-dir $dataDir
   if ($LASTEXITCODE -ne 0) { throw "DEEIX Agent configuration failed" }
 
@@ -46,6 +51,7 @@ try {
   $downloadLiteral = $download.Replace("'", "''")
   $backupLiteral = $backup.Replace("'", "''")
   $dataDirLiteral = $dataDir.Replace("'", "''")
+  $legacyInstallDirLiteral = $legacyInstallDir.Replace("'", "''")
   $userSIDLiteral = $userSID.Replace("'", "''")
   $errorFile = Join-Path $temporary "service-install.error.txt"
   $errorFileLiteral = $errorFile.Replace("'", "''")
@@ -54,13 +60,21 @@ try {
 try {
   & '$downloadLiteral' service-stop
   if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent service stop failed' }
-  `$remaining = @(Get-CimInstance Win32_Process -Filter "Name='deeix-agent.exe'" | Where-Object {
-    [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase)
+  `$remaining = @(Get-CimInstance Win32_Process | Where-Object {
+    `$commandLine = [string]`$_.CommandLine
+    [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase) -or
+      (`$_.Name -in @('deeix-agent.exe', 'node.exe', 'cmd.exe') -and
+        (`$commandLine.IndexOf('$dataDirLiteral', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+         `$commandLine.IndexOf('$legacyInstallDirLiteral', [StringComparison]::OrdinalIgnoreCase) -ge 0))
   })
   foreach (`$process in `$remaining) { Stop-Process -Id `$process.ProcessId -Force -ErrorAction SilentlyContinue }
   for (`$attempt = 0; `$attempt -lt 30; `$attempt++) {
-    `$remaining = @(Get-CimInstance Win32_Process -Filter "Name='deeix-agent.exe'" | Where-Object {
-      [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase)
+    `$remaining = @(Get-CimInstance Win32_Process | Where-Object {
+      `$commandLine = [string]`$_.CommandLine
+      [string]::Equals(`$_.ExecutablePath, '$installedLiteral', [StringComparison]::OrdinalIgnoreCase) -or
+        (`$_.Name -in @('deeix-agent.exe', 'node.exe', 'cmd.exe') -and
+          (`$commandLine.IndexOf('$dataDirLiteral', [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+           `$commandLine.IndexOf('$legacyInstallDirLiteral', [StringComparison]::OrdinalIgnoreCase) -ge 0))
     })
     if (`$remaining.Count -eq 0) { break }
     Start-Sleep -Seconds 1
@@ -91,6 +105,7 @@ try {
 "@
   Remove-Item -LiteralPath (Join-Path $dataDir "runtime-status.json") -Force -ErrorAction SilentlyContinue
   $encodedServiceScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($serviceScript))
+  Write-Host "DEEIX Agent: requesting administrator approval to replace the system service..."
   $elevated = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedServiceScript"
   if ($elevated.ExitCode -ne 0) {
     $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "administrator approval was not completed" }
@@ -98,6 +113,7 @@ try {
   }
   $serviceInstalled = $true
 
+  Write-Host "DEEIX Agent: waiting up to 120 seconds for a stable connection..."
   $connected = $false
   $connectedSeconds = 0
   for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -113,13 +129,14 @@ try {
         $connectedSeconds = 0
       }
     } catch {}
+    if ($attempt -gt 0 -and $attempt % 10 -eq 0) { Write-Host "DEEIX Agent: connection check $attempt/120..." }
   }
   if (-not $connected) {
     $logPath = Join-Path $dataDir "agent.log"
     $detail = if (Test-Path -LiteralPath $logPath) { (Get-Content -LiteralPath $logPath -Tail 1) } else { "no runtime log was written" }
     throw "DEEIX Agent service did not connect: $detail"
   }
-  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $taskName, $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
   $installedVersion = ((& $installed version 2>&1) | Out-String).Trim()
   Write-Host "DEEIX Agent system service is installed and connected: $installedVersion ($installed)"
@@ -144,7 +161,12 @@ if (Test-Path -LiteralPath '$backupLiteral') {
     $encodedRollback = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($rollbackScript))
     Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback" | Out-Null
   }
-  if ($hadScheduledTask) { Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+  Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  if ($hadService) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+  } elseif ($hadScheduledTask) {
+    Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  }
   throw
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
