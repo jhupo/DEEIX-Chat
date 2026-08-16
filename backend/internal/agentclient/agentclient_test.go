@@ -354,6 +354,13 @@ func TestParseAgentCommandRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestParseAgentCommandAcceptsThreadRead(t *testing.T) {
+	command, err := parseAgentCommand(json.RawMessage(`{"kind":"thread.read","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-1","threadId":"agth_0123456789abcdef0123456789abcdef","sourceThreadRef":"source-thread-1"}`))
+	if err != nil || command.Kind != "thread.read" || command.SourceThreadRef != "source-thread-1" {
+		t.Fatalf("thread read command was rejected: %#v %v", command, err)
+	}
+}
+
 func TestRPCServerRequestDoesNotBlockResponses(t *testing.T) {
 	serverReads, clientWrites := io.Pipe()
 	clientReads, serverWrites := io.Pipe()
@@ -515,6 +522,39 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 		workspaces[0].Name != want.Name || len(workspaces[0].SessionRoots) != 1 || workspaces[0].SessionRoots[0] != want.Root {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
+	adapter.replaceWorkspaces(workspaces)
+	sessions, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		Resource: &struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+		}{Scope: "workspace", Name: "sessions"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, _ := sessions["data"].(map[string]any)
+	items, _ := catalog["data"].([]any)
+	if len(items) != 8 {
+		t.Fatalf("unexpected session summary count: %#v", sessions)
+	}
+	first, _ := items[0].(map[string]any)
+	if first["historyLoaded"] != false || first["messages"] != nil {
+		t.Fatalf("session catalog eagerly included history: %#v", first)
+	}
+	sourceRef, _ := first["sourceThreadRef"].(string)
+	detail, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "thread.read", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		ThreadID: "agth_0123456789abcdef0123456789abcdef", SourceThreadRef: sourceRef,
+	}, nil)
+	if err != nil || detail["kind"] != "thread-read" {
+		t.Fatalf("thread detail request failed: %#v %v", detail, err)
+	}
+	session, _ := detail["session"].(map[string]any)
+	messages, _ := session["messages"].([]any)
+	if session["historyLoaded"] != true || len(messages) != 2 {
+		t.Fatalf("thread detail did not project messages: %#v", session)
+	}
 }
 
 func assertMappedSet(t *testing.T, members []struct {
@@ -559,11 +599,25 @@ func runFakeAppServer() {
 			result = map[string]any{"data": []any{map[string]any{"id": "gpt-test", "displayName": "GPT Test"}}}
 		case "thread/list":
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
-			result = map[string]any{"data": []any{
-				map[string]any{"id": "thread-1", "cwd": root},
-				map[string]any{"id": "thread-2", "cwd": root},
-				map[string]any{"id": "thread-missing-cwd"},
-			}, "nextCursor": nil}
+			var params map[string]any
+			_ = json.Unmarshal(request["params"], &params)
+			if params["cursor"] == "next" {
+				result = map[string]any{"data": []any{map[string]any{"id": "thread-3", "cwd": root, "name": "Third thread"}}, "nextCursor": nil}
+			} else {
+				result = map[string]any{"data": []any{
+					map[string]any{"id": "thread-1", "cwd": root, "name": "First thread", "preview": "first"},
+					map[string]any{"id": "thread-2", "cwd": root, "name": "Second thread", "preview": "second"},
+					map[string]any{"id": "thread-missing-cwd"},
+				}, "nextCursor": "next"}
+			}
+		case "thread/read":
+			result = map[string]any{"thread": map[string]any{
+				"id": "thread-1", "name": "First thread", "preview": "first",
+				"turns": []any{map[string]any{"startedAt": 1, "completedAt": 2, "items": []any{
+					map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}}},
+					map[string]any{"type": "agentMessage", "text": "world"},
+				}}},
+			}}
 		}
 		var id any
 		_ = json.Unmarshal(request["id"], &id)

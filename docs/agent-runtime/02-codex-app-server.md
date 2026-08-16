@@ -75,6 +75,7 @@ export type AgentCommand =
   | { kind: "thread.rename"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; name: string }
   | { kind: "thread.metadata.update"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; patch: ThreadMetadataPatch }
   | { kind: "thread.compact"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string }
+  | { kind: "thread.read"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string }
   | { kind: "review.start"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; target: ReviewTarget }
   | { kind: "turn.start"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; input: AgentInput[]; settings: TurnSettings }
   | { kind: "turn.steer"; deviceId: string; profileId: string; workspaceId: string; threadId: string; sourceThreadRef: string; turnId: string; sourceTurnRef: string; input: AgentInput[] }

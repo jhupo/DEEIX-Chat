@@ -188,7 +188,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
 		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
-		Commands:         []string{"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
+		Commands:         []string{"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
 		InputKinds:       []string{"text", "artifact"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},
 	}
@@ -365,6 +365,20 @@ func sanitizeDiagnosticValue(value string, limit int) string {
 	return string(clean)
 }
 
+func sanitizeSessionMessage(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	clean := make([]rune, 0, len(value))
+	for _, character := range value {
+		if character >= 32 || character == '\n' || character == '\t' {
+			clean = append(clean, character)
+		}
+		if len(clean) == limit {
+			break
+		}
+	}
+	return string(clean)
+}
+
 func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, artifacts map[string]LocalArtifact) (map[string]any, error) {
 	if command.ProfileID != adapter.profileID {
 		return nil, errors.New("gateway command profile does not match this runtime")
@@ -410,6 +424,16 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 		err = adapter.rpc.Request(ctx, "thread/metadata/update", map[string]any{"threadId": providerThreadID, "gitInfo": command.GitInfo}, nil)
 	case "thread.compact":
 		err = adapter.rpc.Request(ctx, "thread/compact/start", map[string]any{"threadId": providerThreadID}, nil)
+	case "thread.read":
+		detail, requestErr := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": providerThreadID, "includeTurns": true})
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		session, requestErr := adapter.projectSessionDetail(detail, providerThreadID)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		return map[string]any{"kind": "thread-read", "session": session}, nil
 	case "review.start":
 		response, requestErr := adapter.requestMap(ctx, "review/start", map[string]any{"threadId": providerThreadID, "target": codexReviewTarget(command.Target), "delivery": "inline"})
 		if requestErr != nil {
@@ -510,7 +534,7 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 		if len(sessionRoots) == 0 {
 			sessionRoots = []string{cwd}
 		}
-		params["cwd"], params["limit"], params["archived"] = sessionRoots, 30, false
+		params["cwd"], params["limit"], params["archived"] = sessionRoots, 100, false
 		params["sortKey"], params["sourceKinds"] = "recency_at", codexInteractiveSourceKinds
 	case "skills":
 		params["cwds"], params["forceReload"] = []string{cwd}, true
@@ -542,35 +566,55 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 }
 
 func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string]any) (any, error) {
-	items := make([]any, 0, 60)
+	const maxSessionsPerStatus = 500
+	items := make([]any, 0, 200)
 	for _, archived := range []bool{false, true} {
-		request := make(map[string]any, len(params))
-		for key, value := range params {
-			request[key] = value
-		}
-		request["archived"] = archived
-		page, err := adapter.requestMap(ctx, "thread/list", request)
-		if err != nil {
-			return nil, err
-		}
-		pageItems, ok := page["data"].([]any)
-		if !ok {
-			return nil, errors.New("Codex session catalog is invalid")
-		}
 		status := "active"
 		if archived {
 			status = "archived"
 		}
-		for index, raw := range pageItems {
-			if index == 30 {
+		cursor := ""
+		seenCursors := make(map[string]struct{})
+		count := 0
+		for count < maxSessionsPerStatus {
+			request := make(map[string]any, len(params)+1)
+			for key, value := range params {
+				request[key] = value
+			}
+			request["archived"] = archived
+			if cursor != "" {
+				request["cursor"] = cursor
+			}
+			page, err := adapter.requestMap(ctx, "thread/list", request)
+			if err != nil {
+				return nil, err
+			}
+			pageItems, ok := page["data"].([]any)
+			if !ok {
+				return nil, errors.New("Codex session catalog is invalid")
+			}
+			for _, raw := range pageItems {
+				if count == maxSessionsPerStatus {
+					break
+				}
+				thread, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				thread["status"] = status
+				items = append(items, thread)
+				count++
+			}
+			nextCursor, _ := page["nextCursor"].(string)
+			nextCursor = strings.TrimSpace(nextCursor)
+			if nextCursor == "" || count == maxSessionsPerStatus {
 				break
 			}
-			thread, ok := raw.(map[string]any)
-			if !ok {
-				continue
+			if _, duplicate := seenCursors[nextCursor]; duplicate {
+				return nil, errors.New("Codex session catalog cursor repeated")
 			}
-			thread["status"] = status
-			items = append(items, thread)
+			seenCursors[nextCursor] = struct{}{}
+			cursor = nextCursor
 		}
 	}
 	return map[string]any{"data": items}, nil
@@ -590,16 +634,43 @@ func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any
 		if err != nil {
 			return nil, err
 		}
-		messages := []any{}
-		if detail, readErr := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": id, "includeTurns": true}); readErr == nil {
-			messages = projectSessionMessages(detail)
-		}
 		result = append(result, map[string]any{
-			"sourceThreadRef": sourceRef, "preview": thread["preview"], "name": thread["name"], "modelProvider": thread["modelProvider"],
-			"createdAt": thread["createdAt"], "updatedAt": thread["updatedAt"], "recencyAt": thread["recencyAt"], "status": thread["status"], "messages": messages,
+			"sourceThreadRef": sourceRef, "preview": sessionText(thread["preview"], 512), "name": sessionText(thread["name"], 256), "modelProvider": sessionText(thread["modelProvider"], 128),
+			"createdAt": thread["createdAt"], "updatedAt": thread["updatedAt"], "recencyAt": thread["recencyAt"], "status": thread["status"], "historyLoaded": false,
 		})
 	}
 	return map[string]any{"data": result}, nil
+}
+
+func (adapter *CodexAdapter) projectSessionDetail(detail map[string]any, providerThreadID string) (map[string]any, error) {
+	thread, _ := detail["thread"].(map[string]any)
+	id, _ := thread["id"].(string)
+	if strings.TrimSpace(id) == "" {
+		id = providerThreadID
+	}
+	if id != providerThreadID {
+		return nil, errors.New("Codex thread detail does not match the requested thread")
+	}
+	sourceRef, err := adapter.state.PublishSource(adapter.profileID, "thread", id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"sourceThreadRef": sourceRef,
+		"preview":         sessionText(thread["preview"], 512),
+		"name":            sessionText(thread["name"], 256),
+		"modelProvider":   sessionText(thread["modelProvider"], 128),
+		"createdAt":       thread["createdAt"],
+		"updatedAt":       thread["updatedAt"],
+		"recencyAt":       thread["recencyAt"],
+		"historyLoaded":   true,
+		"messages":        projectSessionMessages(detail),
+	}, nil
+}
+
+func sessionText(value any, limit int) string {
+	text, _ := value.(string)
+	return sanitizeDiagnosticValue(text, limit)
 }
 
 func (adapter *CodexAdapter) notification(notification RPCNotification) error {
@@ -1071,7 +1142,7 @@ func projectSessionMessages(detail map[string]any) []any {
 					}
 				}
 				if len(textParts) > 0 {
-					messages = append(messages, map[string]any{"role": "user", "content": strings.Join(textParts, "\n"), "createdAt": turn["startedAt"]})
+					messages = append(messages, map[string]any{"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), 16*1024), "createdAt": turn["startedAt"]})
 				}
 			case "reasoning":
 				parts := append(stringSlice(item["summary"]), stringSlice(item["content"])...)
@@ -1085,11 +1156,11 @@ func projectSessionMessages(detail map[string]any) []any {
 		}
 		if len(assistantParts) > 0 {
 			message := map[string]any{
-				"role": "assistant", "content": strings.Join(assistantParts, "\n\n"),
+				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), 16*1024),
 				"createdAt": firstValue(turn["completedAt"], turn["startedAt"]),
 			}
 			if len(reasoningParts) > 0 {
-				message["reasoningContent"] = strings.Join(reasoningParts, "\n")
+				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n"), 16*1024)
 			}
 			messages = append(messages, message)
 		}

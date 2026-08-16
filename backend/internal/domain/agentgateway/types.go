@@ -135,6 +135,8 @@ type Thread struct {
 	SourceThreadRef   *string
 	Title             string
 	Status            string
+	HistoryStatus     string
+	HistoryError      string
 	GitSHA            *string
 	GitBranch         *string
 	GitOriginURL      *string

@@ -888,6 +888,33 @@ export async function sendMessage(
   );
 }
 
+export type ConversationHistoryDTO = {
+  status: "loaded" | "unloaded" | "loading" | "error";
+  error: string;
+};
+
+export async function ensureConversationHistory(
+  accessToken: string,
+  conversationPublicID: string,
+): Promise<ConversationHistoryDTO> {
+  return authedRequest<ConversationHistoryDTO>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/history`,
+    { method: "POST", accessToken },
+    true,
+  );
+}
+
+export async function getConversationHistory(
+  accessToken: string,
+  conversationPublicID: string,
+): Promise<ConversationHistoryDTO> {
+  return authedRequest<ConversationHistoryDTO>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/history`,
+    { accessToken },
+    true,
+  );
+}
+
 export async function listConversationInteractions(
   accessToken: string,
   conversationPublicID: string,

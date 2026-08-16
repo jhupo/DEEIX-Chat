@@ -71,7 +71,7 @@ deeix-agent doctor
 | `mcp` | `mcpServerStatus/list` | 真实进程通过 |
 | `plugins` | `plugin/list` | 真实进程通过；官方仍标为 under development |
 | `auth-status` | `getAuthStatus` | 真实进程通过；只投影模式和是否需要认证 |
-| `sessions` | `thread/list` + `thread/read` | 真实进程通过；消息历史可恢复 |
+| `sessions` | 分页 `thread/list` 摘要 + 按需 `thread/read` | 真实进程通过；目录与消息历史可恢复 |
 | `skills` | `skills/list` | 真实进程通过 |
 | `hooks` | `hooks/list` | 真实进程通过 |
 
@@ -110,7 +110,7 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；活动与归档目录分别通过 `thread/list` 读取，再以 `thread/read(includeTurns:true)` 导入历史 | 所选设备连接后自动刷新 `sessions`，将 user/assistant/reasoning 消息显示在对应 Workspace；同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；设备间隔离，当前每个 Workspace 分别取最近 30 个活动会话和 30 个归档会话 |
+| 读取本地项目与会话历史 | 全局 `thread/list` 按 canonical `cwd` 发现 Workspace；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；当前 Web 输入限普通文本与已授权附件 |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
@@ -259,16 +259,11 @@ deeix-agent doctor
 
 #### 6.8 Session 资源分页与读取成本
 
-现状：`sessions` 已分别读取最近 30 个活动会话和 30 个归档会话，并将归档状态投影到 Conversation；同一 turn 的 reasoning 与多个 `agentMessage` 项会规范化为一条助手消息。当前仍逐条调用 `thread/read` 且未暴露 cursor，因此大量历史会话会产生 N+1 调用。
+已完成：Bridge 在单次 `sessions` 命令内消费 app-server opaque cursor，活动与归档目录各最多读取 500 条。目录只上传经过长度限制的 summary，不再逐条执行 `thread/read`。新导入 AgentThread 标记为 `unloaded`；Web 打开会话时只调用 Conversation history API，由后端在 capability 门控后排队唯一在途 `thread.read`。成功后增量投影消息并标记 `loaded`，失败记录错误且下次打开可重试。Cloud Conversation 直接视为 `loaded`。
 
-修改：
+当前边界：每种状态超过 500 条时只保留 app-server 最近的 500 条；`thread/unsubscribe` 仍待确认读取详情是否建立持续订阅后再接入。
 
-- 新增分页 resource command，携带 opaque cursor 和 limit。
-- 使用 `thread/list` summary；只在打开详情时调用 `thread/read(includeTurns:true)`。
-- 投影官方 `ThreadStatus`，并保留 archived filter。
-- 增加 `thread/unsubscribe`，离开详情时释放订阅。
-
-验收：100+ 会话分页、归档筛选、重启后 notLoaded、并发刷新和 cursor 失效测试通过。
+验收：原生 Adapter fixture 覆盖 cursor 翻页、摘要不含消息和按需读取详情；repository 测试覆盖 summary 创建、唯一读取命令、消息投影与 loaded 状态。归档筛选继续使用 Conversation 状态。
 
 #### 6.9 App、Skill、Plugin 和 MCP 目前以列表为主
 
@@ -291,7 +286,7 @@ deeix-agent doctor
 2. Web 归档/恢复会立即更新 AgentThread 与 Conversation 的目录状态，再由本机 `thread/archive|unarchive` 完成真实生命周期；命令失败时恢复原状态。本机 `thread/archived|unarchived` 通知也会反向更新 Conversation。
 3. 删除在设备确认且待投影事件清空后才软删除 Conversation。本地 Workspace 文件保留；失败时恢复会话状态，已删除 thread 不会被后续 `sessions` 刷新重新导入。
 4. Bridge 支持 `workspace.register`。路径解析、目录创建、配置持久化和附件落盘都以配置用户身份执行；命令终态后 Cloud 清除暂存的本机路径，并刷新 Workspace 与 sessions 投影。
-5. `sessions` 同时读取活动与归档目录。当前每个 Workspace 分别导入最近 30 个活动会话和 30 个归档会话；归档 Conversation 不进入项目树、置顶或最近，只能在“所有对话”的归档筛选中查看。
+5. `sessions` 同时分页读取活动与归档目录。当前每个 Workspace 每种状态最多投影 500 条摘要，打开 Conversation 时才读取单个 thread 的完整历史；归档 Conversation 不进入项目树、置顶或最近，只能在“所有对话”的归档筛选中查看。
 
 仍待完成：
 

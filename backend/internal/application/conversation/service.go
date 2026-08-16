@@ -49,6 +49,7 @@ type gatewayExecutor interface {
 	CreateArtifact(context.Context, uint, string, string) (*GatewayArtifact, error)
 	StartThread(context.Context, uint, GatewayStartThreadInput) error
 	GetThreadByConversation(context.Context, uint, uint) (*GatewayThread, error)
+	EnsureThreadHistory(context.Context, uint, uint) (*GatewayThreadHistory, error)
 	DeleteThread(context.Context, uint, string, string) error
 	SetThreadArchived(context.Context, uint, string, bool, string) error
 	StartTurn(context.Context, uint, GatewayStartTurnInput) error
@@ -63,8 +64,18 @@ type gatewayProjectLister interface {
 
 type GatewayArtifact struct{ ArtifactID string }
 type GatewayThread struct {
-	ThreadID string
-	Status   string
+	ThreadID      string
+	Status        string
+	HistoryStatus string
+	HistoryError  string
+}
+type GatewayThreadHistory struct {
+	Status string
+	Error  string
+}
+type ConversationHistory struct {
+	Status string
+	Error  string
 }
 type GatewayProject struct {
 	ProjectID string

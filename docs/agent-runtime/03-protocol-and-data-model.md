@@ -7,6 +7,8 @@ POST /api/v1/conversations
 POST /api/v1/conversations/:id/turns
 POST /api/v1/conversations/:id/turns/stream
 GET  /api/v1/conversations/:id/messages
+GET  /api/v1/conversations/:id/history
+POST /api/v1/conversations/:id/history
 GET  /api/v1/conversations/:id/runs
 GET  /api/v1/conversations/:id/events?after=N
 GET  /api/v1/conversations/:id/interactions?status=
@@ -42,6 +44,8 @@ POST /api/v1/conversation-runs/:run_id/interrupt
 Turn 请求对两种执行方式相同。Cloud 要求 Chat key binding；Gateway 使用已有本地 Runtime 准入，不读取或改写用户机器的 Codex 配置。Gateway 当前接受 text/markdown 与附件，设置 allowlist 为 `model`、`reasoningEffort`、`approvalPolicy`、`sandboxPolicy`。
 
 非流式 `/turns` 对两种执行方式都等待终态后返回；`/turns/stream` 对两种执行方式都输出 NDJSON 实时事件并在最后返回同一消息结果。
+
+Conversation 目录使用服务端已投影的摘要。打开本地工作会话时，Web 先通过 `POST /conversations/:id/history` 准备历史，再用 `GET /conversations/:id/history` 轮询 `loaded|loading|error`，完成后继续调用原消息分页接口。Cloud 会话始终返回 `loaded`；页面不直接调用 Agent API。
 
 ## 2. 设备和资源 API
 

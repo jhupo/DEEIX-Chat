@@ -176,6 +176,8 @@ type AgentThread struct {
 	SourceThreadRef  *string `gorm:"size:256;uniqueIndex:uk_agent_threads_profile_source,priority:2,where:source_thread_ref IS NOT NULL"`
 	Title            string  `gorm:"size:256;not null;default:''"`
 	Status           string  `gorm:"size:32;not null;index"`
+	HistoryStatus    string  `gorm:"size:16;not null;default:'loaded';index"`
+	HistoryError     string  `gorm:"size:4096;not null;default:''"`
 	GitSHA           *string `gorm:"size:64"`
 	GitBranch        *string `gorm:"size:256"`
 	GitOriginURL     *string `gorm:"size:2048"`

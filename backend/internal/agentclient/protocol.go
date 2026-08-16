@@ -171,6 +171,8 @@ func parseAgentCommand(raw json.RawMessage) (AgentCommand, error) {
 		}
 	case "thread.compact":
 		allowed = thread
+	case "thread.read":
+		allowed = thread
 	case "review.start":
 		allowed = append(thread, "target")
 		if err := validateReviewTarget(command.Target); err != nil {

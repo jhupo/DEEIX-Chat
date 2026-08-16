@@ -44,6 +44,7 @@ type AgentGatewayRepository interface {
 	GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error)
 	QueueTurnInterrupt(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	QueueThreadLifecycle(context.Context, string, string, uint, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
+	QueueThreadHistory(context.Context, uint, uint, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Command, error)
 	StartThread(context.Context, string, string, *domainagent.Thread, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Turn, error)
 	GetThreadByConversation(context.Context, uint, uint) (*domainagent.Thread, error)
 	StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error)

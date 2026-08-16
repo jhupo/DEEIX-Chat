@@ -7717,6 +7717,101 @@ const docTemplate = `{
                 }
             }
         },
+        "/conversations/{id}/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "查询会话历史加载状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationHistoryResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "普通聊天立即就绪；本地工作会话按需排队读取对应 Codex thread。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "准备会话完整历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 public_id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationHistoryResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/ConversationErrorDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/conversations/{id}/interactions": {
             "get": {
                 "security": [
@@ -12215,6 +12310,42 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/ConversationExportResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConversationHistoryResponse": {
+            "type": "object",
+            "required": [
+                "error",
+                "status"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "loaded",
+                        "unloaded",
+                        "loading",
+                        "error"
+                    ]
+                }
+            }
+        },
+        "ConversationHistoryResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ConversationHistoryResponse"
                 },
                 "errorMsg": {
                     "type": "string"
@@ -20005,7 +20136,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.49",
+	Version:          "0.4.50",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

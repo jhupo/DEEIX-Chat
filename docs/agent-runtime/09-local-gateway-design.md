@@ -33,7 +33,7 @@ Bridge 启动后先通过无 `cwd` 过滤的 `thread/list` 分页读取本机 Co
 
 创建请求只携带统一 `projectID` 和 `execution(type/device)`。Cloud Project 直接解析；Gateway Adapter 校验 Workspace 属于该用户和设备，解析对应 Profile 后写入 Conversation 执行绑定。Web 不提交 `profileID/workspaceID` 组合，也不直接请求 Workspace sessions 来拼装导航。
 
-Workspace 的 `sessions` 刷新通过 `thread/list` 和 `thread/read(includeTurns=true)` 读取最近的 Codex 线程。Bridge 只上传 opaque thread ref、标题、时间以及裁剪后的用户/助手文本；provider raw ID、本地路径、命令输出和凭据留在设备。Cloud 在接收资源终态的同一事务内创建或增量更新 Conversation/Message 投影，并将 `AgentThread` 绑定到原 opaque thread ref。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
+Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，分别读取最多 500 个活动线程和 500 个归档线程，只上传 opaque thread ref、标题、预览、状态和时间摘要。Cloud 在资源终态事务中创建或更新 Conversation 与 AgentThread 目录投影，历史状态初始为 `unloaded`。用户打开会话时，Web 通过 Conversation history API 排队强类型 `thread.read`；Bridge 校验 source ref 后调用 `thread/read(includeTurns=true)`，只上传该线程裁剪后的用户/助手消息并把状态改为 `loaded`。provider raw ID、本地路径、命令输出和凭据留在设备。用户继续发送前 Bridge 先调用 `thread/resume`，再向同一个 app-server thread 发起 `turn/start`。
 
 每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Workspace 和小时桶幂等下发一次 `sessions` 刷新。首次连接会自动导入历史；同一小时内的 WSS 重连复用原命令，不重复扫描全部线程。
 

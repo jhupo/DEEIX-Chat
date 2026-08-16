@@ -214,18 +214,25 @@ type RegisterWorkspaceInput struct {
 }
 
 type ThreadView struct {
-	ThreadID     string
-	DeviceID     string
-	ProfileID    string
-	WorkspaceID  string
-	Title        string
-	Status       string
-	GitSHA       *string
-	GitBranch    *string
-	GitOriginURL *string
-	LastEventSeq uint64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ThreadID      string
+	DeviceID      string
+	ProfileID     string
+	WorkspaceID   string
+	Title         string
+	Status        string
+	HistoryStatus string
+	HistoryError  string
+	GitSHA        *string
+	GitBranch     *string
+	GitOriginURL  *string
+	LastEventSeq  uint64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type ThreadHistoryView struct {
+	Status string
+	Error  string
 }
 
 type TurnView struct {
@@ -642,6 +649,32 @@ func (s *Service) GetThreadByConversation(ctx context.Context, userID, conversat
 	}
 	view := threadView(*item, item.DevicePublicID, item.ProfilePublicID, item.WorkspacePublicID)
 	return &view, nil
+}
+
+func (s *Service) GetThreadHistory(ctx context.Context, userID, conversationID uint) (*ThreadHistoryView, error) {
+	if userID == 0 || conversationID == 0 {
+		return nil, ErrInvalidInput
+	}
+	item, err := s.repo.GetThreadByConversation(ctx, userID, conversationID)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	return &ThreadHistoryView{Status: normalizeHistoryStatus(item.HistoryStatus), Error: item.HistoryError}, nil
+}
+
+func (s *Service) EnsureThreadHistory(ctx context.Context, userID, conversationID uint) (*ThreadHistoryView, error) {
+	if userID == 0 || conversationID == 0 {
+		return nil, ErrInvalidInput
+	}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "thread.read"}
+	thread, queued, err := s.repo.QueueThreadHistory(ctx, userID, conversationID, command, s.now().UTC())
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	if queued != nil {
+		s.notifyUser(userID)
+	}
+	return &ThreadHistoryView{Status: normalizeHistoryStatus(thread.HistoryStatus), Error: thread.HistoryError}, nil
 }
 
 func (s *Service) DeleteThread(ctx context.Context, userID uint, threadID, idempotencyKey string) (*CommandView, error) {
@@ -1442,7 +1475,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 	}
 	return validManifestValues(manifest.Commands, []string{
 		"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
-		"review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
+		"thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
 	}) && validManifestValues(manifest.Resources.Profile, []string{
 		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
 	}) && validManifestValues(manifest.Resources.Workspace, []string{"sessions", "skills", "hooks"}) &&
@@ -1511,7 +1544,14 @@ func requestHash(value any) string {
 }
 
 func threadView(item domainagent.Thread, deviceID, profileID, workspaceID string) ThreadView {
-	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return ThreadView{ThreadID: item.PublicID, DeviceID: deviceID, ProfileID: profileID, WorkspaceID: workspaceID, Title: item.Title, Status: item.Status, HistoryStatus: normalizeHistoryStatus(item.HistoryStatus), HistoryError: item.HistoryError, GitSHA: item.GitSHA, GitBranch: item.GitBranch, GitOriginURL: item.GitOriginURL, LastEventSeq: item.LastEventSeq, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+func normalizeHistoryStatus(value string) string {
+	if value == "unloaded" || value == "loading" || value == "error" {
+		return value
+	}
+	return "loaded"
 }
 
 func turnView(item domainagent.Turn, threadID string) TurnView {

@@ -75,7 +75,7 @@ deeix-agent version
 
 ## app-server 映射
 
-原生适配器实现现有 Gateway 合同中的全部命令：thread 创建、恢复、分叉、归档、取消归档、删除、重命名、Git 元数据、压缩；turn 启动、steer、中断；review；交互响应；profile/workspace 资源刷新。
+原生适配器实现现有 Gateway 合同中的全部命令：thread 创建、恢复、分叉、归档、取消归档、删除、重命名、Git 元数据、压缩和按需历史读取；turn 启动、steer、中断；review；交互响应；profile/workspace 资源刷新。
 
 资源包括模型、模型能力、权限方案、Apps、MCP、Plugins、认证状态、本地会话及消息历史、Skills 和 Hooks。通知包括消息增量、reasoning、plan、diff、文件 patch、goal、token usage、生命周期与告警。命令审批、文件审批、用户输入、权限申请、MCP elicitation 和动态工具调用通过 `sourceRequestRef` 往返映射。
 

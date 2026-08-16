@@ -219,6 +219,35 @@ func (s *Service) ListMessages(ctx context.Context, userID uint, conversationID 
 	return items, total, nil
 }
 
+func (s *Service) ConversationHistory(ctx context.Context, userID uint, publicID string, ensure bool) (*ConversationHistory, error) {
+	conversation, err := s.repo.GetConversationByPublicID(ctx, strings.TrimSpace(publicID), userID)
+	if err != nil {
+		return nil, ErrConversationNotFound
+	}
+	if conversation.ExecutionType != model.ExecutionTypeGateway {
+		return &ConversationHistory{Status: "loaded"}, nil
+	}
+	if s.gatewayExecutor == nil {
+		return nil, ErrExecutionUnavailable
+	}
+	if ensure {
+		history, historyErr := s.gatewayExecutor.EnsureThreadHistory(ctx, userID, conversation.ID)
+		if historyErr != nil {
+			return nil, historyErr
+		}
+		return &ConversationHistory{Status: history.Status, Error: history.Error}, nil
+	}
+	thread, threadErr := s.gatewayExecutor.GetThreadByConversation(ctx, userID, conversation.ID)
+	if threadErr != nil {
+		return nil, threadErr
+	}
+	status := thread.HistoryStatus
+	if status == "" {
+		status = "loaded"
+	}
+	return &ConversationHistory{Status: status, Error: thread.HistoryError}, nil
+}
+
 // ListMessagesBeforeID 查询指定消息 ID 之前的一页会话消息。
 func (s *Service) ListMessagesBeforeID(ctx context.Context, userID uint, conversationID uint, beforeID uint, pageSize int) ([]model.Message, int64, error) {
 	if beforeID == 0 {

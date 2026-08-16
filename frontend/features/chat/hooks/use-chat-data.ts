@@ -4,12 +4,20 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { cancelMessageGeneration, listMessagesPage, resumeMessageGenerationStream } from "@/shared/api/conversation";
+import {
+  cancelMessageGeneration,
+  ensureConversationHistory,
+  getConversationHistory,
+  listMessagesPage,
+  resumeMessageGenerationStream,
+} from "@/shared/api/conversation";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import type { MessageDTO } from "@/shared/api/conversation.types";
 
 const MESSAGE_PAGE_SIZE = 100;
+const HISTORY_POLL_INTERVAL_MS = 500;
+const HISTORY_POLL_ATTEMPTS = 120;
 
 type ChatDataState = {
   loading: boolean;
@@ -151,6 +159,19 @@ export function useChatData(
           return;
         }
 
+        let history = await ensureConversationHistory(token, conversationID);
+        for (let attempt = 0; history.status !== "loaded" && attempt < HISTORY_POLL_ATTEMPTS; attempt += 1) {
+          if (history.status === "error") {
+            throw new Error(history.error || t("loadFailed"));
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, HISTORY_POLL_INTERVAL_MS));
+          if (cancelled) return;
+          history = await getConversationHistory(token, conversationID);
+        }
+        if (history.status !== "loaded") {
+          throw new Error(history.error || t("loadFailed"));
+        }
+
         const data = await listMessagesPage(token, conversationID, {
           page: 1,
           pageSize: MESSAGE_PAGE_SIZE,
@@ -179,13 +200,13 @@ export function useChatData(
             hasOlder: messages.length < data.total,
           };
         });
-      } catch {
+      } catch (error) {
         if (!cancelled) {
           setState((prev) => ({
             ...prev,
             loading: false,
             loadingOlder: false,
-            errorMsg: t("loadFailed"),
+            errorMsg: error instanceof Error && error.message ? error.message : t("loadFailed"),
           }));
         }
       }

@@ -31,6 +31,8 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.POST("/conversations/:id/share/regenerate", m.Handler.RegenerateConversationShare)
 	authRequired.POST("/shared-conversations/:share_id/clone", m.Handler.CloneSharedConversation)
 	authRequired.GET("/conversations/:id/messages", m.Handler.ListMessages)
+	authRequired.GET("/conversations/:id/history", m.Handler.GetConversationHistory)
+	authRequired.POST("/conversations/:id/history", m.Handler.EnsureConversationHistory)
 	authRequired.GET("/conversations/:id/messages/preview", m.Handler.ListConversationPreviewMessages)
 	authRequired.GET("/conversations/:id/runs", m.Handler.ListConversationRuns)
 	authRequired.GET("/conversations/:id/events", m.Handler.ListExecutionEvents)

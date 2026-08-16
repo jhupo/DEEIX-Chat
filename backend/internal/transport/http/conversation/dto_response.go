@@ -63,6 +63,11 @@ type ConversationSearchPageResponse struct {
 	Results []ConversationSearchResultResponse `json:"results"`
 }
 
+type ConversationHistoryResponse struct {
+	Status string `json:"status" enums:"loaded,unloaded,loading,error"`
+	Error  string `json:"error"`
+}
+
 // ConversationPreviewMessageResponse 会话搜索预览使用的轻量消息 DTO。
 type ConversationPreviewMessageResponse struct {
 	PublicID     string `json:"publicID"`
@@ -1282,6 +1287,11 @@ type FileUpdateResponseDoc struct {
 type ConversationCreateResponseDoc struct {
 	ErrorMsg string               `json:"errorMsg"`
 	Data     ConversationResponse `json:"data"`
+}
+
+type ConversationHistoryResponseDoc struct {
+	ErrorMsg string                      `json:"errorMsg"`
+	Data     ConversationHistoryResponse `json:"data"`
 }
 
 // ConversationDefaultModelCandidateResponseDoc 新会话默认模型候选响应文档。

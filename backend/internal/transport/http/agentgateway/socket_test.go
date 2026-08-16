@@ -440,6 +440,10 @@ func (r *socketRepo) QueueResourceRefresh(_ context.Context, _, _ string, userID
 	created.State = "queued"
 	return &created, nil
 }
+
+func (*socketRepo) QueueThreadHistory(context.Context, uint, uint, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Command, error) {
+	return nil, nil, repository.ErrNotFound
+}
 func (*socketRepo) QueueWorkspaceRegistration(context.Context, string, string, uint, string, string, string, bool, *domainagent.Command, time.Time) (*domainagent.Command, error) {
 	return nil, repository.ErrNotFound
 }

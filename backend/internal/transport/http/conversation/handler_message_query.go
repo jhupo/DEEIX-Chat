@@ -331,6 +331,57 @@ func (h *Handler) ListMessages(c *gin.Context) {
 	response.SuccessPage(c, total, msgResults)
 }
 
+// GetConversationHistory godoc
+// @Summary 查询会话历史加载状态
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "会话 public_id"
+// @Success 200 {object} ConversationHistoryResponseDoc
+// @Failure 400 {object} ErrorDoc
+// @Failure 404 {object} ErrorDoc
+// @Router /conversations/{id}/history [get]
+func (h *Handler) GetConversationHistory(c *gin.Context) {
+	h.conversationHistory(c, false)
+}
+
+// EnsureConversationHistory godoc
+// @Summary 准备会话完整历史
+// @Description 普通聊天立即就绪；本地工作会话按需排队读取对应 Codex thread。
+// @Tags chat
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "会话 public_id"
+// @Success 200 {object} ConversationHistoryResponseDoc
+// @Failure 400 {object} ErrorDoc
+// @Failure 404 {object} ErrorDoc
+// @Failure 409 {object} ErrorDoc
+// @Router /conversations/{id}/history [post]
+func (h *Handler) EnsureConversationHistory(c *gin.Context) {
+	h.conversationHistory(c, true)
+}
+
+func (h *Handler) conversationHistory(c *gin.Context, ensure bool) {
+	publicID, err := stringParam(c, "id")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid conversation id")
+		return
+	}
+	history, err := h.service.ConversationHistory(c.Request.Context(), middleware.MustUserID(c), publicID, ensure)
+	if err != nil {
+		switch {
+		case errors.Is(err, appconversation.ErrConversationNotFound):
+			response.Error(c, http.StatusNotFound, "conversation not found")
+		case errors.Is(err, appconversation.ErrExecutionBindingNotFound), errors.Is(err, appconversation.ErrExecutionConflict), errors.Is(err, appconversation.ErrExecutionUnavailable):
+			response.Error(c, http.StatusConflict, err.Error())
+		default:
+			response.Error(c, http.StatusInternalServerError, "prepare conversation history failed")
+		}
+		return
+	}
+	response.Success(c, ConversationHistoryResponse{Status: history.Status, Error: history.Error})
+}
+
 // ListConversationPreviewMessages godoc
 // @Summary 查询会话预览消息
 // @Description 返回当前用户会话最新分支最近 10 条用户或助手消息

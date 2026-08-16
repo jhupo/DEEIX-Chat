@@ -565,6 +565,16 @@ export interface ConversationExportResponseDoc {
   errorMsg: string;
 }
 
+export interface ConversationHistoryResponse {
+  error: string;
+  status: "loaded" | "unloaded" | "loading" | "error";
+}
+
+export interface ConversationHistoryResponseDoc {
+  data: ConversationHistoryResponse;
+  errorMsg: string;
+}
+
 export interface ConversationListResponseDoc {
   data: {
     results: ConversationResponse[];
@@ -6018,6 +6028,44 @@ export namespace Conversations {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = ConversationExportResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags chat
+   * @name HistoryList
+   * @summary 查询会话历史加载状态
+   * @request GET:/conversations/{id}/history
+   * @secure
+   */
+  export namespace HistoryList {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationHistoryResponseDoc;
+  }
+
+  /**
+   * @description 普通聊天立即就绪；本地工作会话按需排队读取对应 Codex thread。
+   * @tags chat
+   * @name HistoryCreate
+   * @summary 准备会话完整历史
+   * @request POST:/conversations/{id}/history
+   * @secure
+   */
+  export namespace HistoryCreate {
+    export type RequestParams = {
+      /** 会话 public_id */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConversationHistoryResponseDoc;
   }
 
   /**

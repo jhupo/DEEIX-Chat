@@ -1285,6 +1285,31 @@ definitions:
     - data
     - errorMsg
     type: object
+  ConversationHistoryResponse:
+    properties:
+      error:
+        type: string
+      status:
+        enum:
+        - loaded
+        - unloaded
+        - loading
+        - error
+        type: string
+    required:
+    - error
+    - status
+    type: object
+  ConversationHistoryResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ConversationHistoryResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   ConversationListResponseDoc:
     properties:
       data:
@@ -6740,7 +6765,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.49"
+  version: "0.4.50"
 paths:
   /admin/announcements:
     get:
@@ -11442,6 +11467,66 @@ paths:
       security:
       - BearerAuth: []
       summary: 导出会话 JSON
+      tags:
+      - chat
+  /conversations/{id}/history:
+    get:
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationHistoryResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 查询会话历史加载状态
+      tags:
+      - chat
+    post:
+      description: 普通聊天立即就绪；本地工作会话按需排队读取对应 Codex thread。
+      parameters:
+      - description: 会话 public_id
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConversationHistoryResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: 准备会话完整历史
       tags:
       - chat
   /conversations/{id}/interactions:

@@ -176,6 +176,7 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
 		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
+		ManifestJSON: `{"commands":["thread.read"]}`,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatal(err)
@@ -640,46 +641,61 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || replayedResource.PublicID != queued.PublicID {
 		t.Fatalf("idempotent resource replay changed result: %#v %v", replayedResource, err)
 	}
-	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","messages":[]},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}] }]}}}`
+	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"historyLoaded":false}]}}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, 4, resourceCommand.PublicID, strings.Repeat("9", 64), resourceTerminal, now.Add(8*time.Second)); err != nil || ack != 6 {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
 	}
 	snapshot, err := repo.GetResourceSnapshot(context.Background(), 7, device.PublicID, "", workspace.PublicID, "sessions")
 	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID ||
-		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","messages":[]},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}]}`) {
+		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"historyLoaded":false}]}`) {
 		t.Fatalf("resource snapshot mismatch: %#v %v", snapshot, err)
 	}
 	var importedConversation model.Conversation
 	if err := database.Where("execution_type = ? AND title = ?", "gateway", "Imported session").First(&importedConversation).Error; err != nil ||
 		importedConversation.ExecutionDeviceID != device.PublicID || importedConversation.ExecutionProfileID != profile.PublicID ||
-		importedConversation.ExecutionWorkspaceID != workspace.PublicID || importedConversation.MessageCount != 2 || importedConversation.Status != "archived" {
+		importedConversation.ExecutionWorkspaceID != workspace.PublicID || importedConversation.MessageCount != 0 || importedConversation.Status != "archived" {
 		t.Fatalf("imported conversation mismatch: %#v %v", importedConversation, err)
 	}
 	var importedThread model.AgentThread
 	if err := database.Where("conversation_id = ?", importedConversation.ID).First(&importedThread).Error; err != nil ||
-		importedThread.SourceThreadRef == nil || *importedThread.SourceThreadRef != "source-thread-2" || importedThread.Status != "archived" {
+		importedThread.SourceThreadRef == nil || *importedThread.SourceThreadRef != "source-thread-2" || importedThread.Status != "archived" || importedThread.HistoryStatus != "unloaded" {
 		t.Fatalf("imported thread mismatch: %#v %v", importedThread, err)
 	}
 	var importedMessages []model.Message
+	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil || len(importedMessages) != 0 {
+		t.Fatalf("session summary eagerly imported messages: %#v %v", importedMessages, err)
+	}
+	historyThread, historyCommand, err := repo.QueueThreadHistory(context.Background(), 7, importedConversation.ID, &domainagent.Command{PublicID: "agcmd_ffffffffffffffffffffffffffffffff", Kind: "thread.read"}, now.Add(9*time.Second))
+	if err != nil || historyCommand == nil || historyThread.HistoryStatus != "loading" || historyCommand.ServerSeq != 5 {
+		t.Fatalf("queue thread history: %#v %#v %v", historyThread, historyCommand, err)
+	}
+	var storedHistoryCommand model.AgentCommand
+	if err := database.Where("public_id = ?", historyCommand.PublicID).First(&storedHistoryCommand).Error; err != nil {
+		t.Fatal(err)
+	}
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
+	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
+		t.Fatalf("project thread history: %v", err)
+	}
 	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil ||
 		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
 		importedMessages[1].ParentMessageID == nil || *importedMessages[1].ParentMessageID != importedMessages[0].ID {
 		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
 	}
-	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260},{"role":"user","content":"continue","createdAt":1786615320}] }]}}}`
+	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"historyLoaded":false}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,
-	}, updatedResourceTerminal, now.Add(9*time.Second)); err != nil {
+	}, updatedResourceTerminal, now.Add(11*time.Second)); err != nil {
 		t.Fatalf("update session projection: %v", err)
 	}
-	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil || len(importedMessages) != 3 {
+	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil || len(importedMessages) != 2 {
 		t.Fatalf("updated imported messages mismatch: %#v %v", importedMessages, err)
 	}
-	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 3 || importedConversation.Status != "active" {
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 2 || importedConversation.Status != "active" {
 		t.Fatalf("updated imported conversation mismatch: %#v %v", importedConversation, err)
 	}
-	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" {
+	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" || importedThread.HistoryStatus != "loaded" {
 		t.Fatalf("updated imported thread mismatch: %#v %v", importedThread, err)
 	}
 	canonicalWorkspace := model.AgentWorkspace{
@@ -689,7 +705,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Create(&canonicalWorkspace).Error; err != nil {
 		t.Fatalf("create canonical workspace: %v", err)
 	}
-	shortResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","status":"active","messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}] }]}}}`
+	shortResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","status":"active","historyLoaded":false}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &canonicalWorkspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,

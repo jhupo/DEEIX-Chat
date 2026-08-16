@@ -120,6 +120,7 @@ func toDomainThread(v model.AgentThread) *domainagent.Thread {
 		RuntimeProfileID: v.RuntimeProfileID, WorkspaceID: v.WorkspaceID,
 		ConversationID:  v.ConversationID,
 		SourceThreadRef: v.SourceThreadRef, Title: v.Title, Status: v.Status,
+		HistoryStatus: v.HistoryStatus, HistoryError: v.HistoryError,
 		GitSHA: v.GitSHA, GitBranch: v.GitBranch, GitOriginURL: v.GitOriginURL,
 		LastEventSeq: v.LastEventSeq, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
@@ -619,6 +620,7 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 			Name            string          `json:"name"`
 			Resource        string          `json:"resource"`
 			Data            json.RawMessage `json:"data"`
+			Session         json.RawMessage `json:"session"`
 		} `json:"result"`
 	}
 	if json.Unmarshal([]byte(payloadJSON), &outcome) != nil {
@@ -685,6 +687,10 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 					return updateThreadConversationStatus(tx, &thread, restoredStatus, now)
 				}
 			}
+		}
+		if command.ThreadID != nil && command.Kind == "thread.read" {
+			return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).
+				Updates(map[string]any{"history_status": "error", "history_error": message, "updated_at": now}).Error
 		}
 		return nil
 	}
@@ -811,6 +817,11 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 		}
 	}
 	switch outcome.Result.Kind {
+	case "thread-read":
+		if command.Kind != "thread.read" || command.ThreadID == nil || len(outcome.Result.Session) == 0 {
+			return repository.ErrConflict
+		}
+		return syncThreadHistory(tx, command, outcome.Result.Session, now)
 	case "resource":
 		if command.RuntimeProfileID == nil || command.Kind != "resource.refresh" || len(outcome.Result.Data) == 0 {
 			return repository.ErrConflict
@@ -921,6 +932,7 @@ type workspaceSession struct {
 	Status          string                    `json:"status"`
 	CreatedAt       int64                     `json:"createdAt"`
 	UpdatedAt       int64                     `json:"updatedAt"`
+	HistoryLoaded   bool                      `json:"historyLoaded"`
 	Messages        []workspaceSessionMessage `json:"messages"`
 }
 
@@ -933,7 +945,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		return repository.ErrConflict
 	}
 	var snapshot workspaceSessionSnapshot
-	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Data) > 60 {
+	if json.Unmarshal(raw, &snapshot) != nil || len(snapshot.Data) > 1000 {
 		return repository.ErrConflict
 	}
 	var profile model.AgentRuntimeProfile
@@ -945,7 +957,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		return err
 	}
 	for _, session := range snapshot.Data {
-		if !validWorkspaceSession(session) {
+		if !validWorkspaceSession(session, true) || session.HistoryLoaded || len(session.Messages) != 0 {
 			return repository.ErrConflict
 		}
 		var existing model.AgentThread
@@ -986,7 +998,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		thread := model.AgentThread{
 			PublicID: newRepoPublicID("agth"), UserID: device.UserID, DeviceID: device.ID,
 			RuntimeProfileID: profile.ID, WorkspaceID: workspace.ID, ConversationID: conversation.ID,
-			SourceThreadRef: &session.SourceThreadRef, Title: title, Status: session.Status,
+			SourceThreadRef: &session.SourceThreadRef, Title: title, Status: session.Status, HistoryStatus: "unloaded",
 		}
 		if err := tx.Create(&thread).Error; err != nil {
 			return err
@@ -1009,10 +1021,12 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 	return nil
 }
 
-func validWorkspaceSession(session workspaceSession) bool {
+func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
-		(session.Status != "active" && session.Status != "archived") ||
 		len(session.Messages) > 200 || len(session.Name) > 1024 || len(session.Preview) > 4096 {
+		return false
+	}
+	if requireStatus && session.Status != "active" && session.Status != "archived" {
 		return false
 	}
 	total := 0
@@ -1036,18 +1050,38 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		return err
 	}
-	threadUpdates := map[string]any{"status": session.Status, "updated_at": now}
+	threadUpdates := map[string]any{"updated_at": now}
+	if session.Status == "active" || session.Status == "archived" {
+		threadUpdates["status"] = session.Status
+	}
 	if thread.WorkspaceID != workspace.ID {
 		threadUpdates["workspace_id"] = workspace.ID
 	}
 	if err := tx.Model(thread).Updates(threadUpdates).Error; err != nil {
 		return err
 	}
-	conversationUpdates := map[string]any{"status": session.Status}
+	conversationUpdates := map[string]any{}
+	if session.Status == "active" || session.Status == "archived" {
+		conversationUpdates["status"] = session.Status
+	}
 	if conversation.ExecutionWorkspaceID != workspace.PublicID {
 		conversationUpdates["execution_workspace_id"] = workspace.PublicID
 	}
-	if err := tx.Model(&conversation).Updates(conversationUpdates).Error; err != nil {
+	if title := strings.TrimSpace(session.Name); title != "" {
+		conversationUpdates["title"] = truncateRunes(title, 255)
+	}
+	if updatedAt := validSessionTime(session.UpdatedAt, now); updatedAt.After(conversation.UpdatedAt) {
+		conversationUpdates["updated_at"] = updatedAt
+	}
+	if len(conversationUpdates) > 0 {
+		if err := tx.Model(&conversation).Updates(conversationUpdates).Error; err != nil {
+			return err
+		}
+	}
+	if !session.HistoryLoaded {
+		return nil
+	}
+	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "updated_at": now}).Error; err != nil {
 		return err
 	}
 	var stored []model.Message
@@ -1084,6 +1118,29 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		updates["title"] = truncateRunes(title, 255)
 	}
 	return tx.Model(&conversation).Updates(updates).Error
+}
+
+func syncThreadHistory(tx *gorm.DB, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {
+	if command.ThreadID == nil || command.WorkspaceID == nil {
+		return repository.ErrConflict
+	}
+	var session workspaceSession
+	if json.Unmarshal(raw, &session) != nil || !session.HistoryLoaded || !validWorkspaceSession(session, false) {
+		return repository.ErrConflict
+	}
+	var thread model.AgentThread
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&thread, *command.ThreadID).Error; err != nil {
+		return err
+	}
+	if thread.SourceThreadRef == nil || *thread.SourceThreadRef != session.SourceThreadRef || thread.WorkspaceID != *command.WorkspaceID {
+		return repository.ErrConflict
+	}
+	var workspace model.AgentWorkspace
+	if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
+		return err
+	}
+	session.Status = thread.Status
+	return syncExistingWorkspaceSession(tx, &thread, &workspace, session, now)
 }
 
 func newChatPublicID() string { return strings.ReplaceAll(uuid.NewString(), "-", "") }
@@ -2468,6 +2525,101 @@ func (r *Repo) GetThreadByConversation(ctx context.Context, userID, conversation
 	return item, nil
 }
 
+func (r *Repo) QueueThreadHistory(ctx context.Context, userID, conversationID uint, command *domainagent.Command, now time.Time) (*domainagent.Thread, *domainagent.Command, error) {
+	if command == nil || command.Kind != "thread.read" {
+		return nil, nil, repository.ErrInvalidInput
+	}
+	var target model.AgentThread
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND conversation_id = ?", userID, conversationID).First(&target).Error; err != nil {
+		return nil, nil, errFor(err)
+	}
+	if target.HistoryStatus == "" || target.HistoryStatus == "loaded" {
+		target.HistoryStatus = "loaded"
+		return toDomainThread(target), nil, nil
+	}
+	var thread model.AgentThread
+	var queued *model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND status = ?", target.DeviceID, userID, domainagent.DeviceStatusActive).
+			First(&device).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND conversation_id = ?", target.ID, userID, conversationID).
+			First(&thread).Error; err != nil {
+			return err
+		}
+		if thread.HistoryStatus == "" || thread.HistoryStatus == "loaded" {
+			thread.HistoryStatus = "loaded"
+			return nil
+		}
+		if thread.HistoryStatus == "loading" {
+			var pending model.AgentCommand
+			err := tx.Where("thread_id = ? AND kind = ? AND completed_at IS NULL", thread.ID, "thread.read").
+				Order("id DESC").First(&pending).Error
+			if err == nil {
+				queued = &pending
+				return nil
+			}
+			if !dberror.IsRecordNotFound(err) {
+				return err
+			}
+		}
+		if thread.SourceThreadRef == nil || !validRepoRef(*thread.SourceThreadRef) ||
+			(thread.Status != "active" && thread.Status != "archived") {
+			return repository.ErrConflict
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND status = ? AND lease_expires_at > ?",
+			thread.RuntimeProfileID, userID, device.ID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
+			return err
+		}
+		if !manifestSupportsCommand(profile.ManifestJSON, "thread.read") {
+			return repository.ErrConflict
+		}
+		var workspace model.AgentWorkspace
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND runtime_profile_id = ? AND status = ?",
+			thread.WorkspaceID, userID, device.ID, profile.ID, "available").First(&workspace).Error; err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "thread.read", "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"workspaceId": workspace.PublicID, "threadId": thread.PublicID, "sourceThreadRef": *thread.SourceThreadRef,
+		})
+		if err != nil {
+			return err
+		}
+		created := model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID,
+			ServerSeq: device.NextServerSeq, Kind: "thread.read", PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&thread).Updates(map[string]any{"history_status": "loading", "history_error": "", "updated_at": now}).Error; err != nil {
+			return err
+		}
+		thread.HistoryStatus, thread.HistoryError = "loading", ""
+		queued = &created
+		return nil
+	})
+	if err != nil {
+		return nil, nil, errFor(err)
+	}
+	var resultCommand *domainagent.Command
+	if queued != nil {
+		resultCommand = toDomainCommand(*queued)
+	}
+	return toDomainThread(thread), resultCommand, nil
+}
+
 func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string, input *domainagent.Turn, command *domainagent.Command, now time.Time) (*domainagent.Turn, error) {
 	var turn model.AgentTurn
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -2496,7 +2648,8 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 			Where("id = ? AND user_id = ? AND device_id = ?", target.ID, input.UserID, device.ID).First(&thread).Error; err != nil {
 			return err
 		}
-		if thread.SourceThreadRef == nil || thread.Status != "active" {
+		if thread.SourceThreadRef == nil || thread.Status != "active" ||
+			(thread.HistoryStatus != "" && thread.HistoryStatus != "loaded") {
 			return repository.ErrConflict
 		}
 		var activeTurns int64
