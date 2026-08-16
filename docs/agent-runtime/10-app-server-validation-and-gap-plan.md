@@ -285,24 +285,26 @@ deeix-agent doctor
 
 #### 6.10 本地生命周期、Workspace 注册与 Diff 产品闭环
 
-现状：新建本地会话、导入历史和继续输入已经使用同一 `sourceThreadRef` 闭环。删除与归档页面只修改 DEEIX Conversation，尚未调用已经映射的 `thread/delete|archive|unarchive`。本地 Workspace 由 Bridge 从 app-server 全局线程目录自动发现；Diff 通知虽已进入统一事件流，前端没有结构化展示或刷新恢复。
+已完成：
 
-修改：
+1. Conversation 的 gateway executor 使用单一 typed lifecycle 方法，只允许 `archive|unarchive|delete`，并根据 Conversation 绑定生成持久化 `thread.lifecycle` 命令。
+2. Web 归档/恢复会立即更新 AgentThread 与 Conversation 的目录状态，再由本机 `thread/archive|unarchive` 完成真实生命周期；命令失败时恢复原状态。本机 `thread/archived|unarchived` 通知也会反向更新 Conversation。
+3. 删除在设备确认且待投影事件清空后才软删除 Conversation。本地 Workspace 文件保留；失败时恢复会话状态，已删除 thread 不会被后续 `sessions` 刷新重新导入。
+4. Bridge 支持 `workspace.register`。路径解析、目录创建、配置持久化和附件落盘都以配置用户身份执行；命令终态后 Cloud 清除暂存的本机路径，并刷新 Workspace 与 sessions 投影。
+5. `sessions` 同时读取活动与归档目录。当前每个 Workspace 分别导入最近 30 个活动会话和 30 个归档会话；归档 Conversation 不进入项目树、置顶或最近，只能在“所有对话”的归档筛选中查看。
 
-1. 在 Conversation 使用的 `gatewayExecutor` 增加单一 typed lifecycle 方法，只允许 `archive|unarchive|delete`，根据 conversation 绑定生成现有 `thread.lifecycle` 命令。
-2. 生命周期 HTTP 接口先校验 conversation 属于当前用户和 gateway execution，再持久化命令；由命令 terminal result 投影最终 Conversation 状态。设备离线时显示 pending，不把排队状态伪装成已完成。
-3. 删除得到设备 ACK 后再软删除 Conversation。保留以 `runtime_profile_id + source_thread_ref` 唯一定位的 AgentThread tombstone；`syncWorkspaceSessions` 使用包含软删除记录的查询，命中 tombstone 时跳过导入，防止已删本地会话重新出现。
-4. Workspace 创建使用客户端配置的 allowlisted parent roots。Web 仅提交 `rootRef`、合法单段目录名和显示名；Bridge 将 opaque root ref 解析为本机根目录，拒绝绝对路径、`.`、`..`、分隔符、符号链接越界和已存在的非目录目标，然后创建目录并同步 Workspace。注册任意现有目录继续由本机 CLI 或原生目录选择器完成，Cloud 不接收绝对路径。
-5. 增加统一 Resource 查询能力，由后端根据 execution context 返回平台 Skill/Prompt 或 device/profile 的 Plugin、Workspace Skill 快照；原“插件”页面只消费统一 DTO。页面不直接调用 profile/workspace resource API，也不增加设备专用 Plugin 页面。
-6. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
-7. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
+仍待完成：
+
+1. 增加统一 Resource 查询能力，由后端根据 execution context 返回平台 Skill/Prompt 或 device/profile 的 Plugin、Workspace Skill 快照；原“插件”页面只消费统一 DTO。
+2. Conversation SSE 将 `turn/diff/updated` 和 `item/fileChange/*` 解析成 typed execution event。后端按 thread/turn/item 保存最新结构化 patch，并增加 conversation-scoped、分页、只读 Item/Diff API；前端按文件分组展示 additions/deletions、状态和 unified diff，刷新或重连后从历史 API 恢复。
+3. Diff 内容继续经过事件大小限制、字段 allowlist 和 workspace 归属校验；Web 只展示 patch，不接收本机绝对路径，也不直接根据 patch 执行文件写入。
 
 验收：
 
 - 新会话首次输入只创建一个本地 thread；重试使用同一 idempotency key。
 - 归档、恢复和删除在设备在线、离线排队、ACK、失败重试和重复通知下保持 Cloud 与 app-server 一致。
 - 已删除 thread 在后续 `sessions` 刷新中不会重新生成 Conversation。
-- Workspace 创建覆盖合法目录、重复目录、越界、符号链接逃逸和并发创建。
+- Workspace 注册覆盖合法目录、重复目录、受保护目录、数据目录包含关系、符号链接逃逸和并发创建。
 - 统一 Resource DTO 在在线、离线、过期和切换设备时展示正确数据，并保持原“插件”页面交互。
 - Diff 覆盖实时增量、最终 patch、多文件、重连补拉、乱序/重复事件和大内容截断。
 

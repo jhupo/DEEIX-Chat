@@ -6,7 +6,20 @@
 
 继续使用现有左侧 Conversation 列表，不新增 `/agent` 工作台，不增加独立任务入口，也不在会话条目上显示执行位置标签。聊天与工作一次只展示当前 execution context 的项目和会话，不混合两套数据；项目树、最近、置顶、搜索、分享和消息历史使用同一套组件与 Conversation API。
 
-项目与对话是两个维度：Gateway 的 Project 来自 canonical `cwd`/Workspace，Conversation 来自 app-server thread。聊天与工作使用相同的“置顶、项目、最近”导航顺序；没有置顶会话时不显示“置顶”区。Cloud Project 与 Gateway Workspace 都使用可展开项目树，项目节点下只显示该项目的活动会话；项目会话不重复进入“最近”，但可以出现在全局“置顶”区。“最近”只显示未归档、未置顶且未分配项目的当前 execution context 会话。项目右侧加号在该 Project/Workspace 新建会话。前端不从标题猜测项目，也不为 Gateway 建第二套侧栏。
+项目与对话是两个维度：Gateway 的 Project 来自 canonical `cwd`/Workspace，Conversation 来自 app-server thread。聊天与工作使用相同的“置顶、项目、最近”导航顺序；没有置顶会话时不显示“置顶”区。Cloud Project 与 Gateway Workspace 都使用可展开项目树。项目右侧加号在该 Project/Workspace 新建会话。前端不从标题猜测项目，也不为 Gateway 建第二套侧栏。
+
+### 会话目录与归档
+
+| 会话状态 | 置顶 | 项目 | 最近 | 所有对话 |
+| --- | --- | --- | --- | --- |
+| 活动、已置顶 | 显示 | 已分配项目时也保留在项目节点 | 不显示 | 默认显示 |
+| 活动、未置顶、已分配项目 | 不显示 | 只显示在所属项目节点 | 不显示 | 默认显示 |
+| 活动、未置顶、未分配项目 | 不显示 | 不显示 | 显示 | 默认显示 |
+| 已归档 | 不显示 | 不显示 | 不显示 | 只在“已归档”筛选中显示 |
+
+“最近”严格表示当前 execution context 中未归档、未置顶且未分配项目的会话。项目会话不会重复进入“最近”；全局“置顶”是唯一允许跨项目聚合的导航区。
+
+Gateway 连接或刷新 `sessions` 资源时，分别调用 `thread/list` 读取活动和归档目录，再通过 `thread/read(includeTurns:true)` 投影历史。当前每个 Workspace 最多同步最近 30 个活动会话和 30 个归档会话。Web 归档/恢复通过持久化 `thread.lifecycle` 命令调用本机 `thread/archive`/`thread/unarchive`；本机 Codex 发出的 `thread/archived`/`thread/unarchived` 通知也会反向更新 Web Conversation。命令失败时回滚 AgentThread 与 Conversation 状态。
 
 主输入框只保留两个显式资源触发器：`/` 打开 Skill 选择，`@` 打开 Plugin 能力选择。模型继续使用模型选择器，文件继续使用附件入口，Prompt 不再混入触发菜单。Cloud 当前将 Plugin 能力投影到可执行 MCP 工具；Gateway 的 Workspace Skill、Profile Plugin/App 仍须通过统一 Resource DTO 接入，页面不直接读取 `/agent/*`。
 
