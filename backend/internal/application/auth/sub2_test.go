@@ -211,21 +211,31 @@ func TestSub2SessionNeedsRevalidation(t *testing.T) {
 	}
 }
 
-func TestSub2AccessTokensForUserStopsAfterFirstUsableSession(t *testing.T) {
+func TestSub2AccessTokensForUserPrefersUnexpiredSession(t *testing.T) {
 	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	const key = "test-data-encryption-key-value-32"
-	encrypted, err := secretbox.EncryptString(key, "runtime-access-token")
+	validAccessToken, err := secretbox.EncryptString(key, "runtime-access-token")
 	if err != nil {
 		t.Fatal(err)
 	}
+	expiredAccessToken, err := secretbox.EncryptString(key, "expired-access-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshToken, err := secretbox.EncryptString(key, "runtime-refresh-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	expiredAt, validUntil := now.Add(-time.Hour), now.Add(time.Hour)
 	repo := &runtimeAccessTokenRepo{
-		user: &domainuser.User{ID: 1, Sub2UserID: 7, Sub2InstanceID: client.InstanceID()},
+		user: &domainuser.User{ID: 1, Sub2UserID: 7, Sub2InstanceID: client.InstanceID(), Status: domainuser.StatusActive},
 		sessions: []domainuser.Session{
-			{UserID: 1, SessionID: "first", Sub2AccessTokenEncrypted: encrypted, ExpiresAt: time.Now().Add(time.Hour)},
-			{UserID: 1, SessionID: "second", Sub2AccessTokenEncrypted: "invalid", ExpiresAt: time.Now().Add(time.Hour)},
+			{ID: 1, UserID: 1, SessionID: "expired", Sub2AccessTokenEncrypted: expiredAccessToken, Sub2RefreshTokenEncrypted: refreshToken, Sub2AccessExpiresAt: &expiredAt, Sub2VerifiedAt: &expiredAt, ExpiresAt: now.Add(time.Hour)},
+			{ID: 2, UserID: 1, SessionID: "valid", Sub2AccessTokenEncrypted: validAccessToken, Sub2RefreshTokenEncrypted: refreshToken, Sub2AccessExpiresAt: &validUntil, Sub2VerifiedAt: &now, ExpiresAt: now.Add(time.Hour)},
 		},
 	}
 	service := &Service{cfg: config.NewRuntime(config.Config{DataEncryptionKey: key}), sub2: client, repo: repo}

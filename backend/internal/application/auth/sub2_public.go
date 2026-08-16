@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
@@ -34,7 +35,23 @@ func (s *Service) Sub2AccessTokensForUser(ctx context.Context, userID uint) ([]s
 	if err != nil {
 		return nil, err
 	}
+	sort.SliceStable(sessions, func(left, right int) bool {
+		leftExpiry, rightExpiry := sessions[left].Sub2AccessExpiresAt, sessions[right].Sub2AccessExpiresAt
+		if leftExpiry == nil {
+			return false
+		}
+		if rightExpiry == nil {
+			return true
+		}
+		if !leftExpiry.Equal(*rightExpiry) {
+			return leftExpiry.After(*rightExpiry)
+		}
+		return sessions[left].ID > sessions[right].ID
+	})
 	for i := range sessions {
+		if _, ensureErr := s.ensureSub2Session(ctx, userID, &sessions[i]); ensureErr != nil {
+			continue
+		}
 		token, resolveErr := s.sub2AccessTokenForSession(ctx, userID, sessions[i].SessionID)
 		if resolveErr == nil {
 			return []string{token}, nil
