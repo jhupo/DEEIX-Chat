@@ -117,14 +117,14 @@ deeix-agent doctor
 | 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | Run 只作为会话运行状态；本轮不增加独立任务入口 |
 | 模型生成 Plan | `turn/plan/updated`、`item/plan/delta` 已映射 | 当前只作为通用 `execution_event` 传输和 AgentEvent 保存 | 事件已接收，缺少结构化 Plan 投影、历史恢复和步骤 UI |
 | Thread Goal | `thread/goal/updated`、`thread/goal/cleared` 已映射；`set|get|clear` 仍为 extension | 当前只保存通用事件，没有 Goal 状态或控制面 | 本地模型产生的 Goal 可到达 Cloud，Web 尚未展示或管理 |
-| 新建本地项目 | app-server 没有 DEEIX Workspace 注册语义；Bridge 只上报客户端已配置根目录 | Web 只能选择现有 Workspace | 缺口；需要受控的 Workspace 创建/注册流程 |
-| 删除本地会话 | `thread/delete` 已映射并实测 | 当前删除接口只软删除 DEEIX Conversation | 未形成产品闭环；本地 thread 仍存在且可能被再次导入 |
-| 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | 当前归档接口只更新 DEEIX Conversation | 未形成产品闭环；需要把生命周期命令送到设备 |
+| 新建本地项目 | Bridge 提供 `workspace.register`，本机完成路径校验、配置持久化和 Workspace 同步 | Web 在所选在线设备上添加本地文件夹，等待命令终态后刷新项目树 | 已接通；路径操作以配置用户身份执行，命令终态后 Cloud 清除暂存路径 |
+| 删除本地会话 | `thread/delete` 已映射并实测 | Web 通过持久化 `thread.lifecycle` 命令删除本机 thread，设备确认且待投影事件清空后再软删除 Conversation | 已接通；本地工作区文件保留，设备拒绝时恢复会话状态 |
+| 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | Web 归档通过持久化 `thread.lifecycle` 命令同步到设备；本机 Codex 的归档/恢复通知同步更新 Conversation | 已接通；命令失败时回滚 Thread 与 Conversation 状态 |
 | 读取本地 Skill | Workspace `skills/list` 已映射并实测 | Cloud 可保存 `skills` snapshot，页面尚未读取展示 | 后端能力已具备，UI 待接入 |
 | 读取本地 Plugin | Profile `plugin/list` 已映射并实测 | Cloud 保存 `plugins` snapshot；Web 当前“插件”入口仍只读取平台 Skill/Prompt 数据 | 后端能力已具备；统一资源适配接口和 UI 投影待接入 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-聊天和工作共用原有导航、最近会话、项目、搜索和“插件”入口，并保持相同的“置顶、项目、最近”顺序；没有置顶会话时不显示“置顶”区。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation。工作模式的项目区只列 Workspace，thread 仅进入独立的“置顶”和“最近”区；点击 Workspace 使用统一 Conversation API 按项目筛选，不在项目节点内复制 thread 列表。Cloud 保留可展开项目树。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
+聊天和工作共用原有导航、最近会话、项目、搜索和“插件”入口，并保持相同的“置顶、项目、最近”顺序；没有置顶会话时不显示“置顶”区。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation。Cloud Project 与设备 Workspace 都使用可展开项目树；项目会话只显示在所属项目节点中，不重复进入“最近”，但允许出现在全局“置顶”区。“最近”只读取未归档、未置顶且未分配项目的会话；归档会话只在“所有对话”的归档筛选中显示。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
 
 本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口并展示平台 Skill/Prompt；本地 Skill/Plugin 在统一资源 adapter 完成前不伪装为另一套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 

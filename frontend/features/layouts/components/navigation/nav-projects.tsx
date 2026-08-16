@@ -954,7 +954,7 @@ export function NavProjects() {
                                             item={{
                                               publicID: conversation.publicID,
                                               title,
-                                              url: `/chat?conversation_id=${conversation.publicID}`,
+                                              url: `/chat?conversation_id=${conversation.publicID}&project_id=${project.publicID}`,
                                               shareActive:
                                                 conversation.shareStatus === "active" && Boolean(conversation.shareID?.trim()),
                                               labelsJSON: conversation.labelsJSON,

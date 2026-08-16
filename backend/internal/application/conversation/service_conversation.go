@@ -526,6 +526,29 @@ func (s *Service) SetConversationStar(ctx context.Context, userID uint, publicID
 
 // SetConversationArchived 设置会话归档状态。
 func (s *Service) SetConversationArchived(ctx context.Context, userID uint, publicID string, archived bool) (*model.Conversation, error) {
+	current, err := s.repo.GetConversationByPublicID(ctx, publicID, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+	if (current.Status == "archived") == archived {
+		return current, nil
+	}
+	if current.ExecutionType == model.ExecutionTypeGateway {
+		if s.gatewayExecutor == nil {
+			return nil, ErrExecutionUnavailable
+		}
+		thread, threadErr := s.gatewayExecutor.GetThreadByConversation(ctx, userID, current.ID)
+		if threadErr != nil {
+			return nil, threadErr
+		}
+		if archiveErr := s.gatewayExecutor.SetThreadArchived(ctx, userID, thread.ThreadID, archived, uuid.NewString()); archiveErr != nil {
+			return nil, archiveErr
+		}
+		return s.repo.GetConversationByPublicID(ctx, publicID, userID)
+	}
 	item, err := s.repo.UpdateConversationArchiveByPublicID(ctx, userID, publicID, archived)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

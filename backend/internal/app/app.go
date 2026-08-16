@@ -181,6 +181,11 @@ func (a localGatewayAdapter) DeleteThread(ctx context.Context, userID uint, thre
 	return mapLocalGatewayError(err)
 }
 
+func (a localGatewayAdapter) SetThreadArchived(ctx context.Context, userID uint, threadID string, archived bool, idempotencyKey string) error {
+	_, err := a.service.SetThreadArchived(ctx, userID, threadID, archived, idempotencyKey)
+	return mapLocalGatewayError(err)
+}
+
 func (a localGatewayAdapter) StartTurn(ctx context.Context, userID uint, input conversation.GatewayStartTurnInput) error {
 	_, err := a.service.StartTurn(ctx, userID, appagentgateway.StartTurnInput{
 		ThreadID: input.ThreadID, RunID: input.RunID, IdempotencyKey: input.IdempotencyKey,

@@ -197,7 +197,7 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	}
 }
 
-func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
+func TestThreadLifecycleProjectsDeleteAndArchiveStates(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.Conversation{}, &model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{},
@@ -249,15 +249,17 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 
 	repo := NewRepo(database)
 	conversation, thread := createThread("agth_0123456789abcdef0123456789abcdef", "source-thread-1", "0123456789abcdef0123456789abcdef")
-	command, err := repo.QueueThreadDelete(
+	command, err := repo.QueueThreadLifecycle(
 		context.Background(), "01234567-89ab-4def-8123-456789abcdef", strings.Repeat("1", 64), 7, thread.PublicID,
+		"delete",
 		&domainagent.Command{PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.lifecycle"}, now,
 	)
 	if err != nil || command.State != "queued" || !jsonEqual(command.PayloadJSON, `{"kind":"thread.lifecycle","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","threadId":"agth_0123456789abcdef0123456789abcdef","sourceThreadRef":"source-thread-1","action":"delete"}`) {
 		t.Fatalf("queue thread delete: %#v %v", command, err)
 	}
-	if _, err := repo.QueueThreadDelete(
+	if _, err := repo.QueueThreadLifecycle(
 		context.Background(), "21234567-89ab-4def-8123-456789abcdef", strings.Repeat("5", 64), 7, thread.PublicID,
+		"delete",
 		&domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "thread.lifecycle"}, now,
 	); err == nil {
 		t.Fatal("duplicate pending thread delete was queued")
@@ -284,8 +286,9 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 	}
 
 	failedConversation, failedThread := createThread("agth_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "source-thread-2", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	failedCommand, err := repo.QueueThreadDelete(
+	failedCommand, err := repo.QueueThreadLifecycle(
 		context.Background(), "11234567-89ab-4def-8123-456789abcdef", strings.Repeat("3", 64), 7, failedThread.PublicID,
+		"delete",
 		&domainagent.Command{PublicID: "agcmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Kind: "thread.lifecycle"}, now.Add(2*time.Second),
 	)
 	if err != nil {
@@ -313,8 +316,9 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 	if err := database.Create(&pendingEvent).Error; err != nil {
 		t.Fatal(err)
 	}
-	pendingCommand, err := repo.QueueThreadDelete(
+	pendingCommand, err := repo.QueueThreadLifecycle(
 		context.Background(), "31234567-89ab-4def-8123-456789abcdef", strings.Repeat("6", 64), 7, pendingThread.PublicID,
+		"delete",
 		&domainagent.Command{PublicID: "agcmd_cccccccccccccccccccccccccccccccc", Kind: "thread.lifecycle"}, now.Add(4*time.Second),
 	)
 	if err != nil {
@@ -336,8 +340,9 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 	}
 
 	threadEventConversation, threadEventThread := createThread("agth_dddddddddddddddddddddddddddddddd", "source-thread-4", "dddddddddddddddddddddddddddddddd")
-	threadEventCommand, err := repo.QueueThreadDelete(
+	threadEventCommand, err := repo.QueueThreadLifecycle(
 		context.Background(), "41234567-89ab-4def-8123-456789abcdef", strings.Repeat("8", 64), 7, threadEventThread.PublicID,
+		"delete",
 		&domainagent.Command{PublicID: "agcmd_dddddddddddddddddddddddddddddddd", Kind: "thread.lifecycle"}, now.Add(7*time.Second),
 	)
 	if err != nil {
@@ -364,6 +369,86 @@ func TestThreadDeleteFinalizesAfterDeviceAndEventProjection(t *testing.T) {
 	}
 	if err := database.First(&hidden, threadEventConversation.ID).Error; err == nil {
 		t.Fatal("thread-only event blocked confirmed conversation deletion")
+	}
+
+	archiveConversation, archiveThread := createThread("agth_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "source-thread-5", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	archiveCommand, err := repo.QueueThreadLifecycle(
+		context.Background(), "51234567-89ab-4def-8123-456789abcdef", strings.Repeat("b", 64), 7, archiveThread.PublicID,
+		"archive",
+		&domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "thread.lifecycle"}, now.Add(10*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archivedConversation model.Conversation
+	var archivedThread model.AgentThread
+	if err := database.First(&archivedConversation, archiveConversation.ID).Error; err != nil || archivedConversation.Status != "archived" {
+		t.Fatalf("queued archive did not hide the conversation: %#v %v", archivedConversation, err)
+	}
+	if err := database.First(&archivedThread, archiveThread.ID).Error; err != nil || archivedThread.Status != "archived" {
+		t.Fatalf("queued archive did not update the thread: %#v %v", archivedThread, err)
+	}
+	archiveFailed := `{"kind":"error","error":{"message":"device rejected archive"}}`
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, archiveCommand.ServerSeq, archiveCommand.PublicID, strings.Repeat("c", 64), archiveFailed, now.Add(11*time.Second)); err != nil || ack != 6 {
+		t.Fatalf("apply failed archive terminal: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&archivedConversation, archiveConversation.ID).Error; err != nil || archivedConversation.Status != "active" {
+		t.Fatalf("failed archive did not restore the conversation: %#v %v", archivedConversation, err)
+	}
+
+	archiveCommand, err = repo.QueueThreadLifecycle(
+		context.Background(), "61234567-89ab-4def-8123-456789abcdef", strings.Repeat("d", 64), 7, archiveThread.PublicID,
+		"archive",
+		&domainagent.Command{PublicID: "agcmd_ffffffffffffffffffffffffffffffff", Kind: "thread.lifecycle"}, now.Add(12*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 7, archiveCommand.ServerSeq, archiveCommand.PublicID, strings.Repeat("e", 64), accepted, now.Add(13*time.Second)); err != nil || ack != 7 {
+		t.Fatalf("apply archive terminal: ack=%d err=%v", ack, err)
+	}
+	unarchiveCommand, err := repo.QueueThreadLifecycle(
+		context.Background(), "71234567-89ab-4def-8123-456789abcdef", strings.Repeat("f", 64), 7, archiveThread.PublicID,
+		"unarchive",
+		&domainagent.Command{PublicID: "agcmd_11111111111111111111111111111111", Kind: "thread.lifecycle"}, now.Add(14*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 8, unarchiveCommand.ServerSeq, unarchiveCommand.PublicID, strings.Repeat("1", 64), accepted, now.Add(15*time.Second)); err != nil || ack != 8 {
+		t.Fatalf("apply unarchive terminal: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&archivedConversation, archiveConversation.ID).Error; err != nil || archivedConversation.Status != "active" {
+		t.Fatalf("unarchive did not restore the conversation: %#v %v", archivedConversation, err)
+	}
+
+	if _, err := repo.ApplyEventFrame(
+		context.Background(), device.ID, profile.ID, 9, strings.Repeat("2", 64),
+		&domainagent.Event{
+			PublicID: "agev_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", UserID: 7, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, Kind: "thread/archived", SourceThreadRef: "source-thread-5",
+			PayloadJSON: "{}", OccurredAt: now.Add(16 * time.Second),
+		},
+		now.Add(16*time.Second),
+	); err != nil {
+		t.Fatalf("apply local archive event: %v", err)
+	}
+	if err := database.First(&archivedConversation, archiveConversation.ID).Error; err != nil || archivedConversation.Status != "archived" {
+		t.Fatalf("local archive event did not update the conversation: %#v %v", archivedConversation, err)
+	}
+	if _, err := repo.ApplyEventFrame(
+		context.Background(), device.ID, profile.ID, 10, strings.Repeat("3", 64),
+		&domainagent.Event{
+			PublicID: "agev_ffffffffffffffffffffffffffffffff", UserID: 7, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, Kind: "thread/unarchived", SourceThreadRef: "source-thread-5",
+			PayloadJSON: "{}", OccurredAt: now.Add(17 * time.Second),
+		},
+		now.Add(17*time.Second),
+	); err != nil {
+		t.Fatalf("apply local unarchive event: %v", err)
+	}
+	if err := database.First(&archivedConversation, archiveConversation.ID).Error; err != nil || archivedConversation.Status != "active" {
+		t.Fatalf("local unarchive event did not update the conversation: %#v %v", archivedConversation, err)
 	}
 }
 

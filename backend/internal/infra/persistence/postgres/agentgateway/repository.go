@@ -673,6 +673,16 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 					return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).Updates(updates).Error
 				case "delete":
 					return restoreDeletingThread(tx, *command.ThreadID, now)
+				case "archive", "unarchive":
+					var thread model.AgentThread
+					if err := tx.First(&thread, *command.ThreadID).Error; err != nil {
+						return err
+					}
+					restoredStatus := "active"
+					if payload.Action == "unarchive" {
+						restoredStatus = "archived"
+					}
+					return updateThreadConversationStatus(tx, &thread, restoredStatus, now)
 				}
 			}
 		}
@@ -793,8 +803,11 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 			if status == "" {
 				return repository.ErrConflict
 			}
-			return tx.Model(&model.AgentThread{}).Where("id = ?", *command.ThreadID).
-				Updates(map[string]any{"status": status, "updated_at": now}).Error
+			var thread model.AgentThread
+			if err := tx.First(&thread, *command.ThreadID).Error; err != nil {
+				return err
+			}
+			return updateThreadConversationStatus(tx, &thread, status, now)
 		}
 	}
 	switch outcome.Result.Kind {
@@ -1340,6 +1353,15 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 	}
 	next := thread.LastEventSeq + 1
 	event.ThreadID, event.WorkspaceID, event.ThreadSeq = &thread.ID, &thread.WorkspaceID, &next
+	if event.Kind == "thread/archived" || event.Kind == "thread/unarchived" {
+		status := "active"
+		if event.Kind == "thread/archived" {
+			status = "archived"
+		}
+		if err := updateThreadConversationStatus(tx, &thread, status, event.OccurredAt); err != nil {
+			return err
+		}
+	}
 	if event.SourceTurnRef != "" {
 		var turn model.AgentTurn
 		if err := tx.Where("thread_id = ? AND source_turn_ref = ?", thread.ID, event.SourceTurnRef).First(&turn).Error; err == nil {
@@ -1474,6 +1496,26 @@ func restoreDeletingThread(tx *gorm.DB, threadID uint, now time.Time) error {
 			"status":     gorm.Expr("CASE status WHEN ? THEN ? WHEN ? THEN ? END", threadStatusDeletingActive, "active", threadStatusDeletingArchived, "archived"),
 			"updated_at": now,
 		}).Error
+}
+
+func updateThreadConversationStatus(tx *gorm.DB, thread *model.AgentThread, status string, now time.Time) error {
+	if thread == nil || thread.ID == 0 || (status != "active" && status != "archived") {
+		return repository.ErrInvalidInput
+	}
+	if err := tx.Model(thread).Updates(map[string]any{"status": status, "updated_at": now}).Error; err != nil {
+		return err
+	}
+	result := tx.Model(&model.Conversation{}).
+		Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").
+		Updates(map[string]any{"status": status, "updated_at": now})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return repository.ErrConflict
+	}
+	thread.Status = status
+	return nil
 }
 
 func finalizeDeletedThreadConversation(tx *gorm.DB, threadID uint, now time.Time) error {
@@ -2119,14 +2161,18 @@ func (r *Repo) QueueTurnInterrupt(
 	return toDomainCommand(created), nil
 }
 
-func (r *Repo) QueueThreadDelete(
+func (r *Repo) QueueThreadLifecycle(
 	ctx context.Context,
 	idempotencyKey, requestHash string,
 	userID uint,
 	threadPublicID string,
+	action string,
 	command *domainagent.Command,
 	now time.Time,
 ) (*domainagent.Command, error) {
+	if action != "archive" && action != "unarchive" && action != "delete" {
+		return nil, repository.ErrInvalidInput
+	}
 	var created model.AgentCommand
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var operation model.AgentIdempotencyRecord
@@ -2156,7 +2202,10 @@ func (r *Repo) QueueThreadDelete(
 			Where("id = ? AND user_id = ? AND device_id = ?", target.ID, userID, device.ID).First(&thread).Error; err != nil {
 			return err
 		}
-		if thread.SourceThreadRef == nil || (thread.Status != "active" && thread.Status != "archived") {
+		if thread.SourceThreadRef == nil ||
+			(action == "archive" && thread.Status != "active") ||
+			(action == "unarchive" && thread.Status != "archived") ||
+			(action == "delete" && thread.Status != "active" && thread.Status != "archived") {
 			return repository.ErrConflict
 		}
 		var pendingLifecycle int64
@@ -2186,7 +2235,7 @@ func (r *Repo) QueueThreadDelete(
 		payload, err := json.Marshal(map[string]any{
 			"kind": "thread.lifecycle", "deviceId": device.PublicID, "profileId": profile.PublicID,
 			"workspaceId": workspace.PublicID, "threadId": thread.PublicID,
-			"sourceThreadRef": *thread.SourceThreadRef, "action": "delete",
+			"sourceThreadRef": *thread.SourceThreadRef, "action": action,
 		})
 		if err != nil {
 			return err
@@ -2205,11 +2254,18 @@ func (r *Repo) QueueThreadDelete(
 		if err := tx.Model(&operation).Update("result_public_id", created.PublicID).Error; err != nil {
 			return err
 		}
-		deletingStatus := threadStatusDeletingActive
-		if thread.Status == "archived" {
-			deletingStatus = threadStatusDeletingArchived
+		if action == "delete" {
+			deletingStatus := threadStatusDeletingActive
+			if thread.Status == "archived" {
+				deletingStatus = threadStatusDeletingArchived
+			}
+			return tx.Model(&thread).Updates(map[string]any{"status": deletingStatus, "updated_at": now}).Error
 		}
-		return tx.Model(&thread).Updates(map[string]any{"status": deletingStatus, "updated_at": now}).Error
+		nextStatus := "active"
+		if action == "archive" {
+			nextStatus = "archived"
+		}
+		return updateThreadConversationStatus(tx, &thread, nextStatus, now)
 	})
 	if err != nil {
 		return nil, errFor(err)

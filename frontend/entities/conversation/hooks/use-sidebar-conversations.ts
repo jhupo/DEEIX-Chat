@@ -38,6 +38,7 @@ import type {
   SidebarConversationsControllerValue,
 } from "@/entities/conversation/types/sidebar-conversations";
 import {
+  isArchivedConversation,
   mergeUniqueByPublicID,
   removeByPublicID,
   sortByStarredAtDesc,
@@ -120,6 +121,14 @@ function activeShareFieldsMissing(item: ConversationDTO): boolean {
   return (item.shareStatus ?? "").trim() === "none" && !item.shareID?.trim();
 }
 
+function belongsInSidebarRecent(item: ConversationDTO): boolean {
+  return !isArchivedConversation(item) && !item.isStarred && !item.projectID.trim();
+}
+
+function belongsInSidebarStarred(item: ConversationDTO): boolean {
+  return !isArchivedConversation(item) && item.isStarred;
+}
+
 function preserveKnownShareState(
   current: ConversationDTO | null | undefined,
   incoming: ConversationDTO,
@@ -185,6 +194,7 @@ async function fetchRecentPage(accessToken: string, page: number, executionType:
     pageSize: RECENT_PAGE_SIZE,
     status: "active",
     starred: "unstarred",
+    project: "unassigned",
     execution: executionType,
     deviceId: executionDeviceID,
   });
@@ -347,13 +357,12 @@ export function useSidebarConversationsController({
 
   const applyConversationUpdate = React.useCallback((publicID: string, incoming: ConversationDTO) => {
     const updated = preserveKnownShareState(currentConversationSnapshot(publicID), incoming);
-    if (updated.isStarred) {
-      setRecentItems((prev) => removeByPublicID(prev, publicID));
-      setStarredItems((prev) => upsertByPublicID(prev, updated, sortByStarredAtDesc));
-    } else {
-      setRecentItems((prev) => upsertByPublicID(prev, updated, sortByUpdatedAtDesc));
-      setStarredItems((prev) => removeByPublicID(prev, publicID));
-    }
+    setRecentItems((prev) => belongsInSidebarRecent(updated)
+      ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
+      : removeByPublicID(prev, publicID));
+    setStarredItems((prev) => belongsInSidebarStarred(updated)
+      ? upsertByPublicID(prev, updated, sortByStarredAtDesc)
+      : removeByPublicID(prev, publicID));
     publishChange({ type: "upsert", publicID, item: updated });
     return updated;
   }, [currentConversationSnapshot, publishChange]);
@@ -526,7 +535,9 @@ export function useSidebarConversationsController({
       projectID: projectID?.trim() || "",
       execution,
     });
-    setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
+    if (belongsInSidebarRecent(item)) {
+      setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
+    }
     publishChange({ type: "upsert", publicID: item.publicID, item });
     return item;
   }, [newConversationTitle, publishChange]);
@@ -649,14 +660,14 @@ export function useSidebarConversationsController({
       }
 
       const patch: Partial<ConversationDTO> = { projectID: "", projectName: "" };
-      setRecentItems((current) => current.map((item) => (item.projectID === projectID ? { ...item, ...patch } : item)));
       setStarredItems((current) => current.map((item) => (item.projectID === projectID ? { ...item, ...patch } : item)));
       for (const item of affectedItems.values()) {
         publishChange({ type: "patch", publicID: item.publicID, patch });
       }
+      await loadInitial();
       return true;
     },
-    [publishChange, refreshStarredWindow, setProjectList],
+    [loadInitial, publishChange, refreshStarredWindow, setProjectList],
   );
 
   const reorderProjects = React.useCallback(async (projectIDs: string[]): Promise<void> => {
@@ -688,13 +699,12 @@ export function useSidebarConversationsController({
         currentConversationSnapshot(publicID),
         await setConversationProject(token, publicID, { projectID: projectID?.trim() || "" }),
       );
-      if (updated.isStarred) {
-        setStarredItems((prev) => upsertByPublicID(prev, updated, sortByStarredAtDesc));
-        setRecentItems((prev) => removeByPublicID(prev, publicID));
-      } else {
-        setRecentItems((prev) => upsertByPublicID(prev, updated, sortByUpdatedAtDesc));
-        setStarredItems((prev) => removeByPublicID(prev, publicID));
-      }
+      setRecentItems((prev) => belongsInSidebarRecent(updated)
+        ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
+        : removeByPublicID(prev, publicID));
+      setStarredItems((prev) => belongsInSidebarStarred(updated)
+        ? upsertByPublicID(prev, updated, sortByStarredAtDesc)
+        : removeByPublicID(prev, publicID));
       publishChange({ type: "upsert", publicID, item: updated });
       return updated;
     },
@@ -721,14 +731,17 @@ export function useSidebarConversationsController({
         projectID: project?.publicID ?? "",
         projectName: project?.name ?? "",
       };
-      setRecentItems((current) => current.map((item) => (publicIDs.includes(item.publicID) ? { ...item, ...patch } : item)));
+      setRecentItems((current) => projectIDValue
+        ? current.filter((item) => !publicIDs.includes(item.publicID))
+        : current.map((item) => (publicIDs.includes(item.publicID) ? { ...item, ...patch } : item)));
       setStarredItems((current) => current.map((item) => (publicIDs.includes(item.publicID) ? { ...item, ...patch } : item)));
       for (const publicID of publicIDs) {
         publishChange({ type: "patch", publicID, patch });
       }
+      await loadInitial();
       return results.reduce((total, result) => total + result.updated, 0);
     },
-    [bulkPendingTitle, projects, publishChange],
+    [bulkPendingTitle, loadInitial, projects, publishChange],
   );
 
   const setStarByPublicID = React.useCallback(
@@ -742,6 +755,9 @@ export function useSidebarConversationsController({
         null;
       const optimisticStarredAt = new Date().toISOString();
       const wasStarred = Boolean(targetItem?.isStarred);
+      const optimisticItem = targetItem
+        ? { ...targetItem, isStarred: starred, starredAt: starred ? optimisticStarredAt : null }
+        : null;
 
       if (clearTransferTimerRef.current !== null) {
         clearTimeout(clearTransferTimerRef.current);
@@ -751,42 +767,16 @@ export function useSidebarConversationsController({
       setTransferringStarPublicID(publicID);
       await waitForNextFrame();
 
-      if (starred) {
-        setRecentItems((prev) => removeByPublicID(prev, publicID));
-        if (targetItem) {
-          setStarredItems((prev) =>
-            upsertByPublicID(
-              prev,
-              {
-                ...targetItem,
-                isStarred: true,
-                starredAt: optimisticStarredAt,
-              },
-              sortByStarredAtDesc,
-            ),
-          );
-        }
-        if (!wasStarred) {
-          setStarredTotal((prev) => prev + 1);
-        }
-      } else {
-        setStarredItems((prev) => removeByPublicID(prev, publicID));
-        if (targetItem) {
-          setRecentItems((prev) =>
-            upsertByPublicID(
-              prev,
-              {
-                ...targetItem,
-                isStarred: false,
-                starredAt: null,
-              },
-              sortByUpdatedAtDesc,
-            ),
-          );
-        }
-        if (wasStarred) {
-          setStarredTotal((prev) => Math.max(0, prev - 1));
-        }
+      setRecentItems((prev) => optimisticItem && belongsInSidebarRecent(optimisticItem)
+        ? upsertByPublicID(prev, optimisticItem, sortByUpdatedAtDesc)
+        : removeByPublicID(prev, publicID));
+      setStarredItems((prev) => optimisticItem && belongsInSidebarStarred(optimisticItem)
+        ? upsertByPublicID(prev, optimisticItem, sortByStarredAtDesc)
+        : removeByPublicID(prev, publicID));
+      if (!wasStarred && optimisticItem && belongsInSidebarStarred(optimisticItem)) {
+        setStarredTotal((prev) => prev + 1);
+      } else if (wasStarred && !starred) {
+        setStarredTotal((prev) => Math.max(0, prev - 1));
       }
       publishChange({
         type: "patch",
@@ -818,13 +808,12 @@ export function useSidebarConversationsController({
           await setConversationStar(token, publicID, { starred }),
         );
 
-        if (starred) {
-          setStarredItems((prev) => upsertByPublicID(prev, updated, sortByStarredAtDesc));
-          setRecentItems((prev) => removeByPublicID(prev, publicID));
-        } else {
-          setStarredItems((prev) => removeByPublicID(prev, publicID));
-          setRecentItems((prev) => upsertByPublicID(prev, updated, sortByUpdatedAtDesc));
-        }
+        setRecentItems((prev) => belongsInSidebarRecent(updated)
+          ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
+          : removeByPublicID(prev, publicID));
+        setStarredItems((prev) => belongsInSidebarStarred(updated)
+          ? upsertByPublicID(prev, updated, sortByStarredAtDesc)
+          : removeByPublicID(prev, publicID));
         publishChange({ type: "upsert", publicID, item: updated });
         void refreshStarredWindow(token);
 
@@ -858,19 +847,17 @@ export function useSidebarConversationsController({
         currentConversationSnapshot(publicID),
         await setConversationArchive(token, publicID, { archived }),
       );
-      if (archived) {
-        setRecentItems((prev) => removeByPublicID(prev, publicID));
-        setStarredItems((prev) => removeByPublicID(prev, publicID));
-        if (starredItemsRef.current.some((item) => item.publicID === publicID)) {
-          setStarredTotal((prev) => Math.max(0, prev - 1));
-        }
-        void refreshStarredWindow(token);
-      } else if (updated.isStarred) {
-        setStarredItems((prev) => upsertByPublicID(prev, updated, sortByStarredAtDesc));
-        void refreshStarredWindow(token);
-      } else {
-        setRecentItems((prev) => upsertByPublicID(prev, updated, sortByUpdatedAtDesc));
+      const removedFromStarred = starredItemsRef.current.some((item) => item.publicID === publicID);
+      setRecentItems((prev) => belongsInSidebarRecent(updated)
+        ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
+        : removeByPublicID(prev, publicID));
+      setStarredItems((prev) => belongsInSidebarStarred(updated)
+        ? upsertByPublicID(prev, updated, sortByStarredAtDesc)
+        : removeByPublicID(prev, publicID));
+      if (archived && removedFromStarred) {
+        setStarredTotal((prev) => Math.max(0, prev - 1));
       }
+      void refreshStarredWindow(token);
       publishChange({ type: "upsert", publicID, item: updated });
       return updated;
     },

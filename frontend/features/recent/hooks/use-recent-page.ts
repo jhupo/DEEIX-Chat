@@ -122,7 +122,7 @@ export function useRecentPage() {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [hasMore, setHasMore] = React.useState(true);
   const [loadMoreFailed, setLoadMoreFailed] = React.useState(false);
-  const [statusFilter, setStatusFilter] = React.useState<ConversationStatusFilter>("all");
+  const [statusFilter, setStatusFilter] = React.useState<ConversationStatusFilter>("active");
   const [starredFilter, setStarredFilter] = React.useState<ConversationStarredFilter>("all");
   const [shareFilter, setShareFilter] = React.useState<ConversationShareFilter>("all");
   const searchParams = useSearchParams();

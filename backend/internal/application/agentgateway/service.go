@@ -654,7 +654,29 @@ func (s *Service) DeleteThread(ctx context.Context, userID uint, threadID, idemp
 		ThreadID string
 		Action   string
 	}{ThreadID: threadID, Action: "delete"}
-	created, err := s.repo.QueueThreadDelete(ctx, idempotencyKey, requestHash(request), userID, threadID, command, s.now().UTC())
+	created, err := s.repo.QueueThreadLifecycle(ctx, idempotencyKey, requestHash(request), userID, threadID, "delete", command, s.now().UTC())
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) SetThreadArchived(ctx context.Context, userID uint, threadID string, archived bool, idempotencyKey string) (*CommandView, error) {
+	threadID = strings.TrimSpace(threadID)
+	if userID == 0 || !validPublicID(threadID, "agth") || !validIdempotencyKey(idempotencyKey) {
+		return nil, ErrInvalidInput
+	}
+	action := "unarchive"
+	if archived {
+		action = "archive"
+	}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "thread.lifecycle"}
+	request := struct {
+		ThreadID string
+		Action   string
+	}{ThreadID: threadID, Action: action}
+	created, err := s.repo.QueueThreadLifecycle(ctx, idempotencyKey, requestHash(request), userID, threadID, action, command, s.now().UTC())
 	if err != nil {
 		return nil, mapResourceError(err)
 	}

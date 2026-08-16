@@ -309,7 +309,7 @@ func (*socketRepo) RenameDevice(context.Context, uint, string, string) (*domaina
 func (*socketRepo) RevokeDevice(context.Context, uint, string, time.Time) error {
 	return repository.ErrNotFound
 }
-func (*socketRepo) QueueThreadDelete(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
+func (*socketRepo) QueueThreadLifecycle(context.Context, string, string, uint, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) CreateDeviceCredential(context.Context, uint, *domainagent.Credential) error {
