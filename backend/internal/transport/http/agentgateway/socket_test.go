@@ -77,6 +77,10 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 			ID: 11, PublicID: "agcmd_0123456789abcdef0123456789abcdef", UserID: 7, DeviceID: 3,
 			ServerSeq: 1, Kind: "resource.refresh", State: "queued",
 			PayloadJSON: `{"kind":"resource.refresh","deviceId":"agd_f6f910e920934def9a5cda479fc25251","profileId":"profile_1","resource":{"scope":"profile","name":"models"}}`,
+		}, {
+			ID: 12, PublicID: "agcmd_1123456789abcdef0123456789abcdef", UserID: 7, DeviceID: 3,
+			ServerSeq: 2, Kind: "resource.refresh", State: "queued",
+			PayloadJSON: `{"kind":"resource.refresh","deviceId":"agd_f6f910e920934def9a5cda479fc25251","profileId":"profile_1","resource":{"scope":"profile","name":"apps"}}`,
 		}},
 	}
 	service, err := appagent.NewService(repo, "01234567890123456789012345678901")
@@ -139,7 +143,20 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if command.Type != "command" || command.ServerSeq != 1 || command.CommandID != repo.commands[0].PublicID {
 		t.Fatalf("unexpected command: %#v", command)
 	}
+	repo.mu.Lock()
+	secondDeliveredBeforeAck := repo.commands[1].DeliveredAt != nil
+	repo.mu.Unlock()
+	if secondDeliveredBeforeAck {
+		t.Fatal("second command was delivered before the first acknowledgment")
+	}
 	if err = websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "ack.server", AckServerSeq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var secondCommand bridgeFrame
+	if err = websocket.JSON.Receive(connection, &secondCommand); err != nil || secondCommand.Type != "command" || secondCommand.ServerSeq != 2 {
+		t.Fatalf("unexpected second command: %#v, %v", secondCommand, err)
+	}
+	if err = websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "ack.server", AckServerSeq: 2}); err != nil {
 		t.Fatal(err)
 	}
 	outcome := []byte(`{"kind":"result","result":{"kind":"accepted"}}`)
@@ -321,13 +338,16 @@ func (*socketRepo) GetCredential(context.Context, string, string) (*domainagent.
 func (*socketRepo) ConsumeChallengeAndCreateConnection(context.Context, uint, uint, *domainagent.Credential, time.Time) (*domainagent.Credential, error) {
 	return nil, repository.ErrNotFound
 }
-func (r *socketRepo) ListCommandsForDelivery(_ context.Context, _ uint, after uint64, _ int) ([]domainagent.Command, error) {
+func (r *socketRepo) ListCommandsForDelivery(_ context.Context, _ uint, after uint64, limit int) ([]domainagent.Command, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	result := make([]domainagent.Command, 0, len(r.commands))
 	for _, command := range r.commands {
 		if command.ServerSeq > after {
 			result = append(result, command)
+			if len(result) == limit {
+				break
+			}
 		}
 	}
 	return result, nil
@@ -338,11 +358,13 @@ func (*socketRepo) GetCommand(context.Context, uint, string) (*domainagent.Comma
 func (r *socketRepo) MarkCommandDelivered(_ context.Context, _ uint, commandID uint, now time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.commands) == 0 || r.commands[0].ID != commandID {
-		return repository.ErrNotFound
+	for index := range r.commands {
+		if r.commands[index].ID == commandID {
+			r.commands[index].DeliveredAt = &now
+			return nil
+		}
 	}
-	r.commands[0].DeliveredAt = &now
-	return nil
+	return repository.ErrNotFound
 }
 func (r *socketRepo) AckServerCommands(_ context.Context, _ uint, through uint64, _ time.Time) error {
 	r.mu.Lock()

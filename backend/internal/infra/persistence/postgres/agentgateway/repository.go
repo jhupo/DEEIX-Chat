@@ -583,8 +583,14 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 			return err
 		}
 		if command.CompletedAt == nil {
-			if err := projectTerminalResult(tx, &device, &frame, &command, payloadJSON, now); err != nil {
-				return err
+			projectionErr := tx.Transaction(func(projectionTx *gorm.DB) error {
+				return projectTerminalResult(projectionTx, &device, &frame, &command, payloadJSON, now)
+			})
+			if projectionErr != nil {
+				if command.Kind != "resource.refresh" ||
+					(!errors.Is(projectionErr, repository.ErrConflict) && !errors.Is(projectionErr, repository.ErrInvalidInput)) {
+					return projectionErr
+				}
 			}
 			updates := map[string]any{"state": "completed", "terminal_json": payloadJSON, "completed_at": now}
 			if command.Kind == "workspace.register" {
@@ -2014,6 +2020,20 @@ func (r *Repo) QueueResourceRefresh(
 				return err
 			}
 			workspaceID = &workspace.ID
+		}
+		pending := tx.Where(
+			"device_id = ? AND runtime_profile_id = ? AND kind = ? AND completed_at IS NULL AND payload_json -> 'resource' ->> 'name' = ?",
+			device.ID, profile.ID, "resource.refresh", resourceName,
+		)
+		if workspaceID == nil {
+			pending = pending.Where("workspace_id IS NULL")
+		} else {
+			pending = pending.Where("workspace_id = ?", *workspaceID)
+		}
+		if err := pending.Order("server_seq DESC").First(&created).Error; err == nil {
+			return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+		} else if !dberror.IsRecordNotFound(err) {
+			return err
 		}
 		payload := map[string]any{
 			"kind": "resource.refresh", "deviceId": device.PublicID, "profileId": profile.PublicID,

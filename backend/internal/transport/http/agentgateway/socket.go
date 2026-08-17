@@ -384,6 +384,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				)
 				cancel()
 				if err != nil {
+					log.Printf("agent bridge terminal failed device=%s bridge_seq=%d server_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, frame.ServerSeq, err)
 					return
 				}
 				if err = websocket.JSON.Send(connection, bridgeFrame{
@@ -403,6 +404,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
 				cancel()
 				if err != nil {
+					log.Printf("agent bridge event failed device=%s bridge_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, err)
 					return
 				}
 				if err = websocket.JSON.Send(connection, bridgeFrame{

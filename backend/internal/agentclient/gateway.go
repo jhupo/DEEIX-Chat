@@ -276,6 +276,10 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			}
 			_ = gateway.writeStatus("connected", "")
 		case <-gateway.wake:
+			_, acknowledged := gateway.state.Cursors()
+			if sentThrough != acknowledged {
+				continue
+			}
 			if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
 				return err
 			}
@@ -296,6 +300,11 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 				}
 				if err = gateway.state.AcknowledgeBridge(frame.AckBridgeSeq); err != nil {
 					return err
+				}
+				if sentThrough == frame.AckBridgeSeq {
+					if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
+						return err
+					}
 				}
 			case "command":
 				if frame.ServerSeq == 0 || !validRef(frame.CommandID, 256) || frame.Artifacts == nil || len(*frame.Artifacts) > 16 {
@@ -593,14 +602,16 @@ func concurrentCommand(kind string) bool {
 }
 
 func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint64, error) {
-	for _, outgoing := range gateway.state.PendingOutgoing(after) {
-		frame := bridgeFrame{Version: bridgeVersion, Type: outgoing.Type, BridgeSeq: outgoing.BridgeSeq, ServerSeq: outgoing.ServerSeq, CommandID: outgoing.CommandID, Outcome: outgoing.Outcome, Event: outgoing.Event}
-		if err := writer.send(frame); err != nil {
-			return after, err
-		}
-		after = outgoing.BridgeSeq
+	pending := gateway.state.PendingOutgoing(after)
+	if len(pending) == 0 {
+		return after, nil
 	}
-	return after, nil
+	outgoing := pending[0]
+	frame := bridgeFrame{Version: bridgeVersion, Type: outgoing.Type, BridgeSeq: outgoing.BridgeSeq, ServerSeq: outgoing.ServerSeq, CommandID: outgoing.CommandID, Outcome: outgoing.Outcome, Event: outgoing.Event}
+	if err := writer.send(frame); err != nil {
+		return after, err
+	}
+	return outgoing.BridgeSeq, nil
 }
 
 func (gateway *Gateway) signalWake() {

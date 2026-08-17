@@ -642,6 +642,14 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || replayedResource.PublicID != queued.PublicID {
 		t.Fatalf("idempotent resource replay changed result: %#v %v", replayedResource, err)
 	}
+	coalescedResource, err := repo.QueueResourceRefresh(
+		context.Background(), "31234567-89ab-4def-8123-456789abcdef", strings.Repeat("a", 64), 7,
+		device.PublicID, "", workspace.PublicID, "sessions",
+		&domainagent.Command{PublicID: "agcmd_abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "resource.refresh"}, now.Add(7*time.Second),
+	)
+	if err != nil || coalescedResource.PublicID != queued.PublicID {
+		t.Fatalf("unfinished resource refresh was duplicated: %#v %v", coalescedResource, err)
+	}
 	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"historyLoaded":false}]}}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, 4, resourceCommand.PublicID, strings.Repeat("9", 64), resourceTerminal, now.Add(8*time.Second)); err != nil || ack != 6 {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
@@ -758,6 +766,65 @@ func jsonEqual(left, right string) bool {
 	return json.Unmarshal([]byte(left), &leftValue) == nil &&
 		json.Unmarshal([]byte(right), &rightValue) == nil &&
 		reflect.DeepEqual(leftValue, rightValue)
+}
+
+func TestInvalidResourceTerminalAdvancesBridgeCursor(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{},
+		&model.AgentCommand{}, &model.AgentBridgeFrame{}, &model.AgentResourceSnapshot{},
+	); err != nil {
+		t.Fatalf("migrate resource terminal tables: %v", err)
+	}
+	now := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 2,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-main", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "DEEIX-Chat", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	command := model.AgentCommand{
+		PublicID: "agcmd_0123456789abcdef0123456789abcdef", UserID: 7, DeviceID: device.ID,
+		RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ServerSeq: 1, Kind: "resource.refresh",
+		PayloadJSON: `{"resource":{"scope":"workspace","name":"sessions"}}`, State: "acked", TerminalJSON: "{}",
+	}
+	if err := database.Create(&command).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	terminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","status":"invalid","historyLoaded":false}]}}}`
+	repo := NewRepo(database)
+	ack, err := repo.ApplyTerminalFrame(
+		context.Background(), device.ID, 1, 1, command.PublicID, strings.Repeat("b", 64), terminal, now.Add(time.Second),
+	)
+	if err != nil || ack != 1 {
+		t.Fatalf("invalid resource terminal blocked bridge: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&device, device.ID).Error; err != nil || device.LastAckedBridgeSeq != 1 {
+		t.Fatalf("bridge cursor did not advance: %#v %v", device, err)
+	}
+	if err := database.First(&command, command.ID).Error; err != nil || command.State != "completed" || command.CompletedAt == nil {
+		t.Fatalf("resource command did not complete: %#v %v", command, err)
+	}
+	var snapshots int64
+	if err := database.Model(&model.AgentResourceSnapshot{}).Count(&snapshots).Error; err != nil || snapshots != 0 {
+		t.Fatalf("invalid resource snapshot was persisted: count=%d err=%v", snapshots, err)
+	}
 }
 
 func TestIsThreadOnlyEvent(t *testing.T) {

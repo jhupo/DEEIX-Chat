@@ -1079,7 +1079,7 @@ func (s *Service) CommandsForDelivery(ctx context.Context, identity *ConnectionI
 	if identity == nil || identity.InternalDeviceID == 0 || after > uint64(^uint(0)>>1) {
 		return nil, ErrInvalidInput
 	}
-	items, err := s.repo.ListCommandsForDelivery(ctx, identity.InternalDeviceID, after, 64)
+	items, err := s.repo.ListCommandsForDelivery(ctx, identity.InternalDeviceID, after, 1)
 	if err != nil {
 		return nil, err
 	}
