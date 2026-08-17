@@ -128,6 +128,41 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	}
 }
 
+func TestReadCodexDesktopWorkspaces(t *testing.T) {
+	codexHome := repositoryTestDir(t)
+	firstRoot := repositoryTestDir(t)
+	secondRoot := repositoryTestDir(t)
+	state := map[string]any{
+		"electron-persisted-atom-state": map[string]any{
+			"local-projects": map[string]any{
+				"first":  map[string]any{"name": "First project", "rootPaths": []string{firstRoot}},
+				"second": map[string]any{"name": "Second project", "rootPaths": []string{secondRoot, filepath.Join(codexHome, "missing")}},
+			},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(codexHome, ".codex-global-state.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspaces, err := readCodexDesktopWorkspaces(codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces) != 2 {
+		t.Fatalf("unexpected desktop workspaces: %#v", workspaces)
+	}
+	byName := make(map[string]Workspace, len(workspaces))
+	for _, workspace := range workspaces {
+		byName[workspace.Name] = workspace
+	}
+	if byName["First project"].Root != firstRoot || byName["Second project"].Root != secondRoot {
+		t.Fatalf("unexpected desktop workspace roots: %#v", workspaces)
+	}
+}
+
 func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
 	dataDir := repositoryTestDir(t)
 	initialRoot := repositoryTestDir(t)

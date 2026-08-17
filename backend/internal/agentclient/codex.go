@@ -23,6 +23,7 @@ import (
 )
 
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
+const codexDesktopStateMaxBytes = 8 << 20
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
@@ -211,6 +212,12 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 	}
 	adapter.workspaceMu.RUnlock()
 	byID := make(map[string]Workspace, len(configuredWorkspaces))
+	desktopWorkspaces, desktopErr := readCodexDesktopWorkspaces(adapter.codexHome)
+	if desktopErr == nil {
+		for _, workspace := range desktopWorkspaces {
+			mergeWorkspace(byID, workspace)
+		}
+	}
 	for _, configured := range configuredWorkspaces {
 		workspace, err := codexProjectWorkspace(configured.Root)
 		if err != nil {
@@ -284,6 +291,62 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		}
 		return leftName < rightName
 	})
+	return workspaces, nil
+}
+
+func readCodexDesktopWorkspaces(codexHome string) ([]Workspace, error) {
+	codexHome = strings.TrimSpace(codexHome)
+	if !filepath.IsAbs(codexHome) || strings.ContainsRune(codexHome, 0) {
+		return nil, errors.New("Codex home is invalid")
+	}
+	file, err := os.Open(filepath.Join(codexHome, ".codex-global-state.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, codexDesktopStateMaxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > codexDesktopStateMaxBytes {
+		return nil, errors.New("Codex desktop state exceeds the limit")
+	}
+	var state struct {
+		Atoms struct {
+			Projects map[string]struct {
+				Name      string   `json:"name"`
+				RootPaths []string `json:"rootPaths"`
+			} `json:"local-projects"`
+		} `json:"electron-persisted-atom-state"`
+	}
+	if err = json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("read Codex desktop state: %w", err)
+	}
+	byID := make(map[string]Workspace, len(state.Atoms.Projects))
+	for _, project := range state.Atoms.Projects {
+		name := strings.TrimSpace(project.Name)
+		for _, root := range project.RootPaths {
+			if len(byID) == 128 {
+				break
+			}
+			workspace, workspaceErr := CanonicalWorkspace(strings.TrimSpace(root))
+			if workspaceErr != nil {
+				continue
+			}
+			if name != "" && len([]rune(name)) <= 128 {
+				workspace.Name = name
+			}
+			workspace.SessionRoots = []string{workspace.Root}
+			mergeWorkspace(byID, workspace)
+		}
+	}
+	workspaces := make([]Workspace, 0, len(byID))
+	for _, workspace := range byID {
+		workspaces = append(workspaces, workspace)
+	}
 	return workspaces, nil
 }
 

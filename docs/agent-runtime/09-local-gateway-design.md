@@ -29,7 +29,7 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 
 聊天与工作是互斥的数据域。Conversation 列表、搜索和 Project 查询必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域返回 Cloud Conversation 和 Cloud Project；Gateway Adapter 将所选设备的 Workspace 和 Gateway Conversation 投影为相同 Project/Conversation DTO。切换模式或设备会重建数据作用域，界面不会同时合并或标注两套数据。
 
-Bridge 启动后先通过无 `cwd` 过滤的 `thread/list` 分页读取本机 Codex 线程目录，以每条线程返回的 canonical `cwd` 去重并生成 Workspace。安装命令所在目录不参与 Project 投影；没有历史线程时设备仍保持在线，Workspace 列表为空。Cloud 的 Workspace 查询只返回当前所选 Device 上本次连接仍为 `available` 的记录，其他设备和旧目录均不进入结果。
+Bridge 启动后合并两类本机 Workspace 来源：Codex Desktop 当前 `local-projects` 中保存的项目根目录，以及无 `cwd` 过滤的 `thread/list` 返回的历史线程目录。所有路径先在设备端 canonicalize，再按 opaque Workspace ID 去重；Cloud 只接收 ID、名称和可用状态，不接收本机绝对路径。没有历史线程的 Desktop 项目仍会显示为空项目，只有线程历史但未保存到 Desktop 项目列表的 Git 工作区也会被发现。Cloud 的 Workspace 查询只返回当前所选 Device 上本次连接仍为 `available` 的记录，其他设备和旧目录均不进入结果。
 
 创建请求只携带统一 `projectID` 和 `execution(type/device)`。Cloud Project 直接解析；Gateway Adapter 校验 Workspace 属于该用户和设备，解析对应 Profile 后写入 Conversation 执行绑定。Web 不提交 `profileID/workspaceID` 组合，也不直接请求 Workspace sessions 来拼装导航。
 
