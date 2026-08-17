@@ -190,6 +190,24 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if repo.pendingReads == 0 {
 		t.Fatal("runtime handshake did not drain pending conversation events")
 	}
+	if err = websocket.JSON.Send(connection, bridgeFrame{
+		Version: bridgeVersion, Type: "workspaces.sync",
+		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "renamed-workspace"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" {
+		t.Fatalf("workspace sync was not processed before pong: %#v, %v", pong, err)
+	}
+	repo.mu.Lock()
+	syncCalls := repo.syncCalls
+	repo.mu.Unlock()
+	if syncCalls != 2 {
+		t.Fatalf("workspace sync count = %d, want handshake + live refresh", syncCalls)
+	}
 
 	secondConfig, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http"), server.URL)
 	if err != nil {
@@ -252,6 +270,7 @@ type socketRepo struct {
 	serverAck    uint64
 	bridgeAck    uint64
 	pendingReads int
+	syncCalls    int
 }
 
 func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
@@ -436,6 +455,9 @@ func (r *socketRepo) SyncWorkspaces(_ context.Context, userID, deviceID, profile
 	if userID != r.device.UserID || deviceID != r.device.ID || profileID != 21 || len(items) != 1 || items[0].PublicID != "workspace_1" {
 		return repository.ErrConflict
 	}
+	r.mu.Lock()
+	r.syncCalls++
+	r.mu.Unlock()
 	return nil
 }
 

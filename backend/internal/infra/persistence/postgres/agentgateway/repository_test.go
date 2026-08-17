@@ -843,7 +843,7 @@ func TestQueueAgentUpdateRequiresCapabilityAndCoalesces(t *testing.T) {
 	if err := database.Create(&device).Error; err != nil {
 		t.Fatal(err)
 	}
-	leaseExpiresAt, presenceExpiresAt := now.Add(time.Hour), now.Add(time.Minute)
+	leaseExpiresAt, presenceExpiresAt := now.Add(-time.Hour), now.Add(-time.Minute)
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
 		LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &presenceExpiresAt,

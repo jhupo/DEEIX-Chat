@@ -113,7 +113,7 @@ export function AccountActiveDevicesSection({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem
-                        disabled={!device.online || !device.updateAvailable || updatingDeviceId === device.deviceId}
+                        disabled={!device.updateAvailable || updatingDeviceId === device.deviceId}
                         onClick={() => onUpdate(device)}
                       >
                         <RefreshCw className={updatingDeviceId === device.deviceId ? "animate-spin" : ""} />

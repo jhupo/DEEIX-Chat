@@ -2076,7 +2076,7 @@ func (r *Repo) QueueAgentUpdate(
 	userID uint,
 	devicePublicID, targetVersion string,
 	command *domainagent.Command,
-	now time.Time,
+	_ time.Time,
 ) (*domainagent.Command, error) {
 	var created model.AgentCommand
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -2101,8 +2101,8 @@ func (r *Repo) QueueAgentUpdate(
 		}
 		var profile model.AgentRuntimeProfile
 		if err := tx.Where(
-			"user_id = ? AND device_id = ? AND status = ? AND lease_expires_at > ? AND presence_expires_at > ? AND manifest_json @> CAST(? AS jsonb)",
-			userID, device.ID, domainagent.RuntimeStatusReady, now, now, `{"commands":["agent.update"]}`,
+			"user_id = ? AND device_id = ? AND status = ? AND manifest_json @> CAST(? AS jsonb)",
+			userID, device.ID, domainagent.RuntimeStatusReady, `{"commands":["agent.update"]}`,
 		).Order("verified_at DESC NULLS LAST, id DESC").First(&profile).Error; err != nil {
 			return err
 		}

@@ -39,13 +39,17 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Profile/Workspace 和小时桶幂等下发 `apps`、`skills` 与 `sessions` 刷新。首次连接会自动导入历史和输入资源；同一小时内的 WSS 重连复用原命令，不重复扫描。
 
+本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 Codex Desktop 的 UI 私有项目状态。活动会话进入所属 Workspace 的项目树；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
+
+stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。`thread/read(includeTurns=true)` 的完整历史可以大于普通资源帧，因此不能使用 4 MiB 作为所有输入的上限。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 在到期前主动重连，避免依靠服务端过期后再踢出连接。连接恢复后先冲刷未投影事件，再发送新命令。
+
 ## 2.1 安装、注册与更新
 
 账户页根据当前 DEEIX origin 与用户公开 ID 生成命令。命令在当前项目目录运行，下载站内 `/agent/install.sh` 或 `/agent/install.ps1`，再从同源 `/agent/releases/v<VERSION>/` 获取并校验平台包。稳定全量 Release 将 Windows x64、Linux x64 与 macOS arm64 Agent 包一并放入前端静态目录，用户机器不直接连接 GitHub。Agent 包只有原生可执行文件，不携带 Node.js 或 Codex；用户机器必须预先安装组件完整的官方 Codex CLI。安装时解析并保存 CLI 绝对路径，也可通过 `--codex` / `-Codex` 明确指定。
 
 Agent 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与引导目录校验，再原子替换程序目录。引导目录仅用于安装阶段的本地路径校验，不进入运行时 Project 列表。重复运行安装命令会停止原常驻进程、校验并覆盖程序、复用私钥完成幂等注册，最后用 systemd user service、LaunchAgent 或 Windows SCM 系统服务重新启动。Windows SCM 只承载一个 Agent 进程，并以安装用户的活动会话令牌启动 `codex app-server` 子进程。程序包与身份数据分目录，客户端更新不会改变设备 ID。
 
-设备列表同时返回 Agent 当前版本和服务端版本。在线且版本落后时，Web 通过 `POST /api/v1/agent/devices/{device_id}/update` 入队 `agent.update`；该命令要求已认证 Profile 的 manifest 声明能力，并按设备幂等合并。Agent 先持久化待更新标记、确认命令，再让独立更新进程等待旧服务退出并重跑同源安装脚本。这样更新期间允许设备短暂离线，身份、配置、WAL、Workspace 与 Codex 登录状态不变；旧版本没有 `agent.update` 能力时，账户页仍提供一次手动安装升级入口。
+设备列表同时返回 Agent 当前版本和服务端版本。版本落后时，无论设备当前在线还是短暂离线，Web 都可以通过 `POST /api/v1/agent/devices/{device_id}/update` 入队 `agent.update`；该命令要求已认证 Profile 的 manifest 声明能力，并按设备幂等合并。设备重新连接后先领取该更新命令，再持久化待更新标记、确认命令，并让独立更新进程等待旧服务退出后重跑同源安装脚本。这样更新期间允许设备短暂离线，身份、配置、WAL、Workspace 与 Codex 登录状态不变；旧版本没有 `agent.update` 能力时，账户页仍提供一次手动安装升级入口。
 
 ## 3. 强类型命令
 

@@ -125,12 +125,16 @@ export function useSettingsAccount() {
   }, [refreshDevices, revokingDeviceID, t, translateError]);
 
   const handleUpdateDevice = React.useCallback(async (device: AgentDeviceDTO) => {
-    if (updatingDeviceID || !device.online || !device.updateAvailable) return;
+    if (updatingDeviceID || !device.updateAvailable) return;
     setUpdatingDeviceID(device.deviceId);
     try {
       const token = await resolveAccessToken();
       if (!token) throw new Error(t("sessionMissing"));
       const queued = await updateAgentDevice(token, device.deviceId);
+      if (!device.online) {
+        toast.info(t("deviceUpdateStarted"), { description: t("deviceUpdateStartedDescription") });
+        return;
+      }
       let accepted = false;
       for (let attempt = 0; attempt < 120; attempt++) {
         await new Promise((resolve) => window.setTimeout(resolve, 500));

@@ -485,6 +485,59 @@ func TestRPCServerRequestDoesNotBlockResponses(t *testing.T) {
 	close(releaseRequest)
 }
 
+func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {
+	serverReads, clientWrites := io.Pipe()
+	clientReads, serverWrites := io.Pipe()
+	client := NewRPCClient(clientWrites, clientReads)
+	defer client.Close()
+	go func() {
+		buffer := make([]byte, 4096)
+		n, _ := serverReads.Read(buffer)
+		var request map[string]any
+		_ = json.Unmarshal(buffer[:n], &request)
+		response, _ := json.Marshal(map[string]any{
+			"id":     request["id"],
+			"result": map[string]any{"payload": strings.Repeat("x", 5<<20)},
+		})
+		_, _ = serverWrites.Write(append(response, '\n'))
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var result struct {
+		Payload string `json:"payload"`
+	}
+	if err := client.Request(ctx, "thread/read", map[string]any{"threadId": "large"}, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Payload) != 5<<20 {
+		t.Fatalf("large app-server response was truncated: %d", len(result.Payload))
+	}
+}
+
+func TestRuntimeLeaseRenewsBeforeExpiry(t *testing.T) {
+	now := time.Date(2026, 8, 18, 1, 0, 0, 0, time.UTC)
+	delay, err := runtimeLeaseRenewalDelay(now.Add(10*time.Minute).Format(time.RFC3339Nano), now)
+	if err != nil || delay != 9*time.Minute {
+		t.Fatalf("runtimeLeaseRenewalDelay() = %s, %v", delay, err)
+	}
+	if _, err = runtimeLeaseRenewalDelay(now.Add(time.Minute).Format(time.RFC3339Nano), now); err == nil {
+		t.Fatal("accepted a runtime lease without a renewal window")
+	}
+}
+
+func TestEqualWorkspacesIncludesSessionRoots(t *testing.T) {
+	left := []Workspace{{WorkspaceID: "workspace-1", Name: "repo", Root: `C:\repo`, SessionRoots: []string{`C:\repo`, `C:\worktree`}, Registered: true}}
+	right := append([]Workspace(nil), left...)
+	right[0].SessionRoots = append([]string(nil), left[0].SessionRoots...)
+	if !equalWorkspaces(left, right) {
+		t.Fatal("equal workspace snapshots were treated as changed")
+	}
+	right[0].SessionRoots[1] = `C:\other`
+	if equalWorkspaces(left, right) {
+		t.Fatal("workspace session-root change was ignored")
+	}
+}
+
 func TestLockedAppServerContractMatchesNativeRegistry(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "docs", "agent-runtime", "codex-app-server-v0.147.0.lock.json")
 	data, err := os.ReadFile(path)
@@ -762,7 +815,7 @@ func assertMappedSet(t *testing.T, members []struct {
 
 func runFakeAppServer() {
 	reader := bufio.NewScanner(os.Stdin)
-	reader.Buffer(make([]byte, 64*1024), maxRPCLineBytes)
+	reader.Buffer(make([]byte, 64*1024), maxRPCIncomingLineBytes)
 	encoder := json.NewEncoder(os.Stdout)
 	for reader.Scan() {
 		var request map[string]json.RawMessage

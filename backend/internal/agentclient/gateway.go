@@ -33,25 +33,28 @@ type RuntimeStatus struct {
 }
 
 type Gateway struct {
-	ctx             context.Context
-	config          Config
-	dataDir         string
-	identity        *DeviceIdentity
-	state           *StateStore
-	cloud           *CloudClient
-	adapter         *CodexAdapter
-	agentVersion    string
-	logger          *log.Logger
-	wake            chan struct{}
-	commands        chan queuedCommand
-	activeMu        sync.Mutex
-	active          map[string]bool
-	registerMu      sync.Mutex
-	workspaceMu     sync.RWMutex
-	workspaces      map[string]Workspace
-	socketReady     bool
-	updateBridgeSeq atomic.Uint64
+	ctx              context.Context
+	config           Config
+	dataDir          string
+	identity         *DeviceIdentity
+	state            *StateStore
+	cloud            *CloudClient
+	adapter          *CodexAdapter
+	agentVersion     string
+	logger           *log.Logger
+	wake             chan struct{}
+	workspaceUpdates chan []Workspace
+	commands         chan queuedCommand
+	activeMu         sync.Mutex
+	active           map[string]bool
+	registerMu       sync.Mutex
+	workspaceMu      sync.RWMutex
+	workspaces       map[string]Workspace
+	socketReady      bool
+	updateBridgeSeq  atomic.Uint64
 }
+
+var errLeaseRenewal = errors.New("gateway runtime lease renewal")
 
 type queuedCommand struct {
 	ID     string
@@ -59,9 +62,39 @@ type queuedCommand struct {
 }
 
 func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVersion string) error {
+	delay := time.Second
+	for {
+		startedAt := time.Now()
+		err := runGatewayRuntime(ctx, dataDir, logger, agentVersion)
+		if errors.Is(err, ErrUpdateScheduled) || ctx.Err() != nil {
+			return err
+		}
+		if time.Since(startedAt) >= time.Minute {
+			delay = time.Second
+		}
+		message := publicMessage(err)
+		logger.Printf("agent runtime restarting: %s", message)
+		_ = writeSupervisorStatus(dataDir, "restarting", message)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(jitterReconnectDelay(delay)):
+		}
+		if delay < 30*time.Second {
+			delay *= 2
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
+			}
+		}
+	}
+}
+
+func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, agentVersion string) error {
 	if hasPendingUpdate(dataDir) {
 		return ErrUpdateScheduled
 	}
+	runtimeContext, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
 	config, err := LoadConfig(filepath.Join(dataDir, "config.json"))
 	if err != nil {
 		return err
@@ -75,14 +108,15 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVe
 		return err
 	}
 	gateway := &Gateway{
-		ctx: ctx, config: config, dataDir: dataDir, identity: identity, state: state, cloud: NewCloudClient(config.CloudURL), logger: logger,
+		ctx: runtimeContext, config: config, dataDir: dataDir, identity: identity, state: state, cloud: NewCloudClient(config.CloudURL), logger: logger,
 		agentVersion: strings.TrimSpace(agentVersion),
-		wake:         make(chan struct{}, 1), commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
+		wake:         make(chan struct{}, 1), workspaceUpdates: make(chan []Workspace, 1),
+		commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
 	}
 	for _, workspace := range config.Workspaces {
 		gateway.workspaces[workspace.WorkspaceID] = workspace
 	}
-	adapter, err := StartCodexAdapter(ctx, config, state, logger.Writer(), func(event json.RawMessage) error {
+	adapter, err := StartCodexAdapter(runtimeContext, config, state, logger.Writer(), func(event json.RawMessage) error {
 		if _, appendErr := state.AppendEvent(event); appendErr != nil {
 			return appendErr
 		}
@@ -92,51 +126,38 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVe
 	if err != nil {
 		return err
 	}
-	discoveryContext, cancel := context.WithTimeout(ctx, 30*time.Second)
-	discoveredWorkspaces, err := adapter.DiscoverWorkspaces(discoveryContext)
-	cancel()
-	if err != nil {
-		_ = adapter.Close()
-		return err
-	}
-	config.Workspaces = discoveredWorkspaces
-	if err = SaveConfig(filepath.Join(dataDir, "config.json"), config); err != nil {
-		_ = adapter.Close()
-		return err
-	}
-	gateway.config = config
-	gateway.workspaces = make(map[string]Workspace, len(discoveredWorkspaces))
-	for _, workspace := range discoveredWorkspaces {
-		gateway.workspaces[workspace.WorkspaceID] = workspace
-	}
-	adapter.replaceWorkspaces(discoveredWorkspaces)
 	gateway.adapter = adapter
 	defer adapter.Close()
 	defer func() { _ = gateway.writeStatus("stopped", "") }()
-	go gateway.commandWorker(ctx)
+	go gateway.commandWorker(runtimeContext)
+	go gateway.refreshWorkspaceLoop(runtimeContext)
 	if err = gateway.recoverCommands(); err != nil {
 		return err
 	}
 	delay := time.Second
 	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if runtimeContext.Err() != nil {
+			return runtimeContext.Err()
 		}
 		if err = gateway.writeStatus("connecting", ""); err != nil {
 			logger.Printf("write status: %v", err)
 		}
-		connectContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+		connectContext, cancel := context.WithTimeout(runtimeContext, 30*time.Second)
 		gateway.socketReady = false
 		token, tokenErr := gateway.cloud.ConnectionToken(connectContext, config, identity)
 		cancel()
 		if tokenErr == nil {
-			tokenErr = gateway.runSocket(ctx, token)
+			tokenErr = gateway.runSocket(runtimeContext, token)
 		}
 		if errors.Is(tokenErr, ErrUpdateScheduled) {
 			return ErrUpdateScheduled
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if errors.Is(tokenErr, errLeaseRenewal) {
+			delay = time.Second
+			continue
+		}
+		if runtimeContext.Err() != nil {
+			return runtimeContext.Err()
 		}
 		select {
 		case <-adapter.Done():
@@ -150,8 +171,8 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVe
 			delay = time.Second
 		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-runtimeContext.Done():
+			return runtimeContext.Err()
 		case <-time.After(jitterReconnectDelay(delay)):
 		}
 		if delay < 30*time.Second {
@@ -179,6 +200,88 @@ func (gateway *Gateway) recoverCommands() error {
 		gateway.enqueue(id, record, concurrentCommand(command.Kind))
 	}
 	return nil
+}
+
+func (gateway *Gateway) refreshWorkspaceLoop(ctx context.Context) {
+	refresh := func() {
+		if err := gateway.refreshWorkspaces(ctx); err != nil && ctx.Err() == nil {
+			gateway.logger.Printf("refresh Codex workspaces: %s", publicMessage(err))
+		}
+	}
+	refresh()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
+func (gateway *Gateway) refreshWorkspaces(ctx context.Context) error {
+	gateway.registerMu.Lock()
+	defer gateway.registerMu.Unlock()
+	discoveryContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	discovered, err := gateway.adapter.DiscoverWorkspaces(discoveryContext)
+	cancel()
+	if err != nil {
+		return err
+	}
+	gateway.workspaceMu.RLock()
+	unchanged := equalWorkspaces(gateway.config.Workspaces, discovered)
+	gateway.workspaceMu.RUnlock()
+	if unchanged {
+		return nil
+	}
+	gateway.workspaceMu.Lock()
+	updated := gateway.config
+	updated.Workspaces = discovered
+	if err = SaveConfig(filepath.Join(gateway.dataDir, "config.json"), updated); err != nil {
+		gateway.workspaceMu.Unlock()
+		return err
+	}
+	byID := make(map[string]Workspace, len(discovered))
+	for _, workspace := range discovered {
+		byID[workspace.WorkspaceID] = workspace
+	}
+	gateway.config = updated
+	gateway.workspaces = byID
+	gateway.adapter.replaceWorkspaces(discovered)
+	gateway.workspaceMu.Unlock()
+	gateway.signalWorkspaceUpdate(discovered)
+	return nil
+}
+
+func equalWorkspaces(left, right []Workspace) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	leftByID := make(map[string]Workspace, len(left))
+	for _, workspace := range left {
+		leftByID[workspace.WorkspaceID] = workspace
+	}
+	for _, workspace := range right {
+		current, ok := leftByID[workspace.WorkspaceID]
+		if !ok || current.Name != workspace.Name || current.Root != workspace.Root || current.Registered != workspace.Registered || !equalStrings(current.SessionRoots, workspace.SessionRoots) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
@@ -252,6 +355,10 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if ready.Version != bridgeVersion || ready.Type != "auth.ready" || ready.ProfileID != gateway.config.ProfileID {
 		return errors.New("gateway runtime authorization failed")
 	}
+	leaseRenewalDelay, err := runtimeLeaseRenewalDelay(ready.LeaseExpiresAt, time.Now())
+	if err != nil {
+		return err
+	}
 	var welcome bridgeFrame
 	if err = receiveBridgeFrame(connection, &welcome); err != nil || welcome.Version != bridgeVersion || welcome.Type != "welcome" || welcome.DeviceID != gateway.config.DeviceID || welcome.HeartbeatSeconds < 5 || welcome.HeartbeatSeconds > 300 {
 		return errors.New("gateway welcome frame is invalid")
@@ -274,6 +381,8 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	go readSocket(connection, frames)
 	heartbeat := time.NewTicker(time.Duration(welcome.HeartbeatSeconds) * time.Second / 2)
 	defer heartbeat.Stop()
+	leaseRenewal := time.NewTimer(leaseRenewalDelay)
+	defer leaseRenewal.Stop()
 	readTimeout := time.Duration(welcome.HeartbeatSeconds*2) * time.Second
 	_ = connection.SetReadDeadline(time.Now().Add(readTimeout))
 	sentThrough := welcome.AckBridgeSeq
@@ -290,6 +399,8 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			return ctx.Err()
 		case <-gateway.adapter.Done():
 			return errors.New("Codex app-server exited")
+		case <-leaseRenewal.C:
+			return errLeaseRenewal
 		case <-heartbeat.C:
 			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
 				return err
@@ -301,6 +412,14 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 				continue
 			}
 			if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
+				return err
+			}
+		case workspaces := <-gateway.workspaceUpdates:
+			registrations := make([]bridgeWorkspace, 0, len(workspaces))
+			for _, workspace := range workspaces {
+				registrations = append(registrations, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+			}
+			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "workspaces.sync", Workspaces: registrations}); err != nil {
 				return err
 			}
 		case read := <-frames:
@@ -423,6 +542,14 @@ func runtimeProofDeadline(value string, now time.Time) (time.Time, error) {
 		return time.Time{}, errors.New("gateway runtime challenge expiry is invalid")
 	}
 	return expiresAt, nil
+}
+
+func runtimeLeaseRenewalDelay(value string, now time.Time) (time.Duration, error) {
+	expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil || expiresAt.Before(now.Add(2*time.Minute)) || expiresAt.After(now.Add(30*time.Minute)) {
+		return 0, errors.New("gateway runtime lease expiry is invalid")
+	}
+	return expiresAt.Add(-time.Minute).Sub(now), nil
 }
 
 func (gateway *Gateway) commandWorker(ctx context.Context) {
@@ -631,6 +758,7 @@ func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any,
 	gateway.workspaces = byID
 	gateway.adapter.replaceWorkspaces(registered)
 	gateway.workspaceMu.Unlock()
+	gateway.signalWorkspaceUpdate(registered)
 
 	return map[string]any{"kind": "accepted", "workspaceId": workspace.WorkspaceID, "name": workspace.Name}, nil
 }
@@ -659,6 +787,23 @@ func (gateway *Gateway) signalWake() {
 	}
 }
 
+func (gateway *Gateway) signalWorkspaceUpdate(workspaces []Workspace) {
+	update := append([]Workspace(nil), workspaces...)
+	select {
+	case gateway.workspaceUpdates <- update:
+		return
+	default:
+	}
+	select {
+	case <-gateway.workspaceUpdates:
+	default:
+	}
+	select {
+	case gateway.workspaceUpdates <- update:
+	default:
+	}
+}
+
 func bridgeAuthError(frame bridgeFrame) error {
 	if frame.Version != bridgeVersion || frame.Type != "auth.error" {
 		return nil
@@ -677,6 +822,23 @@ func (gateway *Gateway) writeStatus(state, lastError string) error {
 	status := RuntimeStatus{Version: 1, PID: os.Getpid(), State: state, DeviceID: gateway.config.DeviceID, CodexVersion: gateway.adapter.version, UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano), LastError: lastError}
 	data, _ := json.MarshalIndent(status, "", "  ")
 	return writeFileAtomic(filepath.Join(gateway.dataDir, "runtime-status.json"), append(data, '\n'), 0o600)
+}
+
+func writeSupervisorStatus(dataDir, state, lastError string) error {
+	status, err := ReadRuntimeStatus(dataDir)
+	if err != nil {
+		status = RuntimeStatus{Version: 1}
+		if config, loadErr := LoadConfig(filepath.Join(dataDir, "config.json")); loadErr == nil {
+			status.DeviceID = config.DeviceID
+		}
+	}
+	status.Version = 1
+	status.PID = os.Getpid()
+	status.State = state
+	status.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	status.LastError = lastError
+	data, _ := json.MarshalIndent(status, "", "  ")
+	return writeFileAtomic(filepath.Join(dataDir, "runtime-status.json"), append(data, '\n'), 0o600)
 }
 
 type socketWriter struct {

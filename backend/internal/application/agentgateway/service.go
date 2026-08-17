@@ -574,7 +574,7 @@ func (s *Service) QueueAgentUpdate(ctx context.Context, userID uint, devicePubli
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	if !device.Online || !validAgentVersion(device.AgentVersion) || compareAgentVersions(device.AgentVersion, targetVersion) >= 0 {
+	if !validAgentVersion(device.AgentVersion) || compareAgentVersions(device.AgentVersion, targetVersion) >= 0 {
 		return nil, ErrStateConflict
 	}
 	request := struct {

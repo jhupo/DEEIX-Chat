@@ -392,9 +392,11 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				}); err != nil {
 					return
 				}
-				sentThrough, err = h.sendCommands(connection, identity, sentThrough)
-				if err != nil {
-					return
+				if sentThrough == identity.LastAckedServerSeq {
+					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					if err != nil {
+						return
+					}
 				}
 			case "event":
 				if !validEventFrame(frame) {
@@ -411,6 +413,27 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
 				}); err != nil {
 					return
+				}
+			case "workspaces.sync":
+				if !validWorkspaceSyncFrame(frame) {
+					return
+				}
+				registrations := make([]appagent.WorkspaceRegistration, 0, len(frame.Workspaces))
+				for _, workspace := range frame.Workspaces {
+					registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+				}
+				ctx, cancel = socketRuntimeAuthContext()
+				err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)
+				cancel()
+				if err != nil {
+					log.Printf("agent bridge workspace sync failed device=%s: %v", identity.DeviceID, err)
+					return
+				}
+				if sentThrough == identity.LastAckedServerSeq {
+					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					if err != nil {
+						return
+					}
 				}
 			default:
 				return
@@ -524,6 +547,28 @@ func validAuthProofFrame(frame bridgeFrame) bool {
 		len(frame.Outcome) == 0 && len(frame.Event) == 0 && len(frame.Manifest) > 0 && frame.DeviceID == "" &&
 		frame.HeartbeatSeconds == 0 && frame.Challenge == "" && frame.ExpiresAt == "" &&
 		frame.LeaseExpiresAt == "" && frame.Artifacts == nil
+}
+
+func validWorkspaceSyncFrame(frame bridgeFrame) bool {
+	if len(frame.Workspaces) > 128 || frame.AckServerSeq != 0 || frame.AckBridgeSeq != 0 ||
+		frame.ServerSeq != 0 || frame.BridgeSeq != 0 || frame.CommandID != "" ||
+		len(frame.Command) != 0 || len(frame.Outcome) != 0 || len(frame.Event) != 0 ||
+		len(frame.Manifest) != 0 || frame.Artifacts != nil || frame.ProfileID != "" || frame.Proof != "" ||
+		frame.DeviceID != "" || frame.HeartbeatSeconds != 0 || frame.ChallengeID != "" ||
+		frame.Challenge != "" || frame.ExpiresAt != "" || frame.LeaseExpiresAt != "" {
+		return false
+	}
+	seen := make(map[string]struct{}, len(frame.Workspaces))
+	for _, workspace := range frame.Workspaces {
+		if !validProfileID(workspace.WorkspaceID) || strings.TrimSpace(workspace.Name) == "" || len(workspace.Name) > 128 {
+			return false
+		}
+		if _, exists := seen[workspace.WorkspaceID]; exists {
+			return false
+		}
+		seen[workspace.WorkspaceID] = struct{}{}
+	}
+	return true
 }
 
 func validClientEmpty(frame bridgeFrame) bool {

@@ -17,6 +17,12 @@ The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0
 
 The lock file and its exact generated schema are implementation authority. The tables below are a human capability summary, not an exhaustive registry. A name outside this stable lock is not advertised or dispatched. Main-branch/experimental drift stays disabled until a separate `--experimental` lock has generated artifacts, hashes, exhaustive dispositions and review.
 
+### JSONL frame and process lifecycle
+
+The local RPC reader is line-oriented but bounded: incoming app-server lines are capped at 64 MiB and outgoing requests at 4 MiB. The larger incoming limit is intentional because `thread/read(includeTurns:true)` returns a complete local history, while ordinary resource and command payloads remain small. The reader rejects a line that exceeds the cap without allocating an unbounded buffer. A frame overflow, malformed JSON, EOF, or a dead stdio pipe closes the RPC client and terminates the associated app-server process. The Agent runtime supervisor then cancels the old runtime scope and restarts a fresh app-server with jittered backoff; it does not keep a dead RPC process behind a reconnecting WSS socket.
+
+The WSS runtime lease is renewed by reconnecting before expiry. Workspace discovery is initially served from the persisted device configuration, then refreshed through `thread/list` and sent as an authenticated `workspaces.sync` frame. This keeps project discovery and history reads on the app-server contract while allowing a newly registered local folder to appear without reinstalling the Agent.
+
 Official references: [app-server documentation](https://developers.openai.com/codex/app-server/), [app-server source](https://github.com/openai/codex/tree/main/codex-rs/app-server), and [Codex repository](https://github.com/openai/codex).
 
 ## 2. Local adapter boundary

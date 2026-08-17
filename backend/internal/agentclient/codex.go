@@ -167,6 +167,15 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 		close(adapter.done)
 		adapter.rpc.closeWithError(errors.New("Codex app-server exited"))
 	}()
+	go func() {
+		select {
+		case <-adapter.rpc.Done():
+			if command.Process != nil {
+				_ = command.Process.Kill()
+			}
+		case <-adapter.done:
+		}
+	}()
 	initializeContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var initialized struct {

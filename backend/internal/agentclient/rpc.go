@@ -13,7 +13,12 @@ import (
 	"sync/atomic"
 )
 
-const maxRPCLineBytes = 4 << 20
+const (
+	maxRPCIncomingLineBytes = 64 << 20
+	maxRPCOutgoingLineBytes = 4 << 20
+)
+
+var errRPCFrameTooLarge = errors.New("app-server frame exceeds the limit")
 
 var rpcMethodPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._/-]{0,255}$`)
 
@@ -134,12 +139,14 @@ func (client *RPCClient) Close() error {
 	return client.output.Close()
 }
 
+func (client *RPCClient) Done() <-chan struct{} { return client.closed }
+
 func (client *RPCClient) write(value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if len(data)+1 > maxRPCLineBytes {
+	if len(data)+1 > maxRPCOutgoingLineBytes {
 		return errors.New("outgoing app-server frame exceeds the limit")
 	}
 	client.writeMu.Lock()
@@ -158,11 +165,7 @@ func (client *RPCClient) write(value any) error {
 func (client *RPCClient) readLoop() {
 	reader := bufio.NewReaderSize(client.output, 64*1024)
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > maxRPCLineBytes {
-			client.closeWithError(errors.New("app-server frame exceeds the limit"))
-			return
-		}
+		line, err := readRPCLine(reader)
 		if len(bytes.TrimSpace(line)) > 0 {
 			if handleErr := client.handleLine(bytes.TrimSpace(line)); handleErr != nil {
 				client.closeWithError(handleErr)
@@ -175,6 +178,23 @@ func (client *RPCClient) readLoop() {
 			}
 			client.closeWithError(err)
 			return
+		}
+	}
+}
+
+func readRPCLine(reader *bufio.Reader) ([]byte, error) {
+	line := make([]byte, 0, 64*1024)
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(line)+len(fragment) > maxRPCIncomingLineBytes {
+			return nil, errRPCFrameTooLarge
+		}
+		line = append(line, fragment...)
+		if err == nil {
+			return line, nil
+		}
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return line, err
 		}
 	}
 }

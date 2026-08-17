@@ -77,7 +77,7 @@ Windows 安装和更新会先停止 `DEEIX Agent Bridge` 与 `DEEIX Agent` 两�
 
 ### Web 手动更新
 
-账户设置中的“活跃设备”表会展示每台设备上报的 Agent 版本、当前在线状态和服务端当前版本。当前 Agent 版本低于服务端版本且设备在线时，设备操作菜单会出现“更新客户端”。点击后，Web 只向该设备队列一个带 `Idempotency-Key` 的 `agent.update` 命令：
+账户设置中的“活跃设备”表会展示每台设备上报的 Agent 版本、当前在线状态和服务端当前版本。当前 Agent 版本低于服务端版本时，即使设备暂时离线，设备操作菜单也可以出现“更新客户端”。点击后，Web 只向该设备队列一个带 `Idempotency-Key` 的 `agent.update` 命令：
 
 1. Agent 先把目标版本写入本地 `pending-update.json`，再回传命令终态。
 2. Agent 在服务端确认该终态后退出当前网关连接；Windows 服务或 Unix 用户服务之外的更新进程等待旧 PID 退出，再执行同源安装脚本。
@@ -85,6 +85,8 @@ Windows 安装和更新会先停止 `DEEIX Agent Bridge` 与 `DEEIX Agent` 两�
 4. Web 在短暂离线和重新连接期间继续轮询设备版本；重新上线并上报目标版本后才显示更新完成。
 
 该命令由 Agent manifest 的 `agent.update` 能力门控，服务端不会向未声明能力的旧客户端下发。首次使用 Web 更新前，旧客户端需要通过账户页的安装命令手动升级到支持 `agent.update` 的版本；之后可从 Web 触发后续更新。Web 更新不重建数据库、Redis、上传文件或 Codex 登录状态，也不会把 Codex CLI 或 API key 下载到设备。
+
+如果 app-server 因历史帧过大、进程退出或连接断开，Agent 会关闭受污染的本地 RPC、重启 app-server，并用抖动退避重新建立 WSS。运行时 lease 会在到期前主动重连；旧 runtime 的刷新循环和命令 worker 会在重建时取消，避免重复扫描和重复执行。设备状态只有完成 runtime proof、workspace sync 和 pending projection drain 后才进入稳定在线。
 
 ## app-server 映射
 
