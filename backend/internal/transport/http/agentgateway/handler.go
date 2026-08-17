@@ -50,15 +50,18 @@ type renameDeviceRequest struct {
 	Name string `json:"name"`
 }
 type deviceResponse struct {
-	DeviceID   string  `json:"deviceId"`
-	UserID     string  `json:"userId"`
-	Name       string  `json:"name"`
-	Platform   string  `json:"platform"`
-	Status     string  `json:"status"`
-	Online     bool    `json:"online"`
-	CreatedAt  string  `json:"createdAt"`
-	UpdatedAt  string  `json:"updatedAt"`
-	LastSeenAt *string `json:"lastSeenAt"`
+	DeviceID           string  `json:"deviceId"`
+	UserID             string  `json:"userId"`
+	Name               string  `json:"name"`
+	Platform           string  `json:"platform"`
+	AgentVersion       string  `json:"agentVersion"`
+	LatestAgentVersion string  `json:"latestAgentVersion"`
+	UpdateAvailable    bool    `json:"updateAvailable"`
+	Status             string  `json:"status"`
+	Online             bool    `json:"online"`
+	CreatedAt          string  `json:"createdAt"`
+	UpdatedAt          string  `json:"updatedAt"`
+	LastSeenAt         *string `json:"lastSeenAt"`
 }
 type challengeRequest struct {
 	DeviceID string `json:"deviceId"`
@@ -274,6 +277,25 @@ func (h *Handler) RegisterWorkspace(c *gin.Context) {
 	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
 }
 
+// UpdateDevice godoc
+// @Summary Update the native Agent on a device
+// @Tags agent-gateway
+// @Security BearerAuth
+// @Param device_id path string true "Device public ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Success 200 {object} CommandResponseDoc
+// @Router /agent/devices/{device_id}/update [post]
+func (h *Handler) UpdateDevice(c *gin.Context) {
+	result, err := h.service.QueueAgentUpdate(
+		c.Request.Context(), middleware.MustUserID(c), c.Param("device_id"), strings.TrimSpace(c.GetHeader("Idempotency-Key")),
+	)
+	if err != nil {
+		writeError(c, err, "update agent device failed")
+		return
+	}
+	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
+}
+
 func (h *Handler) GetCommand(c *gin.Context) {
 	result, err := h.service.GetCommand(c.Request.Context(), middleware.MustUserID(c), c.Param("command_id"))
 	if err != nil {
@@ -436,6 +458,7 @@ func (h *Handler) toDeviceResponse(item appagent.DeviceView) deviceResponse {
 	}
 	return deviceResponse{
 		DeviceID: item.DeviceID, UserID: item.UserID, Name: item.Name, Platform: item.Platform,
+		AgentVersion: item.AgentVersion, LatestAgentVersion: item.LatestAgentVersion, UpdateAvailable: item.UpdateAvailable,
 		Status: item.Status, Online: item.Online, LastSeenAt: lastSeenAt,
 		CreatedAt: item.CreatedAt.Format(timeLayout), UpdatedAt: item.UpdatedAt.Format(timeLayout),
 	}

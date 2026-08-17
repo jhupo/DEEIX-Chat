@@ -17,7 +17,7 @@ $backup = "$installed.previous"
 $taskName = "DEEIX Agent"
 $legacyTaskName = "DEEIX Agent Bridge"
 $legacyInstallDir = Join-Path $env:LOCALAPPDATA "DEEIX\AgentBridge"
-$userSID = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$userSID = if ($env:DEEIX_AGENT_USER_SID) { $env:DEEIX_AGENT_USER_SID } else { [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
 $serviceInstalled = $false
 $hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
 $hadLegacyScheduledTask = $null -ne (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue)
@@ -111,9 +111,17 @@ try {
 "@
   Remove-Item -LiteralPath (Join-Path $dataDir "runtime-status.json") -Force -ErrorAction SilentlyContinue
   $encodedServiceScript = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($serviceScript))
-  Write-Host "DEEIX Agent: requesting administrator approval to replace the system service..."
-  $elevated = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedServiceScript"
-  if ($elevated.ExitCode -ne 0) {
+  $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+  $isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isElevated) {
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedServiceScript
+    $elevatedExitCode = $LASTEXITCODE
+  } else {
+    Write-Host "DEEIX Agent: requesting administrator approval to replace the system service..."
+    $elevated = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedServiceScript"
+    $elevatedExitCode = $elevated.ExitCode
+  }
+  if ($elevatedExitCode -ne 0) {
     $detail = if (Test-Path -LiteralPath $errorFile) { (Get-Content -LiteralPath $errorFile -Raw).Trim() } else { "administrator approval was not completed" }
     throw "DEEIX Agent system service installation failed: $detail"
   }

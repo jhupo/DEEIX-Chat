@@ -48,11 +48,16 @@ func (service *windowsService) Execute(_ []string, requests <-chan svc.ChangeReq
 	statuses <- svc.Status{State: svc.StartPending}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	updateReady := make(chan struct{}, 1)
 	go func() {
 		defer close(done)
 		for ctx.Err() == nil {
-			err := agentclient.RunGateway(ctx, service.dataDir, service.logger)
+			err := runAgentGateway(ctx, service.dataDir, service.logger)
 			if ctx.Err() != nil {
+				return
+			}
+			if errors.Is(err, agentclient.ErrUpdateScheduled) {
+				updateReady <- struct{}{}
 				return
 			}
 			service.logger.Printf("agent runtime stopped: %v", err)
@@ -64,20 +69,30 @@ func (service *windowsService) Execute(_ []string, requests <-chan svc.ChangeReq
 		}
 	}()
 	statuses <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
-	for request := range requests {
-		switch request.Cmd {
-		case svc.Interrogate:
-			statuses <- request.CurrentStatus
-		case svc.Stop, svc.Shutdown:
+	for {
+		select {
+		case <-updateReady:
 			statuses <- svc.Status{State: svc.StopPending}
 			cancel()
 			<-done
 			return false, 0
+		case request, open := <-requests:
+			if !open {
+				cancel()
+				<-done
+				return false, 0
+			}
+			switch request.Cmd {
+			case svc.Interrogate:
+				statuses <- request.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				statuses <- svc.Status{State: svc.StopPending}
+				cancel()
+				<-done
+				return false, 0
+			}
 		}
 	}
-	cancel()
-	<-done
-	return false, 0
 }
 
 func installPlatformService(dataDir, userSID string) error {

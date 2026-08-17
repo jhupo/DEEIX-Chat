@@ -13,12 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	"github.com/google/uuid"
 )
 
@@ -76,15 +78,18 @@ type Service struct {
 }
 
 type DeviceView struct {
-	DeviceID   string
-	UserID     string
-	Name       string
-	Platform   string
-	Status     string
-	Online     bool
-	LastSeenAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	DeviceID           string
+	UserID             string
+	Name               string
+	Platform           string
+	AgentVersion       string
+	LatestAgentVersion string
+	UpdateAvailable    bool
+	Status             string
+	Online             bool
+	LastSeenAt         *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type EnrollmentChallengeResult struct {
@@ -557,6 +562,33 @@ func (s *Service) QueueResourceRefresh(ctx context.Context, userID uint, deviceP
 	}
 	s.notifyUser(userID)
 	return &ResourceRefreshView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) QueueAgentUpdate(ctx context.Context, userID uint, devicePublicID, idempotencyKey string) (*CommandView, error) {
+	devicePublicID, idempotencyKey = strings.TrimSpace(devicePublicID), strings.TrimSpace(idempotencyKey)
+	targetVersion := buildinfo.ResolveVersion()
+	if userID == 0 || !validPublicID(devicePublicID, "agd") || !validIdempotencyKey(idempotencyKey) || !validAgentVersion(targetVersion) {
+		return nil, ErrInvalidInput
+	}
+	device, err := s.repo.GetDevice(ctx, userID, devicePublicID)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	if !device.Online || !validAgentVersion(device.AgentVersion) || compareAgentVersions(device.AgentVersion, targetVersion) >= 0 {
+		return nil, ErrStateConflict
+	}
+	request := struct {
+		DeviceID, TargetVersion string
+	}{devicePublicID, targetVersion}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "agent.update"}
+	created, err := s.repo.QueueAgentUpdate(
+		ctx, idempotencyKey, requestHash(request), userID, devicePublicID, targetVersion, command, s.now().UTC(),
+	)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
 }
 
 func (s *Service) RegisterWorkspace(ctx context.Context, userID uint, input RegisterWorkspaceInput) (*CommandView, error) {
@@ -1487,6 +1519,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		return false
 	}
 	var manifest struct {
+		AgentVersion    string   `json:"agentVersion"`
 		Provider        string   `json:"provider"`
 		RuntimeVersion  string   `json:"runtimeVersion"`
 		ProtocolVersion string   `json:"protocolVersion"`
@@ -1509,6 +1542,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&manifest) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
 		manifest.Provider != provider || manifest.ThreadSettings.Model == nil ||
+		(manifest.AgentVersion != "" && !validAgentVersion(manifest.AgentVersion)) ||
 		!validManifestText(manifest.RuntimeVersion, 64) ||
 		!validManifestText(manifest.ProtocolVersion, 64) || len(manifest.SchemaHash) != 64 {
 		return false
@@ -1517,7 +1551,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		return false
 	}
 	return validManifestValues(manifest.Commands, []string{
-		"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
+		"agent.update", "workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
 		"thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
 	}) && validManifestValues(manifest.Resources.Profile, []string{
 		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
@@ -1721,8 +1755,44 @@ func newPublicID(prefix string) string {
 }
 
 func deviceView(item domainagent.Device, userPublicID string) DeviceView {
+	latest := buildinfo.ResolveVersion()
 	return DeviceView{
 		DeviceID: item.PublicID, UserID: userPublicID, Name: item.Name, Platform: item.Platform,
-		Status: item.Status, Online: item.Online, LastSeenAt: item.LastSeenAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		AgentVersion: item.AgentVersion, LatestAgentVersion: latest,
+		UpdateAvailable: validAgentVersion(item.AgentVersion) && validAgentVersion(latest) && compareAgentVersions(item.AgentVersion, latest) < 0,
+		Status:          item.Status, Online: item.Online, LastSeenAt: item.LastSeenAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}
+}
+
+func validAgentVersion(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || len(part) > 9 {
+			return false
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func compareAgentVersions(left, right string) int {
+	leftParts, rightParts := strings.Split(left, "."), strings.Split(right, ".")
+	for index := 0; index < 3; index++ {
+		leftValue, _ := strconv.ParseUint(leftParts[index], 10, 32)
+		rightValue, _ := strconv.ParseUint(rightParts[index], 10, 32)
+		if leftValue < rightValue {
+			return -1
+		}
+		if leftValue > rightValue {
+			return 1
+		}
+	}
+	return 0
 }

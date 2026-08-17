@@ -43,6 +43,8 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 Agent 配置与 Ed25519 设备私钥保存在用户目录。安装脚本先在 staging 目录使用本机 Codex 完成版本、app-server 初始化、runtime proof 与引导目录校验，再原子替换程序目录。引导目录仅用于安装阶段的本地路径校验，不进入运行时 Project 列表。重复运行安装命令会停止原常驻进程、校验并覆盖程序、复用私钥完成幂等注册，最后用 systemd user service、LaunchAgent 或 Windows SCM 系统服务重新启动。Windows SCM 只承载一个 Agent 进程，并以安装用户的活动会话令牌启动 `codex app-server` 子进程。程序包与身份数据分目录，客户端更新不会改变设备 ID。
 
+设备列表同时返回 Agent 当前版本和服务端版本。在线且版本落后时，Web 通过 `POST /api/v1/agent/devices/{device_id}/update` 入队 `agent.update`；该命令要求已认证 Profile 的 manifest 声明能力，并按设备幂等合并。Agent 先持久化待更新标记、确认命令，再让独立更新进程等待旧服务退出并重跑同源安装脚本。这样更新期间允许设备短暂离线，身份、配置、WAL、Workspace 与 Codex 登录状态不变；旧版本没有 `agent.update` 能力时，账户页仍提供一次手动安装升级入口。
+
 ## 3. 强类型命令
 
 Conversation 当前只会创建：
@@ -52,6 +54,7 @@ Conversation 当前只会创建：
 - `turn.interrupt`：按 Run 中断活动 Turn。
 - `interaction.respond`：回答 app-server server request。
 - `resource.refresh`：刷新模型、sessions、skills、MCP、插件等只读快照；sessions 终态同时更新工作会话投影。
+- `agent.update`：由 Web 设备管理触发，更新当前稳定 Release 的 Agent 原生包，不进入 Codex app-server。
 
 应用服务没有接受任意 JSON 的通用入队方法。Bridge 内部 adapter 可以覆盖 app-server 更多原生方法，但新增产品能力必须先进入 Conversation 用例和强类型 Cloud command，不能直接开放成 Web provider RPC。
 

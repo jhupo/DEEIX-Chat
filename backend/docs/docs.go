@@ -5098,6 +5098,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/agent/devices/{device_id}/update": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Update the native Agent on a device",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device public ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/devices/{device_id}/workspaces": {
             "get": {
                 "security": [
@@ -13454,17 +13491,23 @@ const docTemplate = `{
                 "data": {
                     "type": "object",
                     "required": [
+                        "agentVersion",
                         "createdAt",
                         "deviceId",
                         "lastSeenAt",
+                        "latestAgentVersion",
                         "name",
                         "online",
                         "platform",
                         "status",
+                        "updateAvailable",
                         "updatedAt",
                         "userId"
                     ],
                     "properties": {
+                        "agentVersion": {
+                            "type": "string"
+                        },
                         "createdAt": {
                             "type": "string"
                         },
@@ -13472,6 +13515,9 @@ const docTemplate = `{
                             "type": "string"
                         },
                         "lastSeenAt": {
+                            "type": "string"
+                        },
+                        "latestAgentVersion": {
                             "type": "string"
                         },
                         "name": {
@@ -13485,6 +13531,9 @@ const docTemplate = `{
                         },
                         "status": {
                             "type": "string"
+                        },
+                        "updateAvailable": {
+                            "type": "boolean"
                         },
                         "updatedAt": {
                             "type": "string"
@@ -13502,17 +13551,23 @@ const docTemplate = `{
         "DeviceResponseDocData": {
             "type": "object",
             "required": [
+                "agentVersion",
                 "createdAt",
                 "deviceId",
                 "lastSeenAt",
+                "latestAgentVersion",
                 "name",
                 "online",
                 "platform",
                 "status",
+                "updateAvailable",
                 "updatedAt",
                 "userId"
             ],
             "properties": {
+                "agentVersion": {
+                    "type": "string"
+                },
                 "createdAt": {
                     "type": "string"
                 },
@@ -13520,6 +13575,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "lastSeenAt": {
+                    "type": "string"
+                },
+                "latestAgentVersion": {
                     "type": "string"
                 },
                 "name": {
@@ -13533,6 +13591,9 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
+                },
+                "updateAvailable": {
+                    "type": "boolean"
                 },
                 "updatedAt": {
                     "type": "string"
@@ -16011,6 +16072,9 @@ const docTemplate = `{
                 "threadSettings"
             ],
             "properties": {
+                "agentVersion": {
+                    "type": "string"
+                },
                 "commands": {
                     "type": "array",
                     "items": {
@@ -20261,7 +20325,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.56",
+	Version:          "0.4.57",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

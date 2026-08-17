@@ -2044,11 +2044,15 @@ definitions:
     properties:
       data:
         properties:
+          agentVersion:
+            type: string
           createdAt:
             type: string
           deviceId:
             type: string
           lastSeenAt:
+            type: string
+          latestAgentVersion:
             type: string
           name:
             type: string
@@ -2058,18 +2062,23 @@ definitions:
             type: string
           status:
             type: string
+          updateAvailable:
+            type: boolean
           updatedAt:
             type: string
           userId:
             type: string
         required:
+        - agentVersion
         - createdAt
         - deviceId
         - lastSeenAt
+        - latestAgentVersion
         - name
         - online
         - platform
         - status
+        - updateAvailable
         - updatedAt
         - userId
         type: object
@@ -2081,11 +2090,15 @@ definitions:
     type: object
   DeviceResponseDocData:
     properties:
+      agentVersion:
+        type: string
       createdAt:
         type: string
       deviceId:
         type: string
       lastSeenAt:
+        type: string
+      latestAgentVersion:
         type: string
       name:
         type: string
@@ -2095,18 +2108,23 @@ definitions:
         type: string
       status:
         type: string
+      updateAvailable:
+        type: boolean
       updatedAt:
         type: string
       userId:
         type: string
     required:
+    - agentVersion
     - createdAt
     - deviceId
     - lastSeenAt
+    - latestAgentVersion
     - name
     - online
     - platform
     - status
+    - updateAvailable
     - updatedAt
     - userId
     type: object
@@ -3828,6 +3846,8 @@ definitions:
     type: object
   ProviderManifestDoc:
     properties:
+      agentVersion:
+        type: string
       commands:
         items:
           type: string
@@ -6811,7 +6831,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.56"
+  version: "0.4.57"
 paths:
   /admin/announcements:
     get:
@@ -10014,6 +10034,29 @@ paths:
       security:
       - BearerAuth: []
       summary: Refresh a runtime profile resource
+      tags:
+      - agent-gateway
+  /agent/devices/{device_id}/update:
+    post:
+      parameters:
+      - description: Device public ID
+        in: path
+        name: device_id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/CommandResponseDoc'
+      security:
+      - BearerAuth: []
+      summary: Update the native Agent on a device
       tags:
       - agent-gateway
   /agent/devices/{device_id}/workspaces:

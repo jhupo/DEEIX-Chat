@@ -245,12 +245,13 @@ func (r *Repo) ConsumeEnrollmentChallengeAndEnroll(ctx context.Context, challeng
 func (r *Repo) ListDevices(ctx context.Context, userID uint) ([]domainagent.Device, error) {
 	type row struct {
 		model.AgentDevice
-		Online bool `gorm:"column:online"`
+		Online       bool   `gorm:"column:online"`
+		AgentVersion string `gorm:"column:agent_version"`
 	}
 	var rows []row
 	now := time.Now().UTC()
 	if err := r.db.WithContext(ctx).Table("agent_devices AS devices").
-		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now).
+		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online, COALESCE((SELECT profiles.manifest_json ->> 'agentVersion' FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? ORDER BY profiles.verified_at DESC NULLS LAST, profiles.id DESC LIMIT 1), '') AS agent_version", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now, domainagent.RuntimeStatusReady).
 		Where("devices.user_id = ?", userID).Order("devices.id DESC").Scan(&rows).Error; err != nil {
 		return nil, errFor(err)
 	}
@@ -258,6 +259,7 @@ func (r *Repo) ListDevices(ctx context.Context, userID uint) ([]domainagent.Devi
 	for _, row := range rows {
 		item := toDomainDevice(row.AgentDevice)
 		item.Online = row.Online
+		item.AgentVersion = row.AgentVersion
 		result = append(result, *item)
 	}
 	return result, nil
@@ -266,17 +268,19 @@ func (r *Repo) ListDevices(ctx context.Context, userID uint) ([]domainagent.Devi
 func (r *Repo) GetDevice(ctx context.Context, userID uint, publicID string) (*domainagent.Device, error) {
 	type row struct {
 		model.AgentDevice
-		Online bool `gorm:"column:online"`
+		Online       bool   `gorm:"column:online"`
+		AgentVersion string `gorm:"column:agent_version"`
 	}
 	var item row
 	now := time.Now().UTC()
 	if err := r.db.WithContext(ctx).Table("agent_devices AS devices").
-		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now).
+		Select("devices.*, (devices.status = ? AND EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?)) AS online, COALESCE((SELECT profiles.manifest_json ->> 'agentVersion' FROM agent_runtime_profiles profiles WHERE profiles.device_id = devices.id AND profiles.status = ? ORDER BY profiles.verified_at DESC NULLS LAST, profiles.id DESC LIMIT 1), '') AS agent_version", domainagent.DeviceStatusActive, domainagent.RuntimeStatusReady, now, now, domainagent.RuntimeStatusReady).
 		Where("devices.user_id = ? AND devices.public_id = ?", userID, publicID).First(&item).Error; err != nil {
 		return nil, errFor(err)
 	}
 	result := toDomainDevice(item.AgentDevice)
 	result.Online = item.Online
+	result.AgentVersion = item.AgentVersion
 	return result, nil
 }
 
@@ -2051,6 +2055,72 @@ func (r *Repo) QueueResourceRefresh(
 			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
 			RuntimeProfileID: &profile.ID, WorkspaceID: workspaceID, ServerSeq: device.NextServerSeq,
 			Kind: "resource.refresh", PayloadJSON: string(encoded), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(created), nil
+}
+
+func (r *Repo) QueueAgentUpdate(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	devicePublicID, targetVersion string,
+	command *domainagent.Command,
+	now time.Time,
+) (*domainagent.Command, error) {
+	var created model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var operation model.AgentIdempotencyRecord
+		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: "agent.update", Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, claim.Operation, idempotencyKey).
+			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
+		}
+
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND public_id = ? AND status = ?", userID, devicePublicID, domainagent.DeviceStatusActive).
+			First(&device).Error; err != nil {
+			return err
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Where(
+			"user_id = ? AND device_id = ? AND status = ? AND lease_expires_at > ? AND presence_expires_at > ? AND manifest_json @> CAST(? AS jsonb)",
+			userID, device.ID, domainagent.RuntimeStatusReady, now, now, `{"commands":["agent.update"]}`,
+		).Order("verified_at DESC NULLS LAST, id DESC").First(&profile).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("device_id = ? AND kind = ? AND completed_at IS NULL", device.ID, "agent.update").
+			Order("server_seq DESC").First(&created).Error; err == nil {
+			return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+		} else if !dberror.IsRecordNotFound(err) {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "agent.update", "deviceId": device.PublicID, "profileId": profile.PublicID, "targetVersion": targetVersion,
+		})
+		if err != nil {
+			return err
+		}
+		created = model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
+			ServerSeq: device.NextServerSeq, Kind: "agent.update", PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return err

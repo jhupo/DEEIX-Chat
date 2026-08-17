@@ -123,6 +123,11 @@
       "lastSeen": "最后活跃",
       "online": "在线",
       "offline": "离线",
+      "version": "客户端版本",
+      "versionUnknown": "版本未知，请先手动升级客户端",
+      "latestVersion": "最新 {version}",
+      "update": "更新客户端",
+      "updating": "更新中",
       "empty": "还没有添加设备。",
       "actions": "设备操作",
       "revoke": "移除设备",
@@ -202,7 +207,13 @@
       "sessionLoggedOut": "会话已登出",
       "logoutSessionFailed": "登出会话失败",
       "deviceRevoked": "设备已移除",
-      "deviceRevokeFailed": "移除设备失败"
+      "deviceRevokeFailed": "移除设备失败",
+      "deviceUpdated": "客户端已更新",
+      "deviceUpdatedDescription": "设备已运行 {version}",
+      "deviceUpdateStarted": "更新命令已执行",
+      "deviceUpdateStartedDescription": "设备仍在安装或重新连接，可稍后刷新查看版本。",
+      "deviceUpdateFailed": "客户端更新失败",
+      "deviceUpdateTimeout": "客户端未在预期时间内确认更新"
     }
   },
   "chatPage": {

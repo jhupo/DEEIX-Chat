@@ -6,6 +6,9 @@ export type AgentDeviceDTO = Omit<DeviceResponseDocData, "lastSeenAt" | "platfor
   platform: "windows" | "darwin" | "linux";
   status: "active" | "revoked";
   lastSeenAt: string | null;
+  agentVersion: string;
+  latestAgentVersion: string;
+  updateAvailable: boolean;
 };
 
 export async function listAgentDevices(accessToken: string): Promise<AgentDeviceDTO[]> {
@@ -17,6 +20,21 @@ export async function revokeAgentDevice(accessToken: string, deviceId: string): 
     accessToken,
     method: "DELETE",
   }, true);
+}
+
+export async function updateAgentDevice(
+  accessToken: string,
+  deviceId: string,
+): Promise<{ commandId: string; status: string }> {
+  return authedRequest<{ commandId: string; status: string }>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/update`,
+    {
+      accessToken,
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
 }
 
 export type AgentRuntimeProfileDTO = {

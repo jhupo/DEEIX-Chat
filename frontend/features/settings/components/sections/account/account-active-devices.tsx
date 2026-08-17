@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { MoreHorizontal, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -26,16 +26,20 @@ export function AccountActiveDevicesSection({
   devices,
   loading,
   revokingDeviceId,
+  updatingDeviceId,
   onAdd,
   addDisabled,
   onRevoke,
+  onUpdate,
 }: {
   devices: AgentDeviceDTO[];
   loading: boolean;
   revokingDeviceId: string;
+  updatingDeviceId: string;
   onAdd: () => void;
   addDisabled: boolean;
   onRevoke: (device: AgentDeviceDTO) => void;
+  onUpdate: (device: AgentDeviceDTO) => void;
 }) {
   const t = useTranslations("settings.accountPage.device");
   const { locale } = useAppLocale();
@@ -52,10 +56,11 @@ export function AccountActiveDevicesSection({
         </Button>
       )}
     >
-      <Table className="table-fixed" style={{ minWidth: 720 }}>
+      <Table className="table-fixed" style={{ minWidth: 840 }}>
         <colgroup>
           <col style={{ width: 240 }} />
           <col style={{ width: 120 }} />
+          <col style={{ width: 150 }} />
           <col style={{ width: 132 }} />
           <col style={{ width: 180 }} />
           <col style={{ width: 56 }} />
@@ -64,14 +69,15 @@ export function AccountActiveDevicesSection({
           <TableRow>
             <TableHead>{t("name")}</TableHead>
             <TableHead>{t("status")}</TableHead>
+            <TableHead>{t("version")}</TableHead>
             <TableHead>{t("platform")}</TableHead>
             <TableHead>{t("lastSeen")}</TableHead>
             <TableHead className="w-[56px]" stickyEnd />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading && activeDevices.length === 0 ? <TableLoadingRow colSpan={5} /> : null}
-          {!loading && activeDevices.length === 0 ? <TableEmptyRow colSpan={5}>{t("empty")}</TableEmptyRow> : null}
+          {loading && activeDevices.length === 0 ? <TableLoadingRow colSpan={6} /> : null}
+          {!loading && activeDevices.length === 0 ? <TableEmptyRow colSpan={6}>{t("empty")}</TableEmptyRow> : null}
           {activeDevices.map((device) => (
             <TableRow key={device.deviceId}>
               <TableCell className="max-w-0">
@@ -82,6 +88,16 @@ export function AccountActiveDevicesSection({
                   <span className={device.online ? "size-1.5 rounded-full bg-emerald-500" : "size-1.5 rounded-full bg-muted-foreground/45"} />
                   {device.online ? t("online") : t("offline")}
                 </span>
+              </TableCell>
+              <TableCell className="max-w-0">
+                <span className="block truncate font-mono text-xs" title={device.agentVersion || t("versionUnknown")}>
+                  {device.agentVersion || "-"}
+                </span>
+                {device.updateAvailable ? (
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {t("latestVersion", { version: device.latestAgentVersion })}
+                  </span>
+                ) : null}
               </TableCell>
               <TableCell className="text-muted-foreground">{t(`platforms.${device.platform}`)}</TableCell>
               <TableCell className="max-w-0 text-muted-foreground">
@@ -96,6 +112,13 @@ export function AccountActiveDevicesSection({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        disabled={!device.online || !device.updateAvailable || updatingDeviceId === device.deviceId}
+                        onClick={() => onUpdate(device)}
+                      >
+                        <RefreshCw className={updatingDeviceId === device.deviceId ? "animate-spin" : ""} />
+                        {updatingDeviceId === device.deviceId ? t("updating") : t("update")}
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         disabled={revokingDeviceId === device.deviceId}
                         onClick={() => setRevokeTarget(device)}

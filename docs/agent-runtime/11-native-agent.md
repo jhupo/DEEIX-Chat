@@ -75,6 +75,17 @@ deeix-agent version
 
 Windows 安装和更新会先停止 `DEEIX Agent Bridge` 与 `DEEIX Agent` 两代计划任务并等待相关进程退出，再停止系统服务、替换二进制并重新安装服务。只有新服务连续在线 20 秒才提交更新并删除回滚副本；失败时恢复旧二进制与旧服务，但不会同时恢复计划任务和服务。脚本会显示下载、配置、提权、服务安装和连接检查进度；成功输出包含实际运行的 Agent 版本，可用 `deeix-agent version` 再次核对。
 
+### Web 手动更新
+
+账户设置中的“活跃设备”表会展示每台设备上报的 Agent 版本、当前在线状态和服务端当前版本。当前 Agent 版本低于服务端版本且设备在线时，设备操作菜单会出现“更新客户端”。点击后，Web 只向该设备队列一个带 `Idempotency-Key` 的 `agent.update` 命令：
+
+1. Agent 先把目标版本写入本地 `pending-update.json`，再回传命令终态。
+2. Agent 在服务端确认该终态后退出当前网关连接；Windows 服务或 Unix 用户服务之外的更新进程等待旧 PID 退出，再执行同源安装脚本。
+3. 安装脚本下载并校验当前稳定 Release，保留身份、配置、工作区和本地命令状态，替换原生二进制后重新启动服务。
+4. Web 在短暂离线和重新连接期间继续轮询设备版本；重新上线并上报目标版本后才显示更新完成。
+
+该命令由 Agent manifest 的 `agent.update` 能力门控，服务端不会向未声明能力的旧客户端下发。首次使用 Web 更新前，旧客户端需要通过账户页的安装命令手动升级到支持 `agent.update` 的版本；之后可从 Web 触发后续更新。Web 更新不重建数据库、Redis、上传文件或 Codex 登录状态，也不会把 Codex CLI 或 API key 下载到设备。
+
 ## app-server 映射
 
 原生适配器实现现有 Gateway 合同中的全部命令：thread 创建、恢复、分叉、归档、取消归档、删除、重命名、Git 元数据、压缩和按需历史读取；turn 启动、steer、中断；review；交互响应；profile/workspace 资源刷新。

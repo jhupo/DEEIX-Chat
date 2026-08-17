@@ -78,6 +78,31 @@ func TestParseWorkspaceRegisterCommand(t *testing.T) {
 	}
 }
 
+func TestParseAgentUpdateAndPendingMarker(t *testing.T) {
+	command, err := parseAgentCommand(json.RawMessage(`{
+		"kind":"agent.update",
+		"deviceId":"agd_0123456789abcdef0123456789abcdef",
+		"profileId":"codex-default",
+		"targetVersion":"0.4.57"
+	}`))
+	if err != nil || command.TargetVersion != "0.4.57" {
+		t.Fatalf("parseAgentCommand() = %#v, %v", command, err)
+	}
+	for _, version := range []string{"", "dev", "0.4", "0.4.57-beta", "0.4.x"} {
+		if validAgentVersion(version) {
+			t.Fatalf("invalid Agent version accepted: %q", version)
+		}
+	}
+	dataDir := repositoryTestDir(t)
+	if err = preparePendingUpdate(dataDir, command.TargetVersion); err != nil || !hasPendingUpdate(dataDir) {
+		t.Fatalf("pending update was not persisted: %v", err)
+	}
+	clearPendingUpdate(dataDir)
+	if hasPendingUpdate(dataDir) {
+		t.Fatal("pending update was not cleared")
+	}
+}
+
 func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	root := t.TempDir()
 	workspace := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace"}

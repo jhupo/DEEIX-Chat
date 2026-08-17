@@ -2,10 +2,20 @@ package agentclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+var ErrUpdateScheduled = errors.New("agent update scheduled")
+
+const pendingUpdateFile = "pending-update.json"
+
+type pendingUpdate struct {
+	Version string `json:"version"`
+}
 
 type UpdateResult struct {
 	Scheduled bool   `json:"scheduled"`
@@ -22,8 +32,35 @@ func Update(ctx context.Context, dataDir string) (UpdateResult, error) {
 	if err != nil {
 		return UpdateResult{}, err
 	}
-	return platformUpdate(ctx, resolved, config)
+	result, err := platformUpdate(ctx, resolved, config)
+	if err == nil {
+		_ = os.Remove(filepath.Join(resolved, pendingUpdateFile))
+	}
+	return result, err
 }
+
+func preparePendingUpdate(dataDir, version string) error {
+	version = strings.TrimSpace(version)
+	if !validAgentVersion(version) {
+		return errors.New("agent update version is invalid")
+	}
+	encoded, err := json.Marshal(pendingUpdate{Version: version})
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(dataDir, pendingUpdateFile), encoded, 0o600)
+}
+
+func hasPendingUpdate(dataDir string) bool {
+	content, err := os.ReadFile(filepath.Join(dataDir, pendingUpdateFile))
+	if err != nil {
+		return false
+	}
+	var update pendingUpdate
+	return json.Unmarshal(content, &update) == nil && validAgentVersion(update.Version)
+}
+
+func clearPendingUpdate(dataDir string) { _ = os.Remove(filepath.Join(dataDir, pendingUpdateFile)) }
 
 func Uninstall(dataDir string, purge bool) (UninstallResult, error) {
 	resolved, _, err := managementConfig(dataDir)

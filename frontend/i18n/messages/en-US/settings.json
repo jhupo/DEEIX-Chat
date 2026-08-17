@@ -123,6 +123,11 @@
       "lastSeen": "Last active",
       "online": "Online",
       "offline": "Offline",
+      "version": "Client version",
+      "versionUnknown": "Unknown version. Update this client manually first.",
+      "latestVersion": "Latest {version}",
+      "update": "Update client",
+      "updating": "Updating",
       "empty": "No devices have been added.",
       "actions": "Device actions",
       "revoke": "Remove device",
@@ -202,7 +207,13 @@
       "sessionLoggedOut": "Session signed out",
       "logoutSessionFailed": "Failed to sign out session",
       "deviceRevoked": "Device removed",
-      "deviceRevokeFailed": "Failed to remove device"
+      "deviceRevokeFailed": "Failed to remove device",
+      "deviceUpdated": "Client updated",
+      "deviceUpdatedDescription": "The device is now running {version}",
+      "deviceUpdateStarted": "Update command completed",
+      "deviceUpdateStartedDescription": "The device is still installing or reconnecting. Refresh later to check its version.",
+      "deviceUpdateFailed": "Failed to update client",
+      "deviceUpdateTimeout": "The client did not confirm the update in time"
     }
   },
   "chatPage": {

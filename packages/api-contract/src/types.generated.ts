@@ -915,13 +915,16 @@ export interface DeviceListResponseDoc {
 
 export interface DeviceResponseDoc {
   data: {
+    agentVersion: string;
     createdAt: string;
     deviceId: string;
     lastSeenAt: string;
+    latestAgentVersion: string;
     name: string;
     online: boolean;
     platform: string;
     status: string;
+    updateAvailable: boolean;
     updatedAt: string;
     userId: string;
   };
@@ -929,13 +932,16 @@ export interface DeviceResponseDoc {
 }
 
 export interface DeviceResponseDocData {
+  agentVersion: string;
   createdAt: string;
   deviceId: string;
   lastSeenAt: string;
+  latestAgentVersion: string;
   name: string;
   online: boolean;
   platform: string;
   status: string;
+  updateAvailable: boolean;
   updatedAt: string;
   userId: string;
 }
@@ -1694,6 +1700,7 @@ export interface PromptPresetResponseDoc {
 }
 
 export interface ProviderManifestDoc {
+  agentVersion?: string;
   commands: string[];
   inputKinds: string[];
   interactionKinds: string[];
@@ -4995,6 +5002,28 @@ export namespace Agent {
       profileId: string;
       /** Resource name */
       resource: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent-gateway
+   * @name DevicesUpdateCreate
+   * @summary Update the native Agent on a device
+   * @request POST:/agent/devices/{device_id}/update
+   * @secure
+   */
+  export namespace DevicesUpdateCreate {
+    export type RequestParams = {
+      /** Device public ID */
+      deviceId: string;
     };
     export type RequestQuery = {};
     export type RequestBody = never;

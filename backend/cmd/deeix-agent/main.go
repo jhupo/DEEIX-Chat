@@ -78,7 +78,10 @@ func run(args []string) error {
 		logger := log.New(logFile, "", log.Ldate|log.Ltime|log.LUTC)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		err = agentclient.RunGateway(ctx, *dataDir, logger)
+		err = runAgentGateway(ctx, *dataDir, logger)
+		if errors.Is(err, agentclient.ErrUpdateScheduled) {
+			return nil
+		}
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
@@ -166,6 +169,17 @@ func run(args []string) error {
 	default:
 		return usageError()
 	}
+}
+
+func runAgentGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
+	err := agentclient.RunGateway(ctx, dataDir, logger, version)
+	if !errors.Is(err, agentclient.ErrUpdateScheduled) {
+		return err
+	}
+	if _, updateErr := agentclient.Update(context.Background(), dataDir); updateErr != nil {
+		return updateErr
+	}
+	return agentclient.ErrUpdateScheduled
 }
 
 func usageError() error {

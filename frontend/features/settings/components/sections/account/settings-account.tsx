@@ -21,12 +21,14 @@ export function SettingsAccount() {
     passwordDialogOpen,
     addDeviceDialogOpen,
     revokingDeviceID,
+    updatingDeviceID,
     setPasswordDialogOpen,
     setAddDeviceDialogOpen,
     handleChangePassword,
     handleLogoutAll,
     handleLogoutSession,
     handleRevokeDevice,
+    handleUpdateDevice,
   } = useSettingsAccount();
 
   return (
@@ -44,9 +46,11 @@ export function SettingsAccount() {
         devices={devices}
         loading={devicesLoading}
         revokingDeviceId={revokingDeviceID}
+        updatingDeviceId={updatingDeviceID}
         addDisabled={loading || devicesLoading || !viewer?.publicID}
         onAdd={() => setAddDeviceDialogOpen(true)}
         onRevoke={(device) => void handleRevokeDevice(device)}
+        onUpdate={(device) => void handleUpdateDevice(device)}
       />
       <SettingsSectionSeparator />
       <AccountActiveSessionsSection

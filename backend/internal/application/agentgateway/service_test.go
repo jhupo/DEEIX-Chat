@@ -131,7 +131,7 @@ func TestAgentWorkPayloadValidation(t *testing.T) {
 }
 
 func TestProviderManifestValidation(t *testing.T) {
-	valid := json.RawMessage(`{"provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`)
+	valid := json.RawMessage(`{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update","thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`)
 	if !validProviderManifest(valid, "codex") {
 		t.Fatal("valid provider manifest rejected")
 	}
@@ -139,9 +139,21 @@ func TestProviderManifestValidation(t *testing.T) {
 		json.RawMessage(`{"provider":"claude","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 		json.RawMessage(`{"provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"bad","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 		json.RawMessage(`{"provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["raw.command"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
+		json.RawMessage(`{"agentVersion":"0.4.x","provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 	} {
 		if validProviderManifest(value, "codex") {
 			t.Fatalf("invalid provider manifest accepted: %s", value)
+		}
+	}
+}
+
+func TestAgentVersionComparison(t *testing.T) {
+	for _, test := range []struct {
+		left, right string
+		want        int
+	}{{"0.4.56", "0.4.57", -1}, {"0.10.0", "0.9.9", 1}, {"1.0.0", "1.0.0", 0}} {
+		if got := compareAgentVersions(test.left, test.right); got != test.want {
+			t.Fatalf("compareAgentVersions(%q, %q) = %d, want %d", test.left, test.right, got, test.want)
 		}
 	}
 }

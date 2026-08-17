@@ -9,7 +9,13 @@ import type { ActiveSessionDTO, UserDTO } from "@/shared/api/auth.types";
 import { clearSessionAndRedirectToLogin } from "@/shared/auth/session";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
-import { revokeAgentDevice, type AgentDeviceDTO } from "@/shared/api/agent-gateway";
+import {
+  getAgentCommand,
+  listAgentDevices,
+  revokeAgentDevice,
+  type AgentDeviceDTO,
+  updateAgentDevice,
+} from "@/shared/api/agent-gateway";
 import { useDevices } from "@/features/devices";
 
 export function useSettingsAccount() {
@@ -24,6 +30,7 @@ export function useSettingsAccount() {
   const [passwordDialogOpen, setPasswordDialogOpen] = React.useState(false);
   const [addDeviceDialogOpen, setAddDeviceDialogOpen] = React.useState(false);
   const [revokingDeviceID, setRevokingDeviceID] = React.useState("");
+  const [updatingDeviceID, setUpdatingDeviceID] = React.useState("");
   const { devices, loading: devicesLoading, refresh: refreshDevices } = useDevices();
 
   const loadAccountData = React.useCallback(async () => {
@@ -117,6 +124,47 @@ export function useSettingsAccount() {
     }
   }, [refreshDevices, revokingDeviceID, t, translateError]);
 
+  const handleUpdateDevice = React.useCallback(async (device: AgentDeviceDTO) => {
+    if (updatingDeviceID || !device.online || !device.updateAvailable) return;
+    setUpdatingDeviceID(device.deviceId);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) throw new Error(t("sessionMissing"));
+      const queued = await updateAgentDevice(token, device.deviceId);
+      let accepted = false;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        const command = await getAgentCommand(token, queued.commandId);
+        if (command.status === "error") throw new Error(command.errorMessage || t("deviceUpdateFailed"));
+        if (command.status === "completed") {
+          accepted = true;
+          break;
+        }
+      }
+      if (!accepted) throw new Error(t("deviceUpdateTimeout"));
+      for (let attempt = 0; attempt < 180; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+        try {
+          const devices = await listAgentDevices(token);
+          const updated = devices.find((item) => item.deviceId === device.deviceId);
+          if (updated?.online && updated.agentVersion === device.latestAgentVersion) {
+            await refreshDevices();
+            toast.success(t("deviceUpdated"), { description: t("deviceUpdatedDescription", { version: updated.agentVersion }) });
+            return;
+          }
+        } catch {
+          // The device may briefly interrupt the connection while its service is replaced.
+        }
+      }
+      await refreshDevices();
+      toast.info(t("deviceUpdateStarted"), { description: t("deviceUpdateStartedDescription") });
+    } catch (error) {
+      toast.error(t("deviceUpdateFailed"), { description: translateError(error, t("retryLater")) });
+    } finally {
+      setUpdatingDeviceID("");
+    }
+  }, [refreshDevices, t, translateError, updatingDeviceID]);
+
   return {
     viewer,
     sessions,
@@ -129,11 +177,13 @@ export function useSettingsAccount() {
     passwordDialogOpen,
     addDeviceDialogOpen,
     revokingDeviceID,
+    updatingDeviceID,
     setPasswordDialogOpen,
     setAddDeviceDialogOpen,
     handleChangePassword,
     handleLogoutAll,
     handleLogoutSession,
     handleRevokeDevice,
+    handleUpdateDevice,
   };
 }

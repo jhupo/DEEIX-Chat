@@ -190,7 +190,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
 		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
-		Commands:         []string{"workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
+		Commands:         []string{"agent.update", "workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
 		InputKinds:       []string{"text", "artifact", "skill", "app-mention"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},
 	}

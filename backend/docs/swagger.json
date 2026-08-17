@@ -4,7 +4,7 @@
         "description": "DEEIX Chat 后端 API 文档",
         "title": "DEEIX Chat API",
         "contact": {},
-        "version": "0.4.56"
+        "version": "0.4.57"
     },
     "basePath": "/api/v1",
     "paths": {
@@ -5070,6 +5070,43 @@
                         "type": "string",
                         "description": "Resource name",
                         "name": "resource",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/update": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Update the native Agent on a device",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device public ID",
+                        "name": "device_id",
                         "in": "path",
                         "required": true
                     },
@@ -13447,17 +13484,23 @@
                 "data": {
                     "type": "object",
                     "required": [
+                        "agentVersion",
                         "createdAt",
                         "deviceId",
                         "lastSeenAt",
+                        "latestAgentVersion",
                         "name",
                         "online",
                         "platform",
                         "status",
+                        "updateAvailable",
                         "updatedAt",
                         "userId"
                     ],
                     "properties": {
+                        "agentVersion": {
+                            "type": "string"
+                        },
                         "createdAt": {
                             "type": "string"
                         },
@@ -13465,6 +13508,9 @@
                             "type": "string"
                         },
                         "lastSeenAt": {
+                            "type": "string"
+                        },
+                        "latestAgentVersion": {
                             "type": "string"
                         },
                         "name": {
@@ -13478,6 +13524,9 @@
                         },
                         "status": {
                             "type": "string"
+                        },
+                        "updateAvailable": {
+                            "type": "boolean"
                         },
                         "updatedAt": {
                             "type": "string"
@@ -13495,17 +13544,23 @@
         "DeviceResponseDocData": {
             "type": "object",
             "required": [
+                "agentVersion",
                 "createdAt",
                 "deviceId",
                 "lastSeenAt",
+                "latestAgentVersion",
                 "name",
                 "online",
                 "platform",
                 "status",
+                "updateAvailable",
                 "updatedAt",
                 "userId"
             ],
             "properties": {
+                "agentVersion": {
+                    "type": "string"
+                },
                 "createdAt": {
                     "type": "string"
                 },
@@ -13513,6 +13568,9 @@
                     "type": "string"
                 },
                 "lastSeenAt": {
+                    "type": "string"
+                },
+                "latestAgentVersion": {
                     "type": "string"
                 },
                 "name": {
@@ -13526,6 +13584,9 @@
                 },
                 "status": {
                     "type": "string"
+                },
+                "updateAvailable": {
+                    "type": "boolean"
                 },
                 "updatedAt": {
                     "type": "string"
@@ -16004,6 +16065,9 @@
                 "threadSettings"
             ],
             "properties": {
+                "agentVersion": {
+                    "type": "string"
+                },
                 "commands": {
                     "type": "array",
                     "items": {

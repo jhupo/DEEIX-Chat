@@ -827,6 +827,60 @@ func TestInvalidResourceTerminalAdvancesBridgeCursor(t *testing.T) {
 	}
 }
 
+func TestQueueAgentUpdateRequiresCapabilityAndCoalesces(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentCommand{}, &model.AgentIdempotencyRecord{},
+	); err != nil {
+		t.Fatalf("migrate Agent update tables: %v", err)
+	}
+	now := time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaseExpiresAt, presenceExpiresAt := now.Add(time.Hour), now.Add(time.Minute)
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
+		LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &presenceExpiresAt,
+		ManifestJSON: `{"agentVersion":"0.4.56","commands":["agent.update"]}`,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	queued, err := repo.QueueAgentUpdate(
+		context.Background(), "41234567-89ab-4def-8123-456789abcdef", strings.Repeat("c", 64), 7,
+		device.PublicID, "0.4.57", &domainagent.Command{PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "agent.update"}, now,
+	)
+	if err != nil || queued.ServerSeq != 1 || queued.Kind != "agent.update" || !strings.Contains(queued.PayloadJSON, `"targetVersion":"0.4.57"`) {
+		t.Fatalf("queue Agent update: %#v %v", queued, err)
+	}
+	coalesced, err := repo.QueueAgentUpdate(
+		context.Background(), "51234567-89ab-4def-8123-456789abcdef", strings.Repeat("d", 64), 7,
+		device.PublicID, "0.4.57", &domainagent.Command{PublicID: "agcmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Kind: "agent.update"}, now,
+	)
+	if err != nil || coalesced.PublicID != queued.PublicID {
+		t.Fatalf("unfinished Agent update was duplicated: %#v %v", coalesced, err)
+	}
+	if err := database.Model(&profile).Update("manifest_json", `{"agentVersion":"0.4.56","commands":["thread.create"]}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Model(&model.AgentCommand{}).Where("public_id = ?", queued.PublicID).Update("completed_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.QueueAgentUpdate(
+		context.Background(), "61234567-89ab-4def-8123-456789abcdef", strings.Repeat("e", 64), 7,
+		device.PublicID, "0.4.57", &domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "agent.update"}, now,
+	); err == nil {
+		t.Fatal("Agent update was queued without the declared capability")
+	}
+}
+
 func TestIsThreadOnlyEvent(t *testing.T) {
 	threadID := uint(1)
 	cases := []struct {

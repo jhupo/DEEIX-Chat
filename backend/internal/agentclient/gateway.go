@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -32,22 +33,24 @@ type RuntimeStatus struct {
 }
 
 type Gateway struct {
-	ctx         context.Context
-	config      Config
-	dataDir     string
-	identity    *DeviceIdentity
-	state       *StateStore
-	cloud       *CloudClient
-	adapter     *CodexAdapter
-	logger      *log.Logger
-	wake        chan struct{}
-	commands    chan queuedCommand
-	activeMu    sync.Mutex
-	active      map[string]bool
-	registerMu  sync.Mutex
-	workspaceMu sync.RWMutex
-	workspaces  map[string]Workspace
-	socketReady bool
+	ctx             context.Context
+	config          Config
+	dataDir         string
+	identity        *DeviceIdentity
+	state           *StateStore
+	cloud           *CloudClient
+	adapter         *CodexAdapter
+	agentVersion    string
+	logger          *log.Logger
+	wake            chan struct{}
+	commands        chan queuedCommand
+	activeMu        sync.Mutex
+	active          map[string]bool
+	registerMu      sync.Mutex
+	workspaceMu     sync.RWMutex
+	workspaces      map[string]Workspace
+	socketReady     bool
+	updateBridgeSeq atomic.Uint64
 }
 
 type queuedCommand struct {
@@ -55,7 +58,10 @@ type queuedCommand struct {
 	Record commandRecord
 }
 
-func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
+func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVersion string) error {
+	if hasPendingUpdate(dataDir) {
+		return ErrUpdateScheduled
+	}
 	config, err := LoadConfig(filepath.Join(dataDir, "config.json"))
 	if err != nil {
 		return err
@@ -70,7 +76,8 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 	}
 	gateway := &Gateway{
 		ctx: ctx, config: config, dataDir: dataDir, identity: identity, state: state, cloud: NewCloudClient(config.CloudURL), logger: logger,
-		wake: make(chan struct{}, 1), commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
+		agentVersion: strings.TrimSpace(agentVersion),
+		wake:         make(chan struct{}, 1), commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
 	}
 	for _, workspace := range config.Workspaces {
 		gateway.workspaces[workspace.WorkspaceID] = workspace
@@ -120,6 +127,9 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger) error {
 		cancel()
 		if tokenErr == nil {
 			tokenErr = gateway.runSocket(ctx, token)
+		}
+		if errors.Is(tokenErr, ErrUpdateScheduled) {
+			return ErrUpdateScheduled
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -219,6 +229,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		workspaces = append(workspaces, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
 	}
 	manifest := gateway.adapter.Manifest()
+	if validAgentVersion(gateway.agentVersion) {
+		manifest.AgentVersion = gateway.agentVersion
+	}
 	if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "auth.proof", ProfileID: gateway.config.ProfileID, ChallengeID: challenge.ChallengeID, Proof: proof, Workspaces: workspaces, Manifest: &manifest}); err != nil {
 		return err
 	}
@@ -247,6 +260,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		if err = gateway.state.AcknowledgeBridge(welcome.AckBridgeSeq); err != nil {
 			return err
 		}
+	}
+	if updateSeq := gateway.updateBridgeSeq.Load(); updateSeq > 0 && welcome.AckBridgeSeq >= updateSeq {
+		return ErrUpdateScheduled
 	}
 	_ = gateway.writeStatus("connected", "")
 	gateway.logger.Printf("connected device %s", gateway.config.DeviceID)
@@ -300,6 +316,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 				}
 				if err = gateway.state.AcknowledgeBridge(frame.AckBridgeSeq); err != nil {
 					return err
+				}
+				if updateSeq := gateway.updateBridgeSeq.Load(); updateSeq > 0 && frame.AckBridgeSeq >= updateSeq {
+					return ErrUpdateScheduled
 				}
 				if sentThrough == frame.AckBridgeSeq {
 					if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
@@ -448,6 +467,7 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	var result map[string]any
+	updatePrepared := false
 	if err == nil {
 		gateway.workspaceMu.RLock()
 		registeredWorkspaces := make(map[string]Workspace, len(gateway.workspaces))
@@ -463,6 +483,12 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 		})
 		if downloadErr != nil {
 			err = downloadErr
+		} else if command.Kind == "agent.update" {
+			err = preparePendingUpdate(gateway.dataDir, command.TargetVersion)
+			if err == nil {
+				updatePrepared = true
+				result = map[string]any{"kind": "update-scheduled", "targetVersion": command.TargetVersion}
+			}
 		} else if command.Kind == "workspace.register" {
 			result, err = gateway.registerWorkspace(command)
 		} else {
@@ -475,9 +501,16 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 	} else {
 		outcome, _ = json.Marshal(map[string]any{"kind": "result", "result": result})
 	}
-	if _, appendErr := gateway.state.AppendTerminal(item.ID, outcome); appendErr != nil {
+	outgoing, appendErr := gateway.state.AppendTerminal(item.ID, outcome)
+	if appendErr != nil {
+		if updatePrepared {
+			clearPendingUpdate(gateway.dataDir)
+		}
 		gateway.logger.Printf("persist command %s terminal outcome: %v", item.ID, appendErr)
 		return
+	}
+	if updatePrepared {
+		gateway.updateBridgeSeq.Store(outgoing.BridgeSeq)
 	}
 	gateway.signalWake()
 }
@@ -689,7 +722,7 @@ func receiveBridgeFrame(connection *websocket.Conn, frame *bridgeFrame) error {
 }
 
 func safeToReplay(command AgentCommand) bool {
-	if command.Kind == "resource.refresh" || command.Kind == "thread.rename" || command.Kind == "thread.metadata.update" || command.Kind == "turn.interrupt" {
+	if command.Kind == "agent.update" || command.Kind == "resource.refresh" || command.Kind == "thread.rename" || command.Kind == "thread.metadata.update" || command.Kind == "turn.interrupt" {
 		return true
 	}
 	return command.Kind == "thread.lifecycle" && command.Action != "fork"

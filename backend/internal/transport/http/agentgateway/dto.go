@@ -22,6 +22,7 @@ type RuntimeProfileDoc struct {
 }
 
 type ProviderManifestDoc struct {
+	AgentVersion     string                    `json:"agentVersion,omitempty"`
 	Provider         string                    `json:"provider"`
 	RuntimeVersion   string                    `json:"runtimeVersion"`
 	ProtocolVersion  string                    `json:"protocolVersion"`
@@ -82,15 +83,18 @@ type EnrollmentChallengeResponseDoc struct {
 type DeviceResponseDoc struct {
 	ErrorMsg string `json:"errorMsg"`
 	Data     struct {
-		DeviceID   string  `json:"deviceId"`
-		UserID     string  `json:"userId"`
-		Name       string  `json:"name"`
-		Platform   string  `json:"platform"`
-		Status     string  `json:"status"`
-		Online     bool    `json:"online"`
-		CreatedAt  string  `json:"createdAt"`
-		UpdatedAt  string  `json:"updatedAt"`
-		LastSeenAt *string `json:"lastSeenAt"`
+		DeviceID           string  `json:"deviceId"`
+		UserID             string  `json:"userId"`
+		Name               string  `json:"name"`
+		Platform           string  `json:"platform"`
+		AgentVersion       string  `json:"agentVersion"`
+		LatestAgentVersion string  `json:"latestAgentVersion"`
+		UpdateAvailable    bool    `json:"updateAvailable"`
+		Status             string  `json:"status"`
+		Online             bool    `json:"online"`
+		CreatedAt          string  `json:"createdAt"`
+		UpdatedAt          string  `json:"updatedAt"`
+		LastSeenAt         *string `json:"lastSeenAt"`
 	} `json:"data"`
 }
 
@@ -100,15 +104,18 @@ type DeviceListResponseDoc struct {
 }
 
 type DeviceResponseDocData struct {
-	DeviceID   string  `json:"deviceId"`
-	UserID     string  `json:"userId"`
-	Name       string  `json:"name"`
-	Platform   string  `json:"platform"`
-	Status     string  `json:"status"`
-	Online     bool    `json:"online"`
-	CreatedAt  string  `json:"createdAt"`
-	UpdatedAt  string  `json:"updatedAt"`
-	LastSeenAt *string `json:"lastSeenAt"`
+	DeviceID           string  `json:"deviceId"`
+	UserID             string  `json:"userId"`
+	Name               string  `json:"name"`
+	Platform           string  `json:"platform"`
+	AgentVersion       string  `json:"agentVersion"`
+	LatestAgentVersion string  `json:"latestAgentVersion"`
+	UpdateAvailable    bool    `json:"updateAvailable"`
+	Status             string  `json:"status"`
+	Online             bool    `json:"online"`
+	CreatedAt          string  `json:"createdAt"`
+	UpdatedAt          string  `json:"updatedAt"`
+	LastSeenAt         *string `json:"lastSeenAt"`
 }
 
 type DeviceRevokeResponseDoc struct {

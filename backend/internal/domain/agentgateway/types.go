@@ -19,6 +19,7 @@ type Device struct {
 	UserID               uint
 	Name                 string
 	Platform             string
+	AgentVersion         string
 	PublicKey            []byte
 	PublicKeyFingerprint string
 	CredentialVersion    uint

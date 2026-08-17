@@ -93,6 +93,7 @@ type AgentCommand struct {
 	InteractionID    string             `json:"interactionId,omitempty"`
 	SourceRequestRef string             `json:"sourceRequestRef,omitempty"`
 	Response         json.RawMessage    `json:"response,omitempty"`
+	TargetVersion    string             `json:"targetVersion,omitempty"`
 	Resource         *struct {
 		Scope string `json:"scope"`
 		Name  string `json:"name"`
@@ -100,6 +101,7 @@ type AgentCommand struct {
 }
 
 type ProviderManifest struct {
+	AgentVersion    string   `json:"agentVersion,omitempty"`
 	Provider        string   `json:"provider"`
 	RuntimeVersion  string   `json:"runtimeVersion"`
 	ProtocolVersion string   `json:"protocolVersion"`
@@ -138,6 +140,11 @@ func parseAgentCommand(raw json.RawMessage) (AgentCommand, error) {
 	turn := append(append([]string{}, thread...), "turnId", "sourceTurnRef")
 	var allowed []string
 	switch command.Kind {
+	case "agent.update":
+		allowed = []string{"kind", "deviceId", "profileId", "targetVersion"}
+		if !validAgentVersion(command.TargetVersion) {
+			return AgentCommand{}, errors.New("agent update version is invalid")
+		}
 	case "workspace.register":
 		allowed = []string{"kind", "deviceId", "profileId", "path", "create"}
 		if !validText(command.Path, 4096) || strings.ContainsRune(command.Path, 0) {
@@ -227,6 +234,24 @@ func parseAgentCommand(raw json.RawMessage) (AgentCommand, error) {
 	return command, nil
 }
 
+func validAgentVersion(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || len(part) > 9 {
+			return false
+		}
+		for _, character := range part {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 var profileResources = []string{"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status"}
 var workspaceResources = []string{"sessions", "skills", "hooks"}
 
@@ -237,7 +262,7 @@ var (
 )
 
 func validateTargets(command AgentCommand) bool {
-	if command.Kind == "workspace.register" {
+	if command.Kind == "agent.update" || command.Kind == "workspace.register" {
 		return true
 	}
 	if command.Kind == "resource.refresh" && command.Resource != nil && command.Resource.Scope == "profile" {
