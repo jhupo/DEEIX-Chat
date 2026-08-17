@@ -325,7 +325,7 @@ export function AppChatArea() {
     [newConversationProjectID, projects],
   );
   const selectedProjectID = newConversationProject?.publicID ?? "";
-  const executionProjectID = selectedProjectID || projects[0]?.publicID || "";
+  const executionProjectID = selectedProjectID;
   const prependNewConversationInContext = React.useCallback(
     (platformModelName?: string) => prependNewConversation(
       platformModelName,

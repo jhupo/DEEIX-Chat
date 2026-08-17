@@ -27,8 +27,6 @@ const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615c
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
 
-var codexInteractiveSourceKinds = []string{"cli", "vscode", "appServer", "unknown"}
-
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
 	"item/fileChange/requestApproval":       true,
@@ -240,7 +238,6 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		for len(byID) < 128 {
 			params := map[string]any{
 				"limit": 100, "archived": archived, "sortKey": "recency_at",
-				"sourceKinds": codexInteractiveSourceKinds,
 			}
 			if cursor != "" {
 				params["cursor"] = cursor
@@ -607,7 +604,7 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 			sessionRoots = []string{cwd}
 		}
 		params["cwd"], params["limit"], params["archived"] = sessionRoots, 100, false
-		params["sortKey"], params["sourceKinds"] = "recency_at", codexInteractiveSourceKinds
+		params["sortKey"] = "recency_at"
 	case "skills":
 		params["cwds"], params["forceReload"] = []string{cwd}, true
 	case "hooks":

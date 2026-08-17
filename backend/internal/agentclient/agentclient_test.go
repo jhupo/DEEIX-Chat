@@ -869,6 +869,10 @@ func runFakeAppServer() {
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)
+			if _, filtered := params["sourceKinds"]; filtered {
+				result = map[string]any{"data": []any{}, "nextCursor": nil}
+				break
+			}
 			if params["cursor"] == "next" {
 				result = map[string]any{"data": []any{map[string]any{"id": "thread-3", "cwd": root, "name": "Third thread"}}, "nextCursor": nil}
 			} else {
