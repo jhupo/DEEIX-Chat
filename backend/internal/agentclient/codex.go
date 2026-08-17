@@ -208,7 +208,9 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 	adapter.workspaceMu.RLock()
 	configuredWorkspaces := make([]Workspace, 0, len(adapter.workspaces))
 	for _, workspace := range adapter.workspaces {
-		configuredWorkspaces = append(configuredWorkspaces, workspace)
+		if workspace.Registered {
+			configuredWorkspaces = append(configuredWorkspaces, workspace)
+		}
 	}
 	adapter.workspaceMu.RUnlock()
 	byID := make(map[string]Workspace, len(configuredWorkspaces))
@@ -227,6 +229,7 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		if err != nil {
 			continue
 		}
+		workspace.Registered = true
 		mergeWorkspace(byID, workspace)
 	}
 	for _, archived := range []bool{false, true} {
@@ -361,6 +364,7 @@ func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {
 			existing.SessionRoots = append(existing.SessionRoots, root)
 		}
 	}
+	existing.Registered = existing.Registered || incoming.Registered
 	workspaces[incoming.WorkspaceID] = existing
 }
 

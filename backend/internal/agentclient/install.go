@@ -25,8 +25,8 @@ type InstallOptions struct {
 type InstallResult struct {
 	DeviceID     string `json:"deviceId"`
 	CodexVersion string `json:"codexVersion"`
-	WorkspaceID  string `json:"workspaceId"`
-	Workspace    string `json:"workspace"`
+	WorkspaceID  string `json:"workspaceId,omitempty"`
+	Workspace    string `json:"workspace,omitempty"`
 	Updated      bool   `json:"updated"`
 }
 
@@ -53,9 +53,13 @@ func Install(ctx context.Context, options InstallOptions, stderr io.Writer) (Ins
 	if name == "" || len(name) > 128 {
 		return InstallResult{}, errors.New("device name is invalid")
 	}
-	workspace, err := CanonicalWorkspace(options.Workspace)
-	if err != nil {
-		return InstallResult{}, err
+	var workspace Workspace
+	if root := strings.TrimSpace(options.Workspace); root != "" {
+		workspace, err = CanonicalWorkspace(root)
+		if err != nil {
+			return InstallResult{}, err
+		}
+		workspace.Registered = true
 	}
 	dataDir := options.DataDir
 	if dataDir == "" {
@@ -100,11 +104,16 @@ func Install(ctx context.Context, options InstallOptions, stderr io.Writer) (Ins
 			return InstallResult{}, errors.New("this agent identity belongs to a different server or user")
 		}
 		config.CodexExecutable = resolvedCodex
-		upsertWorkspace(&config.Workspaces, workspace)
+		if workspace.WorkspaceID != "" {
+			upsertWorkspace(&config.Workspaces, workspace)
+		}
 	} else {
 		config = Config{
 			Version: configVersion, CloudURL: server, UserPublicID: userPublicID, ProfileID: "codex-default",
-			CodexExecutable: resolvedCodex, Workspaces: []Workspace{workspace},
+			CodexExecutable: resolvedCodex,
+		}
+		if workspace.WorkspaceID != "" {
+			config.Workspaces = []Workspace{workspace}
 		}
 	}
 	state, err := OpenStateStore(filepath.Join(dataDir, "state.json"))

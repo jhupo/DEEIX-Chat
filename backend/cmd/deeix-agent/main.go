@@ -43,7 +43,7 @@ func run(args []string) error {
 		name := flags.String("name", hostname(), "device name")
 		codex := flags.String("codex", "codex", "Codex CLI executable")
 		dataDir := flags.String("data-dir", "", "agent data directory")
-		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *server == "" || *user == "" || *workspace == "" {
+		if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *server == "" || *user == "" {
 			return usageError()
 		}
 		result, err := agentclient.Install(context.Background(), agentclient.InstallOptions{
@@ -183,7 +183,7 @@ func runAgentGateway(ctx context.Context, dataDir string, logger *log.Logger) er
 }
 
 func usageError() error {
-	return errors.New("usage:\n  deeix-agent install --server URL --user PUBLIC_ID --workspace PATH [--name NAME] [--codex PATH]\n  deeix-agent start\n  deeix-agent doctor\n  deeix-agent status\n  deeix-agent update\n  deeix-agent uninstall [--purge]\n  deeix-agent version")
+	return errors.New("usage:\n  deeix-agent install --server URL --user PUBLIC_ID [--workspace PATH] [--name NAME] [--codex PATH]\n  deeix-agent start\n  deeix-agent doctor\n  deeix-agent status\n  deeix-agent update\n  deeix-agent uninstall [--purge]\n  deeix-agent version")
 }
 
 func hostname() string {

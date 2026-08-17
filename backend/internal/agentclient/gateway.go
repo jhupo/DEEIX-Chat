@@ -100,6 +100,10 @@ func RunGateway(ctx context.Context, dataDir string, logger *log.Logger, agentVe
 		return err
 	}
 	config.Workspaces = discoveredWorkspaces
+	if err = SaveConfig(filepath.Join(dataDir, "config.json"), config); err != nil {
+		_ = adapter.Close()
+		return err
+	}
 	gateway.config = config
 	gateway.workspaces = make(map[string]Workspace, len(discoveredWorkspaces))
 	for _, workspace := range discoveredWorkspaces {
@@ -588,6 +592,7 @@ func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any,
 			workspace = selected
 			workspace.SessionRoots = []string{workspace.Root}
 		}
+		workspace.Registered = true
 		return nil
 	})
 	if err != nil {

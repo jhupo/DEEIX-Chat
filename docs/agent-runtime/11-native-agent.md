@@ -32,11 +32,11 @@ DEEIX Web
 Web 的“添加设备”仍生成一条命令：
 
 ```powershell
-& ([scriptblock]::Create((irm 'SERVER/agent/install.ps1'))) -Server 'SERVER' -User 'PUBLIC_USER_ID' -Workspace (Get-Location).Path
+& ([scriptblock]::Create((irm 'SERVER/agent/install.ps1'))) -Server 'SERVER' -User 'PUBLIC_USER_ID'
 ```
 
 ```bash
-curl -fsSL 'SERVER/agent/install.sh' | sh -s -- --server 'SERVER' --user 'PUBLIC_USER_ID' --workspace "$PWD"
+curl -fsSL 'SERVER/agent/install.sh' | sh -s -- --server 'SERVER' --user 'PUBLIC_USER_ID'
 ```
 
 安装命令是幂等更新入口：
@@ -62,7 +62,7 @@ Agent 使用本机官方独立 Codex CLI。`codex --version` 必须可执行，`
 ## 命令
 
 ```text
-deeix-agent install --server URL --user PUBLIC_ID --workspace PATH [--name NAME] [--codex PATH]
+deeix-agent install --server URL --user PUBLIC_ID [--workspace PATH] [--name NAME] [--codex PATH]
 deeix-agent start
 deeix-agent doctor
 deeix-agent status

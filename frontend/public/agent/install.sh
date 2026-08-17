@@ -16,8 +16,8 @@ while [ "$#" -gt 0 ]; do
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
-[ -n "$server" ] && [ -n "$user" ] && [ -n "$workspace" ] || {
-  echo "usage: install.sh --server URL --user PUBLIC_ID --workspace PATH" >&2
+[ -n "$server" ] && [ -n "$user" ] || {
+  echo "usage: install.sh --server URL --user PUBLIC_ID [--workspace PATH]" >&2
   exit 2
 }
 
@@ -46,7 +46,8 @@ curl -fL --retry 3 "$base/$asset.sha256" -o "$download.sha256"
 (cd "$temporary" && shasum -a 256 -c "$asset.sha256")
 chmod 755 "$download"
 
-set -- install --server "$server" --user "$user" --workspace "$workspace" --codex "$codex" --data-dir "$data_dir"
+set -- install --server "$server" --user "$user" --codex "$codex" --data-dir "$data_dir"
+[ -z "$workspace" ] || set -- "$@" --workspace "$workspace"
 [ -z "$name" ] || set -- "$@" --name "$name"
 "$download" "$@"
 

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -105,7 +106,7 @@ func TestParseAgentUpdateAndPendingMarker(t *testing.T) {
 
 func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	root := t.TempDir()
-	workspace := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace"}
+	workspace := Workspace{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace", Registered: true}
 	config := Config{
 		Version: 1, CloudURL: "https://example.com", UserPublicID: "0123456789abcdef0123456789abcdef",
 		DeviceID: "agd_0123456789abcdef0123456789abcdef", ProfileID: "codex-default", CodexExecutable: filepath.Join(root, "codex"),
@@ -119,12 +120,16 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.DeviceID != config.DeviceID || loaded.Workspaces[0].Root != workspace.Root {
+	if loaded.DeviceID != config.DeviceID || loaded.Workspaces[0].Root != workspace.Root || !loaded.Workspaces[0].Registered {
 		t.Fatalf("unexpected config round trip: %#v", loaded)
 	}
 	upsertWorkspace(&loaded.Workspaces, workspace)
 	if len(loaded.Workspaces) != 1 {
 		t.Fatalf("workspace was duplicated: %#v", loaded.Workspaces)
+	}
+	config.Workspaces = nil
+	if err = SaveConfig(path, config); err != nil {
+		t.Fatalf("config without workspaces was rejected: %v", err)
 	}
 }
 
@@ -163,6 +168,35 @@ func TestReadCodexDesktopWorkspaces(t *testing.T) {
 	}
 }
 
+func TestDiscoverWorkspacesOnlyKeepsRegisteredConfiguredRoots(t *testing.T) {
+	registeredRoot := repositoryTestDir(t)
+	staleRoot := repositoryTestDir(t)
+	t.Setenv("DEEIX_TEST_THREAD_CWD", registeredRoot)
+	state, err := OpenStateStore(filepath.Join(repositoryTestDir(t), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{
+		ProfileID: "codex-default", CodexExecutable: os.Args[0],
+		Workspaces: []Workspace{
+			{WorkspaceID: "workspace-registered", Root: registeredRoot, Name: "registered", Registered: true},
+			{WorkspaceID: "workspace-stale", Root: staleRoot, Name: "stale"},
+		},
+	}
+	adapter, err := StartCodexAdapter(context.Background(), config, state, io.Discard, func(json.RawMessage) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	workspaces, err := adapter.DiscoverWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workspaces) != 1 || !workspaces[0].Registered || !slices.Contains(workspaces[0].SessionRoots, registeredRoot) || slices.Contains(workspaces[0].SessionRoots, staleRoot) {
+		t.Fatalf("unexpected configured workspace discovery: %#v", workspaces)
+	}
+}
+
 func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
 	dataDir := repositoryTestDir(t)
 	initialRoot := repositoryTestDir(t)
@@ -187,6 +221,9 @@ func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
 	loaded, err := LoadConfig(filepath.Join(dataDir, "config.json"))
 	if err != nil || len(loaded.Workspaces) != 2 {
 		t.Fatalf("registered config = %#v, %v", loaded.Workspaces, err)
+	}
+	if !loaded.Workspaces[1].Registered {
+		t.Fatalf("registered workspace was not marked explicit: %#v", loaded.Workspaces[1])
 	}
 	reserved := filepath.Join(dataDir, "reserved-project")
 	if _, err = gateway.registerWorkspace(AgentCommand{Path: reserved, Create: true}); err == nil {
@@ -257,11 +294,11 @@ func TestCodexProjectWorkspaceRejectsDirectoryWithoutGitBoundary(t *testing.T) {
 
 func TestMergeWorkspacePreservesConfiguredSessionRoots(t *testing.T) {
 	workspaces := map[string]Workspace{}
-	mergeWorkspace(workspaces, Workspace{WorkspaceID: "workspace-one", Root: "repo", SessionRoots: []string{"worktree-a"}})
+	mergeWorkspace(workspaces, Workspace{WorkspaceID: "workspace-one", Root: "repo", Registered: true, SessionRoots: []string{"worktree-a"}})
 	mergeWorkspace(workspaces, Workspace{WorkspaceID: "workspace-one", Root: "repo", SessionRoots: []string{"worktree-b", "worktree-a"}})
-	got := workspaces["workspace-one"].SessionRoots
-	if len(got) != 2 || got[0] != "worktree-a" || got[1] != "worktree-b" {
-		t.Fatalf("workspace session roots were not merged: %#v", got)
+	got := workspaces["workspace-one"]
+	if len(got.SessionRoots) != 2 || got.SessionRoots[0] != "worktree-a" || got.SessionRoots[1] != "worktree-b" || !got.Registered {
+		t.Fatalf("workspace metadata was not merged: %#v", got)
 	}
 }
 
@@ -339,7 +376,7 @@ func TestInstallEnrollsOnceAndReusesDeviceIdentity(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(dataRoot) })
 	dataDir := filepath.Join(dataRoot, "agent")
 	options := InstallOptions{
-		Server: server.URL, UserPublicID: "0123456789abcdef0123456789abcdef", Workspace: root,
+		Server: server.URL, UserPublicID: "0123456789abcdef0123456789abcdef",
 		Name: "fixture", CodexExecutable: executable, DataDir: dataDir,
 	}
 	first, err := Install(context.Background(), options, io.Discard)
@@ -360,6 +397,10 @@ func TestInstallEnrollsOnceAndReusesDeviceIdentity(t *testing.T) {
 	}
 	if first.Updated || !second.Updated || first.DeviceID != second.DeviceID || string(identityBefore) != string(identityAfter) {
 		t.Fatalf("install was not idempotent: first=%#v second=%#v", first, second)
+	}
+	config, err := LoadConfig(filepath.Join(dataDir, "config.json"))
+	if err != nil || len(config.Workspaces) != 0 || first.WorkspaceID != "" || first.Workspace != "" {
+		t.Fatalf("install registered the current directory: result=%#v config=%#v err=%v", first, config, err)
 	}
 	if requests.Load() != 2 {
 		t.Fatalf("repeat install enrolled a second device: %d requests", requests.Load())

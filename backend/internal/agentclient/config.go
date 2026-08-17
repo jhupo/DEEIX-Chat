@@ -35,6 +35,7 @@ type Workspace struct {
 	WorkspaceID  string   `json:"workspaceId"`
 	Root         string   `json:"root"`
 	Name         string   `json:"name"`
+	Registered   bool     `json:"registered,omitempty"`
 	SessionRoots []string `json:"-"`
 }
 
@@ -135,7 +136,7 @@ func (config Config) Validate() error {
 	if config.CodexExecutable == "" || len(config.CodexExecutable) > 2048 || strings.ContainsRune(config.CodexExecutable, 0) {
 		return errors.New("agent config Codex executable is invalid")
 	}
-	if len(config.Workspaces) == 0 || len(config.Workspaces) > 128 {
+	if len(config.Workspaces) > 128 {
 		return errors.New("agent config workspaces are invalid")
 	}
 	seen := make(map[string]struct{}, len(config.Workspaces))

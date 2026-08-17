@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$Server,
   [Parameter(Mandatory = $true)][string]$User,
-  [Parameter(Mandatory = $true)][string]$Workspace,
+  [string]$Workspace,
   [string]$Name = $env:COMPUTERNAME,
   [string]$Codex = "codex"
 )
@@ -50,7 +50,9 @@ try {
     if (-not $taskStopped) { throw "DEEIX Agent scheduled tasks did not stop" }
   }
   Write-Host "DEEIX Agent: configuring this device..."
-  & $download install --server $Server --user $User --workspace $Workspace --name $Name --codex $Codex --data-dir $dataDir
+  $installArgs = @("install", "--server", $Server, "--user", $User, "--name", $Name, "--codex", $Codex, "--data-dir", $dataDir)
+  if ($Workspace) { $installArgs += @("--workspace", $Workspace) }
+  & $download @installArgs
   if ($LASTEXITCODE -ne 0) { throw "DEEIX Agent configuration failed" }
 
   $installedLiteral = $installed.Replace("'", "''")

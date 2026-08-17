@@ -26,9 +26,9 @@ export function AccountAddDeviceDialog({
   const command = React.useCallback((platform: Platform) => {
     if (!origin || !publicUserID) return "";
     if (platform === "windows") {
-      return `& ([scriptblock]::Create((irm '${origin}/agent/install.ps1'))) -Server '${origin}' -User '${publicUserID}' -Workspace (Get-Location).Path`;
+      return `& ([scriptblock]::Create((irm '${origin}/agent/install.ps1'))) -Server '${origin}' -User '${publicUserID}'`;
     }
-    return `curl -fsSL '${origin}/agent/install.sh' | sh -s -- --server '${origin}' --user '${publicUserID}' --workspace "$PWD"`;
+    return `curl -fsSL '${origin}/agent/install.sh' | sh -s -- --server '${origin}' --user '${publicUserID}'`;
   }, [origin, publicUserID]);
 
   return (

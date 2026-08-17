@@ -17,17 +17,16 @@ func platformUpdate(_ context.Context, dataDir string, config Config) (UpdateRes
 		return UpdateResult{}, err
 	}
 	scriptPath := filepath.Join(dataDir, "update-agent.ps1")
-	workspace := config.Workspaces[0].Root
 	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
 try {
   Wait-Process -Id %d -ErrorAction SilentlyContinue
   $env:DEEIX_AGENT_DATA_DIR = '%s'
   $env:DEEIX_AGENT_HOME = '%s'
-  & ([scriptblock]::Create((irm '%s/agent/install.ps1'))) -Server '%s' -User '%s' -Workspace '%s' -Codex '%s'
+  & ([scriptblock]::Create((irm '%s/agent/install.ps1'))) -Server '%s' -User '%s' -Codex '%s'
 } finally {
   Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
-`, os.Getpid(), psLiteral(dataDir), psLiteral(filepath.Dir(executable)), psLiteral(config.CloudURL), psLiteral(config.CloudURL), psLiteral(config.UserPublicID), psLiteral(workspace), psLiteral(config.CodexExecutable))
+`, os.Getpid(), psLiteral(dataDir), psLiteral(filepath.Dir(executable)), psLiteral(config.CloudURL), psLiteral(config.CloudURL), psLiteral(config.UserPublicID), psLiteral(config.CodexExecutable))
 	if err = writeFileAtomic(scriptPath, []byte(script), 0o600); err != nil {
 		return UpdateResult{}, err
 	}
