@@ -40,6 +40,8 @@ An online update writes only `deeix-chat-app-runtime` and the journal in `deeix-
 
 The image contains a baseline release under `/app/image-runtime` with a digest covering the server binary, static frontend, and version file. On every container start, the entrypoint seeds that exact build into an immutable `releases/image-<version>-<digest>` directory. Online-installed stable bundles exclusively use `releases/<version>`, so an image never overwrites an administrator-installed bundle. The `current` symlink is switched atomically: a rebuilt `dev` image replaces an older image build even when `VERSION` has not changed, while an online-installed release of the same or a newer semantic version remains active. Recreating the container with the same named volume preserves releases and rollback data.
 
+The GHCR image build also compiles and embeds the native Agent release set at `/agent/releases/current` for Windows x64, Linux x64, and macOS arm64. This path is part of the image contract, so a deployment that installs from GHCR does not depend on the separate GitHub Release packaging job. The server validates all six Agent assets (three binaries and three checksum files) while building the runtime image.
+
 When a fresh container is running `releases/image-<version>-<digest>`, the updater may install the stable bundle of that same version once. This promotes the baseline image to `releases/<version>` and supplies the native `deeix-agent` executables and checksums. Once the stable release is active, another same-version install is rejected.
 
 ## Online Update Flow
@@ -86,6 +88,8 @@ UPDATE_PROXY_URL=http://127.0.0.1:7890
 
 The proxy is applied to both the GitHub manifest request and Release bundle download. A URL-prefix download mirror is a different mechanism and is not accepted as this setting. Leave the value empty for a direct connection.
 
+Agent WSS connections use the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables in the same way as Agent HTTPS requests. This is configured on the machine running the Agent, not in the Web container. HTTP(S) CONNECT and SOCKS5/SOCKS5H proxy URLs are supported; a proxy that only covers REST while WSS is forced direct is not a supported deployment state.
+
 ## Tag Workflow
 
 A stable tag must equal `v$(cat VERSION)`. The release job builds the static frontend once, compiles the server for Linux amd64 and arm64, and publishes:
@@ -100,6 +104,8 @@ update-manifest.json.sha256
 ```
 
 Each application archive has the same top-level layout expected by the updater: `VERSION`, `deeix-chat`, and `frontend/out`.
+
+The mutable installer and Agent assets under `/agent/install.*` and `/agent/releases/current/` are served with `no-store`/revalidation headers. Reverse proxies and CDNs must preserve those headers; only hashed `/_next/static/*` assets should be immutable. After changing the current Agent release, purge any previously cached installer or current-asset responses before testing a new installation.
 
 ## One-Time Migration From The Host Updater
 

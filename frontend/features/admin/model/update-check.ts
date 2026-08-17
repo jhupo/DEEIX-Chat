@@ -5,8 +5,8 @@ export type ReleaseInfo = {
 
 export type VersionCompareResult = "available" | "current" | "unknown";
 
-export const LATEST_RELEASE_ENDPOINT = "https://api.github.com/repos/DEEIX-AI/DEEIX-Chat/releases/latest";
-export const RELEASE_PAGE_PREFIX = "https://github.com/DEEIX-AI/DEEIX-Chat/releases/tag/";
+export const LATEST_RELEASE_ENDPOINT = "https://api.github.com/repos/jhupo/DEEIX-Chat/releases/latest";
+export const RELEASE_PAGE_PREFIX = "https://github.com/jhupo/DEEIX-Chat/releases/tag/";
 
 const LATEST_RELEASE_CACHE_KEY = "deeix-chat:latest-release";
 const LATEST_RELEASE_CHANGED_EVENT = "deeix-chat:latest-release-changed";

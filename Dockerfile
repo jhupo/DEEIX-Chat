@@ -59,6 +59,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
        -ldflags="-s -w -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Version=${VERSION} -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.Commit=${GIT_COMMIT} -X github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo.BuildTime=${BUILD_TIME}" \
        -o /out/deeix-chat ./cmd/server
 
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    VERSION="$(cat /src/VERSION)" \
+    && AGENT_DIR=/out/agent/releases/current \
+    && mkdir -p "$AGENT_DIR" \
+    && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT}" -o "$AGENT_DIR/deeix-agent-windows-x64.exe" ./cmd/deeix-agent \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT}" -o "$AGENT_DIR/deeix-agent-linux-x64" ./cmd/deeix-agent \
+    && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT}" -o "$AGENT_DIR/deeix-agent-macos-arm64" ./cmd/deeix-agent \
+    && cd "$AGENT_DIR" \
+    && sha256sum deeix-agent-windows-x64.exe > deeix-agent-windows-x64.exe.sha256 \
+    && sha256sum deeix-agent-linux-x64 > deeix-agent-linux-x64.sha256 \
+    && sha256sum deeix-agent-macos-arm64 > deeix-agent-macos-arm64.sha256
+
 
 FROM debian:bookworm-slim AS runtime-deps
 
@@ -77,7 +90,14 @@ COPY --from=runtime-deps /etc/localtime /etc/localtime
 COPY --from=runtime-deps /etc/timezone /etc/timezone
 COPY --from=backend-builder /out/deeix-chat /app/image-runtime/deeix-chat
 COPY --from=frontend-builder /src/frontend/out /app/image-runtime/frontend/out
+COPY --from=backend-builder /out/agent /app/image-runtime/frontend/out/agent
 COPY VERSION /app/image-runtime/VERSION
+RUN test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-windows-x64.exe \
+  && test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-windows-x64.exe.sha256 \
+  && test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-linux-x64 \
+  && test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-linux-x64.sha256 \
+  && test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-macos-arm64 \
+  && test -s /app/image-runtime/frontend/out/agent/releases/current/deeix-agent-macos-arm64.sha256
 RUN find /app/image-runtime -type f -print0 \
   | sort -z \
   | xargs -0 sha256sum \

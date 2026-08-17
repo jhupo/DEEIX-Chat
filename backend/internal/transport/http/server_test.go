@@ -133,6 +133,49 @@ func TestFrontendStaticCachesImmutableBuildAssets(t *testing.T) {
 	}
 }
 
+func TestFrontendStaticRevalidatesMutableAgentAssets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	root := t.TempDir()
+	currentDir := filepath.Join(root, "agent", "releases", "current")
+	if err := os.MkdirAll(currentDir, 0o755); err != nil {
+		t.Fatalf("create agent release directory: %v", err)
+	}
+	for _, fileName := range []string{
+		filepath.Join("agent", "install.ps1"),
+		filepath.Join("agent", "install.sh"),
+		filepath.Join("agent", "releases", "current", "deeix-agent-windows-x64.exe"),
+		filepath.Join("agent", "releases", "current", "deeix-agent-windows-x64.exe.sha256"),
+	} {
+		if err := os.WriteFile(filepath.Join(root, fileName), []byte("agent asset"), 0o644); err != nil {
+			t.Fatalf("write agent asset %s: %v", fileName, err)
+		}
+	}
+
+	engine := gin.New()
+	registerFrontendStatic(engine, root, nil)
+
+	for _, requestPath := range []string{
+		"/agent/install.ps1",
+		"/agent/install.sh",
+		"/agent/releases/current/deeix-agent-windows-x64.exe",
+		"/agent/releases/current/deeix-agent-windows-x64.exe.sha256",
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, requestPath, nil)
+		engine.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for %s, got %d", requestPath, recorder.Code)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+			t.Fatalf("expected mutable agent asset no-cache for %s, got %q", requestPath, got)
+		}
+		if got := recorder.Header().Get("Pragma"); got != "no-cache" {
+			t.Fatalf("expected mutable agent asset pragma no-cache for %s, got %q", requestPath, got)
+		}
+	}
+}
+
 func TestFrontendStaticFallbackSkipsAPIPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	root := t.TempDir()

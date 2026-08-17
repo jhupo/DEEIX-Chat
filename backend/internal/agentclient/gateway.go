@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -290,7 +289,7 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return err
 	}
 	dialContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	connection, err := config.DialContext(dialContext)
+	connection, err := dialBridgeWebSocket(dialContext, config)
 	cancel()
 	if err != nil {
 		return err
@@ -497,7 +496,6 @@ func bridgeWebSocketConfig(cloudURL, token string, probe bool) (*websocket.Confi
 		return nil, err
 	}
 	config.Protocol = []string{bridgeProtocol, "deeix.auth." + token}
-	config.Dialer = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	return config, nil
 }
 
@@ -507,7 +505,7 @@ func probeBridgeConnection(ctx context.Context, cloudURL, deviceID, token string
 		return err
 	}
 	dialContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	connection, err := config.DialContext(dialContext)
+	connection, err := dialBridgeWebSocket(dialContext, config)
 	cancel()
 	if err != nil {
 		return err

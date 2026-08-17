@@ -342,6 +342,11 @@ func isRegularFile(filePath string) bool {
 }
 
 func applyFrontendCacheHeaders(c *gin.Context, requestPath string) {
+	if isMutableAgentAsset(requestPath) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		return
+	}
 	if isImmutableFrontendAsset(requestPath) {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		return
@@ -355,6 +360,12 @@ func applyFrontendCacheHeaders(c *gin.Context, requestPath string) {
 		return
 	}
 	c.Header("Cache-Control", "public, max-age=3600")
+}
+
+func isMutableAgentAsset(requestPath string) bool {
+	return requestPath == "/agent/install.ps1" ||
+		requestPath == "/agent/install.sh" ||
+		strings.HasPrefix(requestPath, "/agent/releases/current/")
 }
 
 func isImmutableFrontendAsset(requestPath string) bool {

@@ -17,7 +17,7 @@ $backup = "$installed.previous"
 $taskName = "DEEIX Agent"
 $legacyTaskName = "DEEIX Agent Bridge"
 $legacyInstallDir = Join-Path $env:LOCALAPPDATA "DEEIX\AgentBridge"
-$userSID = if ($env:DEEIX_AGENT_USER_SID) { $env:DEEIX_AGENT_USER_SID } else { [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+$userSID = if ($env:DEEIX_AGENT_WINDOWS_USER_SID) { $env:DEEIX_AGENT_WINDOWS_USER_SID } else { [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
 $serviceInstalled = $false
 $hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)
 $hadLegacyScheduledTask = $null -ne (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue)
@@ -159,6 +159,7 @@ try {
   $installedVersion = ((& $installed version 2>&1) | Out-String).Trim()
   Write-Host "DEEIX Agent system service is installed and connected: $installedVersion ($installed)"
 } catch {
+	$installError = $_
   if ($serviceInstalled) {
     $installedLiteral = $installed.Replace("'", "''")
     $backupLiteral = $backup.Replace("'", "''")
@@ -178,6 +179,16 @@ if (Test-Path -LiteralPath '$backupLiteral') {
 "@
     $encodedRollback = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($rollbackScript))
     Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback" | Out-Null
+  } elseif ($hadService) {
+    try {
+      $service = Get-Service -Name "DEEIXAgent" -ErrorAction Stop
+      if ($service.Status -ne "Running") {
+        Start-Service -Name "DEEIXAgent" -ErrorAction Stop
+        $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
+      }
+    } catch {
+      throw "DEEIX Agent update failed and the previous service did not restart: $($installError.Exception.Message); recovery: $($_.Exception.Message)"
+    }
   }
   Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
   if ($hadService) {
@@ -185,7 +196,7 @@ if (Test-Path -LiteralPath '$backupLiteral') {
   } elseif ($hadScheduledTask) {
     Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   }
-  throw
+	throw $installError
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }

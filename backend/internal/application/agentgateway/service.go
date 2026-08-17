@@ -415,7 +415,7 @@ func (s *Service) CompleteRuntimeProof(
 		ctx, identity.UserID, sub2UserID, []byte(challenge.Canonical), proof,
 	)
 	if err != nil || remoteKeyID <= 0 || len(credentialHash) != sha256.Size*2 {
-		return time.Time{}, fmt.Errorf("%w: API key ownership proof failed: %v", ErrRuntimeAuth, err)
+		return time.Time{}, fmt.Errorf("%w: API key ownership proof failed: %w", ErrRuntimeAuth, err)
 	}
 	now := s.now().UTC()
 	leaseExpiresAt := now.Add(runtimeLeaseTTL)
