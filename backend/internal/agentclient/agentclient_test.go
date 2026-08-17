@@ -133,41 +133,6 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 	}
 }
 
-func TestReadCodexDesktopWorkspaces(t *testing.T) {
-	codexHome := repositoryTestDir(t)
-	firstRoot := repositoryTestDir(t)
-	secondRoot := repositoryTestDir(t)
-	state := map[string]any{
-		"electron-persisted-atom-state": map[string]any{
-			"local-projects": map[string]any{
-				"first":  map[string]any{"name": "First project", "rootPaths": []string{firstRoot}},
-				"second": map[string]any{"name": "Second project", "rootPaths": []string{secondRoot, filepath.Join(codexHome, "missing")}},
-			},
-		},
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(codexHome, ".codex-global-state.json"), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	workspaces, err := readCodexDesktopWorkspaces(codexHome)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(workspaces) != 2 {
-		t.Fatalf("unexpected desktop workspaces: %#v", workspaces)
-	}
-	byName := make(map[string]Workspace, len(workspaces))
-	for _, workspace := range workspaces {
-		byName[workspace.Name] = workspace
-	}
-	if byName["First project"].Root != firstRoot || byName["Second project"].Root != secondRoot {
-		t.Fatalf("unexpected desktop workspace roots: %#v", workspaces)
-	}
-}
-
 func TestDiscoverWorkspacesOnlyKeepsRegisteredConfiguredRoots(t *testing.T) {
 	registeredRoot := repositoryTestDir(t)
 	staleRoot := repositoryTestDir(t)
@@ -669,6 +634,22 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 	adapter.replaceWorkspaces(workspaces)
+	created, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "thread.create", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		Settings: &Settings{},
+	}, nil)
+	if err != nil || created["kind"] != "thread-created" {
+		t.Fatalf("project thread request failed: %#v %v", created, err)
+	}
+	projectThreadRef, _ := created["sourceThreadRef"].(string)
+	projectTurn, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "turn.start", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		ThreadID: "agth_0123456789abcdef0123456789abcdef", SourceThreadRef: projectThreadRef,
+		Input: []AgentInput{{Kind: "text", Text: "project message"}}, Settings: &Settings{},
+	}, nil)
+	if err != nil || projectTurn["kind"] != "turn-started" {
+		t.Fatalf("project turn request failed: %#v %v", projectTurn, err)
+	}
 	skills, err := adapter.Execute(context.Background(), AgentCommand{
 		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
 		Resource: &struct {
@@ -806,13 +787,27 @@ func runFakeAppServer() {
 				"cwd":    root,
 				"skills": []any{map[string]any{"name": "review", "description": "Review changes", "path": filepath.Join(root, ".codex", "skills", "review", "SKILL.md"), "enabled": true}},
 			}}}
+		case "thread/start":
+			var params struct {
+				Cwd string `json:"cwd"`
+			}
+			_ = json.Unmarshal(request["params"], &params)
+			if params.Cwd == os.Getenv("DEEIX_TEST_THREAD_CWD") {
+				result = map[string]any{"thread": map[string]any{"id": "thread-project-test"}}
+			}
 		case "turn/start":
 			var params struct {
-				Input []map[string]any `json:"input"`
+				ThreadID string           `json:"threadId"`
+				Cwd      string           `json:"cwd"`
+				Input    []map[string]any `json:"input"`
 			}
 			_ = json.Unmarshal(request["params"], &params)
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
-			if len(params.Input) == 3 && params.Input[1]["type"] == "skill" && params.Input[1]["name"] == "review" &&
+			if params.ThreadID == "thread-project-test" && params.Cwd == root && len(params.Input) == 1 &&
+				params.Input[0]["type"] == "text" && params.Input[0]["text"] == "project message" {
+				result = map[string]any{"turn": map[string]any{"id": "turn-project-test"}}
+			} else if params.ThreadID == "thread-input-test" && params.Cwd == root && len(params.Input) == 3 &&
+				params.Input[1]["type"] == "skill" && params.Input[1]["name"] == "review" &&
 				params.Input[1]["path"] == filepath.Join(root, ".codex", "skills", "review", "SKILL.md") &&
 				params.Input[2]["type"] == "mention" && params.Input[2]["name"] == "Calendar" && params.Input[2]["path"] == "app://calendar-private-id" {
 				result = map[string]any{"turn": map[string]any{"id": "turn-input-test"}}
