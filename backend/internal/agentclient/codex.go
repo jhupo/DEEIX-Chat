@@ -26,7 +26,7 @@ const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615c
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
-var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer"}
+var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", "unknown"}
 
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,

@@ -41,7 +41,7 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Profile/Workspace 和小时桶幂等下发 `apps`、`skills` 与 `sessions` 刷新。首次连接会自动导入历史和输入资源；同一小时内的 WSS 重连复用原命令，不重复扫描。
 
-本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 Codex Desktop 的 UI 私有项目状态。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer`，避免 app-server 的默认过滤漏掉桌面端和程序化入口创建的顶层会话，同时不把子 Agent 线程混入主导航。省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。活动会话同时进入所属 Workspace 的项目树和按更新时间排序的“最近”；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
+本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 Codex Desktop 的 UI 私有项目状态。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer` 以及旧目录中未分类的 `unknown`，避免 app-server 的默认过滤漏掉桌面端、程序化入口和旧版创建的顶层会话，同时不把明确的 `subAgent*` 子线程混入主导航。省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。活动会话同时进入所属 Workspace 的项目树和按更新时间排序的“最近”；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
 
 stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。`thread/read(includeTurns=true)` 的完整历史可以大于普通资源帧，因此不能使用 4 MiB 作为所有输入的上限。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 与 presence 由心跳在原连接上原子续期，健康连接不因租约计时器主动关闭；连接恢复后先冲刷未投影事件，再发送新命令。
 

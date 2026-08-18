@@ -109,7 +109,7 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地项目与会话历史 | 全局 `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 顶层会话并按 canonical `cwd` 发现有历史的 Workspace；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；活动会话同时显示在所属项目和“最近”；无历史的空 Workspace 由用户在 Web 中明确添加；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；不读取 Desktop UI 私有状态，不混入子 Agent 线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
+| 读取本地项目与会话历史 | 全局 `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 和旧版未分类的 `unknown` 顶层会话，并按 canonical `cwd` 发现有历史的 Workspace；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；活动会话同时显示在所属项目和“最近”；无历史的空 Workspace 由用户在 Web 中明确添加；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；不读取 Desktop UI 私有状态，不混入明确的 `subAgent*` 子线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
 | 管理工作项目 | `0.147.0` 稳定锁没有 `project/*`；官方 `main` 已出现实验 `project/list|read|create|import|update|move|delete` | 项目内 Conversation 已支持置顶、改名、归档和删除；工作项目行当前只有新建对话与展开 | 待选定包含 `project/*` 的正式 release 并生成 experimental schema lock 后整体替换；不建立 `project/*` 与 `cwd` 双数据源 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；支持文本、已授权附件、Workspace Skill 与 App mention |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
