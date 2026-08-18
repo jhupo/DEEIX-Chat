@@ -121,8 +121,12 @@ function activeShareFieldsMissing(item: ConversationDTO): boolean {
   return (item.shareStatus ?? "").trim() === "none" && !item.shareID?.trim();
 }
 
-function belongsInSidebarRecent(item: ConversationDTO): boolean {
-  return !isArchivedConversation(item) && !item.isStarred && !item.projectID.trim();
+function belongsInSidebarRecent(item: ConversationDTO, executionType: "cloud" | "gateway"): boolean {
+  return (
+    !isArchivedConversation(item) &&
+    !item.isStarred &&
+    (executionType === "gateway" || !item.projectID.trim())
+  );
 }
 
 function belongsInSidebarStarred(item: ConversationDTO): boolean {
@@ -194,7 +198,7 @@ async function fetchRecentPage(accessToken: string, page: number, executionType:
     pageSize: RECENT_PAGE_SIZE,
     status: "active",
     starred: "unstarred",
-    project: "unassigned",
+    ...(executionType === "cloud" ? { project: "unassigned" } : {}),
     execution: executionType,
     deviceId: executionDeviceID,
   });
@@ -357,7 +361,7 @@ export function useSidebarConversationsController({
 
   const applyConversationUpdate = React.useCallback((publicID: string, incoming: ConversationDTO) => {
     const updated = preserveKnownShareState(currentConversationSnapshot(publicID), incoming);
-    setRecentItems((prev) => belongsInSidebarRecent(updated)
+    setRecentItems((prev) => belongsInSidebarRecent(updated, executionType)
       ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
       : removeByPublicID(prev, publicID));
     setStarredItems((prev) => belongsInSidebarStarred(updated)
@@ -365,7 +369,7 @@ export function useSidebarConversationsController({
       : removeByPublicID(prev, publicID));
     publishChange({ type: "upsert", publicID, item: updated });
     return updated;
-  }, [currentConversationSnapshot, publishChange]);
+  }, [currentConversationSnapshot, executionType, publishChange]);
 
   const refreshStarredWindow = React.useCallback(async (accessTokenOverride?: string) => {
     starredWindowRequestVersionRef.current += 1;
@@ -535,12 +539,12 @@ export function useSidebarConversationsController({
       projectID: projectID?.trim() || "",
       execution,
     });
-    if (belongsInSidebarRecent(item)) {
+    if (belongsInSidebarRecent(item, executionType)) {
       setRecentItems((prev) => mergeUniqueByPublicID([item], prev, sortByUpdatedAtDesc));
     }
     publishChange({ type: "upsert", publicID: item.publicID, item });
     return item;
-  }, [newConversationTitle, publishChange]);
+  }, [executionType, newConversationTitle, publishChange]);
 
   const renameByPublicID = React.useCallback(
     async (publicID: string, title: string): Promise<ConversationDTO | null> => {
@@ -699,7 +703,7 @@ export function useSidebarConversationsController({
         currentConversationSnapshot(publicID),
         await setConversationProject(token, publicID, { projectID: projectID?.trim() || "" }),
       );
-      setRecentItems((prev) => belongsInSidebarRecent(updated)
+      setRecentItems((prev) => belongsInSidebarRecent(updated, executionType)
         ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
         : removeByPublicID(prev, publicID));
       setStarredItems((prev) => belongsInSidebarStarred(updated)
@@ -708,7 +712,7 @@ export function useSidebarConversationsController({
       publishChange({ type: "upsert", publicID, item: updated });
       return updated;
     },
-    [currentConversationSnapshot, publishChange],
+    [currentConversationSnapshot, executionType, publishChange],
   );
 
   const batchSetProjectByPublicIDs = React.useCallback(
@@ -767,7 +771,7 @@ export function useSidebarConversationsController({
       setTransferringStarPublicID(publicID);
       await waitForNextFrame();
 
-      setRecentItems((prev) => optimisticItem && belongsInSidebarRecent(optimisticItem)
+      setRecentItems((prev) => optimisticItem && belongsInSidebarRecent(optimisticItem, executionType)
         ? upsertByPublicID(prev, optimisticItem, sortByUpdatedAtDesc)
         : removeByPublicID(prev, publicID));
       setStarredItems((prev) => optimisticItem && belongsInSidebarStarred(optimisticItem)
@@ -808,7 +812,7 @@ export function useSidebarConversationsController({
           await setConversationStar(token, publicID, { starred }),
         );
 
-        setRecentItems((prev) => belongsInSidebarRecent(updated)
+        setRecentItems((prev) => belongsInSidebarRecent(updated, executionType)
           ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
           : removeByPublicID(prev, publicID));
         setStarredItems((prev) => belongsInSidebarStarred(updated)
@@ -833,7 +837,7 @@ export function useSidebarConversationsController({
         }, 320);
       }
     },
-    [publishChange, refreshStarredWindow],
+    [executionType, publishChange, refreshStarredWindow],
   );
 
   const archiveByPublicID = React.useCallback(
@@ -848,7 +852,7 @@ export function useSidebarConversationsController({
         await setConversationArchive(token, publicID, { archived }),
       );
       const removedFromStarred = starredItemsRef.current.some((item) => item.publicID === publicID);
-      setRecentItems((prev) => belongsInSidebarRecent(updated)
+      setRecentItems((prev) => belongsInSidebarRecent(updated, executionType)
         ? upsertByPublicID(prev, updated, sortByUpdatedAtDesc)
         : removeByPublicID(prev, publicID));
       setStarredItems((prev) => belongsInSidebarStarred(updated)
@@ -861,7 +865,7 @@ export function useSidebarConversationsController({
       publishChange({ type: "upsert", publicID, item: updated });
       return updated;
     },
-    [currentConversationSnapshot, publishChange, refreshStarredWindow],
+    [currentConversationSnapshot, executionType, publishChange, refreshStarredWindow],
   );
 
   const deleteByPublicID = React.useCallback(async (publicID: string, options: DeleteConversationOptions = {}): Promise<boolean> => {

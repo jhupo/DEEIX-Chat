@@ -868,7 +868,7 @@ func runFakeAppServer() {
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)
-			if _, filtered := params["sourceKinds"]; filtered {
+			if fmt.Sprint(params["sourceKinds"]) != "[cli vscode exec appServer]" {
 				result = map[string]any{"data": []any{}, "nextCursor": nil}
 				break
 			}

@@ -13,11 +13,11 @@
 | 会话状态 | 置顶 | 项目 | 最近 | 所有对话 |
 | --- | --- | --- | --- | --- |
 | 活动、已置顶 | 显示 | 已分配项目时也保留在项目节点 | 不显示 | 默认显示 |
-| 活动、未置顶、已分配项目 | 不显示 | 只显示在所属项目节点 | 不显示 | 默认显示 |
+| 活动、未置顶、已分配项目 | 不显示 | 显示在所属项目节点 | 工作中显示；聊天中不显示 | 默认显示 |
 | 活动、未置顶、未分配项目 | 不显示 | 不显示 | 显示 | 默认显示 |
 | 已归档 | 不显示 | 不显示 | 不显示 | 只在“已归档”筛选中显示 |
 
-“最近”严格表示当前 execution context 中未归档、未置顶且未分配项目的会话。项目会话不会重复进入“最近”；全局“置顶”是唯一允许跨项目聚合的导航区。
+“最近”在工作模式中按更新时间聚合当前设备的全部未归档、未置顶线程，因此同一线程也会出现在所属项目节点；聊天模式维持原有规则，只聚合未分配项目的会话。全局“置顶”继续单独聚合已置顶会话。
 
 Gateway 连接或刷新 `sessions` 资源时，Bridge 消费 `thread/list` 的 opaque cursor，分别读取最多 500 个活动会话和 500 个归档会话，并只上传裁剪后的目录摘要。新投影的 AgentThread 历史状态为 `unloaded`；用户打开会话时，Conversation API 排队一次强类型 `thread.read`，Bridge 才调用 `thread/read(includeTurns:true)` 并投影完整消息。Web 归档/恢复通过持久化 `thread.lifecycle` 命令调用本机 `thread/archive`/`thread/unarchive`；本机 Codex 发出的 `thread/archived`/`thread/unarchived` 通知也会反向更新 Web Conversation。命令失败时回滚 AgentThread 与 Conversation 状态。
 
