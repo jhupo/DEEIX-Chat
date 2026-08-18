@@ -23,6 +23,7 @@ import (
 )
 
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
+const maxCodexDesktopStateBytes = 4 << 20
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
@@ -233,6 +234,12 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		workspace.Registered = true
 		mergeWorkspace(byID, workspace)
 	}
+	for _, workspace := range adapter.desktopWorkspaces() {
+		if len(byID) == 128 {
+			break
+		}
+		mergeWorkspace(byID, workspace)
+	}
 	for _, archived := range []bool{false, true} {
 		seenCursors := make(map[string]struct{})
 		cursor := ""
@@ -295,6 +302,63 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		return leftName < rightName
 	})
 	return workspaces, nil
+}
+
+func (adapter *CodexAdapter) desktopWorkspaces() []Workspace {
+	codexHome := strings.TrimSpace(adapter.codexHome)
+	if codexHome == "" || len(codexHome) > 4096 || !filepath.IsAbs(codexHome) || strings.ContainsRune(codexHome, 0) {
+		return nil
+	}
+	statePath := filepath.Join(codexHome, ".codex-global-state.json")
+	file, err := os.Open(statePath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxCodexDesktopStateBytes {
+		return nil
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxCodexDesktopStateBytes+1))
+	if err != nil || len(data) > maxCodexDesktopStateBytes {
+		return nil
+	}
+	var state struct {
+		SavedRoots []string          `json:"electron-saved-workspace-roots"`
+		Labels     map[string]string `json:"electron-workspace-root-labels"`
+	}
+	if json.Unmarshal(data, &state) != nil {
+		return nil
+	}
+	workspaces := make([]Workspace, 0, min(len(state.SavedRoots), 128))
+	seen := make(map[string]struct{}, len(state.SavedRoots))
+	for _, root := range state.SavedRoots {
+		root = strings.TrimSpace(root)
+		if root == "" || len(root) > 4096 || !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+			continue
+		}
+		workspace, workspaceErr := CanonicalWorkspace(root)
+		if workspaceErr != nil {
+			continue
+		}
+		if _, duplicate := seen[workspace.WorkspaceID]; duplicate {
+			continue
+		}
+		label := sanitizeDiagnosticValue(state.Labels[root], 128)
+		if label == "" {
+			label = sanitizeDiagnosticValue(state.Labels[workspace.Root], 128)
+		}
+		if label != "" {
+			workspace.Name = label
+		}
+		workspace.SessionRoots = []string{workspace.Root}
+		seen[workspace.WorkspaceID] = struct{}{}
+		workspaces = append(workspaces, workspace)
+		if len(workspaces) == 128 {
+			break
+		}
+	}
+	return workspaces
 }
 
 func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {

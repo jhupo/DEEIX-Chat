@@ -609,6 +609,21 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(root, "auth.json"), []byte("{\"OPENAI_API_KEY\":\"sub2-test-key\"}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	savedProjectRoot := filepath.Join(root, "saved-desktop-project")
+	if err = os.Mkdir(savedProjectRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	desktopState, err := json.Marshal(map[string]any{
+		"electron-saved-workspace-roots": []string{savedProjectRoot, "relative-project", filepath.Join(root, "missing-project")},
+		"electron-workspace-root-labels": map[string]string{savedProjectRoot: "Saved Desktop Project"},
+		"unrelated-private-state":        "ignored",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, ".codex-global-state.json"), desktopState, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("DEEIX_TEST_THREAD_CWD", root)
 	state, err := OpenStateStore(filepath.Join(root, "state.json"))
 	if err != nil {
@@ -681,8 +696,22 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspaces) != 1 || workspaces[0].WorkspaceID != want.WorkspaceID || workspaces[0].Root != want.Root ||
-		workspaces[0].Name != want.Name || len(workspaces[0].SessionRoots) != 1 || workspaces[0].SessionRoots[0] != want.Root {
+	if len(workspaces) != 2 {
+		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
+	}
+	var historyWorkspace, savedWorkspace *Workspace
+	for index := range workspaces {
+		if workspaces[index].WorkspaceID == want.WorkspaceID {
+			historyWorkspace = &workspaces[index]
+		}
+		if workspaces[index].Name == "Saved Desktop Project" {
+			savedWorkspace = &workspaces[index]
+		}
+	}
+	if historyWorkspace == nil || historyWorkspace.Root != want.Root || historyWorkspace.Name != want.Name ||
+		len(historyWorkspace.SessionRoots) != 1 || historyWorkspace.SessionRoots[0] != want.Root ||
+		savedWorkspace == nil || savedWorkspace.Root != savedProjectRoot || savedWorkspace.Registered ||
+		len(savedWorkspace.SessionRoots) != 1 || savedWorkspace.SessionRoots[0] != savedProjectRoot {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 	adapter.replaceWorkspaces(workspaces)
