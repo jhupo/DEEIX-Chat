@@ -43,7 +43,7 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 Codex Desktop 的 UI 私有项目状态。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；省略 `sourceKinds` 以采用 Codex Desktop 使用的交互会话集合，省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。活动会话进入所属 Workspace 的项目树；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
 
-stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。`thread/read(includeTurns=true)` 的完整历史可以大于普通资源帧，因此不能使用 4 MiB 作为所有输入的上限。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 在到期前主动重连，避免依靠服务端过期后再踢出连接。连接恢复后先冲刷未投影事件，再发送新命令。
+stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。`thread/read(includeTurns=true)` 的完整历史可以大于普通资源帧，因此不能使用 4 MiB 作为所有输入的上限。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 与 presence 由心跳在原连接上原子续期，健康连接不因租约计时器主动关闭；连接恢复后先冲刷未投影事件，再发送新命令。
 
 ## 2.1 安装、注册与更新
 

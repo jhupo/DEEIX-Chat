@@ -184,8 +184,19 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	var pong bridgeFrame
-	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" {
+	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" || pong.LeaseExpiresAt == "" {
 		t.Fatalf("unexpected pong: %#v, %v", pong, err)
+	}
+	readyLease, readyErr := time.Parse(time.RFC3339Nano, ready.LeaseExpiresAt)
+	pongLease, pongErr := time.Parse(time.RFC3339Nano, pong.LeaseExpiresAt)
+	if readyErr != nil || pongErr != nil || !pongLease.After(readyLease) {
+		t.Fatalf("heartbeat did not renew the runtime lease: ready=%q pong=%q", ready.LeaseExpiresAt, pong.LeaseExpiresAt)
+	}
+	repo.mu.Lock()
+	leaseRenewals := repo.leaseRenewals
+	repo.mu.Unlock()
+	if leaseRenewals < 2 {
+		t.Fatalf("runtime lease renewal count = %d, want at least 2", leaseRenewals)
 	}
 	if repo.pendingReads == 0 {
 		t.Fatal("runtime handshake did not drain pending conversation events")
@@ -199,7 +210,7 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if err = websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
 		t.Fatal(err)
 	}
-	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" {
+	if err = websocket.JSON.Receive(connection, &pong); err != nil || pong.Type != "pong" || pong.LeaseExpiresAt == "" {
 		t.Fatalf("workspace sync was not processed before pong: %#v, %v", pong, err)
 	}
 	repo.mu.Lock()
@@ -262,15 +273,16 @@ func TestBridgeSocketProbeDoesNotStartRuntime(t *testing.T) {
 }
 
 type socketRepo struct {
-	mu           sync.Mutex
-	tokenHash    string
-	device       domainagent.Device
-	consumed     bool
-	commands     []domainagent.Command
-	serverAck    uint64
-	bridgeAck    uint64
-	pendingReads int
-	syncCalls    int
+	mu            sync.Mutex
+	tokenHash     string
+	device        domainagent.Device
+	consumed      bool
+	commands      []domainagent.Command
+	serverAck     uint64
+	bridgeAck     uint64
+	pendingReads  int
+	syncCalls     int
+	leaseRenewals int
 }
 
 func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
@@ -441,7 +453,13 @@ func (r *socketRepo) CompleteRuntimeProof(_ context.Context, deviceID, profileID
 	}
 	return nil
 }
-func (*socketRepo) TouchRuntimePresence(context.Context, uint, uint, time.Time, time.Time) error {
+func (r *socketRepo) RenewRuntimeLease(_ context.Context, deviceID, profileID uint, now, leaseExpiresAt, presenceExpiresAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if deviceID != r.device.ID || profileID != 21 || !leaseExpiresAt.After(now) || !presenceExpiresAt.After(now) {
+		return repository.ErrConflict
+	}
+	r.leaseRenewals++
 	return nil
 }
 

@@ -1767,11 +1767,11 @@ func (r *Repo) CompleteRuntimeProof(
 	}))
 }
 
-func (r *Repo) TouchRuntimePresence(ctx context.Context, deviceID, profileID uint, now, expiresAt time.Time) error {
+func (r *Repo) RenewRuntimeLease(ctx context.Context, deviceID, profileID uint, now, leaseExpiresAt, presenceExpiresAt time.Time) error {
 	return errFor(r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&model.AgentRuntimeProfile{}).
 			Where("id = ? AND device_id = ? AND status = ? AND lease_expires_at > ?", profileID, deviceID, domainagent.RuntimeStatusReady, now).
-			Update("presence_expires_at", expiresAt)
+			Updates(map[string]any{"lease_expires_at": leaseExpiresAt, "presence_expires_at": presenceExpiresAt})
 		if result.Error != nil {
 			return result.Error
 		}

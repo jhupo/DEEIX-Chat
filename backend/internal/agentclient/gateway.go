@@ -53,8 +53,6 @@ type Gateway struct {
 	updateBridgeSeq  atomic.Uint64
 }
 
-var errLeaseRenewal = errors.New("gateway runtime lease renewal")
-
 type queuedCommand struct {
 	ID     string
 	Record commandRecord
@@ -150,10 +148,6 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 		}
 		if errors.Is(tokenErr, ErrUpdateScheduled) {
 			return ErrUpdateScheduled
-		}
-		if errors.Is(tokenErr, errLeaseRenewal) {
-			delay = time.Second
-			continue
 		}
 		if runtimeContext.Err() != nil {
 			return runtimeContext.Err()
@@ -354,8 +348,7 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if ready.Version != bridgeVersion || ready.Type != "auth.ready" || ready.ProfileID != gateway.config.ProfileID {
 		return errors.New("gateway runtime authorization failed")
 	}
-	leaseRenewalDelay, err := runtimeLeaseRenewalDelay(ready.LeaseExpiresAt, time.Now())
-	if err != nil {
+	if err = validateRuntimeLeaseExpiry(ready.LeaseExpiresAt, time.Now()); err != nil {
 		return err
 	}
 	var welcome bridgeFrame
@@ -380,8 +373,6 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	go readSocket(connection, frames)
 	heartbeat := time.NewTicker(time.Duration(welcome.HeartbeatSeconds) * time.Second / 2)
 	defer heartbeat.Stop()
-	leaseRenewal := time.NewTimer(leaseRenewalDelay)
-	defer leaseRenewal.Stop()
 	readTimeout := time.Duration(welcome.HeartbeatSeconds*2) * time.Second
 	_ = connection.SetReadDeadline(time.Now().Add(readTimeout))
 	sentThrough := welcome.AckBridgeSeq
@@ -398,8 +389,6 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			return ctx.Err()
 		case <-gateway.adapter.Done():
 			return errors.New("Codex app-server exited")
-		case <-leaseRenewal.C:
-			return errLeaseRenewal
 		case <-heartbeat.C:
 			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ping"}); err != nil {
 				return err
@@ -432,6 +421,9 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			}
 			switch frame.Type {
 			case "pong":
+				if err = validateRuntimeLeaseExpiry(frame.LeaseExpiresAt, time.Now()); err != nil {
+					return err
+				}
 			case "ack.bridge":
 				if frame.AckBridgeSeq == 0 {
 					return errors.New("gateway bridge acknowledgment is invalid")
@@ -542,12 +534,12 @@ func runtimeProofDeadline(value string, now time.Time) (time.Time, error) {
 	return expiresAt, nil
 }
 
-func runtimeLeaseRenewalDelay(value string, now time.Time) (time.Duration, error) {
+func validateRuntimeLeaseExpiry(value string, now time.Time) error {
 	expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
 	if err != nil || expiresAt.Before(now.Add(2*time.Minute)) || expiresAt.After(now.Add(30*time.Minute)) {
-		return 0, errors.New("gateway runtime lease expiry is invalid")
+		return errors.New("gateway runtime lease expiry is invalid")
 	}
-	return expiresAt.Add(-time.Minute).Sub(now), nil
+	return nil
 }
 
 func (gateway *Gateway) commandWorker(ctx context.Context) {

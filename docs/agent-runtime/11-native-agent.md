@@ -86,7 +86,7 @@ Windows 安装和更新会先停止 `DEEIX Agent Bridge` 与 `DEEIX Agent` 两�
 
 该命令由 Agent manifest 的 `agent.update` 能力门控，服务端不会向未声明能力的旧客户端下发。首次使用 Web 更新前，旧客户端需要通过账户页的安装命令手动升级到支持 `agent.update` 的版本；之后可从 Web 触发后续更新。Web 更新不重建数据库、Redis、上传文件或 Codex 登录状态，也不会把 Codex CLI 或 API key 下载到设备。
 
-如果 app-server 因历史帧过大、进程退出或连接断开，Agent 会关闭受污染的本地 RPC、重启 app-server，并用抖动退避重新建立 WSS。运行时 lease 会在到期前主动重连；旧 runtime 的刷新循环和命令 worker 会在重建时取消，避免重复扫描和重复执行。设备状态只有完成 runtime proof、workspace sync 和 pending projection drain 后才进入稳定在线。
+如果 app-server 因历史帧过大、进程退出或连接断开，Agent 会关闭受污染的本地 RPC、重启 app-server，并用抖动退避重新建立 WSS。正常 WSS 由 30 秒心跳持续续期 runtime lease 与 presence，不做周期性主动断线；只有心跳超时、网络故障、服务重启、设备撤销或校验失败才进入抖动重连。旧 runtime 的刷新循环和命令 worker 会在重建时取消，避免重复扫描和重复执行。设备状态只有完成 runtime proof、workspace sync 和 pending projection drain 后才进入稳定在线。
 
 ## app-server 映射
 

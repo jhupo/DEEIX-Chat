@@ -377,8 +377,8 @@ App Server 的 `attestation/generate` 继续保持 lock 中的 `disabled` dispos
 
 ### 6.4 生命周期
 
-RuntimeProfile 状态为 `unverified -> proving -> ready -> expired/revoked/mismatch`。首次绑定、Bridge 重连、`account/updated`、
-本地 auth rotation 以及 proof lease 到期前都重新 challenge。证明失败后停止派发新 command；已接受 turn 由 app-server 最终事件
+RuntimeProfile 状态为 `unverified -> proving -> ready -> expired/revoked/mismatch`。首次绑定和 Bridge 重连执行 challenge；ready 连接通过
+认证心跳原子续期 lease 与 presence。设备撤销会立即关闭连接；本地 auth rotation 在下一次连接时重新证明，期间上游认证错误按 turn 终态返回。证明失败后停止派发新 command；已接受 turn 由 app-server 最终事件
 收敛，历史 projection 仍可读。Sub2 余额、key quota 和实际 key 可用性仍由每次本地模型请求的 gateway response 决定。
 
 为了发送 challenge，WSS 先建立一个只有 `auth.prove`、`disconnect`、`heartbeat` 的隔离通道；proof 通过前不注册 ready runtime、

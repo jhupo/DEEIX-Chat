@@ -429,12 +429,15 @@ func (s *Service) CompleteRuntimeProof(
 	return leaseExpiresAt, nil
 }
 
-func (s *Service) TouchRuntimePresence(ctx context.Context, identity *ConnectionIdentity, profileID uint) error {
+func (s *Service) RenewRuntimeLease(ctx context.Context, identity *ConnectionIdentity, profileID uint) (time.Time, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || profileID == 0 {
-		return ErrInvalidInput
+		return time.Time{}, ErrInvalidInput
 	}
 	now := s.now().UTC()
-	return s.repo.TouchRuntimePresence(ctx, identity.InternalDeviceID, profileID, now, now.Add(runtimePresenceTTL))
+	leaseExpiresAt := now.Add(runtimeLeaseTTL)
+	return leaseExpiresAt, s.repo.RenewRuntimeLease(
+		ctx, identity.InternalDeviceID, profileID, now, leaseExpiresAt, now.Add(runtimePresenceTTL),
+	)
 }
 
 func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdentity, challenge *RuntimeChallengeResult, registrations []WorkspaceRegistration) error {

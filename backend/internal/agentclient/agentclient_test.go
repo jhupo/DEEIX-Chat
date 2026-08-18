@@ -514,13 +514,12 @@ func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {
 	}
 }
 
-func TestRuntimeLeaseRenewsBeforeExpiry(t *testing.T) {
+func TestValidateRuntimeLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 8, 18, 1, 0, 0, 0, time.UTC)
-	delay, err := runtimeLeaseRenewalDelay(now.Add(10*time.Minute).Format(time.RFC3339Nano), now)
-	if err != nil || delay != 9*time.Minute {
-		t.Fatalf("runtimeLeaseRenewalDelay() = %s, %v", delay, err)
+	if err := validateRuntimeLeaseExpiry(now.Add(10*time.Minute).Format(time.RFC3339Nano), now); err != nil {
+		t.Fatalf("validateRuntimeLeaseExpiry() error = %v", err)
 	}
-	if _, err = runtimeLeaseRenewalDelay(now.Add(time.Minute).Format(time.RFC3339Nano), now); err == nil {
+	if err := validateRuntimeLeaseExpiry(now.Add(time.Minute).Format(time.RFC3339Nano), now); err == nil {
 		t.Fatal("accepted a runtime lease without a renewal window")
 	}
 }

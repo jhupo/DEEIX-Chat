@@ -267,7 +267,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		return
 	}
 	ctx, cancel = socketRuntimeAuthContext()
-	err = h.service.TouchRuntimePresence(ctx, identity, challenge.Profile.ID)
+	leaseExpiresAt, err = h.service.RenewRuntimeLease(ctx, identity, challenge.Profile.ID)
 	cancel()
 	if err != nil {
 		h.rejectBridge(connection, identity, "runtime_presence_rejected", "The runtime connection could not be activated.", err)
@@ -341,12 +341,15 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					return
 				}
 				ctx, cancel = socketOperationContext()
-				err = h.service.TouchRuntimePresence(ctx, identity, challenge.Profile.ID)
+				leaseExpiresAt, err = h.service.RenewRuntimeLease(ctx, identity, challenge.Profile.ID)
 				cancel()
 				if err != nil {
 					return
 				}
-				if err := websocket.JSON.Send(connection, bridgeFrame{Version: bridgeVersion, Type: "pong"}); err != nil {
+				resetTimer(leaseTimer, time.Until(leaseExpiresAt))
+				if err := websocket.JSON.Send(connection, bridgeFrame{
+					Version: bridgeVersion, Type: "pong", LeaseExpiresAt: leaseExpiresAt.Format(time.RFC3339Nano),
+				}); err != nil {
 					return
 				}
 				if sentThrough == identity.LastAckedServerSeq {
@@ -472,6 +475,16 @@ func readBridgeFrames(connection *websocket.Conn, output chan<- bridgeRead, stop
 			return
 		}
 	}
+}
+
+func resetTimer(timer *time.Timer, delay time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(delay)
 }
 
 func nextBridgeDeadline(leaseExpiresAt time.Time) time.Time {
