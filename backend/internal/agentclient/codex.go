@@ -359,6 +359,15 @@ func (adapter *CodexAdapter) desktopWorkspaces() []Workspace {
 			break
 		}
 	}
+	// Some Desktop versions persist projectless IDs without root hints. The
+	// hidden Recent workspace still needs an internal anchor so it can be
+	// synchronized; each thread keeps its real cwd from thread/list and uses
+	// that cwd when resumed. The Codex home is never exposed as a project.
+	if recentRoot == "" && len(projectless) > 0 {
+		if workspace, workspaceErr := canonicalWorkspaceAsConfiguredUser(codexHome); workspaceErr == nil {
+			recentRoot = workspace.Root
+		}
+	}
 	if recentRoot != "" && len(projectless) > 0 {
 		sum := sha256.Sum256([]byte("deeix:recent:" + recentRoot))
 		workspaces = append(workspaces, Workspace{WorkspaceID: "workspace-recent-" + hex.EncodeToString(sum[:12]), Root: recentRoot, Name: "Recent", Hidden: true, SessionRoots: []string{recentRoot}, ThreadIDs: projectless})

@@ -9,7 +9,7 @@
 - 活动 thread 由 app-server 返回，归档 thread 使用同一方法并设置 `archived: true` 返回。
 - app-server 返回 thread 的 ID、标题、预览、`cwd`、状态与时间，但当前锁定 schema 没有 Desktop project ID，也没有 `project/*` 方法。
 - Desktop 的“项目”和“最近”互斥。项目中的 thread 不再重复进入“最近”。
-- Desktop 的“最近”对应 `.codex-global-state.json` 中 `projectless-thread-ids` 标记的活动 thread。
+- Desktop 的“最近”对应 `.codex-global-state.json` 中 `projectless-thread-ids` 标记的活动 thread。部分 Desktop 版本不保存这些 thread 的 `thread-workspace-root-hints`；Agent 仍会创建一个仅用于同步的隐藏 Recent scope，并以 Codex home 作为内部锚点，实际恢复/继续会话始终使用 `thread/list` 返回的真实 `cwd`。
 - Desktop 项目来自 `local-projects` 的名称和 `rootPaths`；thread 的最近归属来自 `projectless-thread-ids`，项目会话按项目 `rootPaths` 请求 app-server。
 - 归档 thread 不进入项目树或“最近”，只进入已归档筛选。
 

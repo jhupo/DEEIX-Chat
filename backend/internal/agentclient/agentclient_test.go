@@ -777,6 +777,36 @@ func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {
 	}
 }
 
+func TestDesktopWorkspacesCreatesRecentScopeWithoutRootHints(t *testing.T) {
+	root, err := os.MkdirTemp(".", ".agent-desktop-recent-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	state := map[string]any{
+		"projectless-thread-ids": []string{"thread-recent-1", "thread-recent-2"},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(root, ".codex-global-state.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{codexHome: root}
+	workspaces := adapter.desktopWorkspaces()
+	if len(workspaces) != 1 || !workspaces[0].Hidden || workspaces[0].Name != "Recent" {
+		t.Fatalf("recent workspace = %#v", workspaces)
+	}
+	if len(workspaces[0].ThreadIDs) != 2 || workspaces[0].Root != root {
+		t.Fatalf("recent workspace membership = %#v", workspaces[0])
+	}
+}
+
 func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	root, err := os.MkdirTemp(".", ".agent-codex-workspace-")
 	if err != nil {
