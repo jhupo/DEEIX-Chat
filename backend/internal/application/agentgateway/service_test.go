@@ -188,3 +188,16 @@ func TestRuntimeProfileResourceCapabilities(t *testing.T) {
 		t.Fatal("resource capability crossed manifest scope")
 	}
 }
+
+func TestWorkspaceRevisionIsOptionalAndBounded(t *testing.T) {
+	for _, value := range []string{"", "0123456789abcdef01234567"} {
+		if !validWorkspaceRevision(value) {
+			t.Fatalf("valid workspace revision rejected: %q", value)
+		}
+	}
+	for _, value := range []string{"0123456789abcdef0123456", "0123456789abcdef012345678", "0123456789abcdef0123456g"} {
+		if validWorkspaceRevision(value) {
+			t.Fatalf("invalid workspace revision accepted: %q", value)
+		}
+	}
+}

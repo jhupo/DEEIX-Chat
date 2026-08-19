@@ -462,7 +462,7 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 	for _, registration := range registrations {
 		registration.WorkspaceID, registration.Name, registration.Revision = strings.TrimSpace(registration.WorkspaceID), strings.TrimSpace(registration.Name), strings.TrimSpace(registration.Revision)
 		if len(registration.WorkspaceID) > 64 || !validOpaqueRef(registration.WorkspaceID) ||
-			registration.Name == "" || utf8.RuneCountInString(registration.Name) > 128 || !validHex(registration.Revision, 24) {
+			registration.Name == "" || utf8.RuneCountInString(registration.Name) > 128 || !validWorkspaceRevision(registration.Revision) {
 			return ErrInvalidInput
 		}
 		if _, exists := seen[registration.WorkspaceID]; exists {
@@ -501,6 +501,10 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 		}
 	}
 	return nil
+}
+
+func validWorkspaceRevision(value string) bool {
+	return value == "" || validHex(value, 24)
 }
 
 func runtimeProfileHasResource(profile *domainagent.RuntimeProfile, scope, name string) bool {
