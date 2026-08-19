@@ -1258,13 +1258,17 @@ func (s *Service) AckServerCommands(ctx context.Context, identity *ConnectionIde
 
 func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionIdentity, bridgeSeq, serverSeq uint64, commandID string, outcome json.RawMessage) (uint64, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || bridgeSeq == 0 || serverSeq == 0 ||
-		!validPublicID(commandID, "agcmd") || len(outcome) == 0 || len(outcome) > 2*1024*1024 || !validTerminalOutcome(outcome) {
+		!validPublicID(commandID, "agcmd") || len(outcome) == 0 || len(outcome) > 2*1024*1024 {
 		return 0, ErrInvalidInput
 	}
 	payloadHash := sha256.Sum256(outcome)
+	normalized, err := normalizeBridgeJSON(outcome)
+	if err != nil || !validTerminalOutcome(normalized) {
+		return 0, ErrInvalidInput
+	}
 	acknowledged, err := s.repo.ApplyTerminalFrame(
 		ctx, identity.InternalDeviceID, bridgeSeq, serverSeq, commandID,
-		hex.EncodeToString(payloadHash[:]), string(outcome), s.now().UTC(),
+		hex.EncodeToString(payloadHash[:]), string(normalized), s.now().UTC(),
 	)
 	if err != nil {
 		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
@@ -1281,7 +1285,12 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 
 func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdentity, runtimeProfileID uint, bridgeSeq uint64, event json.RawMessage) (uint64, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || runtimeProfileID == 0 || bridgeSeq == 0 ||
-		len(event) == 0 || len(event) > 2*1024*1024 || !validProviderEvent(event) {
+		len(event) == 0 || len(event) > 2*1024*1024 {
+		return 0, ErrInvalidInput
+	}
+	payloadHash := sha256.Sum256(event)
+	normalized, err := normalizeBridgeJSON(event)
+	if err != nil || !validProviderEvent(normalized) {
 		return 0, ErrInvalidInput
 	}
 	var envelope struct {
@@ -1293,10 +1302,9 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		OccurredAt       time.Time       `json:"occurredAt"`
 		Payload          json.RawMessage `json:"payload"`
 	}
-	if json.Unmarshal(event, &envelope) != nil || !json.Valid(envelope.Payload) {
+	if json.Unmarshal(normalized, &envelope) != nil || !json.Valid(envelope.Payload) {
 		return 0, ErrInvalidInput
 	}
-	payloadHash := sha256.Sum256(event)
 	applied, err := s.repo.ApplyEventFrame(
 		ctx, identity.InternalDeviceID, runtimeProfileID, bridgeSeq,
 		hex.EncodeToString(payloadHash[:]), &domainagent.Event{
@@ -1319,6 +1327,45 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 	}
 	s.notifyUser(identity.UserID)
 	return applied.Acknowledged, nil
+}
+
+func normalizeBridgeJSON(raw json.RawMessage) (json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, ErrInvalidInput
+	}
+	return json.Marshal(normalizeBridgeJSONValue(value))
+}
+
+func normalizeBridgeJSONValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return strings.Map(func(character rune) rune {
+			if character < 32 && character != '\n' && character != '\r' && character != '\t' {
+				return '\uFFFD'
+			}
+			return character
+		}, strings.ToValidUTF8(typed, "\uFFFD"))
+	case []any:
+		for index := range typed {
+			typed[index] = normalizeBridgeJSONValue(typed[index])
+		}
+		return typed
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			normalizedKey, _ := normalizeBridgeJSONValue(key).(string)
+			result[normalizedKey] = normalizeBridgeJSONValue(item)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 func (s *Service) FlushPendingConversationEvents(ctx context.Context, identity *ConnectionIdentity) error {

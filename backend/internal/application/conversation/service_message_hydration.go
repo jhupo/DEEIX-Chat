@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"strings"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
@@ -83,8 +84,39 @@ func (s *Service) hydrateMessageProcessTraces(ctx context.Context, items []model
 			continue
 		}
 		items[i].ProcessTrace = buildMessageProcessTraceDTO(byMessageID[items[i].ID], eventsByMessageID[items[i].ID])
+		attachReasoningSummaryTrace(&items[i])
 	}
 	return nil
+}
+
+func attachReasoningSummaryTrace(message *model.Message) {
+	if message == nil || message.Role != "assistant" || strings.TrimSpace(message.ReasoningContent) == "" {
+		return
+	}
+	if message.ProcessTrace == nil {
+		message.ProcessTrace = &model.MessageProcessTrace{Enabled: true}
+	}
+	if message.ProcessTrace.UpstreamThink != nil {
+		return
+	}
+	status := messageTraceStatusCompleted
+	if message.Status == "pending" {
+		status = messageTraceStatusStreaming
+	} else if message.Status == "error" {
+		status = messageTraceStatusError
+	}
+	message.ProcessTrace.Enabled = true
+	message.ProcessTrace.UpstreamThink = &model.MessageTraceBlock{
+		ContentMarkdown: strings.TrimSpace(message.ReasoningContent),
+		Status:          status,
+		Stage:           "think",
+		UpdatedAt:       message.UpdatedAt,
+	}
+	message.ProcessTrace.Status = aggregateTraceStatusFromBlocks(
+		message.ProcessTrace.Process,
+		message.ProcessTrace.Tools,
+		message.ProcessTrace.UpstreamThink,
+	)
 }
 
 func buildMessageProcessTraceDTO(rows []model.MessageTrace, eventRows []model.MessageTraceEventRow) *model.MessageProcessTrace {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,24 @@ func TestAgentPublicIDValidation(t *testing.T) {
 		if validPublicID(value, "agd") {
 			t.Fatalf("invalid device public ID accepted: %q", value)
 		}
+	}
+}
+
+func TestNormalizeBridgeJSONReplacesPostgresNUL(t *testing.T) {
+	normalized, err := normalizeBridgeJSON(json.RawMessage(`{"kind":"item/completed","payload":{"output":"before\u0000after"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(normalized), `\u0000`) {
+		t.Fatalf("PostgreSQL-incompatible NUL was retained: %s", normalized)
+	}
+	var value struct {
+		Payload struct {
+			Output string `json:"output"`
+		} `json:"payload"`
+	}
+	if err = json.Unmarshal(normalized, &value); err != nil || value.Payload.Output != "before\uFFFDafter" {
+		t.Fatalf("normalized payload = %q, %v", value.Payload.Output, err)
 	}
 }
 

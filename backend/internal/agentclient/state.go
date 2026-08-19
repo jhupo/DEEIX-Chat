@@ -1,15 +1,18 @@
 package agentclient
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -155,6 +158,11 @@ func (store *StateStore) MarkStarted(commandID string) error {
 func (store *StateStore) AppendTerminal(commandID string, outcome json.RawMessage) (outgoingFrame, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	normalized, err := normalizeBridgeJSON(outcome)
+	if err != nil {
+		return outgoingFrame{}, errors.New("gateway terminal outcome is invalid")
+	}
+	outcome = normalized
 	record, ok := store.state.Commands[commandID]
 	if !ok || !validTerminalOutcome(outcome) {
 		return outgoingFrame{}, errors.New("gateway terminal outcome is invalid")
@@ -183,6 +191,11 @@ func (store *StateStore) AppendTerminal(commandID string, outcome json.RawMessag
 func (store *StateStore) AppendEvent(event json.RawMessage) (outgoingFrame, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	normalized, err := normalizeBridgeJSON(event)
+	if err != nil {
+		return outgoingFrame{}, errors.New("provider event is invalid")
+	}
+	event = normalized
 	if !validProviderEvent(event) {
 		return outgoingFrame{}, errors.New("provider event is invalid")
 	}
@@ -195,6 +208,45 @@ func (store *StateStore) AppendEvent(event json.RawMessage) (outgoingFrame, erro
 		return outgoingFrame{}, err
 	}
 	return frame, nil
+}
+
+func normalizeBridgeJSON(raw json.RawMessage) (json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("JSON contains trailing data")
+	}
+	return json.Marshal(normalizeBridgeJSONValue(value))
+}
+
+func normalizeBridgeJSONValue(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return strings.Map(func(character rune) rune {
+			if character < 32 && character != '\n' && character != '\r' && character != '\t' {
+				return '\uFFFD'
+			}
+			return character
+		}, strings.ToValidUTF8(typed, "\uFFFD"))
+	case []any:
+		for index := range typed {
+			typed[index] = normalizeBridgeJSONValue(typed[index])
+		}
+		return typed
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			normalizedKey, _ := normalizeBridgeJSONValue(key).(string)
+			result[normalizedKey] = normalizeBridgeJSONValue(item)
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 func (store *StateStore) PendingOutgoing(after uint64) []outgoingFrame {

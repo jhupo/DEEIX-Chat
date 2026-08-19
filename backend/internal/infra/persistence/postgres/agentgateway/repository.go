@@ -1359,6 +1359,9 @@ func loadAppliedEventFrame(tx *gorm.DB, bridgeFrameID uint, acknowledged uint64,
 	}
 	result.Acknowledged = acknowledged
 	result.Event = *toDomainEvent(event)
+	if event.ConversationProjectedAt != nil {
+		return nil
+	}
 	if event.ThreadID == nil {
 		return nil
 	}

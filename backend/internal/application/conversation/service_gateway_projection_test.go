@@ -3,6 +3,8 @@ package conversation
 import (
 	"testing"
 	"time"
+
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
 
 func TestNormalizeGatewayExecutionEvent(t *testing.T) {
@@ -21,6 +23,20 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 	})
 	if err != nil || terminal.TerminalStatus != "failed" || terminal.ErrorMessage != "boom" || terminal.LatencyMS != 42 {
 		t.Fatalf("terminal projection = %#v, %v", terminal, err)
+	}
+}
+
+func TestAttachReasoningSummaryTrace(t *testing.T) {
+	updatedAt := time.Now().UTC()
+	message := model.Message{
+		Role: "assistant", Status: "success", ReasoningContent: "checked configuration", UpdatedAt: updatedAt,
+	}
+	attachReasoningSummaryTrace(&message)
+	if message.ProcessTrace == nil || message.ProcessTrace.UpstreamThink == nil ||
+		message.ProcessTrace.UpstreamThink.ContentMarkdown != "checked configuration" ||
+		message.ProcessTrace.UpstreamThink.Status != messageTraceStatusCompleted ||
+		!message.ProcessTrace.UpstreamThink.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("reasoning trace = %#v", message.ProcessTrace)
 	}
 }
 

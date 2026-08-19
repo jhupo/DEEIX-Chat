@@ -788,6 +788,15 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 			t.Fatalf("conversation binding was lost: %#v", event)
 		}
 	}
+	if err := repo.MarkConversationEventProjected(context.Background(), storedEvent.ID, now.Add(15*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := repo.ApplyEventFrame(
+		context.Background(), device.ID, profile.ID, 1, strings.Repeat("2", 64), earlyCompleted, now.Add(16*time.Second),
+	)
+	if err != nil || replayed.Acknowledged != 8 || replayed.ConversationID != 0 || replayed.RunID != "" {
+		t.Fatalf("projected bridge replay was republished: %#v %v", replayed, err)
+	}
 }
 
 func jsonEqual(left, right string) bool {

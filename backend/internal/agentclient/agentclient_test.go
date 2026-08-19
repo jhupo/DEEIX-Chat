@@ -533,6 +533,37 @@ func TestStatePersistsCommandOutcomeAndSourceMapping(t *testing.T) {
 	}
 }
 
+func TestStateSanitizesNewPostgresIncompatibleBridgeEvents(t *testing.T) {
+	poisoned := json.RawMessage(`{"kind":"item/completed","occurredAt":"2026-08-19T01:24:03Z","payload":{"item":{"aggregatedOutput":"before\u0000after"}}}`)
+	assertSanitized := func(t *testing.T, raw json.RawMessage) {
+		t.Helper()
+		if strings.Contains(string(raw), `\u0000`) {
+			t.Fatalf("PostgreSQL-incompatible NUL was retained: %s", raw)
+		}
+		var event struct {
+			Payload struct {
+				Item struct {
+					AggregatedOutput string `json:"aggregatedOutput"`
+				} `json:"item"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &event); err != nil || event.Payload.Item.AggregatedOutput != "before\uFFFDafter" {
+			t.Fatalf("sanitized event = %q, %v", event.Payload.Item.AggregatedOutput, err)
+		}
+	}
+
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := store.AppendEvent(poisoned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSanitized(t, frame.Event)
+}
+
 func TestParseAgentCommandRejectsUnknownField(t *testing.T) {
 	_, err := parseAgentCommand(json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"models"},"extra":true}`))
 	if err == nil {
