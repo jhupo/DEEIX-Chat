@@ -240,7 +240,8 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		workspace.Name = configured.Name
 		mergeWorkspace(byID, workspace)
 	}
-	for _, workspace := range adapter.desktopWorkspaces() {
+	desktopWorkspaces := adapter.desktopWorkspaces()
+	for _, workspace := range desktopWorkspaces {
 		if len(byID) == 128 {
 			break
 		}
@@ -249,7 +250,9 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 		}
 		mergeWorkspace(byID, workspace)
 	}
-	adapter.mergeUnassignedRecentThreads(ctx, byID, excludedWorkspaceIDs)
+	if len(desktopWorkspaces) > 0 {
+		adapter.mergeUnassignedRecentThreads(ctx, byID, excludedWorkspaceIDs)
+	}
 	workspaces := make([]Workspace, 0, len(byID))
 	for _, workspace := range byID {
 		sort.Strings(workspace.SessionRoots)
@@ -266,7 +269,7 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 }
 
 func (adapter *CodexAdapter) mergeUnassignedRecentThreads(ctx context.Context, workspaces map[string]Workspace, excluded map[string]struct{}) {
-	if ctx == nil || len(workspaces) >= 128 {
+	if ctx == nil || adapter.rpc == nil || len(workspaces) >= 128 {
 		return
 	}
 	result, err := adapter.listSessions(ctx, map[string]any{
@@ -287,6 +290,9 @@ func (adapter *CodexAdapter) mergeUnassignedRecentThreads(ctx context.Context, w
 		threadID = strings.TrimSpace(threadID)
 		status, _ := thread["status"].(string)
 		if threadID == "" || status != "active" {
+			continue
+		}
+		if cwd, _ := thread["cwd"].(string); strings.TrimSpace(cwd) == "" {
 			continue
 		}
 		assigned := false
