@@ -214,7 +214,7 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	return manifest
 }
 
-func (adapter *CodexAdapter) DiscoverWorkspaces(_ context.Context) ([]Workspace, error) {
+func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
 	adapter.workspaceMu.RLock()
 	configuredWorkspaces := make([]Workspace, 0, len(adapter.workspaces))
 	excludedWorkspaceIDs := make(map[string]struct{})
@@ -249,6 +249,7 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(_ context.Context) ([]Workspace,
 		}
 		mergeWorkspace(byID, workspace)
 	}
+	adapter.mergeUnassignedRecentThreads(ctx, byID, excludedWorkspaceIDs)
 	workspaces := make([]Workspace, 0, len(byID))
 	for _, workspace := range byID {
 		sort.Strings(workspace.SessionRoots)
@@ -262,6 +263,85 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(_ context.Context) ([]Workspace,
 		return leftName < rightName
 	})
 	return workspaces, nil
+}
+
+func (adapter *CodexAdapter) mergeUnassignedRecentThreads(ctx context.Context, workspaces map[string]Workspace, excluded map[string]struct{}) {
+	if ctx == nil || len(workspaces) >= 128 {
+		return
+	}
+	result, err := adapter.listSessions(ctx, map[string]any{
+		"limit": 100, "archived": false, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
+	})
+	if err != nil {
+		return
+	}
+	root, _ := result.(map[string]any)
+	rawItems, _ := root["data"].([]any)
+	threadIDs := make(map[string]struct{})
+	for _, raw := range rawItems {
+		thread, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		threadID, _ := thread["id"].(string)
+		threadID = strings.TrimSpace(threadID)
+		status, _ := thread["status"].(string)
+		if threadID == "" || status != "active" {
+			continue
+		}
+		assigned := false
+		for _, workspace := range workspaces {
+			if workspace.Hidden {
+				if _, exists := workspace.ThreadIDs[threadID]; exists {
+					assigned = true
+					break
+				}
+				continue
+			}
+			if _, exists := workspace.ThreadIDs[threadID]; exists || sessionCWDWithinRoots(thread, workspace.SessionRoots) {
+				assigned = true
+				break
+			}
+		}
+		if !assigned {
+			threadIDs[threadID] = struct{}{}
+		}
+	}
+	if len(threadIDs) == 0 {
+		return
+	}
+	var anchor string
+	for _, workspace := range workspaces {
+		if workspace.Hidden && strings.TrimSpace(workspace.Root) != "" {
+			anchor = workspace.Root
+			break
+		}
+	}
+	if anchor == "" {
+		codexHome := strings.TrimSpace(adapter.codexHome)
+		if workspace, resolveErr := canonicalWorkspaceAsConfiguredUser(codexHome); resolveErr == nil {
+			anchor = workspace.Root
+		}
+	}
+	if anchor == "" {
+		return
+	}
+	sum := sha256.Sum256([]byte("deeix:recent:" + anchor))
+	recentID := "workspace-recent-" + hex.EncodeToString(sum[:12])
+	if _, blocked := excluded[recentID]; blocked {
+		return
+	}
+	recent, exists := workspaces[recentID]
+	if !exists {
+		recent = Workspace{WorkspaceID: recentID, Root: anchor, Name: "Recent", Hidden: true, SessionRoots: []string{anchor}, ThreadIDs: make(map[string]struct{})}
+	}
+	if recent.ThreadIDs == nil {
+		recent.ThreadIDs = make(map[string]struct{})
+	}
+	for threadID := range threadIDs {
+		recent.ThreadIDs[threadID] = struct{}{}
+	}
+	workspaces[recentID] = recent
 }
 
 func (adapter *CodexAdapter) desktopWorkspaces() []Workspace {
