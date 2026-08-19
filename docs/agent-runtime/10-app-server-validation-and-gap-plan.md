@@ -1,5 +1,7 @@
 # Codex app-server 功能验收与差距计划
 
+> Desktop 项目、Recent 与归档的最新实测和投影规则见 [12-codex-desktop-projects-and-recents.md](./12-codex-desktop-projects-and-recents.md)。其中 `local-projects` / `projectless-thread-ids` 的互斥规则覆盖本文件较早的 saved roots 与“双重展示”描述。
+
 > 验收日期：2026-08-14。官方依据为 [Codex app-server 文档](https://learn.chatgpt.com/docs/app-server)，实现依据为仓库锁定的 `rust-v0.147.0` schema、`CodexAdapter` 和统一 Conversation Gateway 链路。
 
 ## 1. 结论
@@ -109,15 +111,15 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地项目与会话历史 | 只读 Desktop `electron-saved-workspace-roots` 补齐已保存项目；全局 `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 和旧版未分类的 `unknown` 顶层会话，并按 canonical `cwd` 归属历史；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；活动会话同时显示在所属项目和“最近”；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；Desktop 状态只提供项目根与标签且不离开设备，历史仍以 app-server 为权威；不混入明确的 `subAgent*` 子线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
-| 管理工作项目 | `0.147.0` 稳定锁没有 `project/*`；官方 `main` 已出现实验 `project/list|read|create|import|update|move|delete` | 项目内 Conversation 已支持置顶、改名、归档和删除；工作项目行当前只有新建对话与展开 | 待选定包含 `project/*` 的正式 release 并生成 experimental schema lock 后整体替换；不建立 `project/*` 与 `cwd` 双数据源 |
+| 读取本地项目与会话历史 | 读取 Desktop `local-projects.rootPaths`、`projectless-thread-ids` 和 root hints；app-server `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 和旧版未分类的 `unknown` 顶层会话，项目按 root/assignment 过滤，Recent 按 projectless ID 精确过滤；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；项目会话只显示在所属项目，projectless 会话只显示在“最近”；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；Desktop 状态只在设备端读取，历史仍以 app-server 为权威；不混入明确的 `subAgent*` 子线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
+| 管理工作项目 | `0.147.0` 稳定锁没有 `project/*`；官方 `main` 已出现实验 `project/list|read|create|import|update|move|delete` | 项目内 Conversation 支持置顶、改名、归档和删除；Web 添加的 managed Workspace 支持改显示名和从 DEEIX 移除，Desktop 自动发现项目保持只读 | 已接通 Workspace 控制面；移除只写排除记录并下线投影，本地目录、文件和历史保留。待正式 `project/*` release 后再评估 Desktop 项目写操作 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；支持文本、已授权附件、Workspace Skill 与 App mention |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |
 | 模型生成任务 | 每个本地回合有 app-server turn | Cloud 已持久化 Run，gateway 额外持久化 AgentTurn，并支持 run list、stream resume 与 interrupt | Run 只作为会话运行状态；本轮不增加独立任务入口 |
 | 模型生成 Plan | `turn/plan/updated`、`item/plan/delta` 已映射 | 当前只作为通用 `execution_event` 传输和 AgentEvent 保存 | 事件已接收，缺少结构化 Plan 投影、历史恢复和步骤 UI |
 | Thread Goal | `thread/goal/updated`、`thread/goal/cleared` 已映射；`set|get|clear` 仍为 extension | 当前只保存通用事件，没有 Goal 状态或控制面 | 本地模型产生的 Goal 可到达 Cloud，Web 尚未展示或管理 |
-| 新建本地项目 | Bridge 提供 `workspace.register`，本机完成路径校验、配置持久化和 Workspace 同步 | Web 在所选在线设备上添加本地文件夹，等待命令终态后刷新项目树 | 已接通；路径操作以配置用户身份执行，命令终态后 Cloud 清除暂存路径 |
+| 新建本地项目 | Bridge 提供 `workspace.register`，本机完成路径校验、配置持久化和 Workspace 同步 | Web 在所选在线设备上添加本地文件夹，等待命令终态后刷新项目树 | 已接通；路径操作以配置用户身份执行，命令终态后 Cloud 清除暂存路径；managed Workspace 后续可 rename/unregister |
 | 删除本地会话 | `thread/delete` 已映射并实测 | Web 通过持久化 `thread.lifecycle` 命令删除本机 thread，设备确认且待投影事件清空后再软删除 Conversation | 已接通；本地工作区文件保留，设备拒绝时恢复会话状态 |
 | 归档/恢复本地会话 | `thread/archive`、`thread/unarchive` 已映射并实测 | Web 归档通过持久化 `thread.lifecycle` 命令同步到设备；本机 Codex 的归档/恢复通知同步更新 Conversation | 已接通；命令失败时回滚 Thread 与 Conversation 状态 |
 | 使用本地 Skill | Workspace `skills/list` 已映射并实测 | `/` 从 Conversation Resource API 读取当前设备/Workspace 快照，并提交 opaque ref | 已接通；Bridge 在本机解析为 `UserInput.skill`，路径不进入 Cloud |
@@ -125,7 +127,7 @@ deeix-agent doctor
 | 管理本地 Plugin 包 | Profile `plugin/list` 已映射并实测 | Web 不把只读 Plugin 包伪装成可执行 mention | 只读快照已具备；read/install/uninstall/share 仍待独立管理接口 |
 | 展示文件 Diff | `turn/diff/updated`、`item/fileChange/patchUpdated` 已映射；item/event 可持久化 | Conversation SSE 会下发通用 `execution_event`，前端尚未解析，刷新后也没有 Diff 历史查询入口 | 传输与存储基础已具备，UI 和历史恢复待接入 |
 
-聊天和工作共用原有导航、最近会话、项目、搜索和“插件”入口，并保持相同的“置顶、项目、最近”顺序；没有置顶会话时不显示“置顶”区。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation。Cloud Project 与设备 Workspace 都使用可展开项目树；工作中的活动、未置顶线程同时显示在所属项目和按更新时间排序的“最近”，聊天模式仍只把未分配项目的会话放进“最近”。归档会话只在“所有对话”的归档筛选中显示。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
+聊天和工作共用原有导航、最近会话、项目、搜索和“插件”入口，并保持相同的“置顶、项目、最近”顺序；没有置顶会话时不显示“置顶”区。Workspace/canonical `cwd` 投影为 Project，app-server thread 投影为 Conversation。Cloud Project 与设备 Workspace 都使用可展开项目树；工作中的项目会话只显示在所属项目，projectless 会话只显示在“最近”，聊天模式仍只把未分配项目的会话放进“最近”。归档会话只在“所有对话”的归档筛选中显示。主输入框的 `/` 只选择 Skill，`@` 只选择 Plugin 能力；模型、文件和 Prompt 使用各自已有入口。工作模式不把平台 Skill/MCP 资源带入 gateway 请求。前端只向 Conversation/Project/Resource 业务接口提交 `execution` 与 `device` 上下文；Workspace 到 Project、thread 到 Conversation、provider resource 到统一资源 DTO 的转换属于后端 adapter。布局和页面组件不直接请求 `/agent/*`。
 
 本轮已撤下独立“任务”入口和设备专用 Plugin 页面。“插件”仍使用 `/skills-prompt` 原入口展示平台 Skill/Prompt；工作输入框通过 Conversation Resource API 使用本地 Workspace Skill 与可 mention App，不新增第二套页面。设置中的设备管理仍可使用设备 API，因为该页面本身就是设备控制面。
 
@@ -287,7 +289,7 @@ deeix-agent doctor
 1. Conversation 的 gateway executor 使用单一 typed lifecycle 方法，只允许 `archive|unarchive|delete`，并根据 Conversation 绑定生成持久化 `thread.lifecycle` 命令。
 2. Web 归档/恢复会立即更新 AgentThread 与 Conversation 的目录状态，再由本机 `thread/archive|unarchive` 完成真实生命周期；命令失败时恢复原状态。本机 `thread/archived|unarchived` 通知也会反向更新 Conversation。
 3. 删除在设备确认且待投影事件清空后才软删除 Conversation。本地 Workspace 文件保留；失败时恢复会话状态，已删除 thread 不会被后续 `sessions` 刷新重新导入。
-4. Bridge 支持 `workspace.register`。路径解析、目录创建、配置持久化和附件落盘都以配置用户身份执行；命令终态后 Cloud 清除暂存的本机路径，并刷新 Workspace 与 sessions 投影。
+4. Bridge 支持 `workspace.register|rename|unregister`。路径解析、目录创建、配置持久化和附件落盘都以配置用户身份执行；命令终态后 Cloud 清除暂存的本机路径，并刷新 Workspace 与 sessions 投影。rename 只改显示名；unregister 保存排除记录并保留本地目录和文件。
 5. `sessions` 同时分页读取活动与归档目录。当前每个 Workspace 每种状态最多投影 500 条摘要，打开 Conversation 时才读取单个 thread 的完整历史；归档 Conversation 不进入项目树、置顶或最近，只能在“所有对话”的归档筛选中查看。
 6. Conversation Resource API 已按 execution context 返回设备 Profile App 与 Workspace Skill 的统一 DTO；输入框消费该接口并只提交 opaque ref。
 

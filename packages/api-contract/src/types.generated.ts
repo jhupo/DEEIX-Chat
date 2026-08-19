@@ -624,6 +624,7 @@ export interface ConversationProjectResponse {
   defaultSkillIDs: number[];
   description: string;
   icon: string;
+  managed: boolean;
   mcpDefaultMode: string;
   name: string;
   publicID: string;
@@ -1790,12 +1791,22 @@ export interface PublicSharedMessageResponse {
   upstreamModelName: string;
 }
 
+export interface RegisterWorkspaceRequest {
+  create: boolean;
+  path: string;
+  profileId: string;
+}
+
 export interface RenameConversationRequest {
   /** @maxLength 255 */
   title: string;
 }
 
 export interface RenameDeviceRequest {
+  name: string;
+}
+
+export interface RenameWorkspaceRequest {
   name: string;
 }
 
@@ -2979,6 +2990,7 @@ export interface UserSettingsResponseDoc {
 export interface WorkspaceDoc {
   deviceId: string;
   lastSeenAt: string;
+  managed: boolean;
   name: string;
   profileId: string;
   status: string;
@@ -5051,6 +5063,76 @@ export namespace Agent {
     export type RequestBody = never;
     export type RequestHeaders = {};
     export type ResponseBody = WorkspaceListResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent-gateway
+   * @name DevicesWorkspacesCreate
+   * @summary Register a local Workspace on a device
+   * @request POST:/agent/devices/{device_id}/workspaces
+   * @secure
+   */
+  export namespace DevicesWorkspacesCreate {
+    export type RequestParams = {
+      /** Device public ID */
+      deviceId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = RegisterWorkspaceRequest;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * @description The local directory and files remain on the device.
+   * @tags agent-gateway
+   * @name DevicesWorkspacesDelete
+   * @summary Remove a managed Workspace from DEEIX
+   * @request DELETE:/agent/devices/{device_id}/workspaces/{workspace_id}
+   * @secure
+   */
+  export namespace DevicesWorkspacesDelete {
+    export type RequestParams = {
+      /** Device public ID */
+      deviceId: string;
+      /** Workspace ID */
+      workspaceId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = CommandResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags agent-gateway
+   * @name DevicesWorkspacesPartialUpdate
+   * @summary Rename a managed Workspace
+   * @request PATCH:/agent/devices/{device_id}/workspaces/{workspace_id}
+   * @secure
+   */
+  export namespace DevicesWorkspacesPartialUpdate {
+    export type RequestParams = {
+      /** Device public ID */
+      deviceId: string;
+      /** Workspace ID */
+      workspaceId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = RenameWorkspaceRequest;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
+    export type ResponseBody = CommandResponseDoc;
   }
 
   /**

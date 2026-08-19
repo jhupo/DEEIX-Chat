@@ -42,6 +42,7 @@ type AgentGatewayRepository interface {
 	QueueResourceRefresh(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	QueueAgentUpdate(context.Context, string, string, uint, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	QueueWorkspaceRegistration(context.Context, string, string, uint, string, string, string, bool, *domainagent.Command, time.Time) (*domainagent.Command, error)
+	QueueWorkspaceMutation(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error)
 	QueueTurnInterrupt(context.Context, string, string, uint, string, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	QueueThreadLifecycle(context.Context, string, string, uint, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error)

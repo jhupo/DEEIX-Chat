@@ -51,6 +51,7 @@ type WorkspaceDoc struct {
 	DeviceID    string    `json:"deviceId"`
 	ProfileID   string    `json:"profileId"`
 	Name        string    `json:"name"`
+	Managed     bool      `json:"managed"`
 	Status      string    `json:"status"`
 	LastSeenAt  time.Time `json:"lastSeenAt"`
 }

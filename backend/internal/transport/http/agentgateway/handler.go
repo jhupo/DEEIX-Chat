@@ -89,6 +89,10 @@ type registerWorkspaceRequest struct {
 	Create    bool   `json:"create"`
 }
 
+type renameWorkspaceRequest struct {
+	Name string `json:"name"`
+}
+
 const (
 	smallJSONBodyLimit = int64(8 * 1024)
 	agentJSONBodyLimit = int64(1024*1024 + 128*1024)
@@ -259,7 +263,15 @@ func (h *Handler) ListWorkspaces(c *gin.Context) {
 	response.Success(c, toWorkspaceDocs(items))
 }
 
-// RegisterWorkspace queues local directory validation and registration on the selected device.
+// RegisterWorkspace godoc
+// @Summary Register a local Workspace on a device
+// @Tags agent-gateway
+// @Security BearerAuth
+// @Param device_id path string true "Device public ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Param request body registerWorkspaceRequest true "Workspace registration"
+// @Success 200 {object} CommandResponseDoc
+// @Router /agent/devices/{device_id}/workspaces [post]
 func (h *Handler) RegisterWorkspace(c *gin.Context) {
 	var request registerWorkspaceRequest
 	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
@@ -272,6 +284,55 @@ func (h *Handler) RegisterWorkspace(c *gin.Context) {
 	})
 	if err != nil {
 		writeError(c, err, "register agent workspace failed")
+		return
+	}
+	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
+}
+
+// RenameWorkspace godoc
+// @Summary Rename a managed Workspace
+// @Tags agent-gateway
+// @Security BearerAuth
+// @Param device_id path string true "Device public ID"
+// @Param workspace_id path string true "Workspace ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Param request body renameWorkspaceRequest true "Workspace name"
+// @Success 200 {object} CommandResponseDoc
+// @Router /agent/devices/{device_id}/workspaces/{workspace_id} [patch]
+func (h *Handler) RenameWorkspace(c *gin.Context) {
+	var request renameWorkspaceRequest
+	if err := bindStrictJSON(c, &request, smallJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	result, err := h.service.RenameWorkspace(c.Request.Context(), middleware.MustUserID(c), appagent.RenameWorkspaceInput{
+		DeviceID: c.Param("device_id"), WorkspaceID: c.Param("workspace_id"), Name: request.Name,
+		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")),
+	})
+	if err != nil {
+		writeError(c, err, "rename agent workspace failed")
+		return
+	}
+	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
+}
+
+// UnregisterWorkspace godoc
+// @Summary Remove a managed Workspace from DEEIX
+// @Description The local directory and files remain on the device.
+// @Tags agent-gateway
+// @Security BearerAuth
+// @Param device_id path string true "Device public ID"
+// @Param workspace_id path string true "Workspace ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Success 200 {object} CommandResponseDoc
+// @Router /agent/devices/{device_id}/workspaces/{workspace_id} [delete]
+func (h *Handler) UnregisterWorkspace(c *gin.Context) {
+	result, err := h.service.UnregisterWorkspace(c.Request.Context(), middleware.MustUserID(c), appagent.UnregisterWorkspaceInput{
+		DeviceID: c.Param("device_id"), WorkspaceID: c.Param("workspace_id"),
+		IdempotencyKey: strings.TrimSpace(c.GetHeader("Idempotency-Key")),
+	})
+	if err != nil {
+		writeError(c, err, "remove agent workspace failed")
 		return
 	}
 	response.Success(c, CommandDoc{CommandID: result.CommandID, Status: result.Status})
@@ -476,7 +537,7 @@ func toRuntimeProfileDocs(items []appagent.RuntimeProfileView) []RuntimeProfileD
 func toWorkspaceDocs(items []appagent.WorkspaceView) []WorkspaceDoc {
 	result := make([]WorkspaceDoc, 0, len(items))
 	for _, item := range items {
-		result = append(result, WorkspaceDoc{WorkspaceID: item.WorkspaceID, DeviceID: item.DeviceID, ProfileID: item.ProfileID, Name: item.Name, Status: item.Status, LastSeenAt: item.LastSeenAt})
+		result = append(result, WorkspaceDoc{WorkspaceID: item.WorkspaceID, DeviceID: item.DeviceID, ProfileID: item.ProfileID, Name: item.Name, Managed: item.Managed, Status: item.Status, LastSeenAt: item.LastSeenAt})
 	}
 	return result
 }

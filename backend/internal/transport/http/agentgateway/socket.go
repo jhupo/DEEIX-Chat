@@ -55,6 +55,9 @@ type bridgeFrame struct {
 type bridgeWorkspace struct {
 	WorkspaceID string `json:"workspaceId"`
 	Name        string `json:"name"`
+	Managed     bool   `json:"managed,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
+	Revision    string `json:"revision"`
 }
 
 type bridgeArtifactGrant struct {
@@ -250,7 +253,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	}
 	registrations := make([]appagent.WorkspaceRegistration, 0, len(proof.Workspaces))
 	for _, workspace := range proof.Workspaces {
-		registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+		registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Managed, Hidden: workspace.Hidden, Revision: workspace.Revision})
 	}
 	ctx, cancel = socketRuntimeAuthContext()
 	err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)
@@ -423,7 +426,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				}
 				registrations := make([]appagent.WorkspaceRegistration, 0, len(frame.Workspaces))
 				for _, workspace := range frame.Workspaces {
-					registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+					registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Managed, Hidden: workspace.Hidden, Revision: workspace.Revision})
 				}
 				ctx, cancel = socketRuntimeAuthContext()
 				err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)

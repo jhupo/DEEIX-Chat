@@ -125,7 +125,15 @@ func (r *Repo) ListConversationsByUser(
 		// 保留全部项目归属。
 	case "unassigned":
 		if executionType == domainconversation.ExecutionTypeGateway {
-			query = query.Where("execution_workspace_id = ?", "")
+			query = query.Where(`EXISTS (
+				SELECT 1
+				FROM agent_workspaces AS recent_workspaces
+				JOIN agent_devices AS recent_devices ON recent_devices.id = recent_workspaces.device_id
+				WHERE recent_workspaces.user_id = chat_conversations.user_id
+					AND recent_devices.public_id = chat_conversations.execution_device_id
+					AND recent_workspaces.public_id = chat_conversations.execution_workspace_id
+					AND recent_workspaces.hidden = ?
+			)`, true)
 		} else {
 			query = query.Where("project_id IS NULL")
 		}

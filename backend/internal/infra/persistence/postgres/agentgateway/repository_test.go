@@ -198,6 +198,35 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	}
 }
 
+func TestListWorkspacesHidesRecentRuntimeWorkspace(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows", PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64), CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(time.Hour)
+	profile := model.AgentRuntimeProfile{PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &lease}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	items := []domainagent.Workspace{
+		{PublicID: "workspace-project", Name: "Project"},
+		{PublicID: "workspace-recent", Name: "Recent", Hidden: true},
+	}
+	if err := repo.SyncWorkspaces(context.Background(), 7, device.ID, profile.ID, items, now); err != nil {
+		t.Fatal(err)
+	}
+	visible, err := repo.ListWorkspaces(context.Background(), 7, device.PublicID)
+	if err != nil || len(visible) != 1 || visible[0].PublicID != "workspace-project" {
+		t.Fatalf("visible workspaces = %#v, %v", visible, err)
+	}
+}
+
 func TestThreadLifecycleProjectsDeleteAndArchiveStates(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
@@ -878,6 +907,68 @@ func TestQueueAgentUpdateRequiresCapabilityAndCoalesces(t *testing.T) {
 		device.PublicID, "0.4.57", &domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "agent.update"}, now,
 	); err == nil {
 		t.Fatal("Agent update was queued without the declared capability")
+	}
+}
+
+func TestQueueWorkspaceMutationRequiresManagedWorkspaceAndCapability(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentCommand{}, &model.AgentIdempotencyRecord{},
+	); err != nil {
+		t.Fatalf("migrate Workspace mutation tables: %v", err)
+	}
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaseExpiresAt := now.Add(time.Hour)
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
+		LeaseExpiresAt: &leaseExpiresAt, ManifestJSON: `{"commands":["workspace.rename","workspace.unregister"]}`,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-0123456789abcdef01234567", UserID: 7, DeviceID: device.ID,
+		RuntimeProfileID: profile.ID, Name: "project", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	if _, err := repo.QueueWorkspaceMutation(
+		context.Background(), "71234567-89ab-4def-8123-456789abcdef", strings.Repeat("7", 64), 7,
+		device.PublicID, workspace.PublicID, "workspace.rename", "renamed",
+		&domainagent.Command{PublicID: "agcmd_7123456789abcdef0123456789abcdef", Kind: "workspace.rename"}, now,
+	); err == nil {
+		t.Fatal("unmanaged Workspace mutation was queued")
+	}
+	if err := database.Model(&workspace).Update("managed", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	queued, err := repo.QueueWorkspaceMutation(
+		context.Background(), "81234567-89ab-4def-8123-456789abcdef", strings.Repeat("8", 64), 7,
+		device.PublicID, workspace.PublicID, "workspace.rename", "renamed",
+		&domainagent.Command{PublicID: "agcmd_8123456789abcdef0123456789abcdef", Kind: "workspace.rename"}, now,
+	)
+	if err != nil || queued.ServerSeq != 1 || !strings.Contains(queued.PayloadJSON, `"name":"renamed"`) {
+		t.Fatalf("queue Workspace rename: %#v %v", queued, err)
+	}
+	if err = database.Model(&profile).Update("manifest_json", `{"commands":["workspace.rename"]}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.QueueWorkspaceMutation(
+		context.Background(), "91234567-89ab-4def-8123-456789abcdef", strings.Repeat("9", 64), 7,
+		device.PublicID, workspace.PublicID, "workspace.unregister", "",
+		&domainagent.Command{PublicID: "agcmd_9123456789abcdef0123456789abcdef", Kind: "workspace.unregister"}, now,
+	); err == nil {
+		t.Fatal("Workspace removal was queued without the declared capability")
 	}
 }
 

@@ -82,6 +82,8 @@ type Workspace struct {
 	DevicePublicID   string
 	ProfilePublicID  string
 	Name             string
+	Managed          bool
+	Hidden           bool
 	Status           string
 	LastSeenAt       time.Time
 	CreatedAt        time.Time

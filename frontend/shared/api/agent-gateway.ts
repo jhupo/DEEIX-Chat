@@ -73,6 +73,40 @@ export async function registerAgentWorkspace(
   );
 }
 
+export async function renameAgentWorkspace(
+  accessToken: string,
+  deviceId: string,
+  workspaceId: string,
+  name: string,
+): Promise<{ commandId: string; status: string }> {
+  return authedRequest<{ commandId: string; status: string }>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      accessToken,
+      method: "PATCH",
+      body: { name },
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
+}
+
+export async function unregisterAgentWorkspace(
+  accessToken: string,
+  deviceId: string,
+  workspaceId: string,
+): Promise<{ commandId: string; status: string }> {
+  return authedRequest<{ commandId: string; status: string }>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      accessToken,
+      method: "DELETE",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    true,
+  );
+}
+
 export async function getAgentCommand(
   accessToken: string,
   commandId: string,
@@ -82,4 +116,19 @@ export async function getAgentCommand(
     { accessToken },
     true,
   );
+}
+
+export async function waitForAgentCommand(
+  accessToken: string,
+  commandId: string,
+  attempts = 120,
+): Promise<{ commandId: string; status: string; errorMessage?: string } | null> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const command = await getAgentCommand(accessToken, commandId);
+    if (command.status === "completed" || command.status === "error") {
+      return command;
+    }
+  }
+  return null;
 }

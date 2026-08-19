@@ -14,6 +14,8 @@ func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
 	group.GET("/agent/devices/:device_id/profiles", m.Handler.ListRuntimeProfiles)
 	group.GET("/agent/devices/:device_id/workspaces", m.Handler.ListWorkspaces)
 	group.POST("/agent/devices/:device_id/workspaces", m.Handler.RegisterWorkspace)
+	group.PATCH("/agent/devices/:device_id/workspaces/:workspace_id", m.Handler.RenameWorkspace)
+	group.DELETE("/agent/devices/:device_id/workspaces/:workspace_id", m.Handler.UnregisterWorkspace)
 	group.POST("/agent/devices/:device_id/update", m.Handler.UpdateDevice)
 	group.GET("/agent/commands/:command_id", m.Handler.GetCommand)
 	group.POST("/agent/workspaces/:workspace_id/artifacts", m.Handler.CreateArtifact)

@@ -36,6 +36,7 @@ Web
 | [09-local-gateway-design.md](./09-local-gateway-design.md) | Local Bridge、设备、多网关与信任边界 |
 | [10-app-server-validation-and-gap-plan.md](./10-app-server-validation-and-gap-plan.md) | app-server 真实进程验收、官方文档差距与实施顺序 |
 | [11-native-agent.md](./11-native-agent.md) | 原生 Agent、安装更新、服务管理、持久恢复与发布合同 |
+| [12-codex-desktop-projects-and-recents.md](./12-codex-desktop-projects-and-recents.md) | Codex Desktop 项目、最近、归档的权威来源与互斥投影 |
 | [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) | app-server schema 锁定证据 |
 
 ## 实现入口

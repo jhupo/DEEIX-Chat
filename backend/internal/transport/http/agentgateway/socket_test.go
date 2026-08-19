@@ -120,7 +120,7 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if err = websocket.JSON.Send(connection, bridgeFrame{
 		Version: bridgeVersion, Type: "auth.proof", ProfileID: "profile_1",
 		ChallengeID: challenge.ChallengeID, Proof: base64.RawURLEncoding.EncodeToString(mac.Sum(nil)),
-		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "workspace_1"}},
+		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "workspace_1", Revision: "0123456789abcdef01234567"}},
 		Manifest:   json.RawMessage(testProviderManifest),
 	}); err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	}
 	if err = websocket.JSON.Send(connection, bridgeFrame{
 		Version: bridgeVersion, Type: "workspaces.sync",
-		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "renamed-workspace"}},
+		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "renamed-workspace", Revision: "1123456789abcdef01234567"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -510,6 +510,9 @@ func (*socketRepo) QueueThreadHistory(context.Context, uint, uint, *domainagent.
 	return nil, nil, repository.ErrNotFound
 }
 func (*socketRepo) QueueWorkspaceRegistration(context.Context, string, string, uint, string, string, string, bool, *domainagent.Command, time.Time) (*domainagent.Command, error) {
+	return nil, repository.ErrNotFound
+}
+func (*socketRepo) QueueWorkspaceMutation(context.Context, string, string, uint, string, string, string, string, *domainagent.Command, time.Time) (*domainagent.Command, error) {
 	return nil, repository.ErrNotFound
 }
 func (*socketRepo) GetResourceSnapshot(context.Context, uint, string, string, string, string) (*domainagent.ResourceSnapshot, error) {

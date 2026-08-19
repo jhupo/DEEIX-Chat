@@ -5163,6 +5163,146 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Register a local Workspace on a device",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device public ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Workspace registration",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/registerWorkspaceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/devices/{device_id}/workspaces/{workspace_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The local directory and files remain on the device.",
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Remove a managed Workspace from DEEIX",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device public ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "workspace_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "agent-gateway"
+                ],
+                "summary": "Rename a managed Workspace",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Device public ID",
+                        "name": "device_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Workspace ID",
+                        "name": "workspace_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Idempotency key",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Workspace name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/renameWorkspaceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/CommandResponseDoc"
+                        }
+                    }
+                }
             }
         },
         "/agent/devices/{device_id}/workspaces/{workspace_id}/resources/{resource}": {
@@ -12609,6 +12749,7 @@ const docTemplate = `{
                 "defaultSkillIDs",
                 "description",
                 "icon",
+                "managed",
                 "mcpDefaultMode",
                 "name",
                 "publicID",
@@ -12641,6 +12782,9 @@ const docTemplate = `{
                 },
                 "icon": {
                     "type": "string"
+                },
+                "managed": {
+                    "type": "boolean"
                 },
                 "mcpDefaultMode": {
                     "type": "string"
@@ -19230,6 +19374,7 @@ const docTemplate = `{
             "required": [
                 "deviceId",
                 "lastSeenAt",
+                "managed",
                 "name",
                 "profileId",
                 "status",
@@ -19241,6 +19386,9 @@ const docTemplate = `{
                 },
                 "lastSeenAt": {
                     "type": "string"
+                },
+                "managed": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -19349,7 +19497,37 @@ const docTemplate = `{
                 }
             }
         },
+        "registerWorkspaceRequest": {
+            "type": "object",
+            "required": [
+                "create",
+                "path",
+                "profileId"
+            ],
+            "properties": {
+                "create": {
+                    "type": "boolean"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "profileId": {
+                    "type": "string"
+                }
+            }
+        },
         "renameDeviceRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "renameWorkspaceRequest": {
             "type": "object",
             "required": [
                 "name"

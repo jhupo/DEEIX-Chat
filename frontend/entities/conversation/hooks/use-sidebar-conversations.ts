@@ -121,11 +121,11 @@ function activeShareFieldsMissing(item: ConversationDTO): boolean {
   return (item.shareStatus ?? "").trim() === "none" && !item.shareID?.trim();
 }
 
-function belongsInSidebarRecent(item: ConversationDTO, executionType: "cloud" | "gateway"): boolean {
+function belongsInSidebarRecent(item: ConversationDTO, _executionType: "cloud" | "gateway"): boolean {
   return (
     !isArchivedConversation(item) &&
     !item.isStarred &&
-    (executionType === "gateway" || !item.projectID.trim())
+    !item.projectID.trim()
   );
 }
 
@@ -198,7 +198,7 @@ async function fetchRecentPage(accessToken: string, page: number, executionType:
     pageSize: RECENT_PAGE_SIZE,
     status: "active",
     starred: "unstarred",
-    ...(executionType === "cloud" ? { project: "unassigned" } : {}),
+    project: "unassigned",
     execution: executionType,
     deviceId: executionDeviceID,
   });

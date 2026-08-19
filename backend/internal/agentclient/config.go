@@ -32,11 +32,14 @@ type Config struct {
 }
 
 type Workspace struct {
-	WorkspaceID  string   `json:"workspaceId"`
-	Root         string   `json:"root"`
-	Name         string   `json:"name"`
-	Registered   bool     `json:"registered,omitempty"`
-	SessionRoots []string `json:"-"`
+	WorkspaceID  string              `json:"workspaceId"`
+	Root         string              `json:"root"`
+	Name         string              `json:"name"`
+	Registered   bool                `json:"registered,omitempty"`
+	Excluded     bool                `json:"excluded,omitempty"`
+	Hidden       bool                `json:"hidden,omitempty"`
+	SessionRoots []string            `json:"-"`
+	ThreadIDs    map[string]struct{} `json:"-"`
 }
 
 func DefaultDataDir() (string, error) {
@@ -150,6 +153,9 @@ func (config Config) Validate() error {
 		name := strings.TrimSpace(workspace.Name)
 		if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 128 {
 			return errors.New("agent config workspace name is invalid")
+		}
+		if workspace.Registered && workspace.Excluded {
+			return errors.New("agent config workspace state is invalid")
 		}
 		if _, ok := seen[workspace.WorkspaceID]; ok {
 			return errors.New("agent config workspace IDs must be unique")

@@ -144,6 +144,7 @@ func (a localGatewayAdapter) ListProjects(ctx context.Context, userID uint, devi
 			ProjectID: item.WorkspaceID,
 			ProfileID: item.ProfileID,
 			Name:      item.Name,
+			Managed:   item.Managed,
 			UpdatedAt: item.LastSeenAt,
 		})
 	}
@@ -151,14 +152,14 @@ func (a localGatewayAdapter) ListProjects(ctx context.Context, userID uint, devi
 }
 
 func (a localGatewayAdapter) ListInputResources(ctx context.Context, userID uint, deviceID, workspaceID string) (*conversation.GatewayInputResourceCatalog, error) {
-	workspaces, err := a.service.ListWorkspaces(ctx, userID, deviceID)
+	profiles, err := a.service.ListRuntimeProfiles(ctx, userID, deviceID)
 	if err != nil {
 		return nil, mapLocalGatewayError(err)
 	}
 	profileID := ""
-	for _, workspace := range workspaces {
-		if workspace.WorkspaceID == workspaceID {
-			profileID = workspace.ProfileID
+	for _, profile := range profiles {
+		if _, resolveErr := a.service.ResolveExecutionTarget(ctx, userID, deviceID, profile.ProfileID, workspaceID); resolveErr == nil {
+			profileID = profile.ProfileID
 			break
 		}
 	}

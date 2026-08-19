@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
@@ -94,7 +95,7 @@ func toDomainCommand(v model.AgentCommand) *domainagent.Command {
 }
 
 func toDomainWorkspace(v model.AgentWorkspace) *domainagent.Workspace {
-	return &domainagent.Workspace{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID, RuntimeProfileID: v.RuntimeProfileID, Name: v.Name, Status: v.Status, LastSeenAt: v.LastSeenAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return &domainagent.Workspace{ID: v.ID, PublicID: v.PublicID, UserID: v.UserID, DeviceID: v.DeviceID, RuntimeProfileID: v.RuntimeProfileID, Name: v.Name, Managed: v.Managed, Hidden: v.Hidden, Status: v.Status, LastSeenAt: v.LastSeenAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 func toDomainResourceSnapshot(v model.AgentResourceSnapshot) *domainagent.ResourceSnapshot {
@@ -713,12 +714,12 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 	}
 	if command.Kind == "workspace.register" && outcome.Result.Kind == "accepted" {
 		workspaceID, name := strings.TrimSpace(outcome.Result.WorkspaceID), strings.TrimSpace(outcome.Result.Name)
-		if command.RuntimeProfileID == nil || !validRepoRef(workspaceID) || name == "" || len(name) > 128 {
+		if command.RuntimeProfileID == nil || !validRepoRef(workspaceID) || name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 128 {
 			return repository.ErrConflict
 		}
 		workspace := model.AgentWorkspace{
 			PublicID: workspaceID, UserID: command.UserID, DeviceID: device.ID,
-			RuntimeProfileID: *command.RuntimeProfileID, Name: name, Status: "available", LastSeenAt: now,
+			RuntimeProfileID: *command.RuntimeProfileID, Name: name, Managed: true, Status: "available", LastSeenAt: now,
 		}
 		if err := tx.Where("device_id = ? AND public_id = ?", device.ID, workspaceID).Attrs(workspace).FirstOrCreate(&workspace).Error; err != nil {
 			return err
@@ -726,7 +727,7 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 		if workspace.UserID != command.UserID || workspace.RuntimeProfileID != *command.RuntimeProfileID {
 			return repository.ErrConflict
 		}
-		if err := tx.Model(&workspace).Updates(map[string]any{"name": name, "status": "available", "last_seen_at": now}).Error; err != nil {
+		if err := tx.Model(&workspace).Updates(map[string]any{"name": name, "managed": true, "status": "available", "last_seen_at": now}).Error; err != nil {
 			return err
 		}
 		var profile model.AgentRuntimeProfile
@@ -750,6 +751,30 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 		}
 		device.NextServerSeq++
 		return tx.Model(device).Update("next_server_seq", device.NextServerSeq).Error
+	}
+	if outcome.Result.Kind == "accepted" && (command.Kind == "workspace.rename" || command.Kind == "workspace.unregister") {
+		if command.WorkspaceID == nil {
+			return repository.ErrConflict
+		}
+		var workspace model.AgentWorkspace
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND managed = ?", *command.WorkspaceID, command.UserID, device.ID, true).
+			First(&workspace).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(outcome.Result.WorkspaceID) != workspace.PublicID {
+			return repository.ErrConflict
+		}
+		if command.Kind == "workspace.unregister" {
+			return tx.Model(&workspace).Updates(map[string]any{"managed": false, "status": "unavailable", "updated_at": now}).Error
+		}
+		var payload struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal([]byte(command.PayloadJSON), &payload) != nil || strings.TrimSpace(payload.Name) == "" ||
+			strings.TrimSpace(outcome.Result.Name) != strings.TrimSpace(payload.Name) {
+			return repository.ErrConflict
+		}
+		return tx.Model(&workspace).Updates(map[string]any{"name": strings.TrimSpace(payload.Name), "updated_at": now}).Error
 	}
 	if outcome.Result.Kind == "accepted" && command.ThreadID != nil {
 		switch command.Kind {
@@ -1791,14 +1816,14 @@ func (r *Repo) SyncWorkspaces(ctx context.Context, userID, deviceID, profileID u
 		}
 		publicIDs := make([]string, 0, len(items))
 		for _, item := range items {
-			workspace := model.AgentWorkspace{PublicID: item.PublicID, UserID: userID, DeviceID: deviceID, RuntimeProfileID: profileID, Name: item.Name, Status: "available", LastSeenAt: now}
+			workspace := model.AgentWorkspace{PublicID: item.PublicID, UserID: userID, DeviceID: deviceID, RuntimeProfileID: profileID, Name: item.Name, Managed: item.Managed, Hidden: item.Hidden, Status: "available", LastSeenAt: now}
 			if err := tx.Where("device_id = ? AND public_id = ?", deviceID, item.PublicID).Attrs(workspace).FirstOrCreate(&workspace).Error; err != nil {
 				return err
 			}
 			if workspace.UserID != userID || workspace.RuntimeProfileID != profileID {
 				return repository.ErrConflict
 			}
-			if err := tx.Model(&workspace).Updates(map[string]any{"name": item.Name, "status": "available", "last_seen_at": now}).Error; err != nil {
+			if err := tx.Model(&workspace).Updates(map[string]any{"name": item.Name, "managed": item.Managed, "hidden": item.Hidden, "status": "available", "last_seen_at": now}).Error; err != nil {
 				return err
 			}
 			publicIDs = append(publicIDs, item.PublicID)
@@ -1835,7 +1860,7 @@ func (r *Repo) ListWorkspaces(ctx context.Context, userID uint, devicePublicID s
 		Select("workspaces.*, profiles.public_id AS profile_public_id").
 		Joins("JOIN agent_devices AS devices ON devices.id = workspaces.device_id").
 		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = workspaces.runtime_profile_id").
-		Where("workspaces.user_id = ? AND devices.public_id = ? AND workspaces.status = ?", userID, devicePublicID, "available").
+		Where("workspaces.user_id = ? AND devices.public_id = ? AND workspaces.status = ? AND workspaces.hidden = ?", userID, devicePublicID, "available", false).
 		Order("workspaces.name ASC").Scan(&rows).Error
 	result := make([]domainagent.Workspace, 0, len(rows))
 	for _, row := range rows {
@@ -2183,6 +2208,85 @@ func (r *Repo) QueueWorkspaceRegistration(
 		created = model.AgentCommand{
 			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
 			ServerSeq: device.NextServerSeq, Kind: command.Kind, PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(created), nil
+}
+
+func (r *Repo) QueueWorkspaceMutation(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	devicePublicID, workspacePublicID, kind, name string,
+	command *domainagent.Command,
+	now time.Time,
+) (*domainagent.Command, error) {
+	if kind != "workspace.rename" && kind != "workspace.unregister" {
+		return nil, repository.ErrInvalidInput
+	}
+	var created model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var operation model.AgentIdempotencyRecord
+		claim := model.AgentIdempotencyRecord{UserID: userID, Operation: kind, Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, kind, idempotencyKey).
+			Attrs(claim).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&created).Error
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND public_id = ? AND status = ?", userID, devicePublicID, domainagent.DeviceStatusActive).
+			First(&device).Error; err != nil {
+			return err
+		}
+		var workspaceLookup model.AgentWorkspace
+		if err := tx.Where("user_id = ? AND device_id = ? AND public_id = ? AND status = ? AND managed = ?", userID, device.ID, workspacePublicID, "available", true).
+			First(&workspaceLookup).Error; err != nil {
+			return err
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND device_id = ? AND status = ? AND lease_expires_at > ?", workspaceLookup.RuntimeProfileID, userID, device.ID, domainagent.RuntimeStatusReady, now).
+			First(&profile).Error; err != nil {
+			return err
+		}
+		var workspace model.AgentWorkspace
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND device_id = ? AND runtime_profile_id = ? AND status = ? AND managed = ?", workspaceLookup.ID, userID, device.ID, profile.ID, "available", true).
+			First(&workspace).Error; err != nil {
+			return err
+		}
+		if !manifestSupportsCommand(profile.ManifestJSON, kind) {
+			return repository.ErrConflict
+		}
+		payload := map[string]any{
+			"kind": kind, "deviceId": device.PublicID, "profileId": profile.PublicID, "workspaceId": workspace.PublicID,
+		}
+		if kind == "workspace.rename" {
+			payload["name"] = name
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		created = model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID,
+			ServerSeq: device.NextServerSeq, Kind: kind, PayloadJSON: string(encoded), State: "queued", TerminalJSON: "{}",
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return err

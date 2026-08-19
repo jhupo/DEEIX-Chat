@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/net/websocket"
 )
@@ -111,7 +114,9 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 		commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
 	}
 	for _, workspace := range config.Workspaces {
-		gateway.workspaces[workspace.WorkspaceID] = workspace
+		if !workspace.Excluded {
+			gateway.workspaces[workspace.WorkspaceID] = workspace
+		}
 	}
 	adapter, err := StartCodexAdapter(runtimeContext, config, state, logger.Writer(), func(event json.RawMessage) error {
 		if _, appendErr := state.AppendEvent(event); appendErr != nil {
@@ -224,14 +229,15 @@ func (gateway *Gateway) refreshWorkspaces(ctx context.Context) error {
 		return err
 	}
 	gateway.workspaceMu.RLock()
-	unchanged := equalWorkspaces(gateway.config.Workspaces, discovered)
+	persisted := persistWorkspaceExclusions(discovered, gateway.config.Workspaces)
+	unchanged := equalWorkspaces(gateway.config.Workspaces, persisted)
 	gateway.workspaceMu.RUnlock()
 	if unchanged {
 		return nil
 	}
 	gateway.workspaceMu.Lock()
 	updated := gateway.config
-	updated.Workspaces = discovered
+	updated.Workspaces = persisted
 	if err = SaveConfig(filepath.Join(gateway.dataDir, "config.json"), updated); err != nil {
 		gateway.workspaceMu.Unlock()
 		return err
@@ -242,10 +248,23 @@ func (gateway *Gateway) refreshWorkspaces(ctx context.Context) error {
 	}
 	gateway.config = updated
 	gateway.workspaces = byID
-	gateway.adapter.replaceWorkspaces(discovered)
+	gateway.adapter.replaceWorkspaces(persisted)
 	gateway.workspaceMu.Unlock()
 	gateway.signalWorkspaceUpdate(discovered)
 	return nil
+}
+
+func persistWorkspaceExclusions(visible, current []Workspace) []Workspace {
+	result := append([]Workspace(nil), visible...)
+	for _, workspace := range current {
+		if workspace.Excluded {
+			result = append(result, workspace)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].WorkspaceID < result[j].WorkspaceID
+	})
+	return result
 }
 
 func equalWorkspaces(left, right []Workspace) bool {
@@ -258,7 +277,19 @@ func equalWorkspaces(left, right []Workspace) bool {
 	}
 	for _, workspace := range right {
 		current, ok := leftByID[workspace.WorkspaceID]
-		if !ok || current.Name != workspace.Name || current.Root != workspace.Root || current.Registered != workspace.Registered || !equalStrings(current.SessionRoots, workspace.SessionRoots) {
+		if !ok || current.Name != workspace.Name || current.Root != workspace.Root || current.Registered != workspace.Registered || current.Excluded != workspace.Excluded || current.Hidden != workspace.Hidden || !equalStrings(current.SessionRoots, workspace.SessionRoots) || !equalThreadIDs(current.ThreadIDs, workspace.ThreadIDs) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalThreadIDs(left, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id := range left {
+		if _, ok := right[id]; !ok {
 			return false
 		}
 	}
@@ -322,11 +353,15 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		return err
 	}
 	gateway.workspaceMu.RLock()
-	registeredWorkspaces := append([]Workspace(nil), gateway.config.Workspaces...)
+	registeredWorkspaces := make([]Workspace, 0, len(gateway.workspaces))
+	for _, workspace := range gateway.workspaces {
+		registeredWorkspaces = append(registeredWorkspaces, workspace)
+	}
 	gateway.workspaceMu.RUnlock()
+	sort.Slice(registeredWorkspaces, func(i, j int) bool { return registeredWorkspaces[i].WorkspaceID < registeredWorkspaces[j].WorkspaceID })
 	workspaces := make([]bridgeWorkspace, 0, len(registeredWorkspaces))
 	for _, workspace := range registeredWorkspaces {
-		workspaces = append(workspaces, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+		workspaces = append(workspaces, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Registered, Hidden: workspace.Hidden, Revision: workspaceRevision(workspace)})
 	}
 	manifest := gateway.adapter.Manifest()
 	if validAgentVersion(gateway.agentVersion) {
@@ -405,7 +440,7 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 		case workspaces := <-gateway.workspaceUpdates:
 			registrations := make([]bridgeWorkspace, 0, len(workspaces))
 			for _, workspace := range workspaces {
-				registrations = append(registrations, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name})
+				registrations = append(registrations, bridgeWorkspace{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Registered, Hidden: workspace.Hidden, Revision: workspaceRevision(workspace)})
 			}
 			if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "workspaces.sync", Workspaces: registrations}); err != nil {
 				return err
@@ -462,6 +497,23 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			}
 		}
 	}
+}
+
+func workspaceRevision(workspace Workspace) string {
+	roots := append([]string(nil), workspace.SessionRoots...)
+	sort.Strings(roots)
+	threadIDs := make([]string, 0, len(workspace.ThreadIDs))
+	for id := range workspace.ThreadIDs {
+		threadIDs = append(threadIDs, id)
+	}
+	sort.Strings(threadIDs)
+	payload, _ := json.Marshal(struct {
+		Hidden    bool     `json:"hidden"`
+		Roots     []string `json:"roots"`
+		ThreadIDs []string `json:"threadIds"`
+	}{Hidden: workspace.Hidden, Roots: roots, ThreadIDs: threadIDs})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:12])
 }
 
 func bridgeWebSocketConfig(cloudURL, token string, probe bool) (*websocket.Config, error) {
@@ -612,6 +664,8 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 			}
 		} else if command.Kind == "workspace.register" {
 			result, err = gateway.registerWorkspace(command)
+		} else if command.Kind == "workspace.rename" || command.Kind == "workspace.unregister" {
+			result, err = gateway.mutateWorkspace(command)
 		} else {
 			result, err = gateway.adapter.Execute(ctx, command, artifacts)
 		}
@@ -734,7 +788,9 @@ func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any,
 	gateway.workspaceMu.Lock()
 	byID := make(map[string]Workspace, len(gateway.config.Workspaces)+1)
 	for _, current := range gateway.config.Workspaces {
-		mergeWorkspace(byID, current)
+		if !current.Excluded {
+			mergeWorkspace(byID, current)
+		}
 	}
 	mergeWorkspace(byID, workspace)
 	registered := make([]Workspace, 0, len(byID))
@@ -744,17 +800,92 @@ func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any,
 	sort.Slice(registered, func(i, j int) bool {
 		return registered[i].Name < registered[j].Name
 	})
-	gateway.config.Workspaces = registered
+	gateway.config = persisted
 	gateway.workspaces = byID
-	gateway.adapter.replaceWorkspaces(registered)
+	gateway.adapter.replaceWorkspaces(persisted.Workspaces)
 	gateway.workspaceMu.Unlock()
 	gateway.signalWorkspaceUpdate(registered)
 
 	return map[string]any{"kind": "accepted", "workspaceId": workspace.WorkspaceID, "name": workspace.Name}, nil
 }
 
+func (gateway *Gateway) mutateWorkspace(command AgentCommand) (map[string]any, error) {
+	gateway.registerMu.Lock()
+	defer gateway.registerMu.Unlock()
+	configPath := filepath.Join(gateway.dataDir, "config.json")
+	persisted, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	index := -1
+	for currentIndex := range persisted.Workspaces {
+		current := persisted.Workspaces[currentIndex]
+		if current.WorkspaceID == command.WorkspaceID {
+			index = currentIndex
+			break
+		}
+	}
+	if index < 0 {
+		return nil, errors.New("workspace is not managed by DEEIX")
+	}
+	workspace := persisted.Workspaces[index]
+	if command.Kind == "workspace.unregister" && workspace.Excluded {
+		return map[string]any{"kind": "accepted", "workspaceId": workspace.WorkspaceID}, nil
+	}
+	if !workspace.Registered || workspace.Excluded {
+		return nil, errors.New("workspace is not managed by DEEIX")
+	}
+	if command.Kind == "workspace.rename" {
+		name := strings.TrimSpace(command.Name)
+		if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 128 {
+			return nil, errors.New("workspace name is invalid")
+		}
+		workspace.Name = name
+	} else {
+		workspace.Registered = false
+		workspace.Excluded = true
+		workspace.Hidden = false
+	}
+	persisted.Workspaces[index] = workspace
+	if err = SaveConfig(configPath, persisted); err != nil {
+		return nil, err
+	}
+
+	gateway.workspaceMu.Lock()
+	visible := make(map[string]Workspace, len(gateway.workspaces))
+	for id, current := range gateway.workspaces {
+		visible[id] = current
+	}
+	if command.Kind == "workspace.rename" {
+		current, ok := visible[workspace.WorkspaceID]
+		if ok {
+			current.Name = workspace.Name
+			current.Registered = true
+			visible[workspace.WorkspaceID] = current
+		}
+	} else {
+		delete(visible, workspace.WorkspaceID)
+	}
+	registered := make([]Workspace, 0, len(visible))
+	for _, current := range visible {
+		registered = append(registered, current)
+	}
+	sort.Slice(registered, func(i, j int) bool { return registered[i].Name < registered[j].Name })
+	gateway.config = persisted
+	gateway.workspaces = visible
+	gateway.adapter.replaceWorkspaces(persisted.Workspaces)
+	gateway.workspaceMu.Unlock()
+	gateway.signalWorkspaceUpdate(registered)
+
+	result := map[string]any{"kind": "accepted", "workspaceId": workspace.WorkspaceID}
+	if command.Kind == "workspace.rename" {
+		result["name"] = workspace.Name
+	}
+	return result, nil
+}
+
 func concurrentCommand(kind string) bool {
-	return kind == "interaction.respond" || kind == "workspace.register"
+	return kind == "interaction.respond" || kind == "workspace.register" || kind == "workspace.rename" || kind == "workspace.unregister"
 }
 
 func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint64, error) {
@@ -879,7 +1010,7 @@ func receiveBridgeFrame(connection *websocket.Conn, frame *bridgeFrame) error {
 }
 
 func safeToReplay(command AgentCommand) bool {
-	if command.Kind == "agent.update" || command.Kind == "resource.refresh" || command.Kind == "thread.rename" || command.Kind == "thread.metadata.update" || command.Kind == "turn.interrupt" {
+	if command.Kind == "agent.update" || command.Kind == "resource.refresh" || command.Kind == "workspace.rename" || command.Kind == "workspace.unregister" || command.Kind == "thread.rename" || command.Kind == "thread.metadata.update" || command.Kind == "turn.interrupt" {
 		return true
 	}
 	return command.Kind == "thread.lifecycle" && command.Action != "fork"

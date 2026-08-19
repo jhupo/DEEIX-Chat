@@ -1,5 +1,7 @@
 # Local Gateway 当前设计
 
+> Codex Desktop 项目、最近和归档的当前权威边界见 [12-codex-desktop-projects-and-recents.md](./12-codex-desktop-projects-and-recents.md)。该文档取代本文件中基于旧 Desktop saved roots 或“项目会话同时进入最近”的描述。
+
 ## 1. 责任
 
 Local Gateway 是本地 provider transport，不是另一套聊天后端：
@@ -29,7 +31,7 @@ Conversation 创建时保存公开 `device_id/profile_id/workspace_id`。Cloud �
 
 聊天与工作是互斥的数据域。Conversation 列表、搜索和 Project 查询必须显式传入 `execution=cloud|gateway`；工作域还必须传入当前 `device`。聊天域返回 Cloud Conversation 和 Cloud Project；Gateway Adapter 将所选设备的 Workspace 和 Gateway Conversation 投影为相同 Project/Conversation DTO。切换模式或设备会重建数据作用域，界面不会同时合并或标注两套数据。
 
-当前生产锁为 Codex `0.147.0`。该版本没有 `project/*` app-server 方法，因此 Bridge 启动后合并三类本机 Workspace 来源：Codex Desktop 当前 `.codex-global-state.json` 的 `electron-saved-workspace-roots` 只读项目目录、无 `cwd` 过滤的 app-server `thread/list` 历史线程目录，以及用户在 Web 中明确添加的文件夹。Desktop 状态只补项目根与显示标签，不作为会话或消息来源；历史仍以 app-server 为唯一权威。Agent 安装目录由平台固定选择，安装命令不把终端当前目录注册成项目；`--workspace` 只保留给明确的手动注册。状态文件限制为 4 MiB，路径必须是已存在的绝对目录；所有路径在设备端 canonicalize，再按 opaque Workspace ID 去重。Cloud 只接收 ID、名称和可用状态，不接收本机绝对路径或 Desktop 状态原文。Cloud 的 Workspace 查询只返回当前所选 Device 上本次连接仍为 `available` 的记录，其他设备和旧目录均不进入结果。
+当前生产锁为 Codex `0.147.0`。该版本没有 `project/*` app-server 方法，因此 Bridge 以 `.codex-global-state.json` 的 `local-projects` 读取 Desktop 项目名称和 `rootPaths`，以 `projectless-thread-ids` 和 `thread-workspace-root-hints` 构造隐藏 Recent Workspace；会话和消息仍由 app-server `thread/list` / `thread/read` 提供，显式 Web `workspace.register` 仍是单独的本地目录注册入口。Desktop 状态只在设备端读取和校验，不进入 Cloud。Agent 安装目录由平台固定选择，安装命令不把终端当前目录注册成项目；`--workspace` 只保留给明确的手动注册。状态文件限制为 4 MiB，路径必须是已存在的绝对目录；所有路径在设备端 canonicalize，再按 opaque Workspace ID 去重。Cloud 只接收 ID、名称和可用状态，不接收本机绝对路径或 Desktop 状态原文。Cloud 的 Workspace 查询只返回当前所选 Device 上本次连接仍为 `available` 的记录，其他设备和旧目录均不进入结果。
 
 官方 `main` 文档已经新增实验性的 `project/list|read|create|import|update|move|delete`、`projectId` thread 过滤和项目变更通知；它们不在 `0.147.0` 生成锁中。升级时必须选定包含这些方法的正式 Codex release，使用该二进制重新生成并审计 experimental schema lock，然后一次性用 app-server Project 投影替换 Desktop saved roots 与 `cwd` 推导。项目名称、顺序、roots 和 thread 归属届时以 `project/list` 为权威，不保留双数据源。
 
@@ -41,7 +43,7 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Profile/Workspace 和小时桶幂等下发 `apps`、`skills` 与 `sessions` 刷新。首次连接会自动导入历史和输入资源；同一小时内的 WSS 重连复用原命令，不重复扫描。
 
-本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 Codex Desktop 的 UI 私有项目状态。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer` 以及旧目录中未分类的 `unknown`，避免 app-server 的默认过滤漏掉桌面端、程序化入口和旧版创建的顶层会话，同时不把明确的 `subAgent*` 子线程混入主导航。省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。活动会话同时进入所属 Workspace 的项目树和按更新时间排序的“最近”；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
+本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server `thread/list` / `thread/read`，不是 rollout 文件数量。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer` 以及旧目录中未分类的 `unknown`，避免 app-server 的默认过滤漏掉桌面端、程序化入口和旧版创建的顶层会话，同时不把明确的 `subAgent*` 子线程混入主导航。省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。项目会话只进入所属 Workspace，projectless 会话只进入隐藏 Recent；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
 
 stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。`thread/read(includeTurns=true)` 的完整历史可以大于普通资源帧，因此不能使用 4 MiB 作为所有输入的上限。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 与 presence 由心跳在原连接上原子续期，健康连接不因租约计时器主动关闭；连接恢复后先冲刷未投影事件，再发送新命令。
 

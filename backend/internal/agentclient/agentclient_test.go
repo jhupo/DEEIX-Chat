@@ -77,6 +77,35 @@ func TestParseWorkspaceRegisterCommand(t *testing.T) {
 	if err != nil || command.Path != `C:\source\project` || !command.Create {
 		t.Fatalf("parseAgentCommand() = %#v, %v", command, err)
 	}
+	rename, err := parseAgentCommand(json.RawMessage(`{
+		"kind":"workspace.rename",
+		"deviceId":"agd_0123456789abcdef0123456789abcdef",
+		"profileId":"codex-default",
+		"workspaceId":"workspace-0123456789abcdef01234567",
+		"name":"Renamed workspace"
+	}`))
+	if err != nil || rename.Name != "Renamed workspace" {
+		t.Fatalf("parseAgentCommand(workspace.rename) = %#v, %v", rename, err)
+	}
+	unicodeRename, err := json.Marshal(map[string]any{
+		"kind": "workspace.rename", "deviceId": "agd_0123456789abcdef0123456789abcdef", "profileId": "codex-default",
+		"workspaceId": "workspace-0123456789abcdef01234567", "name": strings.Repeat("项", 128),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = parseAgentCommand(unicodeRename); err != nil {
+		t.Fatalf("128-rune Workspace name was rejected: %v", err)
+	}
+	unregister, err := parseAgentCommand(json.RawMessage(`{
+		"kind":"workspace.unregister",
+		"deviceId":"agd_0123456789abcdef0123456789abcdef",
+		"profileId":"codex-default",
+		"workspaceId":"workspace-0123456789abcdef01234567"
+	}`))
+	if err != nil || unregister.WorkspaceID != "workspace-0123456789abcdef01234567" {
+		t.Fatalf("parseAgentCommand(workspace.unregister) = %#v, %v", unregister, err)
+	}
 }
 
 func TestParseAgentUpdateAndPendingMarker(t *testing.T) {
@@ -136,7 +165,16 @@ func TestConfigRoundTripAndWorkspaceUpsert(t *testing.T) {
 func TestDiscoverWorkspacesOnlyKeepsRegisteredConfiguredRoots(t *testing.T) {
 	registeredRoot := repositoryTestDir(t)
 	staleRoot := repositoryTestDir(t)
-	t.Setenv("DEEIX_TEST_THREAD_CWD", registeredRoot)
+	excludedRoot := repositoryTestDir(t)
+	if err := os.Mkdir(filepath.Join(excludedRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := CanonicalWorkspace(excludedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excluded.Excluded = true
+	t.Setenv("DEEIX_TEST_THREAD_CWD", excludedRoot)
 	state, err := OpenStateStore(filepath.Join(repositoryTestDir(t), "state.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +184,7 @@ func TestDiscoverWorkspacesOnlyKeepsRegisteredConfiguredRoots(t *testing.T) {
 		Workspaces: []Workspace{
 			{WorkspaceID: "workspace-registered", Root: registeredRoot, Name: "registered", Registered: true},
 			{WorkspaceID: "workspace-stale", Root: staleRoot, Name: "stale"},
+			excluded,
 		},
 	}
 	adapter, err := StartCodexAdapter(context.Background(), config, state, io.Discard, func(json.RawMessage) error { return nil })
@@ -199,6 +238,69 @@ func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
 	}
 	if _, err = gateway.registerWorkspace(AgentCommand{Path: filepath.Dir(dataDir)}); err == nil {
 		t.Fatal("Agent data directory ancestor was accepted as a workspace")
+	}
+}
+
+func TestManagedWorkspaceRenameAndRemovalKeepLocalDirectory(t *testing.T) {
+	dataDir := repositoryTestDir(t)
+	root := repositoryTestDir(t)
+	workspace := Workspace{
+		WorkspaceID: "workspace-0123456789abcdef01234567",
+		Root:        root, Name: "original", Registered: true,
+	}
+	config := Config{
+		Version: 1, CloudURL: "https://example.com", UserPublicID: "0123456789abcdef0123456789abcdef",
+		DeviceID: "agd_0123456789abcdef0123456789abcdef", ProfileID: "codex-default", CodexExecutable: os.Args[0],
+		Workspaces: []Workspace{workspace},
+	}
+	configPath := filepath.Join(dataDir, "config.json")
+	if err := SaveConfig(configPath, config); err != nil {
+		t.Fatal(err)
+	}
+	gateway := &Gateway{
+		config: config, dataDir: dataDir, workspaces: map[string]Workspace{workspace.WorkspaceID: workspace},
+		adapter:          &CodexAdapter{profileID: config.ProfileID, workspaces: map[string]Workspace{workspace.WorkspaceID: workspace}},
+		workspaceUpdates: make(chan []Workspace, 1),
+	}
+
+	rename := AgentCommand{Kind: "workspace.rename", WorkspaceID: workspace.WorkspaceID, Name: "renamed"}
+	result, err := gateway.mutateWorkspace(rename)
+	if err != nil || result["name"] != "renamed" || gateway.workspaces[workspace.WorkspaceID].Name != "renamed" {
+		t.Fatalf("mutateWorkspace(rename) = %#v, %v", result, err)
+	}
+	if _, err = gateway.mutateWorkspace(rename); err != nil {
+		t.Fatalf("replayed rename failed: %v", err)
+	}
+	discovered, err := gateway.adapter.DiscoverWorkspaces(context.Background())
+	if err != nil || len(discovered) != 1 || discovered[0].Name != "renamed" {
+		t.Fatalf("renamed workspace discovery = %#v, %v", discovered, err)
+	}
+
+	unregister := AgentCommand{Kind: "workspace.unregister", WorkspaceID: workspace.WorkspaceID}
+	if _, err = gateway.mutateWorkspace(unregister); err != nil {
+		t.Fatalf("mutateWorkspace(unregister) failed: %v", err)
+	}
+	if _, err = gateway.mutateWorkspace(unregister); err != nil {
+		t.Fatalf("replayed unregister failed: %v", err)
+	}
+	loaded, err := LoadConfig(configPath)
+	if err != nil || len(loaded.Workspaces) != 1 || loaded.Workspaces[0].Registered || !loaded.Workspaces[0].Excluded {
+		t.Fatalf("removed workspace config = %#v, %v", loaded.Workspaces, err)
+	}
+	if _, exists := gateway.workspaces[workspace.WorkspaceID]; exists {
+		t.Fatal("removed workspace remained in the active runtime map")
+	}
+	discovered, err = gateway.adapter.DiscoverWorkspaces(context.Background())
+	if err != nil || len(discovered) != 0 {
+		t.Fatalf("removed workspace was rediscovered: %#v, %v", discovered, err)
+	}
+	if _, executeErr := gateway.adapter.Execute(context.Background(), AgentCommand{
+		Kind: "thread.create", ProfileID: config.ProfileID, WorkspaceID: workspace.WorkspaceID, Settings: &Settings{},
+	}, nil); executeErr == nil {
+		t.Fatal("removed workspace still accepted execution commands")
+	}
+	if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
+		t.Fatalf("local workspace directory changed: %v", statErr)
 	}
 }
 
@@ -535,6 +637,25 @@ func TestEqualWorkspacesIncludesSessionRoots(t *testing.T) {
 	if equalWorkspaces(left, right) {
 		t.Fatal("workspace session-root change was ignored")
 	}
+	right = append([]Workspace(nil), left...)
+	right[0].Excluded = true
+	if equalWorkspaces(left, right) {
+		t.Fatal("workspace exclusion change was ignored")
+	}
+}
+
+func TestWorkspaceRevisionTracksDesktopMembership(t *testing.T) {
+	workspace := Workspace{WorkspaceID: "workspace-1", SessionRoots: []string{`C:\repo`}, ThreadIDs: map[string]struct{}{"thread-1": {}}}
+	first := workspaceRevision(workspace)
+	workspace.ThreadIDs["thread-2"] = struct{}{}
+	if second := workspaceRevision(workspace); second == first {
+		t.Fatal("workspace membership change did not update the revision")
+	}
+	delete(workspace.ThreadIDs, "thread-2")
+	workspace.SessionRoots = append(workspace.SessionRoots, `C:\worktree`)
+	if third := workspaceRevision(workspace); third == first {
+		t.Fatal("workspace root change did not update the revision")
+	}
 }
 
 func TestLockedAppServerContractMatchesNativeRegistry(t *testing.T) {
@@ -593,6 +714,38 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 	}
 }
 
+func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {
+	root, err := os.MkdirTemp(".", ".agent-project-sessions-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	state, err := OpenStateStore(filepath.Join(root, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{profileID: "codex-default", state: state}
+	data := map[string]any{"data": []any{
+		map[string]any{"id": "thread-assigned", "cwd": filepath.Join(root, "other")},
+		map[string]any{"id": "thread-rooted", "cwd": filepath.Join(root, "repo")},
+		map[string]any{"id": "thread-unrelated", "cwd": filepath.Join(filepath.Dir(root), "outside")},
+	}}
+	workspace := Workspace{Root: root, SessionRoots: []string{root}, ThreadIDs: map[string]struct{}{"thread-assigned": {}}}
+	projected, err := adapter.projectSessions(data, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, _ := projected.(map[string]any)
+	items, _ := catalog["data"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("project session count = %d, want 2: %#v", len(items), items)
+	}
+}
+
 func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	root, err := os.MkdirTemp(".", ".agent-codex-workspace-")
 	if err != nil {
@@ -613,10 +766,19 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err = os.Mkdir(savedProjectRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	savedProjectWorktree := filepath.Join(root, "saved-desktop-worktree")
+	if err = os.Mkdir(savedProjectWorktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	desktopState, err := json.Marshal(map[string]any{
-		"electron-saved-workspace-roots": []string{savedProjectRoot, "relative-project", filepath.Join(root, "missing-project")},
-		"electron-workspace-root-labels": map[string]string{savedProjectRoot: "Saved Desktop Project"},
-		"unrelated-private-state":        "ignored",
+		"local-projects": map[string]any{
+			"configured-project": map[string]any{"id": "configured-project", "name": "Desktop Root Name", "rootPaths": []string{root}},
+			"desktop-project":    map[string]any{"id": "desktop-project", "name": "Saved Desktop Project", "rootPaths": []string{savedProjectRoot, savedProjectWorktree}},
+		},
+		"projectless-thread-ids":      []string{"thread-1", "thread-3"},
+		"thread-project-assignments":  map[string]any{"thread-assigned": map[string]any{"projectKind": "local", "projectId": "desktop-project", "cwd": savedProjectRoot}},
+		"thread-workspace-root-hints": map[string]string{"thread-1": root, "thread-3": root},
+		"unrelated-private-state":     "ignored",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -636,7 +798,7 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	config := Config{
 		Version: 1, CloudURL: "https://example.com", UserPublicID: "0123456789abcdef0123456789abcdef",
 		DeviceID: "agd_0123456789abcdef0123456789abcdef", ProfileID: "codex-default", CodexExecutable: executable,
-		Workspaces: []Workspace{{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace"}},
+		Workspaces: []Workspace{{WorkspaceID: "workspace-0123456789abcdef01234567", Root: root, Name: "workspace", Registered: true}},
 	}
 	adapter, err := StartCodexAdapter(context.Background(), config, state, io.Discard, func(json.RawMessage) error { return nil })
 	if err != nil {
@@ -696,10 +858,10 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspaces) != 2 {
+	if len(workspaces) != 3 {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
-	var historyWorkspace, savedWorkspace *Workspace
+	var historyWorkspace, savedWorkspace, recentWorkspace *Workspace
 	for index := range workspaces {
 		if workspaces[index].WorkspaceID == want.WorkspaceID {
 			historyWorkspace = &workspaces[index]
@@ -707,11 +869,15 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 		if workspaces[index].Name == "Saved Desktop Project" {
 			savedWorkspace = &workspaces[index]
 		}
+		if workspaces[index].Hidden {
+			recentWorkspace = &workspaces[index]
+		}
 	}
-	if historyWorkspace == nil || historyWorkspace.Root != want.Root || historyWorkspace.Name != want.Name ||
+	if historyWorkspace == nil || historyWorkspace.Root != want.Root || historyWorkspace.Name != "workspace" ||
 		len(historyWorkspace.SessionRoots) != 1 || historyWorkspace.SessionRoots[0] != want.Root ||
 		savedWorkspace == nil || savedWorkspace.Root != savedProjectRoot || savedWorkspace.Registered ||
-		len(savedWorkspace.SessionRoots) != 1 || savedWorkspace.SessionRoots[0] != savedProjectRoot {
+		len(savedWorkspace.SessionRoots) != 2 || savedWorkspace.SessionRoots[0] != savedProjectRoot || savedWorkspace.SessionRoots[1] != savedProjectWorktree ||
+		recentWorkspace == nil || len(recentWorkspace.ThreadIDs) != 2 {
 		t.Fatalf("unexpected discovered workspaces: %#v", workspaces)
 	}
 	adapter.replaceWorkspaces(workspaces)
@@ -786,6 +952,21 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	first, _ := items[0].(map[string]any)
 	if first["historyLoaded"] != false || first["messages"] != nil {
 		t.Fatalf("session catalog eagerly included history: %#v", first)
+	}
+	recentSessions, err := adapter.Execute(context.Background(), AgentCommand{
+		Kind: "resource.refresh", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: recentWorkspace.WorkspaceID,
+		Resource: &struct {
+			Scope string `json:"scope"`
+			Name  string `json:"name"`
+		}{Scope: "workspace", Name: "sessions"},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recentCatalog, _ := recentSessions["data"].(map[string]any)
+	recentItems, _ := recentCatalog["data"].([]any)
+	if len(recentItems) != 4 {
+		t.Fatalf("projectless session summary count = %d, want 4", len(recentItems))
 	}
 	sourceRef, _ := first["sourceThreadRef"].(string)
 	detail, err := adapter.Execute(context.Background(), AgentCommand{

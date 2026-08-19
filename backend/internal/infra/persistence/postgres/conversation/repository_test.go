@@ -1274,6 +1274,36 @@ func TestConversationExecutionScopesAreIsolated(t *testing.T) {
 	}
 }
 
+func TestGatewayUnassignedListsOnlyHiddenRecentWorkspace(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.AgentDevice{}, &model.AgentWorkspace{}); err != nil {
+		t.Fatal(err)
+	}
+	device := model.AgentDevice{PublicID: "agd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 1, Name: "desktop", Platform: "windows", PublicKey: []byte("key"), PublicKeyFingerprint: "fingerprint", CredentialVersion: 1, Status: "active", NextServerSeq: 1}
+	if err := db.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	workspaces := []model.AgentWorkspace{
+		{PublicID: "workspace-project", UserID: 1, DeviceID: device.ID, RuntimeProfileID: 1, Name: "Project", Status: "available", LastSeenAt: now},
+		{PublicID: "workspace-recent", UserID: 1, DeviceID: device.ID, RuntimeProfileID: 1, Name: "Recent", Hidden: true, Status: "available", LastSeenAt: now},
+	}
+	if err := db.Create(&workspaces).Error; err != nil {
+		t.Fatal(err)
+	}
+	items := []model.Conversation{
+		{UserID: 1, PublicID: "conv_project", Title: "Project", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: device.PublicID, ExecutionWorkspaceID: "workspace-project", SessionKey: "session_project", Status: "active"},
+		{UserID: 1, PublicID: "conv_recent", Title: "Recent", LabelsJSON: "[]", ExecutionType: domainconversation.ExecutionTypeGateway, ExecutionDeviceID: device.PublicID, ExecutionWorkspaceID: "workspace-recent", SessionKey: "session_recent", Status: "active"},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, total, err := NewRepo(db).ListConversationsByUser(context.Background(), 1, 0, 10, "active", "unstarred", "all", "unassigned", domainconversation.ExecutionTypeGateway, device.PublicID, "")
+	if err != nil || total != 1 || len(got) != 1 || got[0].PublicID != "conv_recent" {
+		t.Fatalf("recent conversations = %#v, total=%d, err=%v", got, total, err)
+	}
+}
+
 func TestListConversationsForSearchReturnsOrderedWindowWithoutStatusFiltering(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	repo := NewRepo(db)

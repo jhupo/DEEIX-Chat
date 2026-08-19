@@ -83,6 +83,8 @@ type CodexAdapter struct {
 	codexHome   string
 	workspaceMu sync.RWMutex
 	workspaces  map[string]Workspace
+	threadMu    sync.RWMutex
+	threadCWD   map[string]string
 	rpc         *RPCClient
 	command     *exec.Cmd
 	version     string
@@ -156,7 +158,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	adapter := &CodexAdapter{
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
-		workspaces: make(map[string]Workspace, len(config.Workspaces)), done: make(chan struct{}),
+		workspaces: make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -199,7 +201,7 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
 		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
-		Commands:         []string{"agent.update", "workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
+		Commands:         []string{"agent.update", "workspace.register", "workspace.rename", "workspace.unregister", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
 		InputKinds:       []string{"text", "artifact", "skill", "app-mention"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},
 	}
@@ -212,11 +214,14 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	return manifest
 }
 
-func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspace, error) {
+func (adapter *CodexAdapter) DiscoverWorkspaces(_ context.Context) ([]Workspace, error) {
 	adapter.workspaceMu.RLock()
 	configuredWorkspaces := make([]Workspace, 0, len(adapter.workspaces))
+	excludedWorkspaceIDs := make(map[string]struct{})
 	for _, workspace := range adapter.workspaces {
-		if workspace.Registered {
+		if workspace.Excluded {
+			excludedWorkspaceIDs[workspace.WorkspaceID] = struct{}{}
+		} else if workspace.Registered {
 			configuredWorkspaces = append(configuredWorkspaces, workspace)
 		}
 	}
@@ -232,62 +237,17 @@ func (adapter *CodexAdapter) DiscoverWorkspaces(ctx context.Context) ([]Workspac
 			continue
 		}
 		workspace.Registered = true
+		workspace.Name = configured.Name
 		mergeWorkspace(byID, workspace)
 	}
 	for _, workspace := range adapter.desktopWorkspaces() {
 		if len(byID) == 128 {
 			break
 		}
-		mergeWorkspace(byID, workspace)
-	}
-	for _, archived := range []bool{false, true} {
-		seenCursors := make(map[string]struct{})
-		cursor := ""
-		for len(byID) < 128 {
-			params := map[string]any{
-				"limit": 100, "archived": archived, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
-			}
-			if cursor != "" {
-				params["cursor"] = cursor
-			}
-			page, err := adapter.requestMap(ctx, "thread/list", params)
-			if err != nil {
-				return nil, fmt.Errorf("list Codex threads: %w", err)
-			}
-			items, ok := page["data"].([]any)
-			if !ok {
-				return nil, errors.New("Codex thread catalog is invalid")
-			}
-			for _, raw := range items {
-				thread, ok := raw.(map[string]any)
-				if !ok {
-					continue
-				}
-				root, _ := thread["cwd"].(string)
-				root = strings.TrimSpace(root)
-				if root == "" {
-					continue
-				}
-				workspace, workspaceErr := codexProjectWorkspace(root)
-				if workspaceErr != nil {
-					continue
-				}
-				mergeWorkspace(byID, workspace)
-				if len(byID) == 128 {
-					break
-				}
-			}
-			nextCursor, _ := page["nextCursor"].(string)
-			nextCursor = strings.TrimSpace(nextCursor)
-			if nextCursor == "" {
-				break
-			}
-			if _, duplicate := seenCursors[nextCursor]; duplicate {
-				return nil, errors.New("Codex thread catalog cursor repeated")
-			}
-			seenCursors[nextCursor] = struct{}{}
-			cursor = nextCursor
+		if _, excluded := excludedWorkspaceIDs[workspace.WorkspaceID]; excluded {
+			continue
 		}
+		mergeWorkspace(byID, workspace)
 	}
 	workspaces := make([]Workspace, 0, len(byID))
 	for _, workspace := range byID {
@@ -310,55 +270,122 @@ func (adapter *CodexAdapter) desktopWorkspaces() []Workspace {
 		return nil
 	}
 	statePath := filepath.Join(codexHome, ".codex-global-state.json")
-	file, err := os.Open(statePath)
-	if err != nil {
+	var data []byte
+	if err := runAsConfiguredUser(func() error {
+		file, err := os.Open(statePath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxCodexDesktopStateBytes {
+			return errors.New("Codex Desktop state file is invalid")
+		}
+		data, err = io.ReadAll(io.LimitReader(file, maxCodexDesktopStateBytes+1))
+		if err != nil || len(data) > maxCodexDesktopStateBytes {
+			return errors.New("Codex Desktop state file is invalid")
+		}
 		return nil
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxCodexDesktopStateBytes {
-		return nil
-	}
-	data, err := io.ReadAll(io.LimitReader(file, maxCodexDesktopStateBytes+1))
-	if err != nil || len(data) > maxCodexDesktopStateBytes {
+	}); err != nil {
 		return nil
 	}
 	var state struct {
-		SavedRoots []string          `json:"electron-saved-workspace-roots"`
-		Labels     map[string]string `json:"electron-workspace-root-labels"`
+		Projects map[string]struct {
+			Name      string   `json:"name"`
+			RootPaths []string `json:"rootPaths"`
+		} `json:"local-projects"`
+		ProjectlessIDs []string `json:"projectless-thread-ids"`
+		Assignments    map[string]struct {
+			ProjectID string `json:"projectId"`
+		} `json:"thread-project-assignments"`
+		WorkspaceHints map[string]string `json:"thread-workspace-root-hints"`
 	}
 	if json.Unmarshal(data, &state) != nil {
 		return nil
 	}
-	workspaces := make([]Workspace, 0, min(len(state.SavedRoots), 128))
-	seen := make(map[string]struct{}, len(state.SavedRoots))
-	for _, root := range state.SavedRoots {
+	workspaces := make([]Workspace, 0, min(len(state.Projects)+1, 128))
+	seen := make(map[string]struct{}, len(state.Projects))
+	projectIDs := make(map[string]string, len(state.Projects))
+	for projectID, project := range state.Projects {
+		projectID, project.Name = strings.TrimSpace(projectID), sanitizeDiagnosticValue(project.Name, 128)
+		if projectID == "" || project.Name == "" {
+			continue
+		}
+		var selected *Workspace
+		for _, root := range project.RootPaths {
+			root = strings.TrimSpace(root)
+			if root == "" || len(root) > 4096 || !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
+				continue
+			}
+			workspace, workspaceErr := canonicalWorkspaceAsConfiguredUser(strings.TrimSpace(root))
+			if workspaceErr != nil {
+				continue
+			}
+			workspace.Name = project.Name
+			workspace.SessionRoots = []string{workspace.Root}
+			if selected == nil {
+				selected = &workspace
+			} else {
+				selected.SessionRoots = append(selected.SessionRoots, workspace.Root)
+			}
+		}
+		if selected == nil {
+			continue
+		}
+		if _, duplicate := seen[selected.WorkspaceID]; duplicate {
+			continue
+		}
+		seen[selected.WorkspaceID] = struct{}{}
+		projectIDs[projectID] = selected.WorkspaceID
+		workspaces = append(workspaces, *selected)
+	}
+	projectless := make(map[string]struct{}, len(state.ProjectlessIDs))
+	for _, id := range state.ProjectlessIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			projectless[id] = struct{}{}
+		}
+	}
+	var recentRoot string
+	for threadID, root := range state.WorkspaceHints {
+		if _, ok := projectless[threadID]; !ok {
+			continue
+		}
 		root = strings.TrimSpace(root)
 		if root == "" || len(root) > 4096 || !filepath.IsAbs(root) || strings.ContainsRune(root, 0) {
 			continue
 		}
-		workspace, workspaceErr := CanonicalWorkspace(root)
-		if workspaceErr != nil {
-			continue
-		}
-		if _, duplicate := seen[workspace.WorkspaceID]; duplicate {
-			continue
-		}
-		label := sanitizeDiagnosticValue(state.Labels[root], 128)
-		if label == "" {
-			label = sanitizeDiagnosticValue(state.Labels[workspace.Root], 128)
-		}
-		if label != "" {
-			workspace.Name = label
-		}
-		workspace.SessionRoots = []string{workspace.Root}
-		seen[workspace.WorkspaceID] = struct{}{}
-		workspaces = append(workspaces, workspace)
-		if len(workspaces) == 128 {
+		if workspace, workspaceErr := canonicalWorkspaceAsConfiguredUser(root); workspaceErr == nil {
+			recentRoot = workspace.Root
 			break
 		}
 	}
+	if recentRoot != "" && len(projectless) > 0 {
+		sum := sha256.Sum256([]byte("deeix:recent:" + recentRoot))
+		workspaces = append(workspaces, Workspace{WorkspaceID: "workspace-recent-" + hex.EncodeToString(sum[:12]), Root: recentRoot, Name: "Recent", Hidden: true, SessionRoots: []string{recentRoot}, ThreadIDs: projectless})
+	}
+	for threadID, assignment := range state.Assignments {
+		workspaceID, ok := projectIDs[strings.TrimSpace(assignment.ProjectID)]
+		if !ok || strings.TrimSpace(threadID) == "" {
+			continue
+		}
+		for index := range workspaces {
+			if workspaces[index].WorkspaceID == workspaceID {
+				if workspaces[index].ThreadIDs == nil {
+					workspaces[index].ThreadIDs = make(map[string]struct{})
+				}
+				workspaces[index].ThreadIDs[threadID] = struct{}{}
+			}
+		}
+	}
 	return workspaces
+}
+
+func canonicalWorkspaceAsConfiguredUser(root string) (workspace Workspace, err error) {
+	err = runAsConfiguredUser(func() error {
+		workspace, err = CanonicalWorkspace(root)
+		return err
+	})
+	return workspace, err
 }
 
 func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {
@@ -373,6 +400,17 @@ func mergeWorkspace(workspaces map[string]Workspace, incoming Workspace) {
 		}
 	}
 	existing.Registered = existing.Registered || incoming.Registered
+	existing.Excluded = existing.Excluded || incoming.Excluded
+	existing.Hidden = existing.Hidden || incoming.Hidden
+	if !existing.Registered && !incoming.Registered && !incoming.Hidden && strings.TrimSpace(incoming.Name) != "" {
+		existing.Name = incoming.Name
+	}
+	if existing.ThreadIDs == nil && incoming.ThreadIDs != nil {
+		existing.ThreadIDs = make(map[string]struct{}, len(incoming.ThreadIDs))
+	}
+	for threadID := range incoming.ThreadIDs {
+		existing.ThreadIDs[threadID] = struct{}{}
+	}
 	workspaces[incoming.WorkspaceID] = existing
 }
 
@@ -515,7 +553,7 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 	adapter.workspaceMu.RLock()
 	workspace, ok := adapter.workspaces[command.WorkspaceID]
 	adapter.workspaceMu.RUnlock()
-	if !ok {
+	if !ok || workspace.Excluded {
 		return nil, errors.New("gateway command workspace is not registered")
 	}
 	cwd := workspace.Root
@@ -541,6 +579,11 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 	if err != nil {
 		return nil, err
 	}
+	adapter.threadMu.RLock()
+	if threadCWD := strings.TrimSpace(adapter.threadCWD[providerThreadID]); threadCWD != "" {
+		cwd = threadCWD
+	}
+	adapter.threadMu.RUnlock()
 	switch command.Kind {
 	case "thread.lifecycle":
 		return adapter.threadLifecycle(ctx, command, providerThreadID, cwd)
@@ -664,11 +707,14 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 	case "auth-status":
 		params["refreshToken"] = false
 	case "sessions":
-		sessionRoots := workspace.SessionRoots
-		if len(sessionRoots) == 0 {
-			sessionRoots = []string{cwd}
+		if !workspace.Hidden && len(workspace.ThreadIDs) == 0 {
+			sessionRoots := workspace.SessionRoots
+			if len(sessionRoots) == 0 {
+				sessionRoots = []string{cwd}
+			}
+			params["cwd"] = sessionRoots
 		}
-		params["cwd"], params["limit"], params["archived"] = sessionRoots, 100, false
+		params["limit"], params["archived"] = 100, false
 		params["sortKey"] = "recency_at"
 		params["sourceKinds"] = codexUserThreadSourceKinds
 	case "skills":
@@ -697,7 +743,7 @@ func (adapter *CodexAdapter) resource(ctx context.Context, command AgentCommand,
 		}
 		data = map[string]any{"authMethod": authMethod, "requiresOpenaiAuth": source["requiresOpenaiAuth"]}
 	} else if name == "sessions" {
-		data, err = adapter.projectSessions(ctx, data)
+		data, err = adapter.projectSessions(data, workspace)
 		if err != nil {
 			return nil, err
 		}
@@ -785,6 +831,13 @@ func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string
 					continue
 				}
 				thread["status"] = status
+				if id, _ := thread["id"].(string); strings.TrimSpace(id) != "" {
+					if cwd, _ := thread["cwd"].(string); strings.TrimSpace(cwd) != "" {
+						adapter.threadMu.Lock()
+						adapter.threadCWD[id] = cwd
+						adapter.threadMu.Unlock()
+					}
+				}
 				items = append(items, thread)
 				count++
 			}
@@ -803,7 +856,7 @@ func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string
 	return map[string]any{"data": items}, nil
 }
 
-func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any, error) {
+func (adapter *CodexAdapter) projectSessions(data any, workspace Workspace) (any, error) {
 	root, _ := data.(map[string]any)
 	items, _ := root["data"].([]any)
 	result := make([]any, 0, len(items))
@@ -812,6 +865,15 @@ func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any
 		id, _ := thread["id"].(string)
 		if id == "" {
 			continue
+		}
+		if workspace.Hidden {
+			if _, ok := workspace.ThreadIDs[id]; !ok {
+				continue
+			}
+		} else if len(workspace.ThreadIDs) > 0 {
+			if _, assigned := workspace.ThreadIDs[id]; !assigned && !sessionCWDWithinRoots(thread, workspace.SessionRoots) {
+				continue
+			}
 		}
 		sourceRef, err := adapter.state.PublishSource(adapter.profileID, "thread", id)
 		if err != nil {
@@ -823,6 +885,20 @@ func (adapter *CodexAdapter) projectSessions(ctx context.Context, data any) (any
 		})
 	}
 	return map[string]any{"data": result}, nil
+}
+
+func sessionCWDWithinRoots(thread map[string]any, roots []string) bool {
+	cwd, _ := thread["cwd"].(string)
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || len(cwd) > 4096 || !filepath.IsAbs(cwd) || strings.ContainsRune(cwd, 0) {
+		return false
+	}
+	for _, root := range roots {
+		if pathWithin(root, cwd) {
+			return true
+		}
+	}
+	return false
 }
 
 func (adapter *CodexAdapter) projectSessionDetail(detail map[string]any, providerThreadID string) (map[string]any, error) {

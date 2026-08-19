@@ -51,6 +51,7 @@ type ConversationProject struct {
 	UserID            uint
 	PublicID          string
 	Name              string
+	Managed           bool
 	Description       string
 	SystemPrompt      string
 	MCPDefaultMode    string

@@ -24,7 +24,7 @@ func (s gatewayProjectListerStub) ListProjects(context.Context, uint, string) ([
 func TestListExecutionProjectsMapsGatewayProjects(t *testing.T) {
 	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, time.UTC)
 	service := &Service{gatewayProjects: gatewayProjectListerStub{projects: []GatewayProject{
-		{ProjectID: " workspace_deeix ", ProfileID: "profile_codex", Name: " DEEIX ", UpdatedAt: now},
+		{ProjectID: " workspace_deeix ", ProfileID: "profile_codex", Name: " DEEIX ", Managed: true, UpdatedAt: now},
 	}}}
 
 	projects, err := service.ListExecutionProjects(
@@ -41,7 +41,7 @@ func TestListExecutionProjectsMapsGatewayProjects(t *testing.T) {
 		t.Fatalf("ListExecutionProjects() returned %d projects, want 1", len(projects))
 	}
 	project := projects[0]
-	if project.PublicID != "workspace_deeix" || project.Name != "DEEIX" || project.Status != "active" {
+	if project.PublicID != "workspace_deeix" || project.Name != "DEEIX" || project.Status != "active" || !project.Managed {
 		t.Fatalf("gateway project = %#v", project)
 	}
 	if !project.UpdatedAt.Equal(now) || project.MCPDefaultMode != domainconversation.ConversationProjectMCPDefaultModeInherit {
@@ -54,12 +54,15 @@ func TestListExecutionProjectsMapsGatewayProjects(t *testing.T) {
 	if resolved.ProfileID != "profile_codex" {
 		t.Fatalf("resolved gateway project = %#v", resolved)
 	}
-	conversations := []domainconversation.Conversation{{ExecutionWorkspaceID: "workspace_deeix"}}
+	conversations := []domainconversation.Conversation{{ExecutionWorkspaceID: "workspace_deeix"}, {ExecutionWorkspaceID: "workspace_recent"}}
 	if err = service.applyGatewayProjectFields(context.Background(), 7, "agd_device", conversations); err != nil {
 		t.Fatalf("applyGatewayProjectFields() error = %v", err)
 	}
 	if conversations[0].ProjectPublicID != "workspace_deeix" || conversations[0].ProjectName != "DEEIX" {
 		t.Fatalf("gateway conversation project = %#v", conversations[0])
+	}
+	if conversations[1].ProjectPublicID != "" || conversations[1].ProjectName != "" {
+		t.Fatalf("hidden gateway workspace leaked as project = %#v", conversations[1])
 	}
 }
 

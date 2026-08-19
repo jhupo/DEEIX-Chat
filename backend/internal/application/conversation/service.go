@@ -92,6 +92,7 @@ type GatewayProject struct {
 	ProjectID string
 	ProfileID string
 	Name      string
+	Managed   bool
 	UpdatedAt time.Time
 }
 type GatewayStartThreadInput struct {

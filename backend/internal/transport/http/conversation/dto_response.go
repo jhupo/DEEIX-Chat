@@ -245,6 +245,7 @@ func ToConversationExportResponse(item *appconversation.ConversationExportResult
 type ConversationProjectResponse struct {
 	PublicID          string    `json:"publicID"`
 	Name              string    `json:"name"`
+	Managed           bool      `json:"managed"`
 	Description       string    `json:"description"`
 	SystemPrompt      string    `json:"systemPrompt"`
 	MCPDefaultMode    string    `json:"mcpDefaultMode"`
@@ -265,6 +266,7 @@ func toConversationProjectResponse(item *model.ConversationProject) Conversation
 	return ConversationProjectResponse{
 		PublicID:          item.PublicID,
 		Name:              item.Name,
+		Managed:           item.Managed,
 		Description:       item.Description,
 		SystemPrompt:      item.SystemPrompt,
 		MCPDefaultMode:    item.MCPDefaultMode,

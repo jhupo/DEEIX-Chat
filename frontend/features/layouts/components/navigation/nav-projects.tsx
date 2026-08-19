@@ -73,7 +73,7 @@ import {
 import { useChatSession } from "@/features/chat";
 import { useDevices } from "@/features/devices";
 import { ProjectDialog, type ProjectDraft } from "@/features/layouts/components/navigation/project-dialog";
-import { WorkspaceDialog } from "@/features/layouts/components/navigation/workspace-dialog";
+import { WorkspaceDialog, WorkspaceRenameDialog } from "@/features/layouts/components/navigation/workspace-dialog";
 import { SidebarConversationItem } from "@/features/layouts/components/navigation/sidebar-conversation-item";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutProjectConversations } from "@/features/layouts/hooks/use-layout-project-conversations";
@@ -85,14 +85,17 @@ import type {
 import { useSettingsChatPreferences } from "@/features/settings";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { cn } from "@/lib/utils";
+import { unregisterAgentWorkspace, waitForAgentCommand } from "@/shared/api/agent-gateway";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { CollapsibleMotionContent } from "@/shared/components/collapsible-motion-content";
 import { DeleteFilesOption } from "@/shared/components/delete-files-option";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { useStoredBoolean } from "@/shared/hooks/use-stored-boolean";
 
 type ProjectActionTarget = {
-  publicID?: string;
+  publicID: string;
   name: string;
+  kind: "cloud" | "workspace";
 };
 
 const PROJECT_TREE_ACCORDION_TRANSITION: Transition = {
@@ -422,7 +425,9 @@ export function NavProjects() {
   const activeProjectID = pathname === "/chat" ? activeChatProjectID : activeRecentProjectID;
   const [draft, setDraft] = React.useState<ProjectDraft | null>(null);
   const [workspaceDialogOpen, setWorkspaceDialogOpen] = React.useState(false);
+  const [workspaceRenameTarget, setWorkspaceRenameTarget] = React.useState<{ workspaceId: string; name: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ProjectActionTarget | null>(null);
+  const [workspaceMutationPending, setWorkspaceMutationPending] = React.useState(false);
   const [deleteProjectConversations, setDeleteProjectConversations] = React.useState(false);
   const [deleteProjectFiles, setDeleteProjectFiles] = React.useState(false);
   const [conversationRenameTarget, setConversationRenameTarget] = React.useState<SidebarConversationRenameTarget>(null);
@@ -643,6 +648,29 @@ export function NavProjects() {
       return;
     }
     const deletingProjectID = deleteTarget.publicID;
+    if (deleteTarget.kind === "workspace") {
+      if (!defaultDevice || workspaceMutationPending) return;
+      setWorkspaceMutationPending(true);
+      try {
+        const token = await resolveAccessToken();
+        if (!token) throw new Error("missing access token");
+        const queued = await unregisterAgentWorkspace(token, defaultDevice.deviceId, deletingProjectID);
+        const command = await waitForAgentCommand(token, queued.commandId);
+        if (!command) throw new Error(t("workspace.timeout"));
+        if (command.status === "error") throw new Error(command.errorMessage || t("workspace.removeFailed"));
+        if (pathname === "/recent" && activeProjectID === deletingProjectID) router.replace("/recent");
+        if (activeConversationProjectID === deletingProjectID) router.push("/chat");
+        removeProject(deletingProjectID);
+        await reload();
+        toast.success(t("workspace.removed"));
+        setDeleteTarget(null);
+      } catch (error) {
+        toast.error(error instanceof Error && error.message ? error.message : t("workspace.removeFailed"));
+      } finally {
+        setWorkspaceMutationPending(false);
+      }
+      return;
+    }
     const deletingActiveConversation =
       deleteProjectConversations &&
       (
@@ -668,6 +696,8 @@ export function NavProjects() {
   }, [
     activeConversationID,
     activeProjectID,
+    activeConversationProjectID,
+    defaultDevice,
     deleteProject,
     deleteProjectConversations,
     deleteProjectFiles,
@@ -676,7 +706,10 @@ export function NavProjects() {
     pathname,
     projectConversationState,
     removeProject,
+    reload,
     router,
+    t,
+    workspaceMutationPending,
   ]);
 
   React.useEffect(() => {
@@ -789,11 +822,12 @@ export function NavProjects() {
                       const menuHovered = hoveredProjectMenuID === project.publicID;
                       const menuOpen = openProjectMenuID === project.publicID;
                       const rowDragging = draggingProjectID === project.publicID;
+                      const canManageCurrentProject = canManageProjects || (executionMode === "gateway" && project.managed);
                       const canSortProjects = canManageProjects && projects.length >= 2;
-                      const projectActionPaddingClassName = canManageProjects
+                      const projectActionPaddingClassName = canManageCurrentProject
                         ? canSortProjects ? "pr-24" : "pr-16"
                         : "pr-8";
-                      const projectCreateActionClassName = canManageProjects
+                      const projectCreateActionClassName = canManageCurrentProject
                         ? canSortProjects ? "right-16" : "right-8"
                         : "right-0";
                       const projectMenuActionClassName = canSortProjects ? "right-8" : "right-0";
@@ -855,7 +889,7 @@ export function NavProjects() {
                                 >
                                   <PlusIcon aria-hidden size={16} strokeWidth={1.6} animate={createHovered ? "default" : undefined} />
                                 </ProjectInlineAction>
-                                {canManageProjects ? <DropdownMenu
+                                {canManageCurrentProject ? <DropdownMenu
                                   modal={false}
                                   open={menuOpen}
                                   onOpenChange={(open) => setOpenProjectMenuID(open ? project.publicID : null)}
@@ -874,29 +908,37 @@ export function NavProjects() {
                                     <DropdownMenuItem
                                       onSelect={(event) => {
                                         event.preventDefault();
-                                        setDraft({
-                                          publicID: project.publicID,
-                                          name: project.name,
-                                          systemPrompt: project.systemPrompt ?? "",
-                                          mcpDefaultMode: project.mcpDefaultMode ?? "inherit",
-                                          defaultMCPToolIDs: project.defaultMCPToolIDs ?? [],
-                                          defaultSkillIDs: project.defaultSkillIDs ?? [],
-                                        });
+                                        if (canManageProjects) {
+                                          setDraft({
+                                            publicID: project.publicID,
+                                            name: project.name,
+                                            systemPrompt: project.systemPrompt ?? "",
+                                            mcpDefaultMode: project.mcpDefaultMode ?? "inherit",
+                                            defaultMCPToolIDs: project.defaultMCPToolIDs ?? [],
+                                            defaultSkillIDs: project.defaultSkillIDs ?? [],
+                                          });
+                                        } else {
+                                          setWorkspaceRenameTarget({ workspaceId: project.publicID, name: project.name });
+                                        }
                                       }}
                                     >
                                       <DropdownMenuItemIcon icon={PencilLine} className="text-current" />
-                                      {t("edit")}
+                                      {canManageProjects ? t("edit") : t("workspace.renameTitle")}
                                     </DropdownMenuItem>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       variant="destructive"
                                       onSelect={(event) => {
                                         event.preventDefault();
-                                        setDeleteTarget({ publicID: project.publicID, name: project.name });
+                                        setDeleteTarget({
+                                          publicID: project.publicID,
+                                          name: project.name,
+                                          kind: canManageProjects ? "cloud" : "workspace",
+                                        });
                                       }}
                                     >
                                       <DropdownMenuItemIcon icon={Trash} className="text-current" />
-                                      {t("delete")}
+                                      {canManageProjects ? t("delete") : t("workspace.remove")}
                                     </DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu> : null}
@@ -1019,18 +1061,26 @@ export function NavProjects() {
         <ProjectDialog draft={draft} setDraft={setDraft} onOpenChange={(open) => !open && closeDraft()} onSubmit={commitDraft} />
       ) : null}
       {executionMode === "gateway" && defaultDevice ? (
-        <WorkspaceDialog
-          deviceId={defaultDevice.deviceId}
-          open={workspaceDialogOpen}
-          onOpenChange={setWorkspaceDialogOpen}
-          onQueued={reload}
-        />
+        <>
+          <WorkspaceDialog
+            deviceId={defaultDevice.deviceId}
+            open={workspaceDialogOpen}
+            onOpenChange={setWorkspaceDialogOpen}
+            onQueued={reload}
+          />
+          <WorkspaceRenameDialog
+            deviceId={defaultDevice.deviceId}
+            target={workspaceRenameTarget}
+            onOpenChange={(open) => !open && setWorkspaceRenameTarget(null)}
+            onRenamed={reload}
+          />
+        </>
       ) : null}
 
       <AlertDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => {
-          if (!open) {
+          if (!open && !workspaceMutationPending) {
             setDeleteTarget(null);
             setDeleteProjectConversations(false);
             setDeleteProjectFiles(false);
@@ -1039,11 +1089,15 @@ export function NavProjects() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("deleteTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {stableDeleteTarget?.kind === "workspace" ? t("workspace.removeTitle") : t("deleteTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("deleteDescription", { name: stableDeleteTarget?.name ?? t("untitled") })}
+              {stableDeleteTarget?.kind === "workspace"
+                ? t("workspace.removeDescription", { name: stableDeleteTarget.name })
+                : t("deleteDescription", { name: stableDeleteTarget?.name ?? t("untitled") })}
             </AlertDialogDescription>
-            <div className="mt-1 flex items-start gap-2 py-2 text-left">
+            {stableDeleteTarget?.kind !== "workspace" ? <div className="mt-1 flex items-start gap-2 py-2 text-left">
               <Checkbox
                 id={deleteProjectConversationsID}
                 checked={deleteProjectConversations}
@@ -1054,8 +1108,8 @@ export function NavProjects() {
                 <span className="block text-xs font-medium text-foreground">{t("deleteConversationsLabel")}</span>
                 <span className="block text-xs leading-5 text-muted-foreground">{t("deleteConversationsDescription")}</span>
               </label>
-            </div>
-            {deleteProjectConversations ? (
+            </div> : null}
+            {stableDeleteTarget?.kind !== "workspace" && deleteProjectConversations ? (
               <DeleteFilesOption
                 id={deleteProjectFilesID}
                 checked={deleteProjectFiles}
@@ -1064,9 +1118,17 @@ export function NavProjects() {
             ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={() => void confirmDelete()}>
-              {t("delete")}
+            <AlertDialogCancel disabled={workspaceMutationPending}>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={workspaceMutationPending}
+              onClick={(event) => {
+                if (stableDeleteTarget?.kind === "workspace") event.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              {workspaceMutationPending ? <Spinner className="size-4" /> : null}
+              {stableDeleteTarget?.kind === "workspace" ? t("workspace.remove") : t("delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

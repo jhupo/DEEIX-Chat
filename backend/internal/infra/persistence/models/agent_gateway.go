@@ -130,6 +130,8 @@ type AgentWorkspace struct {
 	DeviceID         uint      `gorm:"not null;uniqueIndex:uk_agent_workspaces_device_public,priority:1;index:idx_agent_workspaces_device_status,priority:1"`
 	RuntimeProfileID uint      `gorm:"not null;index"`
 	Name             string    `gorm:"size:128;not null"`
+	Managed          bool      `gorm:"not null;default:false;index"`
+	Hidden           bool      `gorm:"not null;default:false;index"`
 	Status           string    `gorm:"size:32;not null;index:idx_agent_workspaces_device_status,priority:2"`
 	LastSeenAt       time.Time `gorm:"not null;index"`
 }

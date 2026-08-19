@@ -122,6 +122,7 @@ func (s *Service) ListExecutionProjects(
 			projects = append(projects, model.ConversationProject{
 				PublicID:       strings.TrimSpace(item.ProjectID),
 				Name:           strings.TrimSpace(item.Name),
+				Managed:        item.Managed,
 				MCPDefaultMode: model.ConversationProjectMCPDefaultModeInherit,
 				SortOrder:      index + 1,
 				Status:         "active",
@@ -189,8 +190,14 @@ func (s *Service) applyGatewayProjectFields(
 	}
 	for index := range conversations {
 		projectID := strings.TrimSpace(conversations[index].ExecutionWorkspaceID)
-		conversations[index].ProjectPublicID = projectID
-		conversations[index].ProjectName = projectNames[projectID]
+		projectName, visible := projectNames[projectID]
+		if visible {
+			conversations[index].ProjectPublicID = projectID
+			conversations[index].ProjectName = projectName
+		} else {
+			conversations[index].ProjectPublicID = ""
+			conversations[index].ProjectName = ""
+		}
 	}
 	return nil
 }

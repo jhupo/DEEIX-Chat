@@ -46,6 +46,9 @@ type bridgeFrame struct {
 type bridgeWorkspace struct {
 	WorkspaceID string `json:"workspaceId"`
 	Name        string `json:"name"`
+	Managed     bool   `json:"managed,omitempty"`
+	Hidden      bool   `json:"hidden,omitempty"`
+	Revision    string `json:"revision"`
 }
 
 type ArtifactGrant struct {
@@ -150,6 +153,13 @@ func parseAgentCommand(raw json.RawMessage) (AgentCommand, error) {
 		if !validText(command.Path, 4096) || strings.ContainsRune(command.Path, 0) {
 			return AgentCommand{}, errors.New("workspace path is invalid")
 		}
+	case "workspace.rename":
+		allowed = append(workspace, "name")
+		if !validText(command.Name, 512) || utf8.RuneCountInString(command.Name) > 128 {
+			return AgentCommand{}, errors.New("workspace name is invalid")
+		}
+	case "workspace.unregister":
+		allowed = workspace
 	case "thread.create":
 		allowed = append(workspace, "settings")
 		if command.Settings == nil || !validSettings(*command.Settings) {
@@ -271,7 +281,7 @@ func validateTargets(command AgentCommand) bool {
 	if !validRef(command.WorkspaceID, 256) {
 		return false
 	}
-	if command.Kind == "thread.create" || command.Kind == "resource.refresh" {
+	if command.Kind == "workspace.rename" || command.Kind == "workspace.unregister" || command.Kind == "thread.create" || command.Kind == "resource.refresh" {
 		return true
 	}
 	if !validRef(command.ThreadID, 256) || !validRef(command.SourceThreadRef, 256) {

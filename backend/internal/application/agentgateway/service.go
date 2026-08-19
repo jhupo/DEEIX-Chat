@@ -174,6 +174,7 @@ type WorkspaceView struct {
 	DeviceID    string
 	ProfileID   string
 	Name        string
+	Managed     bool
 	Status      string
 	LastSeenAt  time.Time
 }
@@ -211,11 +212,22 @@ type CommandView struct {
 type WorkspaceRegistration struct {
 	WorkspaceID string
 	Name        string
+	Managed     bool
+	Hidden      bool
+	Revision    string
 }
 
 type RegisterWorkspaceInput struct {
 	DeviceID, ProfileID, Path, IdempotencyKey string
 	Create                                    bool
+}
+
+type RenameWorkspaceInput struct {
+	DeviceID, WorkspaceID, Name, IdempotencyKey string
+}
+
+type UnregisterWorkspaceInput struct {
+	DeviceID, WorkspaceID, IdempotencyKey string
 }
 
 type ThreadView struct {
@@ -446,19 +458,21 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 	}
 	items := make([]domainagent.Workspace, 0, len(registrations))
 	seen := make(map[string]struct{}, len(registrations))
+	revisions := make(map[string]string, len(registrations))
 	for _, registration := range registrations {
-		registration.WorkspaceID, registration.Name = strings.TrimSpace(registration.WorkspaceID), strings.TrimSpace(registration.Name)
+		registration.WorkspaceID, registration.Name, registration.Revision = strings.TrimSpace(registration.WorkspaceID), strings.TrimSpace(registration.Name), strings.TrimSpace(registration.Revision)
 		if len(registration.WorkspaceID) > 64 || !validOpaqueRef(registration.WorkspaceID) ||
-			registration.Name == "" || utf8.RuneCountInString(registration.Name) > 128 {
+			registration.Name == "" || utf8.RuneCountInString(registration.Name) > 128 || !validHex(registration.Revision, 24) {
 			return ErrInvalidInput
 		}
 		if _, exists := seen[registration.WorkspaceID]; exists {
 			return ErrInvalidInput
 		}
 		seen[registration.WorkspaceID] = struct{}{}
+		revisions[registration.WorkspaceID] = registration.Revision
 		items = append(items, domainagent.Workspace{
 			PublicID: registration.WorkspaceID, UserID: identity.UserID, DeviceID: identity.InternalDeviceID,
-			RuntimeProfileID: challenge.Profile.ID, Name: registration.Name, Status: "available",
+			RuntimeProfileID: challenge.Profile.ID, Name: registration.Name, Managed: registration.Managed, Hidden: registration.Hidden, Status: "available",
 		})
 	}
 	now := s.now().UTC()
@@ -474,13 +488,13 @@ func (s *Service) SyncWorkspaces(ctx context.Context, identity *ConnectionIdenti
 	}
 	for _, item := range items {
 		if runtimeProfileHasResource(challenge.Profile, "workspace", "sessions") {
-			key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:v2:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+			key := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:sessions:v3:"+identity.DeviceID+":"+item.PublicID+":"+revisions[item.PublicID]+":"+bucket)).String()
 			if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "sessions", key); err != nil {
 				return err
 			}
 		}
 		if runtimeProfileHasResource(challenge.Profile, "workspace", "skills") {
-			skillsKey := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:skills:v1:"+identity.DeviceID+":"+item.PublicID+":"+bucket)).String()
+			skillsKey := uuid.NewSHA1(uuid.NameSpaceURL, []byte("deeix:skills:v2:"+identity.DeviceID+":"+item.PublicID+":"+revisions[item.PublicID]+":"+bucket)).String()
 			if _, err := s.QueueResourceRefresh(ctx, identity.UserID, identity.DeviceID, "", item.PublicID, "skills", skillsKey); err != nil {
 				return err
 			}
@@ -540,7 +554,7 @@ func (s *Service) ListWorkspaces(ctx context.Context, userID uint, devicePublicI
 	for _, item := range items {
 		result = append(result, WorkspaceView{
 			WorkspaceID: item.PublicID, DeviceID: devicePublicID, ProfileID: item.ProfilePublicID, Name: item.Name,
-			Status: item.Status, LastSeenAt: item.LastSeenAt,
+			Managed: item.Managed, Status: item.Status, LastSeenAt: item.LastSeenAt,
 		})
 	}
 	return result, nil
@@ -608,6 +622,43 @@ func (s *Service) RegisterWorkspace(ctx context.Context, userID uint, input Regi
 	created, err := s.repo.QueueWorkspaceRegistration(
 		ctx, input.IdempotencyKey, requestHash(request), userID,
 		input.DeviceID, input.ProfileID, input.Path, input.Create, command, s.now().UTC(),
+	)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) RenameWorkspace(ctx context.Context, userID uint, input RenameWorkspaceInput) (*CommandView, error) {
+	input.DeviceID, input.WorkspaceID, input.Name = strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.WorkspaceID), strings.TrimSpace(input.Name)
+	if userID == 0 || !validPublicID(input.DeviceID, "agd") || !validOpaqueRef(input.WorkspaceID) ||
+		!validIdempotencyKey(input.IdempotencyKey) || input.Name == "" || !utf8.ValidString(input.Name) || utf8.RuneCountInString(input.Name) > 128 {
+		return nil, ErrInvalidInput
+	}
+	request := struct{ DeviceID, WorkspaceID, Name string }{input.DeviceID, input.WorkspaceID, input.Name}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "workspace.rename"}
+	created, err := s.repo.QueueWorkspaceMutation(
+		ctx, input.IdempotencyKey, requestHash(request), userID, input.DeviceID, input.WorkspaceID,
+		command.Kind, input.Name, command, s.now().UTC(),
+	)
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) UnregisterWorkspace(ctx context.Context, userID uint, input UnregisterWorkspaceInput) (*CommandView, error) {
+	input.DeviceID, input.WorkspaceID = strings.TrimSpace(input.DeviceID), strings.TrimSpace(input.WorkspaceID)
+	if userID == 0 || !validPublicID(input.DeviceID, "agd") || !validOpaqueRef(input.WorkspaceID) || !validIdempotencyKey(input.IdempotencyKey) {
+		return nil, ErrInvalidInput
+	}
+	request := struct{ DeviceID, WorkspaceID string }{input.DeviceID, input.WorkspaceID}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "workspace.unregister"}
+	created, err := s.repo.QueueWorkspaceMutation(
+		ctx, input.IdempotencyKey, requestHash(request), userID, input.DeviceID, input.WorkspaceID,
+		command.Kind, "", command, s.now().UTC(),
 	)
 	if err != nil {
 		return nil, mapResourceError(err)
@@ -1554,7 +1605,7 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		return false
 	}
 	return validManifestValues(manifest.Commands, []string{
-		"agent.update", "workspace.register", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
+		"agent.update", "workspace.register", "workspace.rename", "workspace.unregister", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact",
 		"thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh",
 	}) && validManifestValues(manifest.Resources.Profile, []string{
 		"models", "model-capabilities", "permission-profiles", "apps", "mcp", "plugins", "auth-status",
