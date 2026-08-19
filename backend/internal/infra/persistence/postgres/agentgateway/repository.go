@@ -23,6 +23,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
+	historyProjectionVersion     = 2
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -975,6 +976,11 @@ type workspaceSessionSnapshot struct {
 	Data []workspaceSession `json:"data"`
 }
 
+const (
+	maxWorkspaceSessionMessages = 4096
+	maxWorkspaceSessionBytes    = 48 << 20
+)
+
 func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {
 	if command.RuntimeProfileID == nil || command.WorkspaceID == nil {
 		return repository.ErrConflict
@@ -1058,7 +1064,7 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 
 func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
-		len(session.Messages) > 200 || len(session.Name) > 1024 || len(session.Preview) > 4096 {
+		len(session.Messages) > maxWorkspaceSessionMessages || len(session.Name) > 1024 || len(session.Preview) > 4096 {
 		return false
 	}
 	if requireStatus && session.Status != "active" && session.Status != "archived" {
@@ -1070,7 +1076,7 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 			return false
 		}
 		total += len(message.Content) + len(message.ReasoningContent)
-		if strings.TrimSpace(message.Content) == "" || total > 64*1024 {
+		if strings.TrimSpace(message.Content) == "" || total > maxWorkspaceSessionBytes {
 			return false
 		}
 	}
@@ -1116,26 +1122,63 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if !session.HistoryLoaded {
 		return nil
 	}
-	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "updated_at": now}).Error; err != nil {
-		return err
-	}
 	var stored []model.Message
 	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {
 		return err
 	}
-	if len(stored) > len(session.Messages) {
-		return nil
-	}
-	for index := range stored {
-		if stored[index].Role != session.Messages[index].Role || stored[index].Content != session.Messages[index].Content || stored[index].ReasoningContent != session.Messages[index].ReasoningContent {
-			return nil
+
+	// A previous Agent version only forwarded the tail of thread/read. If that
+	// partial snapshot is present, locate it inside the new authoritative
+	// snapshot so the missing prefix can be restored without changing existing
+	// message IDs. A genuinely unrelated projection is rebuilt from the local
+	// app-server snapshot rather than silently keeping stale history.
+	storedStart := 0
+	if len(stored) > 0 {
+		storedStart = -1
+		for candidate := 0; candidate+len(stored) <= len(session.Messages); candidate++ {
+			matched := true
+			for index := range stored {
+				if !historyMessageMatches(stored[index], session.Messages[candidate+index]) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				storedStart = candidate
+				break
+			}
+		}
+		if storedStart < 0 {
+			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Message{}).Error; err != nil {
+				return err
+			}
+			stored = nil
+			storedStart = 0
 		}
 	}
 	var parentID *uint
-	if len(stored) > 0 {
-		parentID = &stored[len(stored)-1].ID
-	}
-	for _, source := range session.Messages[len(stored):] {
+	for index, source := range session.Messages {
+		if index >= storedStart && index < storedStart+len(stored) {
+			storedMessage := &stored[index-storedStart]
+			updates := map[string]any{}
+			if storedMessage.Content != source.Content {
+				updates["content"] = source.Content
+			}
+			if storedMessage.ReasoningContent != source.ReasoningContent {
+				updates["reasoning_content"] = source.ReasoningContent
+			}
+			if (parentID == nil && storedMessage.ParentMessageID != nil) ||
+				(parentID != nil && (storedMessage.ParentMessageID == nil || *storedMessage.ParentMessageID != *parentID)) {
+				updates["parent_message_id"] = parentID
+			}
+			if len(updates) > 0 {
+				if err := tx.Model(storedMessage).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+			parentID = &storedMessage.ID
+			continue
+		}
 		createdAt := validSessionTime(source.CreatedAt, now)
 		message := model.Message{
 			ConversationID: conversation.ID, UserID: thread.UserID, PublicID: newChatPublicID(),
@@ -1148,11 +1191,27 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		parentID = &message.ID
 	}
+	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "history_version": historyProjectionVersion, "updated_at": now}).Error; err != nil {
+		return err
+	}
 	updates := map[string]any{"message_count": len(session.Messages), "updated_at": validSessionTime(session.UpdatedAt, now)}
 	if title := strings.TrimSpace(session.Name); title != "" {
 		updates["title"] = truncateRunes(title, 255)
 	}
 	return tx.Model(&conversation).Updates(updates).Error
+}
+
+const legacySessionMessageRunes = 16 * 1024
+
+func historyMessageMatches(stored model.Message, source workspaceSessionMessage) bool {
+	return stored.Role == source.Role && historyTextMatches(stored.Content, source.Content) && historyTextMatches(stored.ReasoningContent, source.ReasoningContent)
+}
+
+func historyTextMatches(stored, source string) bool {
+	if stored == source {
+		return true
+	}
+	return utf8.RuneCountInString(stored) == legacySessionMessageRunes && strings.HasPrefix(source, stored)
 }
 
 func syncThreadHistory(tx *gorm.DB, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {
@@ -2731,7 +2790,7 @@ func (r *Repo) QueueThreadHistory(ctx context.Context, userID, conversationID ui
 		Where("user_id = ? AND conversation_id = ?", userID, conversationID).First(&target).Error; err != nil {
 		return nil, nil, errFor(err)
 	}
-	if target.HistoryStatus == "" || target.HistoryStatus == "loaded" {
+	if (target.HistoryStatus == "" || target.HistoryStatus == "loaded") && target.HistoryVersion >= historyProjectionVersion {
 		target.HistoryStatus = "loaded"
 		return toDomainThread(target), nil, nil
 	}
@@ -2749,7 +2808,7 @@ func (r *Repo) QueueThreadHistory(ctx context.Context, userID, conversationID ui
 			First(&thread).Error; err != nil {
 			return err
 		}
-		if thread.HistoryStatus == "" || thread.HistoryStatus == "loaded" {
+		if (thread.HistoryStatus == "" || thread.HistoryStatus == "loaded") && thread.HistoryVersion >= historyProjectionVersion {
 			thread.HistoryStatus = "loaded"
 			return nil
 		}

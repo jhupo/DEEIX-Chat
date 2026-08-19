@@ -29,6 +29,8 @@ var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
 var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", "unknown"}
 
+const maxSessionMessageRunes = 64 * 1024
+
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
 	"item/fileChange/requestApproval":       true,
@@ -1600,7 +1602,7 @@ func projectSessionMessages(detail map[string]any) []any {
 					}
 				}
 				if len(textParts) > 0 {
-					messages = append(messages, map[string]any{"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), 16*1024), "createdAt": turn["startedAt"]})
+					messages = append(messages, map[string]any{"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), maxSessionMessageRunes), "createdAt": turn["startedAt"]})
 				}
 			case "reasoning":
 				parts := append(stringSlice(item["summary"]), stringSlice(item["content"])...)
@@ -1614,25 +1616,16 @@ func projectSessionMessages(detail map[string]any) []any {
 		}
 		if len(assistantParts) > 0 {
 			message := map[string]any{
-				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), 16*1024),
+				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), maxSessionMessageRunes),
 				"createdAt": firstValue(turn["completedAt"], turn["startedAt"]),
 			}
 			if len(reasoningParts) > 0 {
-				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n"), 16*1024)
+				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n"), maxSessionMessageRunes)
 			}
 			messages = append(messages, message)
 		}
 	}
-	start, size := len(messages), 0
-	for start > 0 {
-		encoded, _ := json.Marshal(messages[start-1])
-		if size > 0 && size+len(encoded) > 32*1024 {
-			break
-		}
-		size += len(encoded)
-		start--
-	}
-	return messages[start:]
+	return messages
 }
 
 func stringSlice(value any) []string {

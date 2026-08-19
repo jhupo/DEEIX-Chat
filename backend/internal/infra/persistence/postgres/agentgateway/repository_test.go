@@ -27,6 +27,16 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 	}
 }
 
+func TestHistoryMessageMatchesLegacyTailProjection(t *testing.T) {
+	legacy := strings.Repeat("x", legacySessionMessageRunes)
+	if !historyMessageMatches(model.Message{Role: "assistant", Content: legacy}, workspaceSessionMessage{Role: "assistant", Content: legacy + "restored"}) {
+		t.Fatal("legacy truncated message was not matched to the restored snapshot")
+	}
+	if historyMessageMatches(model.Message{Role: "assistant", Content: "different"}, workspaceSessionMessage{Role: "assistant", Content: "restored"}) {
+		t.Fatal("unrelated history messages were treated as the same")
+	}
+}
+
 func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
@@ -733,7 +743,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 2 || importedConversation.Status != "active" {
 		t.Fatalf("updated imported conversation mismatch: %#v %v", importedConversation, err)
 	}
-	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" || importedThread.HistoryStatus != "loaded" {
+	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" || importedThread.HistoryStatus != "loaded" || importedThread.HistoryVersion != historyProjectionVersion {
 		t.Fatalf("updated imported thread mismatch: %#v %v", importedThread, err)
 	}
 	canonicalWorkspace := model.AgentWorkspace{

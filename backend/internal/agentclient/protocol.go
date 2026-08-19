@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	bridgeVersion    = 2
-	bridgeProtocol   = "deeix.bridge.v2"
-	bridgeMaxPayload = (2 << 20) + (64 << 10)
+	bridgeVersion  = 2
+	bridgeProtocol = "deeix.bridge.v2"
+	// thread/read(includeTurns=true) carries the complete local transcript.
+	bridgeMaxPayload = 64 << 20
 )
 
 type bridgeFrame struct {

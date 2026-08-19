@@ -21,7 +21,8 @@ const (
 	bridgeProtocol     = "deeix.bridge.v2"
 	authProtocolPrefix = "deeix.auth."
 	bridgeVersion      = 2
-	bridgeMaxPayload   = (2 << 20) + (64 << 10)
+	// thread/read(includeTurns=true) carries the complete local transcript.
+	bridgeMaxPayload   = 64 << 20
 	bridgeHelloTimeout = 10 * time.Second
 	bridgeHeartbeat    = 30 * time.Second
 )

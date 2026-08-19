@@ -180,6 +180,7 @@ type AgentThread struct {
 	Status           string  `gorm:"size:32;not null;index"`
 	HistoryStatus    string  `gorm:"size:16;not null;default:'loaded';index"`
 	HistoryError     string  `gorm:"size:4096;not null;default:''"`
+	HistoryVersion   int     `gorm:"not null;default:0;index"`
 	GitSHA           *string `gorm:"size:64"`
 	GitBranch        *string `gorm:"size:256"`
 	GitOriginURL     *string `gorm:"size:2048"`

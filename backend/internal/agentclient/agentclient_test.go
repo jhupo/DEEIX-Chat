@@ -745,6 +745,34 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 	}
 }
 
+func TestProjectSessionMessagesPreservesCompleteHistory(t *testing.T) {
+	longText := strings.TrimSpace(strings.Repeat("history ", 3000))
+	detail := map[string]any{
+		"thread": map[string]any{"turns": []any{
+			map[string]any{"startedAt": 1, "completedAt": 2, "items": []any{
+				map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": longText}}},
+				map[string]any{"type": "agentMessage", "text": longText},
+			}},
+			map[string]any{"startedAt": 3, "completedAt": 4, "items": []any{
+				map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "second question"}}},
+				map[string]any{"type": "agentMessage", "text": "second answer"},
+			}},
+		}},
+	}
+	messages := projectSessionMessages(detail)
+	if len(messages) != 4 {
+		t.Fatalf("projected complete history count = %d, want 4", len(messages))
+	}
+	first, ok := messages[0].(map[string]any)
+	if !ok || first["content"] != longText {
+		t.Fatalf("first history message was truncated: %#v", first)
+	}
+	third, ok := messages[2].(map[string]any)
+	if !ok || third["content"] != "second question" {
+		t.Fatalf("history after long turn was lost: %#v", third)
+	}
+}
+
 func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {
 	root, err := os.MkdirTemp(".", ".agent-project-sessions-")
 	if err != nil {
