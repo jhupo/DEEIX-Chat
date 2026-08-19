@@ -124,7 +124,10 @@ func startGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) erro
 
 func appendGatewayMessageDelta(tx *gorm.DB, item *domainconversation.ExecutionEvent, column, delta string) error {
 	result := tx.Model(&model.Message{}).
-		Where("conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND status = ?", item.ConversationID, item.UserID, item.RunID, "assistant", "pending").
+		Where(
+			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status = ? AND error_code = ?))",
+			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", "error", "stream_interrupted",
+		).
 		UpdateColumn(column, gorm.Expr("COALESCE("+column+", '') || ?", delta))
 	if result.Error != nil {
 		return result.Error
@@ -149,7 +152,10 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 		return err
 	}
 	assistant := tx.Model(&model.Message{}).
-		Where("conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND status = ?", item.ConversationID, item.UserID, item.RunID, "assistant", "pending").
+		Where(
+			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status = ? AND error_code = ?))",
+			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", "error", "stream_interrupted",
+		).
 		Updates(map[string]any{"status": messageStatus, "error_code": item.ErrorCode, "error_message": item.ErrorMessage, "latency_ms": item.LatencyMS})
 	if assistant.Error != nil {
 		return assistant.Error

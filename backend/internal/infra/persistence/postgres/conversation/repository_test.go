@@ -22,6 +22,58 @@ func TestTranslateErrorAllowsNil(t *testing.T) {
 	}
 }
 
+func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(db)
+	now := time.Now().UTC()
+	conversation := model.Conversation{
+		UserID: 1, PublicID: "gateway_recovery", Title: "gateway recovery", LabelsJSON: "[]",
+		ExecutionType: domainconversation.ExecutionTypeGateway, SessionKey: "gateway_recovery", Status: "active",
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	runID := "run_gateway_recovery"
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "success", RunID: runID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_assistant", Role: "assistant", ContentType: "text", Content: "partial", BranchReason: "default", Status: "error", ErrorCode: "stream_interrupted", ErrorMessage: "stream closed", RunID: runID},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := model.ConversationRun{RunID: runID, UserID: 1, ConversationID: conversation.ID, Status: "running", StartedAt: now}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	delta := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:delta", Kind: "item/agentMessage/delta",
+		PayloadJSON: `{"delta":" continued"}`, TextDelta: " continued", OccurredAt: now.Add(time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), delta); err != nil || !applied {
+		t.Fatalf("project recovery delta: applied=%v err=%v", applied, err)
+	}
+	terminal := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:completed", Kind: "turn/completed",
+		PayloadJSON: `{"turn":{"status":"completed"}}`, TerminalStatus: "completed", OccurredAt: now.Add(2 * time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), terminal); err != nil || !applied {
+		t.Fatalf("project recovery terminal: applied=%v err=%v", applied, err)
+	}
+	var assistant model.Message
+	if err := db.First(&assistant, messages[1].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if assistant.Status != "success" || assistant.Content != "partial continued" || assistant.ErrorCode != "" || assistant.ErrorMessage != "" {
+		t.Fatalf("recovered assistant = %#v", assistant)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.EndedAt == nil {
+		t.Fatalf("recovered run = %#v, %v", run, err)
+	}
+}
+
 func TestAttachmentDurationSecondsFromMetaJSON(t *testing.T) {
 	if got := attachmentDurationSecondsFromMetaJSON(`{"duration_seconds":6}`); got != 6 {
 		t.Fatalf("expected attachment duration 6, got %d", got)
