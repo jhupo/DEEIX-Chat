@@ -147,7 +147,7 @@ export type ReasoningDeltaDTO = {
   event_type: string;
   item_id?: string;
   status?: string;
-  kind: "summary_text" | "content_text" | "signature";
+  kind: "summary_text" | "content_text" | "summary_part_added" | "signature";
   signature?: string;
   encrypted_content?: string;
 };
@@ -285,6 +285,8 @@ export type StreamMessageEvent =
       roundID?: string;
       eventID?: string;
       kind?: ReasoningDeltaDTO["kind"] | string;
+      summaryIndex?: number;
+      contentIndex?: number;
       delta?: string;
       contentMarkdown?: string;
       block?: TraceBlockDTO;

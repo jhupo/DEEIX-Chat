@@ -34,6 +34,10 @@ var reservedMessageOptionKeys = map[string]struct{}{
 	"systemInstruction": {},
 }
 
+func shouldPersistStreamEvents(executionType string) bool {
+	return executionType != model.ExecutionTypeGateway
+}
+
 func sanitizeMessageOptions(options map[string]interface{}) map[string]interface{} {
 	if len(options) == 0 {
 		return nil
@@ -291,9 +295,15 @@ func (h *Handler) StreamTurn(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
+	// Gateway events are already persisted and published by the execution
+	// projector before awaitGatewayTurn reads them. Republishing those events
+	// from this HTTP subscriber feeds them back into the same stream.
+	persistStreamEvents := shouldPersistStreamEvents(conversation.ExecutionType)
 	var clientDisconnected atomic.Bool
 	flushStreamEvent := func(payload map[string]interface{}) error {
-		payload = h.service.PublishMessageGenerationEvent(input.ClientRunID, payload)
+		if persistStreamEvents {
+			payload = h.service.PublishMessageGenerationEvent(input.ClientRunID, payload)
+		}
 		if clientDisconnected.Load() {
 			return nil
 		}

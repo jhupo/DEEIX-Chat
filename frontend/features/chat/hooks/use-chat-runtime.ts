@@ -118,6 +118,7 @@ export function useChatRuntime({
   releaseAttachments,
   activeGenerationRunsRef,
   failedGenerationRunsRef,
+  generationSeqByRunRef,
   resumingRunID = "",
 }: {
   conversationID: string | null;
@@ -149,6 +150,7 @@ export function useChatRuntime({
   releaseAttachments: (items: PendingAttachment[]) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  generationSeqByRunRef?: React.MutableRefObject<Record<string, number>>;
   resumingRunID?: string;
 }) {
   const [showConversationLayout, setShowConversationLayout] = React.useState(false);
@@ -231,6 +233,7 @@ export function useChatRuntime({
     serverMessagePublicIDs: branchState.serverMessagePublicIDs,
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
     resumeGenerationActive: visibleResumeGenerationActive,
   });
 

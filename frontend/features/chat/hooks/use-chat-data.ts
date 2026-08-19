@@ -83,9 +83,11 @@ export function useChatData(
   {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
   }: {
     activeGenerationRunsRef?: React.RefObject<Set<string>>;
     failedGenerationRunsRef?: React.RefObject<Set<string>>;
+    generationSeqByRunRef?: React.MutableRefObject<Record<string, number>>;
   } = {},
 ) {
   const t = useTranslations("chat.data");
@@ -115,7 +117,8 @@ export function useChatData(
     }
     delete resumeSeqByRunRef.current[normalizedRunID];
     delete resumeTextReplayByRunRef.current[normalizedRunID];
-  }, []);
+    delete generationSeqByRunRef?.current[normalizedRunID];
+  }, [generationSeqByRunRef]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -359,7 +362,10 @@ export function useChatData(
 
     const controller = new AbortController();
     let closed = false;
-    const afterSeq = resumeSeqByRunRef.current[pendingRunID] ?? 0;
+    const afterSeq = Math.max(
+      resumeSeqByRunRef.current[pendingRunID] ?? 0,
+      generationSeqByRunRef?.current[pendingRunID] ?? 0,
+    );
     const baseContent = pendingAssistantContentRef.current;
     const resumeTextReplayByRun = resumeTextReplayByRunRef.current;
     const clearResumeTextReplay = () => {
@@ -398,6 +404,12 @@ export function useChatData(
               return;
             }
             resumeSeqByRunRef.current[pendingRunID] = Math.max(resumeSeqByRunRef.current[pendingRunID] ?? 0, seq);
+            if (generationSeqByRunRef) {
+              generationSeqByRunRef.current[pendingRunID] = Math.max(
+                generationSeqByRunRef.current[pendingRunID] ?? 0,
+                seq,
+              );
+            }
           },
           onMediaStatus: (event) => {
             const status = event.status.trim();
@@ -535,6 +547,7 @@ export function useChatData(
     clearResumeCheckpoint,
     conversationID,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
     pendingRunID,
     reload,
     tSubmit,

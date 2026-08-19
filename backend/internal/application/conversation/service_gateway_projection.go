@@ -13,9 +13,24 @@ func (s *Service) ProjectGatewayEvent(ctx context.Context, input GatewayExecutio
 	if err != nil {
 		return err
 	}
-	_, err = s.repo.ProjectExecutionEvent(ctx, event)
+	applied, err := s.repo.ProjectExecutionEvent(ctx, event)
 	if err != nil {
 		return err
+	}
+	// Repository projection is idempotent by SourceKey. Only the first
+	// application may advance the live stream; replayed bridge deltas must
+	// remain durable no-ops for connected subscribers. A terminal event is
+	// safe to republish because it is the signal that closes the stream.
+	if !applied {
+		if event.TerminalStatus != "" {
+			if err := s.publishMessageGenerationEventReliable(event.RunID, map[string]interface{}{
+				"type": "gateway_completed", "status": event.TerminalStatus,
+			}); err != nil {
+				return err
+			}
+			s.FinishMessageGeneration(event.RunID)
+		}
+		return nil
 	}
 	payload := gatewayStreamPayload(event)
 	if payload != nil && event.TerminalStatus == "" {
@@ -84,15 +99,47 @@ func gatewayStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
 	switch {
 	case event.TextDelta != "":
 		return map[string]interface{}{"type": "delta", "delta": event.TextDelta}
-	case event.ReasoningDelta != "":
-		return map[string]interface{}{
-			"type": "upstream_think_delta", "status": "streaming", "kind": "summary_text_delta", "delta": event.ReasoningDelta,
-		}
+	case event.ReasoningDelta != "" || strings.HasPrefix(event.Kind, "item/reasoning/"):
+		return gatewayReasoningStreamPayload(event)
 	default:
 		var payload interface{}
 		if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil {
 			return nil
 		}
 		return map[string]interface{}{"type": "execution_event", "kind": event.Kind, "payload": payload}
+	}
+}
+
+func gatewayReasoningStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
+	payload := map[string]interface{}{
+		"type":   "upstream_think_delta",
+		"status": "streaming",
+		"kind":   gatewayReasoningKind(event.Kind),
+	}
+	if event.ReasoningDelta != "" {
+		payload["delta"] = event.ReasoningDelta
+	}
+
+	var raw map[string]interface{}
+	if json.Unmarshal([]byte(event.PayloadJSON), &raw) == nil {
+		for _, key := range []string{"summaryIndex", "contentIndex"} {
+			if value, ok := raw[key]; ok {
+				payload[key] = value
+			}
+		}
+	}
+	return payload
+}
+
+func gatewayReasoningKind(eventKind string) string {
+	switch eventKind {
+	case "item/reasoning/summaryTextDelta":
+		return "summary_text"
+	case "item/reasoning/textDelta":
+		return "content_text"
+	case "item/reasoning/summaryPartAdded":
+		return "summary_part_added"
+	default:
+		return eventKind
 	}
 }

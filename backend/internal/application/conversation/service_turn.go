@@ -263,8 +263,16 @@ func (s *Service) awaitGatewayTurn(ctx context.Context, input SendMessageInput, 
 		typeName, _ := payload["type"].(string)
 		switch typeName {
 		case "delta":
-			if delta, _ := payload["delta"].(string); delta != "" && onDelta != nil {
-				return false, onDelta(delta)
+			if delta, _ := payload["delta"].(string); delta != "" {
+				// Gateway deltas already carry the durable stream sequence. Keep the
+				// original payload for the HTTP stream so a later resume starts after
+				// the last event instead of replaying the whole run.
+				if input.OnEvent != nil {
+					return false, input.OnEvent(typeName, payload)
+				}
+				if onDelta != nil {
+					return false, onDelta(delta)
+				}
 			}
 		case "upstream_think_delta":
 			if input.OnEvent != nil {

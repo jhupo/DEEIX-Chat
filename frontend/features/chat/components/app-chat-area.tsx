@@ -216,6 +216,7 @@ export function AppChatArea() {
     router.push(projectID ? `/chat?project_id=${encodeURIComponent(projectID)}` : "/chat");
   }, [requestNewConversation, routeProjectID, router]);
   const activeGenerationRunsRef = React.useRef<Set<string>>(new Set());
+  const generationSeqByRunRef = React.useRef<Record<string, number>>({});
   const failedGenerationRunsRef = React.useRef<Set<string>>(new Set());
   const {
     autoGenerateLabels,
@@ -250,6 +251,7 @@ export function AppChatArea() {
   } = useChatData(conversationID, {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
   });
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
@@ -746,6 +748,7 @@ export function AppChatArea() {
     releaseAttachments,
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
     resumingRunID,
   });
   const generating = sending;

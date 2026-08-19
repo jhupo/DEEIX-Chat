@@ -58,6 +58,7 @@ export function useChatSubmitStream({
   serverMessagePublicIDs,
   activeGenerationRunsRef,
   failedGenerationRunsRef,
+  generationSeqByRunRef,
   resumeGenerationActive,
 }: {
   conversationID: string | null;
@@ -99,6 +100,7 @@ export function useChatSubmitStream({
   serverMessagePublicIDs: Set<string>;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  generationSeqByRunRef?: React.MutableRefObject<Record<string, number>>;
   resumeGenerationActive?: boolean;
 }) {
   const streamBuffer = useChatStreamBuffer({
@@ -151,6 +153,7 @@ export function useChatSubmitStream({
     startStream: streamBuffer.startStream,
     activeGenerationRunsRef,
     failedGenerationRunsRef,
+    generationSeqByRunRef,
     resumeGenerationActive,
   });
 

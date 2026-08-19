@@ -489,6 +489,7 @@ export function useChatMessageSubmit({
   startStream,
   activeGenerationRunsRef,
   failedGenerationRunsRef,
+  generationSeqByRunRef,
   resumeGenerationActive = false,
 }: {
   conversationID: string | null;
@@ -536,6 +537,7 @@ export function useChatMessageSubmit({
   startStream: (exchangeKey: string, runID?: string) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
   failedGenerationRunsRef?: React.RefObject<Set<string>>;
+  generationSeqByRunRef?: React.MutableRefObject<Record<string, number>>;
   resumeGenerationActive?: boolean;
 }) {
   const t = useTranslations("chat.submit");
@@ -616,6 +618,17 @@ export function useChatMessageSubmit({
   React.useEffect(() => {
     queuedSubmissionsRef.current = queuedSubmissions;
   }, [queuedSubmissions]);
+
+  React.useEffect(() => {
+    return () => {
+      for (const active of activeStreamsRef.current.values()) {
+        clearCancelSettlementTimer(active);
+        active.controller.abort();
+      }
+      activeStreamsRef.current.clear();
+      activeGenerationRunsRef?.current.clear();
+    };
+  }, [activeGenerationRunsRef]);
 
   React.useEffect(() => {
     setPendingExchanges((current) => {
@@ -1066,6 +1079,14 @@ export function useChatMessageSubmit({
         let terminalStreamError: Extract<StreamMessageEvent, { type: "error" }> | null = null;
         const streamOptions: ConversationStreamOptions = {
           signal: streamAbortController.signal,
+          onEventSeq: (seq) => {
+            if (generationSeqByRunRef) {
+              generationSeqByRunRef.current[clientRunID] = Math.max(
+                generationSeqByRunRef.current[clientRunID] ?? 0,
+                seq,
+              );
+            }
+          },
           onInterrupted: (event) => {
             terminalStreamError = event;
           },
@@ -1449,6 +1470,7 @@ export function useChatMessageSubmit({
           activeStreamsRef.current.delete(clientRunID);
         }
         activeGenerationRunsRef?.current.delete(clientRunID);
+        delete generationSeqByRunRef?.current[clientRunID];
         if (
           branchRunIsVisible(
             targetBranchScope,
@@ -1471,6 +1493,7 @@ export function useChatMessageSubmit({
       activeGenerationRunsRef,
       autoGenerateLabels,
       failedGenerationRunsRef,
+      generationSeqByRunRef,
       enqueueUpstreamThinkDelta,
       enqueueStreamText,
       flushStreamTextNow,
