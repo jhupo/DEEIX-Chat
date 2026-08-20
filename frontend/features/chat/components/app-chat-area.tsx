@@ -1241,11 +1241,26 @@ export function AppChatArea() {
     }
   }, [resetFileDragState, uploadDropDisabled]);
 
+  const gatewayDevice = currentConversation?.executionType === "gateway" && currentConversation.executionDeviceID
+    ? devices.find((device) => device.deviceId === currentConversation.executionDeviceID) ?? null
+    : defaultDevice;
+  const gatewayReady = executionMode === "cloud" || Boolean(gatewayDevice?.online) &&
+    (Boolean(currentConversation) || Boolean(executionProjectID));
+  const gatewayStatus = executionMode !== "gateway"
+    ? ""
+    : !gatewayDevice
+      ? t("submit.deviceUnavailable")
+      : !gatewayDevice.online
+        ? t("submit.deviceOffline")
+        : !currentConversation && !executionProjectID
+          ? t("submit.projectRequired")
+          : "";
+
   const chatInputProps = {
     draft,
     executionMode,
-    gatewayReady: executionMode === "cloud" || Boolean(defaultDevice?.online) &&
-      (Boolean(currentConversation) || Boolean(executionProjectID)),
+    gatewayReady,
+    gatewayStatus,
     loading,
     sending: generating,
     uploading,

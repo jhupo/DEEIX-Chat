@@ -91,6 +91,7 @@ type ChatInputProps = {
   draft: string;
   executionMode: "cloud" | "gateway";
   gatewayReady: boolean;
+  gatewayStatus?: string;
   loading: boolean;
   sending: boolean;
   uploading: boolean;
@@ -237,6 +238,7 @@ function ChatInputComponent({
   draft,
   executionMode,
   gatewayReady,
+  gatewayStatus,
   loading,
   sending,
   uploading,
@@ -413,6 +415,35 @@ function ChatInputComponent({
     ? gatewayReady
     : Boolean(selectedKeyBindingID && selectedModelName && selectedProtocol);
   const canSend = hasSubmitContent && !loading && !uploading && chatRouteReady;
+  const handleSendButtonClick = React.useCallback(() => {
+    if (hasSubmitContent && !chatRouteReady) {
+      toast.error(tChat("submit.sendFailed"), {
+        description: executionMode === "gateway"
+          ? gatewayStatus || tChat("submit.deviceOffline")
+          : tChat("submit.selectModelFirst"),
+      });
+      return;
+    }
+    if (hasSubmitContent) {
+      void onSendMessage();
+      return;
+    }
+    if (sending) {
+      onStopMessage();
+      return;
+    }
+    speechInput.toggle();
+  }, [
+    chatRouteReady,
+    executionMode,
+    gatewayStatus,
+    hasSubmitContent,
+    onSendMessage,
+    onStopMessage,
+    sending,
+    speechInput,
+    tChat,
+  ]);
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
@@ -664,6 +695,14 @@ function ChatInputComponent({
         style={inputGroupHeight === null ? undefined : { height: inputGroupHeight }}
       >
         <div ref={inputGroupMeasureRef} className="flex w-full flex-col">
+          {executionMode === "gateway" && !gatewayReady && gatewayStatus ? (
+            <div
+              role="status"
+              className="px-5 pt-3 text-xs leading-5 text-muted-foreground"
+            >
+              {gatewayStatus}
+            </div>
+          ) : null}
           {showSelectedResources ? (
             <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
               {selectedSkills.map((skill) => (
@@ -895,6 +934,10 @@ function ChatInputComponent({
                 event.preventDefault();
                 if (canSend) {
                   void onSendMessage();
+                } else if (hasSubmitContent && executionMode === "gateway") {
+                  toast.error(tChat("submit.sendFailed"), {
+                    description: gatewayStatus || tChat("submit.deviceOffline"),
+                  });
                 }
               }
             }}
@@ -1087,8 +1130,8 @@ function ChatInputComponent({
                 variant="ghost"
                 size="icon-sm"
                 className="size-7 rounded-md text-muted-foreground hover:text-foreground sm:size-8"
-                disabled={loading || uploading || !chatRouteReady || (!sending && !hasSubmitContent && !speechInput.supported)}
-                onClick={hasSubmitContent ? onSendMessage : sending ? onStopMessage : speechInput.toggle}
+                disabled={loading || uploading || (!hasSubmitContent && !chatRouteReady) || (!sending && !hasSubmitContent && !speechInput.supported)}
+                onClick={handleSendButtonClick}
                 onMouseEnter={() => setIsVoiceHovered(true)}
                 onMouseLeave={() => setIsVoiceHovered(false)}
                 aria-label={hasSubmitContent ? (sending ? tComposer("queueMessage") : tChat("send")) : sending ? tComposer("pauseGeneration") : speechInput.active ? tComposer("cancelVoiceInput") : tComposer("voiceInput")}
