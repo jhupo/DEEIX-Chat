@@ -23,14 +23,113 @@ import (
 
 func TestMain(m *testing.M) {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Println("codex-cli 0.147.0")
+		version := os.Getenv("DEEIX_TEST_CODEX_VERSION")
+		if version == "" {
+			version = minimumCodexVersion
+		}
+		fmt.Printf("codex-cli %s\n", version)
 		os.Exit(0)
 	}
 	if len(os.Args) == 2 && os.Args[1] == "app-server" {
+		if marker := os.Getenv("DEEIX_TEST_APP_SERVER_MARKER"); marker != "" {
+			_ = os.WriteFile(marker, []byte("started"), 0o600)
+		}
 		runFakeAppServer()
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestResolveCodexEnforcesMinimumVersionBeforeAppServer(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		version    string
+		wantError  []string
+		wantAccept bool
+	}{
+		{name: "minimum version", version: minimumCodexVersion, wantAccept: true},
+		{
+			name: "older version", version: "0.120.0",
+			wantError: []string{
+				"Codex CLI is too old", "detected 0.120.0", "requires 0.147.0 or newer",
+				"powershell -ExecutionPolicy ByPass", "https://chatgpt.com/codex/install.ps1",
+				"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
+			},
+		},
+		{
+			name: "minimum prerelease", version: "0.147.0-rc.1",
+			wantError: []string{"Codex CLI is too old", "detected 0.147.0-rc.1", "requires 0.147.0 or newer"},
+		},
+		{name: "newer patch", version: "0.147.1", wantAccept: true},
+		{name: "newer prerelease", version: "0.148.0-alpha.1", wantAccept: true},
+		{name: "newer minor", version: "0.148.0", wantAccept: true},
+		{name: "invalid semver", version: "0.147.0-alpha..1", wantError: []string{"version \"0.147.0-alpha..1\" is invalid"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "app-server-started")
+			t.Setenv("DEEIX_TEST_CODEX_VERSION", test.version)
+			t.Setenv("DEEIX_TEST_APP_SERVER_MARKER", marker)
+			path, version, resolveErr := ResolveCodex(context.Background(), executable)
+			if test.wantAccept {
+				if resolveErr != nil || path == "" || version != test.version {
+					t.Fatalf("ResolveCodex() = %q, %q, %v", path, version, resolveErr)
+				}
+				return
+			}
+			if resolveErr == nil {
+				t.Fatal("ResolveCodex accepted an unsupported Codex CLI version")
+			}
+			for _, value := range test.wantError {
+				if !strings.Contains(resolveErr.Error(), value) {
+					t.Fatalf("ResolveCodex error %q does not contain %q", resolveErr, value)
+				}
+			}
+			if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("app-server was started before version rejection: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestInstallRejectsOldCodexBeforeUpdatingConfig(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	configPath := filepath.Join(dataDir, "config.json")
+	originalConfig := []byte("existing config must remain unchanged")
+	if err = os.WriteFile(configPath, originalConfig, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dataDir, "app-server-started")
+	t.Setenv("DEEIX_TEST_CODEX_VERSION", "0.120.0")
+	t.Setenv("DEEIX_TEST_APP_SERVER_MARKER", marker)
+	_, err = Install(context.Background(), InstallOptions{
+		Server:          "https://example.com",
+		UserPublicID:    "0123456789abcdef0123456789abcdef",
+		Name:            "test device",
+		CodexExecutable: executable,
+		DataDir:         dataDir,
+	}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "detected 0.120.0") {
+		t.Fatalf("Install() error = %v", err)
+	}
+	currentConfig, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(currentConfig) != string(originalConfig) {
+		t.Fatalf("config changed after version rejection: %q", currentConfig)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("app-server was started before version rejection: %v", statErr)
+	}
 }
 
 func TestRuntimeProofDeadline(t *testing.T) {

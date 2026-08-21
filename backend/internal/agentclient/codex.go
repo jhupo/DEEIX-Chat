@@ -20,9 +20,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
+const minimumCodexVersion = "0.147.0"
 const maxCodexDesktopStateBytes = 4 << 20
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
@@ -129,6 +132,16 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	match := codexVersionPattern.FindStringSubmatch(string(output))
 	if len(match) != 2 {
 		return "", "", errors.New("Codex CLI version output is invalid")
+	}
+	version := "v" + match[1]
+	if !semver.IsValid(version) {
+		return "", "", fmt.Errorf("Codex CLI version %q is invalid", match[1])
+	}
+	if semver.Compare(version, "v"+minimumCodexVersion) < 0 {
+		return "", "", fmt.Errorf(
+			"Codex CLI is too old: detected %s; DEEIX requires %s or newer. Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+			match[1], minimumCodexVersion,
+		)
 	}
 	return path, match[1], nil
 }

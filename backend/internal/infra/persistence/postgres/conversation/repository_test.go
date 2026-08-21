@@ -74,6 +74,69 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	}
 }
 
+func TestGatewayProjectionTruncatesLongTerminalError(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(db)
+	now := time.Now().UTC()
+	conversation := model.Conversation{
+		UserID: 1, PublicID: "gateway_long_error", Title: "gateway long error", LabelsJSON: "[]",
+		ExecutionType: domainconversation.ExecutionTypeGateway, SessionKey: "gateway_long_error", Status: "active",
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	runID := "run_gateway_long_error"
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_long_error_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "pending", RunID: runID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_long_error_assistant", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending", RunID: runID},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := model.ConversationRun{RunID: runID, UserID: 1, ConversationID: conversation.ID, Status: "running", StartedAt: now}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	rawError := strings.Repeat("A", 130) + strings.Repeat("错", 130)
+	payload := `{"turn":{"status":"failed","error":"` + rawError + `"}}`
+	terminal := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:long-error", Kind: "turn/completed",
+		PayloadJSON: payload, TerminalStatus: "failed", ErrorCode: "upstream_forbidden", ErrorMessage: rawError,
+		OccurredAt: now.Add(time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), terminal); err != nil || !applied {
+		t.Fatalf("project long-error terminal: applied=%v err=%v", applied, err)
+	}
+
+	wantError := truncateText(rawError, 255)
+	var assistant model.Message
+	if err := db.First(&assistant, messages[1].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if assistant.Status != "error" || assistant.ErrorCode != "upstream_forbidden" || assistant.ErrorMessage != wantError {
+		t.Fatalf("projected assistant status/error = %q/%q/%q", assistant.Status, assistant.ErrorCode, assistant.ErrorMessage)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "error" || run.ErrorCode != "upstream_forbidden" || run.ErrorMessage != wantError || run.EndedAt == nil {
+		t.Fatalf("projected run = %#v", run)
+	}
+	if len([]rune(wantError)) != 255 || len([]rune(rawError)) <= len([]rune(wantError)) {
+		t.Fatalf("error lengths: raw=%d truncated=%d", len([]rune(rawError)), len([]rune(wantError)))
+	}
+	var event model.ConversationExecutionEvent
+	if err := db.Where("source_key = ?", terminal.SourceKey).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(event.PayloadJSON, rawError) {
+		t.Fatalf("execution event payload did not retain the full error: %q", event.PayloadJSON)
+	}
+}
+
 func TestAttachmentDurationSecondsFromMetaJSON(t *testing.T) {
 	if got := attachmentDurationSecondsFromMetaJSON(`{"duration_seconds":6}`); got != 6 {
 		t.Fatalf("expected attachment duration 6, got %d", got)

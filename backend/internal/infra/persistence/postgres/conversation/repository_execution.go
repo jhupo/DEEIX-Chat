@@ -140,6 +140,7 @@ func appendGatewayMessageDelta(tx *gorm.DB, item *domainconversation.ExecutionEv
 
 func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) error {
 	endedAt := item.OccurredAt.UTC()
+	normalizedErrorMessage := truncateText(item.ErrorMessage, 255)
 	messageStatus, runStatus := "success", "success"
 	if item.TerminalStatus == "interrupted" {
 		messageStatus, runStatus = "interrupted", "interrupted"
@@ -156,7 +157,7 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status = ? AND error_code = ?))",
 			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", "error", "stream_interrupted",
 		).
-		Updates(map[string]any{"status": messageStatus, "error_code": item.ErrorCode, "error_message": item.ErrorMessage, "latency_ms": item.LatencyMS})
+		Updates(map[string]any{"status": messageStatus, "error_code": item.ErrorCode, "error_message": normalizedErrorMessage, "latency_ms": item.LatencyMS})
 	if assistant.Error != nil {
 		return assistant.Error
 	}
@@ -165,7 +166,7 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 	}
 	run := tx.Model(&model.ConversationRun{}).
 		Where("conversation_id = ? AND user_id = ? AND run_id = ? AND status IN ?", item.ConversationID, item.UserID, item.RunID, []string{"queued", "running"}).
-		Updates(map[string]any{"status": runStatus, "error_code": item.ErrorCode, "error_message": item.ErrorMessage, "total_latency_ms": item.LatencyMS, "ended_at": endedAt})
+		Updates(map[string]any{"status": runStatus, "error_code": item.ErrorCode, "error_message": normalizedErrorMessage, "total_latency_ms": item.LatencyMS, "ended_at": endedAt})
 	if run.Error != nil {
 		return run.Error
 	}
