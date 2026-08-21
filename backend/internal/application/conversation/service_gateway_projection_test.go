@@ -60,7 +60,8 @@ func TestGatewayReasoningStreamPayloadPreservesEventKindAndIndex(t *testing.T) {
 		t.Fatalf("reasoning boundary normalization failed: %v", err)
 	}
 	boundaryPayload := gatewayStreamPayload(boundary)
-	if boundaryPayload["kind"] != "summary_part_added" || boundaryPayload["summaryIndex"] != float64(1) {
+	if boundary.ReasoningDelta != "\n\n" || boundaryPayload["kind"] != "summary_part_added" ||
+		boundaryPayload["summaryIndex"] != float64(1) || boundaryPayload["delta"] != nil {
 		t.Fatalf("reasoning boundary payload = %#v", boundaryPayload)
 	}
 }

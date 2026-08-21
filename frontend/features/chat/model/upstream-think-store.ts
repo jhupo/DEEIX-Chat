@@ -8,8 +8,13 @@ import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
 type UpstreamThinkDeltaEvent = Extract<StreamMessageEvent, { type: "upstream_think_delta" }>;
 type Listener = () => void;
+type ReasoningStreamState = {
+  order: string[];
+  parts: Map<string, string>;
+};
 
 const traces = new Map<string, ChatMessageProcessTrace>();
+const reasoningStreams = new Map<string, ReasoningStreamState>();
 const listeners = new Map<string, Set<Listener>>();
 
 function nowISO() {
@@ -30,12 +35,49 @@ function mergeContent(previous: string, event: UpstreamThinkDeltaEvent) {
   return previous;
 }
 
-function mergeUpstreamThinkBlock(current: ChatTraceBlock | undefined, event: UpstreamThinkDeltaEvent): ChatTraceBlock {
-  const contentMarkdown = mergeContent(current?.contentMarkdown ?? "", event);
+function reasoningPartKey(event: UpstreamThinkDeltaEvent) {
+  if (event.kind === "summary_text" || event.kind === "summary_part_added") {
+    return `summary:${event.summaryIndex ?? 0}`;
+  }
+  if (event.kind === "content_text") {
+    return `content:${event.contentIndex ?? 0}`;
+  }
+  return "reasoning:0";
+}
+
+function mergeReasoningSegments(runID: string, event: UpstreamThinkDeltaEvent) {
+  let state = reasoningStreams.get(runID);
+  if (!state) {
+    state = { order: [], parts: new Map() };
+    reasoningStreams.set(runID, state);
+  }
+  const key = reasoningPartKey(event);
+  if (!state.parts.has(key)) {
+    state.order.push(key);
+    state.parts.set(key, "");
+  }
+  if (event.delta) {
+    state.parts.set(key, `${state.parts.get(key) ?? ""}${event.delta}`);
+  }
+  return state.order.map((item) => state.parts.get(item) ?? "").filter((item) => item.trim());
+}
+
+function mergeUpstreamThinkBlock(
+  runID: string,
+  current: ChatTraceBlock | undefined,
+  event: UpstreamThinkDeltaEvent,
+): ChatTraceBlock {
+  const structured = typeof event.contentMarkdown !== "string" &&
+    Boolean(event.kind || event.summaryIndex !== undefined || event.contentIndex !== undefined);
+  const contentSegments = structured ? mergeReasoningSegments(runID, event) : undefined;
+  const contentMarkdown = contentSegments
+    ? contentSegments.join("\n\n")
+    : mergeContent(current?.contentMarkdown ?? "", event);
   return {
     title: event.title?.trim() || current?.title || "",
     summary: event.summary?.trim() || current?.summary || "",
     contentMarkdown,
+    contentSegments,
     status: event.status || current?.status || "streaming",
     stage: event.stage || current?.stage || "think",
     roundID: event.roundID || current?.roundID,
@@ -46,13 +88,18 @@ function mergeUpstreamThinkBlock(current: ChatTraceBlock | undefined, event: Ups
 }
 
 function mergeUpstreamThinkDeltaTrace(
+  runID: string,
   current: ChatMessageProcessTrace | undefined,
   event: UpstreamThinkDeltaEvent,
 ): ChatMessageProcessTrace | undefined {
   if (event.trace?.enabled) {
+    reasoningStreams.delete(runID);
     return toPendingProcessTrace(event.trace);
   }
-  const upstreamThink = mergeUpstreamThinkBlock(current?.upstreamThink, event);
+  if (typeof event.contentMarkdown === "string") {
+    reasoningStreams.delete(runID);
+  }
+  const upstreamThink = mergeUpstreamThinkBlock(runID, current?.upstreamThink, event);
   return {
     enabled: true,
     status: event.status || current?.status || "streaming",
@@ -98,7 +145,7 @@ export function upsertLiveUpstreamThinkTrace(runID: string | null | undefined, e
   if (!key) {
     return undefined;
   }
-  const next = mergeUpstreamThinkDeltaTrace(traces.get(key), event);
+  const next = mergeUpstreamThinkDeltaTrace(key, traces.get(key), event);
   if (!next) {
     return traces.get(key);
   }
@@ -109,10 +156,14 @@ export function upsertLiveUpstreamThinkTrace(runID: string | null | undefined, e
 
 export function clearLiveUpstreamThinkTrace(runID: string | null | undefined) {
   const key = normalizeRunID(runID);
-  if (!key || !traces.delete(key)) {
+  if (!key) {
     return;
   }
-  notify(key);
+  const traceCleared = traces.delete(key);
+  const streamCleared = reasoningStreams.delete(key);
+  if (traceCleared || streamCleared) {
+    notify(key);
+  }
 }
 
 export function mergeLiveUpstreamThinkTrace(

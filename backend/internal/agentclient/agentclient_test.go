@@ -727,7 +727,7 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 			"completedAt":1786615260,
 			"items":[
 				{"type":"userMessage","content":[{"type":"text","text":"inspect"}]},
-				{"type":"reasoning","summary":["checked configuration"],"content":[]},
+				{"type":"reasoning","summary":["checked configuration","validated settings"],"content":["confirmed result"]},
 				{"type":"agentMessage","text":"first paragraph"},
 				{"type":"agentMessage","text":"second paragraph"}
 			]
@@ -740,7 +740,8 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 		t.Fatalf("projected messages = %#v", messages)
 	}
 	assistant, ok := messages[1].(map[string]any)
-	if !ok || assistant["content"] != "first paragraph\n\nsecond paragraph" || assistant["reasoningContent"] != "checked configuration" {
+	if !ok || assistant["content"] != "first paragraph\n\nsecond paragraph" ||
+		assistant["reasoningContent"] != "checked configuration\n\nvalidated settings\n\nconfirmed result" {
 		t.Fatalf("projected assistant message = %#v", messages[1])
 	}
 }

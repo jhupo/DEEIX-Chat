@@ -1620,7 +1620,7 @@ func projectSessionMessages(detail map[string]any) []any {
 				"createdAt": firstValue(turn["completedAt"], turn["startedAt"]),
 			}
 			if len(reasoningParts) > 0 {
-				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n"), maxSessionMessageRunes)
+				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n\n"), maxSessionMessageRunes)
 			}
 			messages = append(messages, message)
 		}

@@ -49,6 +49,23 @@ function resolveThinkFlushSize(pendingLength: number) {
   return Math.min(pendingLength, STREAM_THINK_BASE_CHARS_PER_FLUSH);
 }
 
+function reasoningEventTarget(event: UpstreamThinkDeltaEvent) {
+  return `${event.kind ?? ""}:${event.summaryIndex ?? ""}:${event.contentIndex ?? ""}`;
+}
+
+function flushPendingThinkEvent(buffer: StreamBuffer) {
+  if (!buffer.runID || !buffer.pendingThinkEvent) {
+    return;
+  }
+  upsertLiveUpstreamThinkTrace(buffer.runID, {
+    ...buffer.pendingThinkEvent,
+    delta: buffer.pendingThinkDelta,
+    contentMarkdown: buffer.pendingThinkDelta ? undefined : buffer.pendingThinkEvent.contentMarkdown,
+  });
+  buffer.pendingThinkDelta = "";
+  buffer.pendingThinkEvent = null;
+}
+
 function cancelBufferTimers(buffer: StreamBuffer) {
   if (buffer.textFrame !== null) {
     window.cancelAnimationFrame(buffer.textFrame);
@@ -183,6 +200,19 @@ export function useChatStreamBuffer({
     }
     if (event.trace?.enabled || typeof event.contentMarkdown === "string") {
       buffer.pendingThinkDelta = "";
+      buffer.pendingThinkEvent = null;
+    } else if (
+      buffer.pendingThinkEvent &&
+      (
+        buffer.pendingThinkEvent.trace?.enabled ||
+        typeof buffer.pendingThinkEvent.contentMarkdown === "string" ||
+        reasoningEventTarget(buffer.pendingThinkEvent) !== reasoningEventTarget(event)
+      )
+    ) {
+      flushPendingThinkEvent(buffer);
+    }
+    if (event.trace?.enabled || typeof event.contentMarkdown === "string") {
+      buffer.pendingThinkDelta = "";
       buffer.pendingThinkEvent = event;
       scheduleUpstreamThinkFlush(exchangeKey);
       return;
@@ -236,13 +266,7 @@ export function useChatStreamBuffer({
     if (!buffer.runID || !buffer.pendingThinkEvent) {
       return;
     }
-    upsertLiveUpstreamThinkTrace(buffer.runID, {
-      ...buffer.pendingThinkEvent,
-      delta: buffer.pendingThinkDelta,
-      contentMarkdown: buffer.pendingThinkDelta ? undefined : buffer.pendingThinkEvent.contentMarkdown,
-    });
-    buffer.pendingThinkDelta = "";
-    buffer.pendingThinkEvent = null;
+    flushPendingThinkEvent(buffer);
   }, []);
 
   const resetStreamBuffer = React.useCallback((exchangeKey?: string) => {

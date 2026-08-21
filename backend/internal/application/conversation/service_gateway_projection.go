@@ -64,6 +64,10 @@ func normalizeGatewayExecutionEvent(input GatewayExecutionEvent) (*model.Executi
 		event.TextDelta, _ = payload["delta"].(string)
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
 		event.ReasoningDelta, _ = payload["delta"].(string)
+	case "item/reasoning/summaryPartAdded":
+		if index, ok := payload["summaryIndex"].(float64); ok && index > 0 {
+			event.ReasoningDelta = "\n\n"
+		}
 	case "turn/completed":
 		normalizeGatewayTerminal(event, payload)
 	}
@@ -116,7 +120,7 @@ func gatewayReasoningStreamPayload(event *model.ExecutionEvent) map[string]inter
 		"status": "streaming",
 		"kind":   gatewayReasoningKind(event.Kind),
 	}
-	if event.ReasoningDelta != "" {
+	if event.ReasoningDelta != "" && event.Kind != "item/reasoning/summaryPartAdded" {
 		payload["delta"] = event.ReasoningDelta
 	}
 
