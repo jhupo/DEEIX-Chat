@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 )
@@ -33,7 +34,7 @@ func (s *Service) ProjectGatewayEvent(ctx context.Context, input GatewayExecutio
 		return nil
 	}
 	payload := gatewayStreamPayload(event)
-	if payload != nil && event.TerminalStatus == "" {
+	if payload != nil {
 		if err := s.publishMessageGenerationEventReliable(event.RunID, payload); err != nil {
 			return err
 		}
@@ -110,7 +111,10 @@ func gatewayStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
 		if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil {
 			return nil
 		}
-		return map[string]interface{}{"type": "execution_event", "kind": event.Kind, "payload": payload}
+		return map[string]interface{}{
+			"type": "execution_event", "executionSeq": event.Seq, "runID": event.RunID,
+			"kind": event.Kind, "payload": payload, "occurredAt": event.OccurredAt.UTC().Format(time.RFC3339Nano),
+		}
 	}
 }
 

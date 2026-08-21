@@ -1,19 +1,19 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
-import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
-import type {
-  ChatModelOption,
-  PendingAttachment,
-  PendingExchange,
-  PendingExchangeMap,
-} from "@/features/chat/types/chat-runtime";
+import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
+import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
+import {
+  buildChildrenIndex,
+  parseAttachments,
+  toBranchKey,
+} from "@/features/chat/model/chat-thread";
+import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
+import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
   resolveAssistantInputSideUsageValue,
   resolveDefaultSubmissionParentMessage,
@@ -25,29 +25,28 @@ import {
   preserveRicherLiveUpstreamThinkTrace,
   readLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
+import type {
+  ChatModelOption,
+  PendingAttachment,
+  PendingExchange,
+  PendingExchangeMap,
+} from "@/features/chat/types/chat-runtime";
+import type { ChatAreaMessage, ImageLoadingAspectRatio } from "@/features/chat/types/messages";
 import {
   resolveErrorDetails,
   resolveErrorMessage,
   resolveErrorSummary,
 } from "@/features/chat/utils/chat-runtime";
 import {
-  buildChildrenIndex,
-  parseAttachments,
-  toBranchKey,
-} from "@/features/chat/model/chat-thread";
-import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
-import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
-import {
+  type ConversationStreamOptions,
   cancelMessageGeneration,
   getConversation,
+  steerConversationRun,
+  streamMessage as streamConversationMessage,
   streamImageEdit,
   streamImageGeneration,
-  streamMessage as streamConversationMessage,
   streamVideoGeneration,
   updateMessage,
-  type ConversationStreamOptions,
 } from "@/shared/api/conversation";
 import type {
   ConversationDTO,
@@ -62,6 +61,8 @@ import type {
 } from "@/shared/api/conversation.types";
 import { ApiError } from "@/shared/api/http-client";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { notifyResponseCompletion } from "@/shared/lib/browser-notifications";
 
 const CONVERSATION_METADATA_REFRESH_MAX_WAIT_MS = 45_000;
 const CONVERSATION_METADATA_REFRESH_INITIAL_DELAY_MS = 800;
@@ -190,6 +191,7 @@ type QueuedChatSubmission = BranchScope & {
   id: string;
   clientRunID: string;
   parentRunID: string | null;
+  executionMode: "cloud" | "gateway";
   conversationPublicID: string | null;
   conversation: ConversationDTO | null;
   parentMessagePublicID: string | null;
@@ -202,6 +204,11 @@ type QueuedChatSubmission = BranchScope & {
   selectedSkills: SkillSummaryDTO[];
   inputResourceRefs: string[];
   htmlVisualPromptEnabled: boolean;
+};
+
+type QueuedSteerAttempt = {
+  signature: string;
+  idempotencyKey: string;
 };
 
 function buildBranchScopePath(messages: ChatAreaMessage[]): string[] {
@@ -551,7 +558,12 @@ export function useChatMessageSubmit({
   const optimisticMessageCountsRef = React.useRef(new Map<string, number>());
   const sendQueuedAfterCurrentRef = React.useRef(new Set<string>());
   const dispatchingQueuedSubmissionIDsRef = React.useRef(new Set<string>());
+  const steeringQueuedSubmissionIDsRef = React.useRef(new Set<string>());
+  const queuedSteerAttemptsRef = React.useRef(new Map<string, QueuedSteerAttempt>());
   const [queuedSubmissions, setQueuedSubmissions] = React.useState<QueuedChatSubmission[]>([]);
+  const [steeringQueuedSubmissionIDs, setSteeringQueuedSubmissionIDs] = React.useState<Set<string>>(
+    () => new Set(),
+  );
   const queuedSubmissionsRef = React.useRef<QueuedChatSubmission[]>([]);
   const isRunActive = React.useCallback((runID: string) => activeStreamsRef.current.has(runID), []);
   const {
@@ -583,6 +595,13 @@ export function useChatMessageSubmit({
         ),
       ),
     [activeRunRevision, conversationScopeKey, visibleBranchScopePath, visibleMessages],
+  );
+  const conversationRunActive = React.useMemo(
+    () =>
+      Array.from(activeStreamsRef.current.values()).some(
+        (active) => active.conversationScopeKey === conversationScopeKey,
+      ),
+    [activeRunRevision, conversationScopeKey],
   );
 
   const syncActiveRuns = React.useCallback(() => {
@@ -743,14 +762,12 @@ export function useChatMessageSubmit({
       queuedSubmission?: QueuedChatSubmission;
     }) => {
       const payloadContent = content || t("attachmentOnlyContent");
-      const requestExecutionMode = queuedSubmission?.conversation?.executionType ?? executionMode;
-      const requestPlatformModelName = requestExecutionMode === "cloud"
-        ? (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim()
-        : "";
+      const requestExecutionMode = queuedSubmission?.executionMode ?? executionMode;
+      const requestPlatformModelName = (queuedSubmission?.platformModelName ?? selectedPlatformModelName).trim();
       const requestKeyBindingID = requestExecutionMode === "cloud"
         ? (queuedSubmission?.keyBindingID ?? selectedKeyBindingID).trim()
         : "";
-      const requestOptions = requestExecutionMode === "cloud" ? queuedSubmission?.options ?? options : {};
+      const requestOptions = queuedSubmission?.options ?? options;
       const requestSelectedToolIDs = requestExecutionMode === "cloud"
         ? queuedSubmission?.selectedToolIDs ?? selectedToolIDs
         : [];
@@ -842,7 +859,7 @@ export function useChatMessageSubmit({
       if (submitTask === "chat" && requestExecutionMode === "cloud" && !requestKeyBindingID) {
         return false;
       }
-      if (requestExecutionMode === "cloud" && !requestPlatformModelName) {
+      if (!requestPlatformModelName) {
         toast.error(t("noModel"), { description: t("selectModelFirst") });
         return false;
       }
@@ -1079,6 +1096,7 @@ export function useChatMessageSubmit({
         let terminalStreamError: Extract<StreamMessageEvent, { type: "error" }> | null = null;
         const streamOptions: ConversationStreamOptions = {
           signal: streamAbortController.signal,
+          onExecutionEvent: (event) => applyAgentExecutionEvent(event, targetConversationID ?? ""),
           onEventSeq: (seq) => {
             if (generationSeqByRunRef) {
               generationSeqByRunRef.current[clientRunID] = Math.max(
@@ -1598,6 +1616,7 @@ export function useChatMessageSubmit({
             previousQueuedSubmission?.clientRunID ??
             (visibleRunPending ? visibleRunID : visibleActive?.runID) ??
             null,
+          executionMode,
           ...targetBranchScope,
           conversationPublicID: targetConversationPublicID,
           conversation: targetConversation,
@@ -1744,6 +1763,7 @@ export function useChatMessageSubmit({
   ]);
 
   const onDeleteQueuedMessage = React.useCallback((id: string) => {
+    queuedSteerAttemptsRef.current.delete(id);
     const target = queuedSubmissionsRef.current.find((item) => item.id === id);
     if (target) {
       releaseAttachments(target.attachments);
@@ -1766,32 +1786,95 @@ export function useChatMessageSubmit({
   }, [releaseAttachments]);
 
   const onEditQueuedMessage = React.useCallback((id: string, content: string) => {
+    queuedSteerAttemptsRef.current.delete(id);
     setQueuedSubmissions((current) =>
       current.map((item) => (item.id === id ? { ...item, content: content.trim() } : item)),
     );
   }, []);
 
-  const onGuideQueuedMessage = React.useCallback((id: string) => {
+  const onGuideQueuedMessage = React.useCallback(async (id: string) => {
+    const target = queuedSubmissionsRef.current.find((item) => item.id === id);
+    const targetExecutionMode = target?.executionMode ?? executionMode;
+    if (target && targetExecutionMode === "gateway") {
+      if (steeringQueuedSubmissionIDsRef.current.has(id)) return;
+      if (!target.content.trim() || target.attachments.length > 0) {
+        toast.error(t("steerTextOnly"));
+        return;
+      }
+      const active = Array.from(activeStreamsRef.current.values())
+        .filter((item) => branchScopesEqual(item, target))
+        .at(-1);
+      if (!active) {
+        toast.error(t("steerFailed"), { description: t("steerTurnEnded") });
+        return;
+      }
+      const content = target.content.trim();
+      const signature = `${active.runID}\u0000${content}`;
+      const previousAttempt = queuedSteerAttemptsRef.current.get(id);
+      const attempt = previousAttempt?.signature === signature
+        ? previousAttempt
+        : { signature, idempotencyKey: crypto.randomUUID() };
+      queuedSteerAttemptsRef.current.set(id, attempt);
+      steeringQueuedSubmissionIDsRef.current.add(id);
+      setSteeringQueuedSubmissionIDs((current) => new Set(current).add(id));
+      try {
+        const token = await resolveAccessToken();
+        if (!token) {
+          throw new ApiError(t("steerFailed"), 401);
+        }
+        await steerConversationRun(token, active.runID, content, attempt.idempotencyKey);
+        queuedSteerAttemptsRef.current.delete(id);
+        releaseAttachments(target.attachments);
+        setQueuedSubmissions((current) => {
+          const currentTarget = current.find((item) => item.id === id);
+          if (!currentTarget) {
+            return current;
+          }
+          const firstScopeSubmission = current.find((item) => branchScopesEqual(item, currentTarget));
+          return rechainQueuedSubmissions(
+            current.filter((item) => item.id !== id),
+            currentTarget,
+            firstScopeSubmission?.parentRunID ?? null,
+            firstScopeSubmission?.parentMessagePublicID ?? null,
+          );
+        });
+      } catch (error) {
+        toast.error(t("steerFailed"), {
+          description: error instanceof ApiError && error.status === 409
+            ? t("steerTurnEnded")
+          : t("retryLater"),
+        });
+      } finally {
+        steeringQueuedSubmissionIDsRef.current.delete(id);
+        setSteeringQueuedSubmissionIDs((current) => {
+          if (!current.has(id)) return current;
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }
+      return;
+    }
     setQueuedSubmissions((current) => {
-      const target = current.find((item) => item.id === id);
-      if (!target) {
+      const queuedTarget = current.find((item) => item.id === id);
+      if (!queuedTarget) {
         return current;
       }
-      sendQueuedAfterCurrentRef.current.add(branchScopeID(target));
+      sendQueuedAfterCurrentRef.current.add(branchScopeID(queuedTarget));
       const firstScopeIndex = current.findIndex(
-        (item) => branchScopesEqual(item, target),
+        (item) => branchScopesEqual(item, queuedTarget),
       );
       const firstScopeSubmission = firstScopeIndex >= 0 ? current[firstScopeIndex] : undefined;
       const reordered = current.filter((item) => item.id !== id);
-      reordered.splice(Math.max(firstScopeIndex, 0), 0, target);
+      reordered.splice(Math.max(firstScopeIndex, 0), 0, queuedTarget);
       return rechainQueuedSubmissions(
         reordered,
-        target,
+        queuedTarget,
         firstScopeSubmission?.parentRunID ?? null,
         firstScopeSubmission?.parentMessagePublicID ?? null,
       );
     });
-  }, []);
+  }, [executionMode, releaseAttachments, t]);
 
   const onSendMessage = React.useCallback(async () => {
     if (sending || resumeGenerationActive) {
@@ -2109,7 +2192,10 @@ export function useChatMessageSubmit({
         id: item.id,
         content: item.content,
         attachmentCount: item.attachments.length,
+        executionMode: item.executionMode,
+        steering: steeringQueuedSubmissionIDs.has(item.id),
       })),
     sending,
+    conversationRunActive,
   };
 }

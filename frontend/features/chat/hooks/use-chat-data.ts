@@ -1,9 +1,10 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
-
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import * as React from "react";
+import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
+import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
+import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import {
   cancelMessageGeneration,
   ensureConversationHistory,
@@ -11,9 +12,8 @@ import {
   listMessagesPage,
   resumeMessageGenerationStream,
 } from "@/shared/api/conversation";
-import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import type { MessageDTO } from "@/shared/api/conversation.types";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 100;
 const HISTORY_POLL_INTERVAL_MS = 500;
@@ -399,6 +399,7 @@ export function useChatData(
         const completed = await resumeMessageGenerationStream(token, pendingRunID, {
           signal: controller.signal,
           afterSeq,
+          onExecutionEvent: (event) => applyAgentExecutionEvent(event, conversationID),
           onEventSeq: (seq) => {
             if (isResumeInactive()) {
               return;

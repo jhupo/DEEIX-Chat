@@ -1,4 +1,10 @@
-import type { DeviceResponseDocData } from "@deeix/api-contract";
+import type {
+  DeviceResponseDocData,
+  ProviderManifestDoc,
+  ResourceSnapshotDoc,
+  RuntimeProfileDoc,
+  WorkspaceDoc,
+} from "@deeix/api-contract";
 
 import { authedRequest } from "@/shared/api/authed-client";
 
@@ -37,13 +43,121 @@ export async function updateAgentDevice(
   );
 }
 
-export type AgentRuntimeProfileDTO = {
-  profileId: string;
-  deviceId: string;
-  provider: string;
-  status: "proving" | "ready";
-  manifest: { commands?: string[] };
+export type AgentReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+export type AgentTurnSettings = {
+  model: string;
+  reasoningEffort: AgentReasoningEffort;
+  approvalPolicy: "on-request" | "never";
+  approvalsReviewer: "user" | "auto_review";
+  sandboxPolicy: "workspace-write" | "danger-full-access";
 };
+
+export type AgentProviderManifestDTO = Omit<ProviderManifestDoc, "threadSettings"> & {
+  threadSettings: ProviderManifestDoc["threadSettings"] & {
+    approvalsReviewer?: string[];
+  };
+};
+
+export type AgentRuntimeProfileDTO = Omit<RuntimeProfileDoc, "manifest" | "status"> & {
+  status: "proving" | "ready";
+  manifest: AgentProviderManifestDTO;
+};
+
+export type AgentWorkspaceDTO = WorkspaceDoc;
+export type AgentResourceSnapshotDTO = ResourceSnapshotDoc;
+
+export type AgentModelDTO = {
+  id: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+  defaultReasoningEffort: AgentReasoningEffort;
+  supportedReasoningEfforts: AgentReasoningEffort[];
+};
+
+const AGENT_REASONING_EFFORTS = new Set<AgentReasoningEffort>([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseReasoningEffort(value: unknown): AgentReasoningEffort | null {
+  return typeof value === "string" && AGENT_REASONING_EFFORTS.has(value as AgentReasoningEffort)
+    ? value as AgentReasoningEffort
+    : null;
+}
+
+export function parseAgentModelsResource(
+  value: unknown,
+  allowedReasoningEfforts?: readonly string[],
+): AgentModelDTO[] {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    return [];
+  }
+  const allowed = allowedReasoningEfforts
+    ? new Set(
+        allowedReasoningEfforts
+          .map(parseReasoningEffort)
+          .filter((item): item is AgentReasoningEffort => item !== null),
+      )
+    : AGENT_REASONING_EFFORTS;
+  const seen = new Set<string>();
+  const models: AgentModelDTO[] = [];
+  for (const rawModel of value.data) {
+    if (!isRecord(rawModel) || rawModel.hidden === true) {
+      continue;
+    }
+    const id = typeof rawModel.id === "string" ? rawModel.id.trim() : "";
+    const model = typeof rawModel.model === "string" ? rawModel.model.trim() : "";
+    const displayName = typeof rawModel.displayName === "string" ? rawModel.displayName.trim() : "";
+    const description = typeof rawModel.description === "string" ? rawModel.description.trim() : "";
+    if (
+      !id || id.length > 512 || !model || !displayName || seen.has(id) ||
+      typeof rawModel.isDefault !== "boolean" || typeof rawModel.hidden !== "boolean"
+    ) {
+      continue;
+    }
+    const rawEfforts = Array.isArray(rawModel.supportedReasoningEfforts)
+      ? rawModel.supportedReasoningEfforts
+      : [];
+    const supportedReasoningEfforts: AgentReasoningEffort[] = [];
+    for (const rawEffort of rawEfforts) {
+      if (!isRecord(rawEffort) || typeof rawEffort.description !== "string") {
+        continue;
+      }
+      const effort = parseReasoningEffort(rawEffort.reasoningEffort);
+      if (effort && allowed.has(effort) && !supportedReasoningEfforts.includes(effort)) {
+        supportedReasoningEfforts.push(effort);
+      }
+    }
+    const declaredDefault = parseReasoningEffort(rawModel.defaultReasoningEffort);
+    if (!declaredDefault) {
+      continue;
+    }
+    const defaultReasoningEffort = declaredDefault && supportedReasoningEfforts.includes(declaredDefault)
+      ? declaredDefault
+      : supportedReasoningEfforts[0];
+    if (!defaultReasoningEffort) {
+      continue;
+    }
+    seen.add(id);
+    models.push({
+      id,
+      displayName,
+      description,
+      isDefault: rawModel.isDefault,
+      defaultReasoningEffort,
+      supportedReasoningEfforts,
+    });
+  }
+  return models;
+}
 
 export async function listAgentRuntimeProfiles(
   accessToken: string,
@@ -52,6 +166,47 @@ export async function listAgentRuntimeProfiles(
   return authedRequest<AgentRuntimeProfileDTO[]>(
     `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles`,
     { accessToken },
+    true,
+  );
+}
+
+export async function listAgentWorkspaces(
+  accessToken: string,
+  deviceId: string,
+): Promise<AgentWorkspaceDTO[]> {
+  return authedRequest<AgentWorkspaceDTO[]>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/workspaces`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function getAgentProfileResource(
+  accessToken: string,
+  deviceId: string,
+  profileId: string,
+  resource: string,
+): Promise<AgentResourceSnapshotDTO> {
+  return authedRequest<AgentResourceSnapshotDTO>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles/${encodeURIComponent(profileId)}/resources/${encodeURIComponent(resource)}`,
+    { accessToken },
+    true,
+  );
+}
+
+export async function refreshAgentProfileResource(
+  accessToken: string,
+  deviceId: string,
+  profileId: string,
+  resource: string,
+): Promise<{ commandId: string; status: string }> {
+  return authedRequest<{ commandId: string; status: string }>(
+    `/api/v1/agent/devices/${encodeURIComponent(deviceId)}/profiles/${encodeURIComponent(profileId)}/resources/${encodeURIComponent(resource)}/refresh`,
+    {
+      accessToken,
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+    },
     true,
   );
 }

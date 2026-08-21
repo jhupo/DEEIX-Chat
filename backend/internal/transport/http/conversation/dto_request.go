@@ -149,6 +149,10 @@ type RespondInteractionRequest struct {
 	Response json.RawMessage `json:"response" binding:"required"`
 }
 
+type SteerConversationRunRequest struct {
+	Content string `json:"content" binding:"required,max=1048576"`
+}
+
 // UpdateMessageRequest 更新消息内容请求。
 type UpdateMessageRequest struct {
 	Content string `json:"content" binding:"required"`

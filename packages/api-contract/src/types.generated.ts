@@ -1720,6 +1720,7 @@ export interface ProviderResourcesDoc {
 
 export interface ProviderThreadSettingsDoc {
   approvalPolicy: string[];
+  approvalsReviewer: string[];
   model: boolean;
   reasoningEffort: string[];
   sandboxPolicy: string[];
@@ -2118,6 +2119,11 @@ export interface SkillSummaryResponse {
   title: string;
   trigger: string;
   updatedAt: string;
+}
+
+export interface SteerConversationRunRequest {
+  /** @maxLength 1048576 */
+  content: string;
 }
 
 export interface StorageQuotaResponse {
@@ -5913,6 +5919,28 @@ export namespace ConversationRuns {
     export type RequestQuery = {};
     export type RequestBody = never;
     export type RequestHeaders = {};
+    export type ResponseBody = SuccessDoc;
+  }
+
+  /**
+   * @description Sends guidance to the active Gateway turn without interrupting it or creating another run
+   * @tags chat
+   * @name SteerCreate
+   * @summary Adjust the active Gateway turn
+   * @request POST:/conversation-runs/{run_id}/steer
+   * @secure
+   */
+  export namespace SteerCreate {
+    export type RequestParams = {
+      /** Run ID */
+      runId: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = SteerConversationRunRequest;
+    export type RequestHeaders = {
+      /** Idempotency key */
+      "Idempotency-Key": string;
+    };
     export type ResponseBody = SuccessDoc;
   }
 

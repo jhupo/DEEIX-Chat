@@ -40,10 +40,11 @@ type ProviderResourcesDoc struct {
 }
 
 type ProviderThreadSettingsDoc struct {
-	Model           bool     `json:"model"`
-	ReasoningEffort []string `json:"reasoningEffort"`
-	ApprovalPolicy  []string `json:"approvalPolicy"`
-	SandboxPolicy   []string `json:"sandboxPolicy"`
+	Model             bool     `json:"model"`
+	ReasoningEffort   []string `json:"reasoningEffort"`
+	ApprovalPolicy    []string `json:"approvalPolicy"`
+	ApprovalsReviewer []string `json:"approvalsReviewer"`
+	SandboxPolicy     []string `json:"sandboxPolicy"`
 }
 
 type WorkspaceDoc struct {

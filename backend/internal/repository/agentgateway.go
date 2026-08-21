@@ -50,6 +50,7 @@ type AgentGatewayRepository interface {
 	StartThread(context.Context, string, string, *domainagent.Thread, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Thread, *domainagent.Turn, error)
 	GetThreadByConversation(context.Context, uint, uint) (*domainagent.Thread, error)
 	StartTurn(context.Context, string, string, *domainagent.Turn, *domainagent.Command, time.Time) (*domainagent.Turn, error)
+	QueueTurnSteer(context.Context, string, string, uint, string, json.RawMessage, *domainagent.Command, time.Time) (*domainagent.Command, error)
 	GetTurnByRunID(context.Context, uint, string) (*domainagent.Turn, error)
 	ListInteractions(context.Context, uint, string, string, int) ([]domainagent.Interaction, error)
 	RespondInteraction(context.Context, string, string, uint, string, json.RawMessage, *domainagent.Command, time.Time) (*domainagent.Interaction, error)

@@ -182,7 +182,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 		providerInput = append(providerInput, map[string]string{"kind": "artifact", "artifactRef": artifact.ArtifactID})
 	}
 	encodedInput, _ := json.Marshal(providerInput)
-	settings, err := gatewayTurnSettings(input.Options)
+	settings, err := gatewayTurnSettings(input.PlatformModelName, input.Options)
 	if err != nil {
 		return nil, err
 	}
@@ -233,12 +233,17 @@ func (s *Service) queueGatewayTurn(ctx context.Context, input SendMessageInput, 
 	return err
 }
 
-func gatewayTurnSettings(options map[string]interface{}) (json.RawMessage, error) {
+func gatewayTurnSettings(modelName string, options map[string]interface{}) (json.RawMessage, error) {
 	settings := map[string]string{}
+	if modelName = strings.TrimSpace(modelName); modelName == "" || len(modelName) > 256 || len(options) != 4 {
+		return nil, ErrInvalidExecutionTarget
+	}
+	settings["model"] = modelName
 	allowed := map[string]map[string]bool{
-		"reasoningEffort": {"low": true, "medium": true, "high": true, "xhigh": true},
-		"approvalPolicy":  {"untrusted": true, "on-request": true, "never": true},
-		"sandboxPolicy":   {"read-only": true, "workspace-write": true},
+		"reasoningEffort":   {"low": true, "medium": true, "high": true, "xhigh": true},
+		"approvalPolicy":    {"on-request": true, "never": true},
+		"approvalsReviewer": {"user": true, "auto_review": true},
+		"sandboxPolicy":     {"workspace-write": true, "danger-full-access": true},
 	}
 	for key, value := range options {
 		values, ok := allowed[key]
@@ -248,8 +253,17 @@ func gatewayTurnSettings(options map[string]interface{}) (json.RawMessage, error
 		}
 		settings[key] = text
 	}
+	if !validGatewayApprovalMode(settings["approvalPolicy"], settings["approvalsReviewer"], settings["sandboxPolicy"]) {
+		return nil, ErrInvalidExecutionTarget
+	}
 	encoded, err := json.Marshal(settings)
 	return encoded, err
+}
+
+func validGatewayApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy string) bool {
+	return approvalPolicy == "on-request" && approvalsReviewer == "user" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "on-request" && approvalsReviewer == "auto_review" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access"
 }
 
 func (s *Service) awaitGatewayTurn(ctx context.Context, input SendMessageInput, initial *SendMessageResult, onDelta func(string) error) (*SendMessageResult, error) {
@@ -275,6 +289,10 @@ func (s *Service) awaitGatewayTurn(ctx context.Context, input SendMessageInput, 
 				}
 			}
 		case "upstream_think_delta":
+			if input.OnEvent != nil {
+				return false, input.OnEvent(typeName, payload)
+			}
+		case "execution_event":
 			if input.OnEvent != nil {
 				return false, input.OnEvent(typeName, payload)
 			}
@@ -313,4 +331,32 @@ func (s *Service) gatewayTurnResult(ctx context.Context, userID uint, runID stri
 
 func (s *Service) GetTurnResult(ctx context.Context, userID uint, runID string) (*SendMessageResult, error) {
 	return s.gatewayTurnResult(ctx, userID, normalizeRunID(runID), nil, nil)
+}
+
+func (s *Service) SteerConversationRun(ctx context.Context, userID uint, runID, content, idempotencyKey string) error {
+	runID, content, idempotencyKey = normalizeRunID(runID), strings.TrimSpace(content), strings.TrimSpace(idempotencyKey)
+	if userID == 0 || runID == "" || content == "" || len(content) > 1024*1024 || idempotencyKey == "" {
+		return ErrInvalidExecutionTarget
+	}
+	conversation, err := s.repo.GetConversationExecutionByRunID(ctx, userID, runID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrExecutionConflict
+		}
+		return err
+	}
+	if conversation.ExecutionType != model.ExecutionTypeGateway || s.gatewayExecutor == nil {
+		return ErrExecutionConflict
+	}
+	encoded, err := json.Marshal([]map[string]string{{"kind": "text", "text": content}})
+	if err != nil {
+		return err
+	}
+	if err = s.gatewayExecutor.SteerRun(ctx, userID, runID, idempotencyKey, encoded); err != nil {
+		if errors.Is(err, ErrExecutionBindingNotFound) || errors.Is(err, ErrExecutionUnavailable) {
+			return ErrExecutionConflict
+		}
+		return err
+	}
+	return nil
 }

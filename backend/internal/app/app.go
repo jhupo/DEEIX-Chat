@@ -259,6 +259,13 @@ func (a localGatewayAdapter) StartTurn(ctx context.Context, userID uint, input c
 	return mapLocalGatewayError(err)
 }
 
+func (a localGatewayAdapter) SteerRun(ctx context.Context, userID uint, runID, idempotencyKey string, input []byte) error {
+	_, err := a.service.SteerRun(ctx, userID, appagentgateway.SteerRunInput{
+		RunID: runID, IdempotencyKey: idempotencyKey, Input: input,
+	})
+	return mapLocalGatewayError(err)
+}
+
 func (a localGatewayAdapter) InterruptRun(ctx context.Context, userID uint, runID, idempotencyKey string) error {
 	_, err := a.service.InterruptRun(ctx, userID, runID, idempotencyKey)
 	return mapLocalGatewayError(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -1357,6 +1358,58 @@ func manifestSupportsCommand(value, command string) bool {
 	return slices.Contains(manifest.Commands, command)
 }
 
+func manifestSupportsSettings(manifestJSON, settingsJSON string) bool {
+	var manifest struct {
+		ThreadSettings struct {
+			Model             bool     `json:"model"`
+			ReasoningEffort   []string `json:"reasoningEffort"`
+			ApprovalPolicy    []string `json:"approvalPolicy"`
+			ApprovalsReviewer []string `json:"approvalsReviewer"`
+			SandboxPolicy     []string `json:"sandboxPolicy"`
+		} `json:"threadSettings"`
+	}
+	var settings map[string]string
+	if json.Unmarshal([]byte(manifestJSON), &manifest) != nil || json.Unmarshal([]byte(settingsJSON), &settings) != nil {
+		return false
+	}
+	if len(settings) != 5 || !validRepoApprovalMode(settings["approvalPolicy"], settings["approvalsReviewer"], settings["sandboxPolicy"]) {
+		return false
+	}
+	for key, value := range settings {
+		switch key {
+		case "model":
+			if !manifest.ThreadSettings.Model || strings.TrimSpace(value) == "" {
+				return false
+			}
+		case "reasoningEffort":
+			if !slices.Contains(manifest.ThreadSettings.ReasoningEffort, value) {
+				return false
+			}
+		case "approvalPolicy":
+			if !slices.Contains(manifest.ThreadSettings.ApprovalPolicy, value) {
+				return false
+			}
+		case "approvalsReviewer":
+			if !slices.Contains(manifest.ThreadSettings.ApprovalsReviewer, value) {
+				return false
+			}
+		case "sandboxPolicy":
+			if !slices.Contains(manifest.ThreadSettings.SandboxPolicy, value) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validRepoApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy string) bool {
+	return approvalPolicy == "on-request" && approvalsReviewer == "user" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "on-request" && approvalsReviewer == "auto_review" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access"
+}
+
 func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID uint, bridgeSeq uint64, payloadHash string, event *domainagent.Event, now time.Time) (*domainagent.AppliedEventFrame, error) {
 	var applied domainagent.AppliedEventFrame
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -1535,6 +1588,9 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 				if err := updateAgentTurnTerminal(tx, turn.ID, status, code, message, event.OccurredAt); err != nil {
 					return err
 				}
+				if err := resolveTurnInteractions(tx, turn.ID, event.OccurredAt); err != nil {
+					return err
+				}
 			}
 		} else if !dberror.IsRecordNotFound(err) {
 			return err
@@ -1549,8 +1605,19 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 				Type string `json:"type"`
 			} `json:"item"`
 		}
-		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil || payload.Item.Type == "" {
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
 			return repository.ErrConflict
+		}
+		if payload.Item.Type == "" {
+			var projected struct {
+				Item struct {
+					Kind string `json:"kind"`
+				} `json:"item"`
+			}
+			if json.Unmarshal([]byte(event.PayloadJSON), &projected) != nil || projected.Item.Kind == "" {
+				return repository.ErrConflict
+			}
+			payload.Item.Type = projected.Item.Kind
 		}
 		status := "running"
 		if event.Kind == "item/completed" {
@@ -1594,6 +1661,15 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 			TurnID: event.TurnID, RuntimeProfileID: *event.RuntimeProfileID,
 			SourceRequestRef: event.SourceRequestRef, Kind: kind,
 			RequestJSON: requestJSON, Status: "pending",
+		}
+		if event.TurnID != nil {
+			var status string
+			if err := tx.Model(&model.AgentTurn{}).Select("status").Where("id = ?", *event.TurnID).Scan(&status).Error; err != nil {
+				return err
+			}
+			if status == "completed" || status == "interrupted" || status == "failed" {
+				interaction.Status = "resolved"
+			}
 		}
 		if err := tx.Where("runtime_profile_id = ? AND source_request_ref = ?", interaction.RuntimeProfileID, interaction.SourceRequestRef).
 			Attrs(interaction).FirstOrCreate(&interaction).Error; err != nil {
@@ -1725,6 +1801,12 @@ func updateAgentTurnTerminal(tx *gorm.DB, turnID uint, status, code, message str
 	}).Error
 }
 
+func resolveTurnInteractions(tx *gorm.DB, turnID uint, updatedAt time.Time) error {
+	return tx.Model(&model.AgentInteraction{}).
+		Where("turn_id = ? AND status IN ?", turnID, []string{"pending", "responding"}).
+		Updates(map[string]any{"status": "resolved", "updated_at": updatedAt}).Error
+}
+
 func projectInteractionRequest(payloadJSON string) (string, string, error) {
 	var payload map[string]json.RawMessage
 	if json.Unmarshal([]byte(payloadJSON), &payload) != nil || len(payload) != 2 {
@@ -1750,11 +1832,13 @@ func projectInteractionRequest(payloadJSON string) (string, string, error) {
 	return kind, string(request), nil
 }
 
-func interactionResponseMatchesKind(kind string, response json.RawMessage) bool {
-	var payload struct {
-		Kind string `json:"kind"`
-	}
+func interactionResponseMatchesRequest(kind, requestJSON string, response json.RawMessage) bool {
+	var payload map[string]json.RawMessage
 	if json.Unmarshal(response, &payload) != nil {
+		return false
+	}
+	var responseKind string
+	if json.Unmarshal(payload["kind"], &responseKind) != nil {
 		return false
 	}
 	expected := map[string]string{
@@ -1765,7 +1849,213 @@ func interactionResponseMatchesKind(kind string, response json.RawMessage) bool 
 		"mcp_elicitation":  "mcp-elicitation",
 		"dynamic_tool":     "dynamic-tool",
 	}[kind]
-	return expected != "" && payload.Kind == expected
+	if expected == "" || responseKind != expected {
+		return false
+	}
+	switch kind {
+	case "user_input":
+		return userInputResponseMatchesRequest(requestJSON, payload["answers"])
+	case "permission":
+		return permissionResponseMatchesRequest(requestJSON, payload["decision"], payload["scope"])
+	case "mcp_elicitation":
+		return mcpResponseMatchesRequest(requestJSON, payload)
+	case "dynamic_tool":
+		return dynamicToolResponseMatchesRequest(requestJSON, payload["content"])
+	default:
+		return true
+	}
+}
+
+func userInputResponseMatchesRequest(requestJSON string, rawAnswers json.RawMessage) bool {
+	var request struct {
+		Questions []struct {
+			QuestionRef   string `json:"questionRef"`
+			Required      bool   `json:"required"`
+			AllowFreeform bool   `json:"allowFreeform"`
+			Options       []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	var answers map[string]string
+	if json.Unmarshal([]byte(requestJSON), &request) != nil || len(request.Questions) == 0 ||
+		json.Unmarshal(rawAnswers, &answers) != nil || answers == nil {
+		return false
+	}
+	type questionConstraint struct {
+		required      bool
+		allowFreeform bool
+		options       []string
+	}
+	known := make(map[string]questionConstraint, len(request.Questions))
+	for _, question := range request.Questions {
+		if _, exists := known[question.QuestionRef]; question.QuestionRef == "" || exists {
+			return false
+		}
+		constraint := questionConstraint{required: question.Required, allowFreeform: question.AllowFreeform}
+		for _, option := range question.Options {
+			if option.Label == "" || slices.Contains(constraint.options, option.Label) {
+				return false
+			}
+			constraint.options = append(constraint.options, option.Label)
+		}
+		known[question.QuestionRef] = constraint
+	}
+	for questionRef, answer := range answers {
+		constraint, exists := known[questionRef]
+		if !exists || len(constraint.options) > 0 && !constraint.allowFreeform && !slices.Contains(constraint.options, answer) {
+			return false
+		}
+	}
+	for questionRef, constraint := range known {
+		if constraint.required && strings.TrimSpace(answers[questionRef]) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func permissionResponseMatchesRequest(requestJSON string, rawDecision, rawScope json.RawMessage) bool {
+	var request struct {
+		AllowedScopes []string `json:"allowedScopes"`
+	}
+	var decision string
+	if json.Unmarshal(rawDecision, &decision) != nil {
+		return false
+	}
+	if decision == "decline" {
+		return true
+	}
+	if decision != "accept" || json.Unmarshal([]byte(requestJSON), &request) != nil || len(request.AllowedScopes) == 0 {
+		return false
+	}
+	scope := "turn"
+	if len(rawScope) > 0 && json.Unmarshal(rawScope, &scope) != nil {
+		return false
+	}
+	return slices.Contains(request.AllowedScopes, scope)
+}
+
+type interactionSchemaField struct {
+	Type string            `json:"type"`
+	Enum []json.RawMessage `json:"enum"`
+}
+
+func mcpResponseMatchesRequest(requestJSON string, payload map[string]json.RawMessage) bool {
+	var request struct {
+		RequestedSchema *struct {
+			Properties map[string]interactionSchemaField `json:"properties"`
+			Required   []string                          `json:"required"`
+		} `json:"requestedSchema"`
+	}
+	var decision string
+	if json.Unmarshal([]byte(requestJSON), &request) != nil || json.Unmarshal(payload["decision"], &decision) != nil {
+		return false
+	}
+	if decision == "decline" {
+		return len(payload["content"]) == 0
+	}
+	if decision != "accept" {
+		return false
+	}
+	var content map[string]json.RawMessage
+	if rawContent := payload["content"]; len(rawContent) > 0 {
+		if json.Unmarshal(rawContent, &content) != nil || content == nil {
+			return false
+		}
+	}
+	properties := map[string]interactionSchemaField{}
+	required := []string{}
+	if request.RequestedSchema != nil {
+		properties = request.RequestedSchema.Properties
+		required = request.RequestedSchema.Required
+	}
+	for name, value := range content {
+		field, exists := properties[name]
+		if !exists || !interactionValueMatchesSchema(value, field) {
+			return false
+		}
+	}
+	seenRequired := make(map[string]bool, len(required))
+	for _, name := range required {
+		if _, exists := properties[name]; !exists || seenRequired[name] {
+			return false
+		}
+		seenRequired[name] = true
+		if _, exists := content[name]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func interactionValueMatchesSchema(value json.RawMessage, field interactionSchemaField) bool {
+	if !interactionValueMatchesType(value, field.Type) {
+		return false
+	}
+	if len(field.Enum) == 0 {
+		return true
+	}
+	for _, candidate := range field.Enum {
+		if interactionValuesEqual(value, candidate, field.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func interactionValueMatchesType(value json.RawMessage, fieldType string) bool {
+	switch fieldType {
+	case "string":
+		var typed string
+		return json.Unmarshal(value, &typed) == nil
+	case "boolean":
+		var typed bool
+		return json.Unmarshal(value, &typed) == nil
+	case "number", "integer":
+		var typed float64
+		if json.Unmarshal(value, &typed) != nil || math.IsInf(typed, 0) || math.IsNaN(typed) {
+			return false
+		}
+		return fieldType == "number" || math.Trunc(typed) == typed
+	default:
+		return false
+	}
+}
+
+func interactionValuesEqual(value, candidate json.RawMessage, fieldType string) bool {
+	if !interactionValueMatchesType(candidate, fieldType) {
+		return false
+	}
+	switch fieldType {
+	case "string":
+		var left, right string
+		return json.Unmarshal(value, &left) == nil && json.Unmarshal(candidate, &right) == nil && left == right
+	case "boolean":
+		var left, right bool
+		return json.Unmarshal(value, &left) == nil && json.Unmarshal(candidate, &right) == nil && left == right
+	default:
+		var left, right float64
+		return json.Unmarshal(value, &left) == nil && json.Unmarshal(candidate, &right) == nil && left == right
+	}
+}
+
+func dynamicToolResponseMatchesRequest(requestJSON string, rawContent json.RawMessage) bool {
+	var request struct {
+		AcceptedContentKinds []string `json:"acceptedContentKinds"`
+	}
+	var content []struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(requestJSON), &request) != nil || json.Unmarshal(rawContent, &content) != nil || content == nil {
+		return false
+	}
+	for _, item := range content {
+		if !slices.Contains(request.AcceptedContentKinds, item.Kind) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *Repo) BeginRuntimeProof(
@@ -2617,8 +2907,9 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 			return err
 		}
 		var target struct {
-			ProfileID   string `json:"profileId"`
-			WorkspaceID string `json:"workspaceId"`
+			ProfileID   string          `json:"profileId"`
+			WorkspaceID string          `json:"workspaceId"`
+			Settings    json.RawMessage `json:"settings"`
 		}
 		if err := json.Unmarshal([]byte(command.PayloadJSON), &target); err != nil {
 			return repository.ErrInvalidInput
@@ -2628,6 +2919,9 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 			return err
 		}
 		var workspace model.AgentWorkspace
+		if !manifestSupportsSettings(profile.ManifestJSON, string(target.Settings)) {
+			return repository.ErrConflict
+		}
 		if err := tx.Where("user_id = ? AND device_id = ? AND runtime_profile_id = ? AND public_id = ? AND status = ?", input.UserID, device.ID, profile.ID, target.WorkspaceID, "available").First(&workspace).Error; err != nil {
 			return err
 		}
@@ -2920,6 +3214,9 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 			return err
 		}
 		var workspace model.AgentWorkspace
+		if !manifestSupportsSettings(profile.ManifestJSON, input.SettingsJSON) {
+			return repository.ErrConflict
+		}
 		if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
 			return err
 		}
@@ -2952,6 +3249,95 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		return nil, errFor(err)
 	}
 	return toDomainTurn(turn), nil
+}
+
+func (r *Repo) QueueTurnSteer(
+	ctx context.Context,
+	idempotencyKey, requestHash string,
+	userID uint,
+	runID string,
+	input json.RawMessage,
+	command *domainagent.Command,
+	now time.Time,
+) (*domainagent.Command, error) {
+	var queued model.AgentCommand
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var operation model.AgentIdempotencyRecord
+		created := model.AgentIdempotencyRecord{UserID: userID, Operation: "turn.steer", Key: idempotencyKey, RequestHash: requestHash}
+		if err := tx.Where("user_id = ? AND operation = ? AND key = ?", userID, created.Operation, idempotencyKey).
+			Attrs(created).FirstOrCreate(&operation).Error; err != nil {
+			return err
+		}
+		if operation.RequestHash != requestHash {
+			return repository.ErrConflict
+		}
+		if operation.ResultPublicID != "" {
+			return tx.Where("user_id = ? AND public_id = ?", userID, operation.ResultPublicID).First(&queued).Error
+		}
+
+		var turn model.AgentTurn
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND run_id = ?", userID, runID).First(&turn).Error; err != nil {
+			return err
+		}
+		if turn.Status != "running" || turn.SourceTurnRef == nil || !validRepoRef(*turn.SourceTurnRef) {
+			return repository.ErrConflict
+		}
+		var thread model.AgentThread
+		if err := tx.Where("id = ? AND user_id = ? AND status = ?", turn.ThreadID, userID, "active").First(&thread).Error; err != nil {
+			return err
+		}
+		if thread.SourceThreadRef == nil || !validRepoRef(*thread.SourceThreadRef) {
+			return repository.ErrConflict
+		}
+		var device model.AgentDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND status = ?", thread.DeviceID, userID, domainagent.DeviceStatusActive).
+			First(&device).Error; err != nil {
+			return err
+		}
+		var profile model.AgentRuntimeProfile
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND status = ? AND lease_expires_at > ?",
+			thread.RuntimeProfileID, userID, device.ID, domainagent.RuntimeStatusReady, now).First(&profile).Error; err != nil {
+			return err
+		}
+		if !manifestSupportsCommand(profile.ManifestJSON, "turn.steer") {
+			return repository.ErrConflict
+		}
+		var workspace model.AgentWorkspace
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND runtime_profile_id = ? AND status = ?",
+			thread.WorkspaceID, userID, device.ID, profile.ID, "available").First(&workspace).Error; err != nil {
+			return err
+		}
+		if err := validateCommandArtifacts(tx, userID, workspace.ID, string(input)); err != nil {
+			return err
+		}
+		payload, err := json.Marshal(map[string]any{
+			"kind": "turn.steer", "deviceId": device.PublicID, "profileId": profile.PublicID,
+			"workspaceId": workspace.PublicID, "threadId": thread.PublicID,
+			"sourceThreadRef": *thread.SourceThreadRef, "turnId": turn.PublicID,
+			"sourceTurnRef": *turn.SourceTurnRef, "input": input,
+		})
+		if err != nil {
+			return err
+		}
+		queued = model.AgentCommand{
+			PublicID: command.PublicID, UserID: userID, DeviceID: device.ID,
+			RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, ThreadID: &thread.ID, TurnID: &turn.ID,
+			ServerSeq: device.NextServerSeq, Kind: "turn.steer", PayloadJSON: string(payload), State: "queued", TerminalJSON: "{}",
+		}
+		if err := tx.Create(&queued).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {
+			return err
+		}
+		return tx.Model(&operation).Update("result_public_id", queued.PublicID).Error
+	})
+	if err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainCommand(queued), nil
 }
 
 func (r *Repo) GetTurnByRunID(ctx context.Context, userID uint, runID string) (*domainagent.Turn, error) {
@@ -3048,6 +3434,9 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 				}
 				return repository.ErrConflict
 			}
+			if turn.Status != "running" {
+				return repository.ErrConflict
+			}
 		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ? AND public_id = ?", target.ID, userID, interactionPublicID).First(&interaction).Error; err != nil {
 			return err
@@ -3056,7 +3445,7 @@ func (r *Repo) RespondInteraction(ctx context.Context, idempotencyKey, requestHa
 			(interaction.TurnID != nil && *interaction.TurnID != *target.TurnID) || interaction.Status != "pending" {
 			return repository.ErrConflict
 		}
-		if !interactionResponseMatchesKind(interaction.Kind, response) {
+		if !interactionResponseMatchesRequest(interaction.Kind, interaction.RequestJSON, response) {
 			return repository.ErrInvalidInput
 		}
 		var profile model.AgentRuntimeProfile

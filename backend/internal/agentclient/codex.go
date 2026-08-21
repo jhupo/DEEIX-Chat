@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/mod/semver"
 )
@@ -28,11 +29,16 @@ const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615c
 const minimumCodexVersion = "0.147.0"
 const maxCodexDesktopStateBytes = 4 << 20
 
+const codexUpgradeInstructions = "Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
 var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", "unknown"}
 
 const maxSessionMessageRunes = 64 * 1024
+const maxExecutionTextBytes = 1 << 20
+const maxInteractionPreviewBytes = 8 << 10
+const maxApprovalItemProjections = 256
 
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
@@ -80,6 +86,12 @@ type pendingInteraction struct {
 	Response   chan any
 }
 
+type approvalItemProjection struct {
+	TurnID  string
+	Command string
+	Files   []any
+}
+
 type CodexAdapter struct {
 	profileID   string
 	state       *StateStore
@@ -96,10 +108,12 @@ type CodexAdapter struct {
 	onEvent     func(json.RawMessage) error
 	done        chan struct{}
 
-	mu      sync.Mutex
-	pending map[string]*pendingInteraction
-	active  map[string]bool
-	closed  bool
+	mu            sync.Mutex
+	pending       map[string]*pendingInteraction
+	active        map[string]bool
+	approvalItems map[string]approvalItemProjection
+	approvalOrder []string
+	closed        bool
 }
 
 func ResolveCodex(ctx context.Context, executable string) (string, string, error) {
@@ -139,8 +153,8 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	}
 	if semver.Compare(version, "v"+minimumCodexVersion) < 0 {
 		return "", "", fmt.Errorf(
-			"Codex CLI is too old: detected %s; DEEIX requires %s or newer. Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-			match[1], minimumCodexVersion,
+			"Codex CLI is too old: detected %s; DEEIX requires %s or newer. %s",
+			match[1], minimumCodexVersion, codexUpgradeInstructions,
 		)
 	}
 	return path, match[1], nil
@@ -173,7 +187,8 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	adapter := &CodexAdapter{
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
-		workspaces: make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
+		approvalItems: make(map[string]approvalItemProjection),
+		workspaces:    make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -210,7 +225,31 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 		_ = adapter.Close()
 		return nil, err
 	}
+	compatibilityContext, cancelCompatibility := context.WithTimeout(ctx, 30*time.Second)
+	err = adapter.verifyProjectSessionProtocol(compatibilityContext)
+	cancelCompatibility()
+	if err != nil {
+		_ = adapter.Close()
+		return nil, err
+	}
 	return adapter, nil
+}
+
+func (adapter *CodexAdapter) verifyProjectSessionProtocol(ctx context.Context) error {
+	codexHome := strings.TrimSpace(adapter.codexHome)
+	if codexHome == "" || !filepath.IsAbs(codexHome) || strings.ContainsRune(codexHome, 0) {
+		return errors.New("Codex app-server returned an invalid Codex home directory")
+	}
+	_, err := adapter.listSessions(ctx, map[string]any{
+		"limit": 1, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds, "cwd": []string{codexHome},
+	})
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf(
+		"Codex CLI project session API is incompatible with DEEIX: detected %s; %v. DEEIX requires %s or newer. %s",
+		adapter.version, err, minimumCodexVersion, codexUpgradeInstructions,
+	)
 }
 
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
@@ -224,8 +263,9 @@ func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest.Resources.Workspace = append([]string(nil), workspaceResources...)
 	manifest.ThreadSettings.Model = true
 	manifest.ThreadSettings.ReasoningEffort = []string{"low", "medium", "high", "xhigh"}
-	manifest.ThreadSettings.ApprovalPolicy = []string{"untrusted", "on-request", "never"}
-	manifest.ThreadSettings.SandboxPolicy = []string{"read-only", "workspace-write"}
+	manifest.ThreadSettings.ApprovalPolicy = []string{"on-request", "never"}
+	manifest.ThreadSettings.ApprovalsReviewer = []string{"user", "auto_review"}
+	manifest.ThreadSettings.SandboxPolicy = []string{"workspace-write", "danger-full-access"}
 	return manifest
 }
 
@@ -1051,6 +1091,18 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 		return errors.New("Codex notification payload is invalid")
 	}
 	threadID := identityValue(params, "threadId", "thread")
+	turnID := identityValue(params, "turnId", "turn")
+	itemID := identityValue(params, "itemId", "item")
+	if notification.Method == "item/started" {
+		item, _ := params["item"].(map[string]any)
+		adapter.rememberApprovalItem(itemID, turnID, item)
+	}
+	if notification.Method == "item/completed" && itemID != "" {
+		defer adapter.forgetApprovalItem(itemID)
+	}
+	if notification.Method == "turn/completed" && turnID != "" {
+		defer adapter.forgetTurnApprovalItems(turnID)
+	}
 	if notification.Method == "thread/started" && threadID != "" {
 		adapter.setActive(threadID, true)
 	}
@@ -1063,14 +1115,16 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 	} else if source != "" {
 		event["sourceThreadRef"] = source
 	}
-	if source, err := adapter.publishOptional("turn", identityValue(params, "turnId", "turn")); err != nil {
+	if source, err := adapter.publishOptional("turn", turnID); err != nil {
 		return err
 	} else if source != "" {
 		event["sourceTurnRef"] = source
 	}
-	if source, err := adapter.publishOptional("item", identityValue(params, "itemId", "item")); err != nil {
+	sourceItemRef := ""
+	if source, err := adapter.publishOptional("item", itemID); err != nil {
 		return err
 	} else if source != "" {
+		sourceItemRef = source
 		event["sourceItemRef"] = source
 	}
 	if providerRequestID := notificationRequestID(params["requestId"]); providerRequestID != "" {
@@ -1080,7 +1134,7 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 			event["sourceRequestRef"] = source
 		}
 	}
-	payload := sanitizeEvent(params, "")
+	payload := adapter.projectNotification(notification.Method, params, sourceItemRef)
 	if event["kind"] == "provider.extension" {
 		payload = map[string]any{"method": notification.Method, "data": payload}
 	}
@@ -1105,7 +1159,7 @@ func (adapter *CodexAdapter) serverRequest(ctx context.Context, request RPCServe
 	if err != nil {
 		return nil, err
 	}
-	projected, answerKeys, err := projectServerRequest(request.Method, params)
+	projected, answerKeys, err := adapter.projectServerRequest(request.Method, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1173,6 +1227,8 @@ func (adapter *CodexAdapter) Close() error {
 	}
 	adapter.closed = true
 	adapter.pending = make(map[string]*pendingInteraction)
+	adapter.approvalItems = make(map[string]approvalItemProjection)
+	adapter.approvalOrder = nil
 	adapter.mu.Unlock()
 	_ = adapter.rpc.Close()
 	if adapter.command.Process != nil {
@@ -1222,15 +1278,81 @@ func (adapter *CodexAdapter) isActive(threadID string) bool {
 	return adapter.active[threadID]
 }
 
+func (adapter *CodexAdapter) rememberApprovalItem(itemID, turnID string, item map[string]any) {
+	if itemID == "" || len(itemID) > 4096 || len(turnID) > 4096 || item == nil {
+		return
+	}
+	kind := stringField(item, "type")
+	if kind == "" {
+		kind = stringField(item, "kind")
+	}
+	projection := approvalItemProjection{TurnID: turnID}
+	switch kind {
+	case "commandExecution":
+		projection.Command = interactionText(item["command"])
+	case "fileChange":
+		projection.Files = adapter.projectInteractionChanges(item["changes"])
+	default:
+		return
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.approvalItems == nil {
+		adapter.approvalItems = make(map[string]approvalItemProjection)
+	}
+	if _, exists := adapter.approvalItems[itemID]; exists {
+		adapter.approvalItems[itemID] = projection
+		return
+	}
+	if len(adapter.approvalItems) == maxApprovalItemProjections {
+		oldest := adapter.approvalOrder[0]
+		adapter.approvalOrder = adapter.approvalOrder[1:]
+		delete(adapter.approvalItems, oldest)
+	}
+	adapter.approvalItems[itemID] = projection
+	adapter.approvalOrder = append(adapter.approvalOrder, itemID)
+}
+
+func (adapter *CodexAdapter) approvalItem(itemID string) approvalItemProjection {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	projection := adapter.approvalItems[itemID]
+	projection.Files = append([]any(nil), projection.Files...)
+	return projection
+}
+
+func (adapter *CodexAdapter) forgetApprovalItem(itemID string) {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if _, exists := adapter.approvalItems[itemID]; !exists {
+		return
+	}
+	delete(adapter.approvalItems, itemID)
+	for index, cachedItemID := range adapter.approvalOrder {
+		if cachedItemID == itemID {
+			adapter.approvalOrder = slices.Delete(adapter.approvalOrder, index, index+1)
+			return
+		}
+	}
+}
+
+func (adapter *CodexAdapter) forgetTurnApprovalItems(turnID string) {
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	kept := adapter.approvalOrder[:0]
+	for _, itemID := range adapter.approvalOrder {
+		if adapter.approvalItems[itemID].TurnID == turnID {
+			delete(adapter.approvalItems, itemID)
+			continue
+		}
+		kept = append(kept, itemID)
+	}
+	adapter.approvalOrder = kept
+}
+
 func applyThreadSettings(params map[string]any, settings Settings) {
 	if settings.Model != "" {
 		params["model"] = settings.Model
-	}
-	if settings.ApprovalPolicy != "" {
-		params["approvalPolicy"] = settings.ApprovalPolicy
-	}
-	if settings.SandboxPolicy != "" {
-		params["sandbox"] = settings.SandboxPolicy
 	}
 }
 
@@ -1244,11 +1366,14 @@ func applyTurnSettings(params map[string]any, settings Settings, cwd string) {
 	if settings.ApprovalPolicy != "" {
 		params["approvalPolicy"] = settings.ApprovalPolicy
 	}
-	if settings.SandboxPolicy == "read-only" {
-		params["sandboxPolicy"] = map[string]any{"type": "readOnly", "networkAccess": false}
+	if settings.ApprovalsReviewer != "" {
+		params["approvalsReviewer"] = settings.ApprovalsReviewer
 	}
 	if settings.SandboxPolicy == "workspace-write" {
 		params["sandboxPolicy"] = map[string]any{"type": "workspaceWrite", "writableRoots": []string{cwd}, "networkAccess": false, "excludeTmpdirEnvVar": false, "excludeSlashTmp": false}
+	}
+	if settings.SandboxPolicy == "danger-full-access" {
+		params["sandboxPolicy"] = map[string]any{"type": "dangerFullAccess"}
 	}
 }
 
@@ -1433,7 +1558,268 @@ func notificationKind(method string) string {
 	return "provider.extension"
 }
 
+func (adapter *CodexAdapter) projectNotification(method string, params map[string]any, sourceItemRef string) any {
+	switch method {
+	case "turn/started", "turn/completed":
+		return projectExecutionTurn(params)
+	case "item/started", "item/completed":
+		item, _ := params["item"].(map[string]any)
+		return map[string]any{"itemID": sourceItemRef, "item": adapter.projectExecutionItem(item, sourceItemRef)}
+	case "item/agentMessage/delta", "item/plan/delta":
+		delta, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
+		return map[string]any{"itemID": sourceItemRef, "delta": delta, "truncated": truncated}
+	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+		delta, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
+		result := map[string]any{"itemID": sourceItemRef, "delta": delta, "truncated": truncated}
+		for _, key := range []string{"summaryIndex", "contentIndex"} {
+			if number, ok := finiteNumber(params[key]); ok {
+				result[key] = number
+			}
+		}
+		return result
+	case "item/reasoning/summaryPartAdded":
+		result := map[string]any{"itemID": sourceItemRef}
+		if number, ok := finiteNumber(params["summaryIndex"]); ok {
+			result["summaryIndex"] = number
+		}
+		return result
+	case "item/commandExecution/outputDelta":
+		output, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
+		return map[string]any{"itemID": sourceItemRef, "outputDelta": output, "truncated": truncated}
+	case "item/fileChange/patchUpdated":
+		result := map[string]any{"itemID": sourceItemRef, "changes": adapter.projectExecutionChanges(params["changes"])}
+		if patch, ok := params["patch"].(string); ok {
+			result["patch"], result["truncated"] = boundedText(patch, maxExecutionTextBytes)
+		}
+		return result
+	case "turn/diff/updated":
+		diff, truncated := boundedText(stringField(params, "diff"), maxExecutionTextBytes)
+		return map[string]any{"diff": diff, "truncated": truncated}
+	case "turn/plan/updated":
+		return projectTurnPlan(params)
+	case "thread/tokenUsage/updated":
+		return map[string]any{"tokenUsage": projectTokenUsage(params["tokenUsage"])}
+	case "model/rerouted":
+		return map[string]any{
+			"fromModel": stringField(params, "fromModel"),
+			"toModel":   stringField(params, "toModel"),
+			"reason":    stringField(params, "reason"),
+		}
+	case "serverRequest/resolved":
+		return map[string]any{}
+	default:
+		return sanitizeEvent(params, "")
+	}
+}
+
+func projectExecutionTurn(params map[string]any) map[string]any {
+	turn, _ := params["turn"].(map[string]any)
+	resultTurn := map[string]any{}
+	if status := stringField(turn, "status"); status != "" {
+		resultTurn["status"] = status
+	}
+	if duration, ok := finiteNumber(turn["durationMs"]); ok {
+		resultTurn["durationMs"] = duration
+	}
+	if rawError, ok := turn["error"].(map[string]any); ok {
+		projected := map[string]any{}
+		for _, key := range []string{"code", "message"} {
+			if text := interactionText(rawError[key]); text != "" {
+				projected[key] = text
+			}
+		}
+		if len(projected) > 0 {
+			resultTurn["error"] = projected
+		}
+	}
+	return map[string]any{"turn": resultTurn}
+}
+
+func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceItemRef string) map[string]any {
+	result := map[string]any{"itemID": sourceItemRef}
+	kind := stringField(item, "type")
+	if kind == "" {
+		kind = stringField(item, "kind")
+	}
+	if kind != "" {
+		result["kind"] = kind
+	}
+	if status := stringField(item, "status"); status != "" {
+		result["status"] = status
+	}
+	if command, ok := item["command"].(string); ok {
+		result["command"] = command
+	}
+	if output, ok := item["aggregatedOutput"].(string); ok {
+		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
+	} else if output, ok := item["output"].(string); ok {
+		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
+	}
+	if exitCode, ok := finiteNumber(item["exitCode"]); ok {
+		result["exitCode"] = exitCode
+	}
+	if changes, exists := item["changes"]; exists {
+		result["changes"] = adapter.projectExecutionChanges(changes)
+	}
+	if diff, ok := item["diff"].(string); ok {
+		projected, truncated := boundedText(diff, maxExecutionTextBytes)
+		result["diff"] = projected
+		if truncated {
+			result["truncated"] = true
+		}
+	}
+	return result
+}
+
+func (adapter *CodexAdapter) projectExecutionChanges(value any) []any {
+	items, _ := value.([]any)
+	result := make([]any, 0, len(items))
+	for _, raw := range items {
+		change, _ := raw.(map[string]any)
+		path := adapter.projectWorkspacePath(stringField(change, "path"))
+		if path == "" {
+			continue
+		}
+		projected := map[string]any{"path": path, "change": changeKind(change["kind"])}
+		if previous := adapter.projectWorkspacePath(stringField(change, "previousPath")); previous != "" {
+			projected["previousPath"] = previous
+		}
+		if kind, ok := change["kind"].(map[string]any); ok {
+			if previous := adapter.projectWorkspacePath(stringField(kind, "move_path")); previous != "" {
+				projected["previousPath"] = previous
+			}
+		}
+		if diff, ok := change["diff"].(string); ok {
+			projected["diff"], projected["truncated"] = boundedText(diff, maxExecutionTextBytes)
+		}
+		result = append(result, projected)
+	}
+	return result
+}
+
+func (adapter *CodexAdapter) projectWorkspacePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsRune(value, 0) {
+		return ""
+	}
+	if !filepath.IsAbs(value) {
+		clean := filepath.Clean(value)
+		if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
+			return ""
+		}
+		return filepath.ToSlash(clean)
+	}
+	adapter.workspaceMu.RLock()
+	defer adapter.workspaceMu.RUnlock()
+	best := ""
+	bestRootLength := -1
+	for _, workspace := range adapter.workspaces {
+		roots := append([]string{workspace.Root}, workspace.SessionRoots...)
+		for _, root := range roots {
+			if root == "" || !pathWithin(root, value) || len(root) <= bestRootLength {
+				continue
+			}
+			relative, err := filepath.Rel(root, value)
+			if err == nil && relative != "." {
+				best = filepath.ToSlash(relative)
+				bestRootLength = len(root)
+			}
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return filepath.Base(value)
+}
+
+func projectTurnPlan(params map[string]any) map[string]any {
+	result := map[string]any{"plan": []any{}}
+	if explanation, ok := params["explanation"].(string); ok {
+		result["explanation"], _ = boundedText(explanation, maxInteractionPreviewBytes)
+	}
+	items, _ := params["plan"].([]any)
+	plan := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		step, status := stringField(item, "step"), stringField(item, "status")
+		if step == "" || !containsString([]string{"pending", "inProgress", "completed"}, status) {
+			continue
+		}
+		step, _ = boundedText(step, maxInteractionPreviewBytes)
+		plan = append(plan, map[string]any{"step": step, "status": status})
+	}
+	result["plan"] = plan
+	return result
+}
+
+func projectTokenUsage(value any) map[string]any {
+	source, _ := value.(map[string]any)
+	result := make(map[string]any)
+	for _, section := range []string{"total", "last"} {
+		breakdown, _ := source[section].(map[string]any)
+		projected := make(map[string]any)
+		for _, pair := range [][2]string{{"inputTokens", "inputTokens"}, {"cachedInputTokens", "cachedInputTokens"}, {"outputTokens", "outputTokens"}, {"reasoningOutputTokens", "reasoningTokens"}, {"totalTokens", "totalTokens"}} {
+			if number, ok := finiteNumber(breakdown[pair[0]]); ok {
+				projected[pair[1]] = number
+			}
+		}
+		result[section] = projected
+	}
+	if number, ok := finiteNumber(source["modelContextWindow"]); ok {
+		result["modelContextWindow"] = number
+	}
+	return result
+}
+
+func finiteNumber(value any) (any, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, !isInvalidFloat(typed)
+	case float32:
+		return typed, !isInvalidFloat(float64(typed))
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
+		return value, true
+	default:
+		return nil, false
+	}
+}
+
+func isInvalidFloat(value float64) bool {
+	return value != value || value > 1.7976931348623157e+308 || value < -1.7976931348623157e+308
+}
+
+func stringField(source map[string]any, key string) string {
+	value, _ := source[key].(string)
+	return value
+}
+
+func changeKind(value any) string {
+	if text, ok := value.(string); ok && text != "" {
+		return text
+	}
+	if object, ok := value.(map[string]any); ok {
+		if text := stringField(object, "type"); text != "" {
+			return text
+		}
+	}
+	return "update"
+}
+
+func boundedText(value string, limit int) (string, bool) {
+	if len(value) <= limit {
+		return value, false
+	}
+	end := limit
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end], true
+}
+
 func sanitizeEvent(value any, key string) any {
+	if strings.EqualFold(key, "tokenUsage") {
+		return sanitizeTokenUsage(value)
+	}
 	if sensitiveKey(key) || strings.EqualFold(key, "id") || strings.HasSuffix(key, "Id") {
 		return nil
 	}
@@ -1466,6 +1852,12 @@ func sanitizeValue(value any, key string, event bool) any {
 	case map[string]any:
 		result := make(map[string]any)
 		for name, item := range typed {
+			if strings.EqualFold(name, "tokenUsage") {
+				if projected := sanitizeTokenUsage(item); projected != nil {
+					result[name] = projected
+				}
+				continue
+			}
 			if sensitiveKey(name) || pathKey(name) || event && (strings.EqualFold(name, "id") || strings.HasSuffix(name, "Id")) {
 				continue
 			}
@@ -1480,6 +1872,31 @@ func sanitizeValue(value any, key string, event bool) any {
 	}
 }
 
+func sanitizeTokenUsage(value any) any {
+	allowed := map[string]bool{
+		"total": true, "last": true, "inputTokens": true, "cachedInputTokens": true,
+		"outputTokens": true, "reasoningOutputTokens": true, "totalTokens": true,
+		"modelContextWindow": true,
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		result := make(map[string]any)
+		for key, item := range typed {
+			if !allowed[key] {
+				continue
+			}
+			if projected := sanitizeTokenUsage(item); projected != nil {
+				result[key] = projected
+			}
+		}
+		return result
+	case float64, int, int32, int64, uint, uint32, uint64, json.Number:
+		return value
+	default:
+		return nil
+	}
+}
+
 func sensitiveKey(key string) bool {
 	lower := strings.ToLower(key)
 	return strings.Contains(lower, "token") || strings.Contains(lower, "secret") || strings.Contains(lower, "authorization") || strings.Contains(lower, "password") || strings.Contains(lower, "credential")
@@ -1490,11 +1907,77 @@ func pathKey(key string) bool {
 	return lower == "cwd" || lower == "path" || lower == "codexhome" || lower == "home" || lower == "command" || lower == "args" || lower == "env" || lower == "environment" || lower == "instructionsources" || lower == "writableroots"
 }
 
-func projectServerRequest(method string, params map[string]any) (map[string]any, map[string]string, error) {
-	projected, _ := sanitizeEvent(params, "").(map[string]any)
+func (adapter *CodexAdapter) projectServerRequest(method string, params map[string]any) (map[string]any, map[string]string, error) {
 	answerKeys := make(map[string]string)
-	if method != "item/tool/requestUserInput" {
-		return projected, answerKeys, nil
+	switch method {
+	case "item/commandExecution/requestApproval":
+		request := make(map[string]any)
+		command := interactionText(params["command"])
+		if command == "" {
+			command = adapter.approvalItem(identityValue(params, "itemId", "item")).Command
+		}
+		if command != "" {
+			request["command"] = command
+		}
+		if reason := interactionText(params["reason"]); reason != "" {
+			request["reason"] = reason
+		}
+		return request, answerKeys, nil
+	case "item/fileChange/requestApproval":
+		request := make(map[string]any)
+		if reason := interactionText(params["reason"]); reason != "" {
+			request["reason"] = reason
+		}
+		files := adapter.approvalItem(identityValue(params, "itemId", "item")).Files
+		if root, ok := params["grantRoot"].(string); ok && strings.TrimSpace(root) != "" {
+			if path := adapter.projectWorkspacePath(root); path != "" {
+				files = append(files, map[string]any{"path": path, "change": "write"})
+			}
+		}
+		request["files"] = files
+		return request, answerKeys, nil
+	case "item/permissions/requestApproval":
+		request := map[string]any{
+			"permissions":   permissionNames(params["permissions"]),
+			"allowedScopes": []any{"turn", "session"},
+		}
+		if reason := interactionText(params["reason"]); reason != "" {
+			request["description"] = reason
+		}
+		return request, answerKeys, nil
+	case "mcpServer/elicitation/request":
+		request := make(map[string]any)
+		if server := interactionText(firstInteractionValue(params, "serverName", "server")); server != "" {
+			request["serverName"] = server
+		}
+		if message := interactionText(firstInteractionValue(params, "message", "prompt")); message != "" {
+			request["message"] = message
+		}
+		if schema := firstInteractionValue(params, "requestedSchema", "schema"); schema != nil {
+			if projected := projectElicitationSchema(schema); projected != nil {
+				request["requestedSchema"] = projected
+			}
+		}
+		return request, answerKeys, nil
+	case "item/tool/call":
+		tool := interactionText(firstInteractionValue(params, "tool", "name"))
+		name := tool
+		if namespace := interactionText(params["namespace"]); namespace != "" && tool != "" {
+			name = namespace + "/" + tool
+		}
+		request := map[string]any{
+			"tool":                 tool,
+			"name":                 name,
+			"acceptedContentKinds": []any{"text", "image"},
+		}
+		if preview := interactionArgumentsPreview(firstInteractionValue(params, "arguments", "input")); preview != "" {
+			request["argumentsPreview"] = preview
+		}
+		return request, answerKeys, nil
+	case "item/tool/requestUserInput":
+		// handled below because provider question IDs must be replaced with opaque refs
+	default:
+		return nil, nil, fmt.Errorf("Codex server request is unsupported: %s", method)
 	}
 	questions, _ := params["questions"].([]any)
 	projectedQuestions := make([]any, 0, len(questions))
@@ -1507,12 +1990,254 @@ func projectServerRequest(method string, params map[string]any) (map[string]any,
 		digest := sha256.Sum256([]byte(providerID + time.Now().UTC().String()))
 		questionRef := "question_" + fmt.Sprintf("%x", digest[:16])
 		answerKeys[questionRef] = providerID
-		item, _ := sanitizeEvent(question, "").(map[string]any)
+		item := projectUserInputQuestion(question)
 		item["questionRef"] = questionRef
 		projectedQuestions = append(projectedQuestions, item)
 	}
-	projected["questions"] = projectedQuestions
+	projected := map[string]any{"questions": projectedQuestions}
 	return projected, answerKeys, nil
+}
+
+func projectUserInputQuestion(question map[string]any) map[string]any {
+	result := map[string]any{"required": true}
+	for _, key := range []string{"header", "question"} {
+		if value := interactionText(question[key]); value != "" {
+			result[key] = value
+		}
+	}
+	if value, ok := question["isOther"].(bool); ok {
+		result["allowFreeform"] = value
+	}
+	if value, ok := question["isSecret"].(bool); ok {
+		result["secret"] = value
+	}
+	options, _ := question["options"].([]any)
+	projectedOptions := make([]any, 0, min(len(options), 64))
+	for _, raw := range options {
+		if len(projectedOptions) == 64 {
+			break
+		}
+		option, _ := raw.(map[string]any)
+		label := interactionText(option["label"])
+		if label == "" {
+			continue
+		}
+		projected := map[string]any{"label": label}
+		if description := interactionText(option["description"]); description != "" {
+			projected["description"] = description
+		}
+		projectedOptions = append(projectedOptions, projected)
+	}
+	if len(projectedOptions) > 0 {
+		result["options"] = projectedOptions
+	}
+	return result
+}
+
+func projectElicitationSchema(value any) map[string]any {
+	schema, _ := value.(map[string]any)
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 || len(properties) > 128 {
+		return nil
+	}
+	projectedProperties := make(map[string]any)
+	for name, raw := range properties {
+		if len(projectedProperties) == 128 || !validText(name, 256) {
+			continue
+		}
+		field, _ := raw.(map[string]any)
+		fieldType := stringField(field, "type")
+		if !containsString([]string{"string", "number", "integer", "boolean"}, fieldType) {
+			continue
+		}
+		projected := map[string]any{"type": fieldType}
+		for _, key := range []string{"title", "description"} {
+			if text := interactionText(field[key]); text != "" {
+				projected[key] = text
+			}
+		}
+		values, _ := field["enum"].([]any)
+		enums := make([]any, 0, min(len(values), 64))
+		for _, rawValue := range values {
+			if len(enums) == 64 {
+				break
+			}
+			switch typed := rawValue.(type) {
+			case string:
+				if text, _ := boundedText(typed, maxInteractionPreviewBytes); text != "" {
+					enums = append(enums, text)
+				}
+			default:
+				if number, ok := finiteNumber(rawValue); ok {
+					enums = append(enums, number)
+				}
+			}
+		}
+		if len(enums) > 0 {
+			projected["enum"] = enums
+		}
+		projectedProperties[name] = projected
+	}
+	if len(projectedProperties) == 0 {
+		return nil
+	}
+	result := map[string]any{"properties": projectedProperties}
+	required, _ := schema["required"].([]any)
+	projectedRequired := make([]any, 0, min(len(required), 128))
+	seen := make(map[string]bool)
+	for _, raw := range required {
+		name, _ := raw.(string)
+		if _, exists := projectedProperties[name]; !exists || seen[name] {
+			continue
+		}
+		seen[name] = true
+		projectedRequired = append(projectedRequired, name)
+	}
+	if len(projectedRequired) > 0 {
+		result["required"] = projectedRequired
+	}
+	return result
+}
+
+func firstInteractionValue(source map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, exists := source[key]; exists && value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func interactionText(value any) string {
+	text, _ := value.(string)
+	text, _ = boundedText(text, maxInteractionPreviewBytes)
+	return text
+}
+
+func interactionPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsRune(value, 0) {
+		return ""
+	}
+	if filepath.IsAbs(value) {
+		return filepath.Base(value)
+	}
+	clean := filepath.Clean(value)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
+		return filepath.Base(clean)
+	}
+	return filepath.ToSlash(clean)
+}
+
+func (adapter *CodexAdapter) projectInteractionChanges(value any) []any {
+	items, _ := value.([]any)
+	result := make([]any, 0, min(len(items), 128))
+	for _, raw := range items {
+		if len(result) == 128 {
+			break
+		}
+		change, _ := raw.(map[string]any)
+		path := adapter.projectWorkspacePath(stringField(change, "path"))
+		if path == "" || len(path) > maxInteractionPreviewBytes {
+			continue
+		}
+		kind, _ := boundedText(changeKind(firstInteractionValue(change, "kind", "change")), maxInteractionPreviewBytes)
+		result = append(result, map[string]any{"path": path, "change": kind})
+	}
+	return result
+}
+
+func permissionNames(value any) []any {
+	permissions, _ := value.(map[string]any)
+	result := make([]any, 0, 4)
+	fileSystem, _ := permissions["fileSystem"].(map[string]any)
+	if values, ok := fileSystem["read"].([]any); ok && len(values) > 0 {
+		result = append(result, "filesystem.read")
+	}
+	if values, ok := fileSystem["write"].([]any); ok && len(values) > 0 {
+		result = append(result, "filesystem.write")
+	}
+	if entries, ok := fileSystem["entries"].([]any); ok {
+		seen := make(map[string]bool)
+		for _, raw := range entries {
+			entry, _ := raw.(map[string]any)
+			access := interactionText(entry["access"])
+			if access != "" && !seen[access] {
+				result = append(result, "filesystem."+access)
+				seen[access] = true
+			}
+		}
+	}
+	network, _ := permissions["network"].(map[string]any)
+	if enabled, _ := network["enabled"].(bool); enabled {
+		result = append(result, "network")
+	}
+	return result
+}
+
+func interactionArgumentsPreview(value any) string {
+	projected := projectInteractionValue(value, "arguments")
+	if projected == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		return ""
+	}
+	preview, _ := boundedText(string(encoded), maxInteractionPreviewBytes)
+	return preview
+}
+
+func projectInteractionFields(source map[string]any, allowed []string) map[string]any {
+	result := make(map[string]any)
+	for _, key := range allowed {
+		value, ok := source[key]
+		if !ok {
+			continue
+		}
+		if projected := projectInteractionValue(value, key); projected != nil {
+			result[key] = projected
+		}
+	}
+	return result
+}
+
+func projectInteractionValue(value any, key string) any {
+	if sensitiveKey(key) || strings.EqualFold(key, "id") || strings.HasSuffix(key, "Id") {
+		return nil
+	}
+	commandText := strings.Contains(strings.ToLower(key), "command") || strings.Contains(strings.ToLower(key), "execpolicy")
+	switch typed := value.(type) {
+	case string:
+		if pathKey(key) {
+			if filepath.IsAbs(typed) {
+				return filepath.Base(typed)
+			}
+			return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(typed)), "../")
+		}
+		if !commandText && (filepath.IsAbs(typed) || strings.HasPrefix(strings.ToLower(typed), "file:")) {
+			return nil
+		}
+		return typed
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if projected := projectInteractionValue(item, key); projected != nil {
+				result = append(result, projected)
+			}
+		}
+		return result
+	case map[string]any:
+		result := make(map[string]any)
+		for name, item := range typed {
+			if projected := projectInteractionValue(item, name); projected != nil {
+				result[name] = projected
+			}
+		}
+		return result
+	default:
+		return value
+	}
 }
 
 func mapInteractionResponse(pending *pendingInteraction, raw json.RawMessage) (any, error) {
@@ -1577,13 +2302,11 @@ func mapInteractionResponse(pending *pendingInteraction, raw json.RawMessage) (a
 		items := make([]any, 0, len(content))
 		for _, rawItem := range content {
 			item, _ := rawItem.(map[string]any)
-			typeName := map[string]string{"text": "inputText", "image": "inputImage", "audio": "inputAudio"}[fmt.Sprint(item["kind"])]
+			typeName := map[string]string{"text": "inputText", "image": "inputImage"}[fmt.Sprint(item["kind"])]
 			field := "text"
 			value := item["text"]
 			if typeName == "inputImage" {
 				field, value = "imageUrl", item["url"]
-			} else if typeName == "inputAudio" {
-				field, value = "audioUrl", item["url"]
 			}
 			items = append(items, map[string]any{"type": typeName, field: value})
 		}

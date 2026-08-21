@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
@@ -186,7 +188,7 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
 		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
-		ManifestJSON: `{"commands":["thread.read"]}`,
+		ManifestJSON: `{"commands":["thread.read","turn.steer"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request","never"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]}}`,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatal(err)
@@ -562,11 +564,11 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	threadInput := &domainagent.Thread{PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, ConversationID: 41, Title: "Agent work", Status: "queued"}
 	turnInput := &domainagent.Turn{
 		PublicID: "agturn_0123456789abcdef0123456789abcdef", UserID: 7,
-		RunID: "run_0123456789abcdef0123456789abcdef", Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{}`,
+		RunID: "run_0123456789abcdef0123456789abcdef", Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":"workspace-write"}`,
 	}
 	createCommand := &domainagent.Command{
 		PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.create",
-		PayloadJSON: `{"kind":"thread.create","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","settings":{}}`,
+		PayloadJSON: `{"kind":"thread.create","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","settings":{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":"workspace-write"}}`,
 	}
 	idempotencyKey, requestHash := "01234567-89ab-4def-8123-456789abcdef", strings.Repeat("1", 64)
 	thread, turn, err := repo.StartThread(context.Background(), idempotencyKey, requestHash, threadInput, turnInput, createCommand, now)
@@ -631,11 +633,14 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		storedEvent.ThreadID == nil || *storedEvent.ThreadID != storedThread.ID || storedEvent.TurnID == nil || *storedEvent.TurnID != storedTurn.ID {
 		t.Fatalf("projected state mismatch: thread=%#v turn=%#v event=%#v", storedThread, storedTurn, storedEvent)
 	}
+	if err := database.Model(&storedTurn).Update("status", "running").Error; err != nil {
+		t.Fatal(err)
+	}
 
 	interactionEvent := &domainagent.Event{
 		PublicID: "agev_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Kind: "interaction.requested",
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceRequestRef: "request-1",
-		PayloadJSON: `{"method":"item/commandExecution/requestApproval","request":{"command":"git status"}}`, OccurredAt: now.Add(4 * time.Second),
+		PayloadJSON: `{"method":"item/tool/requestUserInput","request":{"questions":[{"questionRef":"question_known","required":true}]}}`, OccurredAt: now.Add(4 * time.Second),
 	}
 	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 4, strings.Repeat("5", 64), interactionEvent, now.Add(4*time.Second)); err != nil || ack.Acknowledged != 4 {
 		t.Fatalf("apply interaction event: ack=%v err=%v", ack, err)
@@ -644,14 +649,18 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.First(&interaction, "source_request_ref = ?", "request-1").Error; err != nil {
 		t.Fatal(err)
 	}
-	if interaction.Kind != "command_approval" || !jsonEqual(interaction.RequestJSON, `{"command":"git status"}`) {
+	if interaction.Kind != "user_input" || !jsonEqual(interaction.RequestJSON, `{"questions":[{"questionRef":"question_known","required":true}]}`) {
 		t.Fatalf("interaction projection mismatch: %#v", interaction)
 	}
-	wrongResponse := json.RawMessage(`{"kind":"user-input","answers":{"question":"yes"}}`)
-	if _, err := repo.RespondInteraction(context.Background(), "10234567-89ab-4def-8123-456789abcdef", strings.Repeat("a", 64), 7, interaction.PublicID, wrongResponse, &domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "interaction.respond"}, now.Add(5*time.Second)); err == nil {
-		t.Fatal("interaction accepted a response for a different semantic kind")
+	wrongResponse := json.RawMessage(`{"kind":"user-input","answers":{"question_unknown":"yes"}}`)
+	if _, err := repo.RespondInteraction(context.Background(), "10234567-89ab-4def-8123-456789abcdef", strings.Repeat("a", 64), 7, interaction.PublicID, wrongResponse, &domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "interaction.respond"}, now.Add(5*time.Second)); !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("interaction response validation error = %v, want ErrInvalidInput", err)
 	}
-	response := json.RawMessage(`{"kind":"approval","decision":"accept"}`)
+	var invalidCommandCount int64
+	if err := database.Model(&model.AgentCommand{}).Where("public_id = ?", "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee").Count(&invalidCommandCount).Error; err != nil || invalidCommandCount != 0 {
+		t.Fatalf("invalid interaction response queued %d commands: %v", invalidCommandCount, err)
+	}
+	response := json.RawMessage(`{"kind":"user-input","answers":{"question_known":"yes"}}`)
 	respondCommand := &domainagent.Command{PublicID: "agcmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Kind: "interaction.respond"}
 	responded, err := repo.RespondInteraction(context.Background(), "11234567-89ab-4def-8123-456789abcdef", strings.Repeat("6", 64), 7, interaction.PublicID, response, respondCommand, now.Add(5*time.Second))
 	if err != nil || responded.Status != "responding" {
@@ -663,6 +672,24 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	}
 	if err := database.First(&interaction, interaction.ID).Error; err != nil || interaction.Status != "resolved" {
 		t.Fatalf("interaction final state: %q %v", interaction.Status, err)
+	}
+	lateInteraction := model.AgentInteraction{
+		PublicID: "agint_cccccccccccccccccccccccccccccccc", UserID: 7, ThreadID: storedThread.ID,
+		TurnID: &storedTurn.ID, RuntimeProfileID: profile.ID, SourceRequestRef: "request-late",
+		Kind: "command_approval", RequestJSON: `{"command":"pwd"}`, Status: "pending",
+	}
+	if err := database.Create(&lateInteraction).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Model(&storedTurn).Update("status", "completed").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RespondInteraction(
+		context.Background(), "12234567-89ab-4def-8123-456789abcdef", strings.Repeat("b", 64), 7,
+		lateInteraction.PublicID, response,
+		&domainagent.Command{PublicID: "agcmd_ffffffffffffffffffffffffffffffff", Kind: "interaction.respond"}, now.Add(6*time.Second),
+	); err == nil {
+		t.Fatal("terminal turn accepted a new interaction response")
 	}
 
 	resourceCommand := &domainagent.Command{PublicID: "agcmd_cccccccccccccccccccccccccccccccc", Kind: "resource.refresh"}
@@ -806,6 +833,32 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	)
 	if err != nil || replayed.Acknowledged != 8 || replayed.ConversationID != 0 || replayed.RunID != "" {
 		t.Fatalf("projected bridge replay was republished: %#v %v", replayed, err)
+	}
+}
+
+func TestResolveTurnInteractionsClosesActiveStates(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.AgentInteraction{}); err != nil {
+		t.Fatal(err)
+	}
+	turnID := uint(91)
+	items := []model.AgentInteraction{
+		{PublicID: "agint_11111111111111111111111111111111", UserID: 7, ThreadID: 1, TurnID: &turnID, RuntimeProfileID: 1, SourceRequestRef: "request-1", Kind: "command_approval", RequestJSON: `{}`, Status: "pending"},
+		{PublicID: "agint_22222222222222222222222222222222", UserID: 7, ThreadID: 1, TurnID: &turnID, RuntimeProfileID: 1, SourceRequestRef: "request-2", Kind: "file_approval", RequestJSON: `{}`, Status: "responding"},
+		{PublicID: "agint_33333333333333333333333333333333", UserID: 7, ThreadID: 1, TurnID: &turnID, RuntimeProfileID: 1, SourceRequestRef: "request-3", Kind: "user_input", RequestJSON: `{}`, Status: "failed"},
+	}
+	if err := database.Create(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := resolveTurnInteractions(database, turnID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var stored []model.AgentInteraction
+	if err := database.Order("id ASC").Find(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored[0].Status != "resolved" || stored[1].Status != "resolved" || stored[2].Status != "failed" {
+		t.Fatalf("terminal interaction states = %#v", stored)
 	}
 }
 
@@ -1051,28 +1104,62 @@ func TestInteractionRequestKinds(t *testing.T) {
 		"mcpServer/elicitation/request":         "mcp_elicitation",
 		"item/tool/call":                        "dynamic_tool",
 	}
-	responses := map[string]string{
-		"command_approval": `{"kind":"approval","decision":"accept"}`,
-		"file_approval":    `{"kind":"approval","decision":"decline"}`,
-		"user_input":       `{"kind":"user-input","answers":{"question":"yes"}}`,
-		"permission":       `{"kind":"permission","decision":"accept"}`,
-		"mcp_elicitation":  `{"kind":"mcp-elicitation","decision":"decline"}`,
-		"dynamic_tool":     `{"kind":"dynamic-tool","success":true,"content":[]}`,
-	}
 	for method, expectedKind := range cases {
 		kind, request, err := projectInteractionRequest(`{"method":"` + method + `","request":{"title":"fixture"}}`)
 		if err != nil || kind != expectedKind || !jsonEqual(request, `{"title":"fixture"}`) {
 			t.Fatalf("projectInteractionRequest(%q) = %q, %s, %v", method, kind, request, err)
 		}
-		wrong := json.RawMessage(`{"kind":"approval"}`)
-		if kind == "command_approval" || kind == "file_approval" {
-			wrong = json.RawMessage(`{"kind":"user-input"}`)
-		}
-		if !interactionResponseMatchesKind(kind, json.RawMessage(responses[kind])) || interactionResponseMatchesKind(kind, wrong) {
-			t.Fatalf("response kind validation failed for %q", kind)
-		}
 	}
 	if _, _, err := projectInteractionRequest(`{"method":"unknown","request":{}}`); err == nil {
 		t.Fatal("unknown interaction method accepted")
+	}
+}
+
+func TestInteractionResponseMatchesRequest(t *testing.T) {
+	valid := []struct {
+		name, kind, request, response string
+	}{
+		{name: "command approval", kind: "command_approval", request: `{}`, response: `{"kind":"approval","decision":"accept"}`},
+		{name: "file approval", kind: "file_approval", request: `{}`, response: `{"kind":"approval","decision":"decline"}`},
+		{name: "user input", kind: "user_input", request: `{"questions":[{"questionRef":"required","required":true},{"questionRef":"optional"}]}`, response: `{"kind":"user-input","answers":{"required":"yes"}}`},
+		{name: "user input option", kind: "user_input", request: `{"questions":[{"questionRef":"choice","required":true,"options":[{"label":"yes"},{"label":"no"}]}]}`, response: `{"kind":"user-input","answers":{"choice":"yes"}}`},
+		{name: "user input freeform", kind: "user_input", request: `{"questions":[{"questionRef":"choice","required":true,"allowFreeform":true,"options":[{"label":"yes"}]}]}`, response: `{"kind":"user-input","answers":{"choice":"custom"}}`},
+		{name: "permission", kind: "permission", request: `{"allowedScopes":["session"]}`, response: `{"kind":"permission","decision":"accept","scope":"session"}`},
+		{name: "permission decline", kind: "permission", request: `{"allowedScopes":["session"]}`, response: `{"kind":"permission","decision":"decline"}`},
+		{name: "mcp elicitation", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"name":{"type":"string","enum":["Ada","Grace"]},"count":{"type":"integer","enum":[2,3]},"ratio":{"type":"number"},"enabled":{"type":"boolean"}},"required":["name","count","enabled"]}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{"name":"Ada","count":3,"ratio":0.5,"enabled":true}}`},
+		{name: "dynamic tool", kind: "dynamic_tool", request: `{"acceptedContentKinds":["text"]}`, response: `{"kind":"dynamic-tool","success":true,"content":[{"kind":"text","text":"done"}]}`},
+	}
+	for _, test := range valid {
+		t.Run(test.name, func(t *testing.T) {
+			if !interactionResponseMatchesRequest(test.kind, test.request, json.RawMessage(test.response)) {
+				t.Fatal("valid interaction response was rejected")
+			}
+		})
+	}
+
+	invalid := []struct {
+		name, kind, request, response string
+	}{
+		{name: "wrong response kind", kind: "user_input", request: `{"questions":[{"questionRef":"question"}]}`, response: `{"kind":"approval","decision":"accept"}`},
+		{name: "unknown question ref", kind: "user_input", request: `{"questions":[{"questionRef":"known"}]}`, response: `{"kind":"user-input","answers":{"unknown":"yes"}}`},
+		{name: "missing required answer", kind: "user_input", request: `{"questions":[{"questionRef":"required","required":true}]}`, response: `{"kind":"user-input","answers":{}}`},
+		{name: "blank required answer", kind: "user_input", request: `{"questions":[{"questionRef":"required","required":true}]}`, response: `{"kind":"user-input","answers":{"required":"  "}}`},
+		{name: "answer outside options", kind: "user_input", request: `{"questions":[{"questionRef":"choice","required":true,"options":[{"label":"yes"},{"label":"no"}]}]}`, response: `{"kind":"user-input","answers":{"choice":"custom"}}`},
+		{name: "disallowed permission scope", kind: "permission", request: `{"allowedScopes":["turn"]}`, response: `{"kind":"permission","decision":"accept","scope":"session"}`},
+		{name: "disallowed default permission scope", kind: "permission", request: `{"allowedScopes":["session"]}`, response: `{"kind":"permission","decision":"accept"}`},
+		{name: "unknown mcp field", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"name":{"type":"string"}}}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{"other":"Ada"}}`},
+		{name: "missing required mcp field", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"name":{"type":"string"}},"required":["name"]}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{}}`},
+		{name: "wrong mcp type", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"count":{"type":"integer"}}}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{"count":"3"}}`},
+		{name: "fractional mcp integer", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"count":{"type":"integer"}}}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{"count":2.5}}`},
+		{name: "mcp enum mismatch", kind: "mcp_elicitation", request: `{"requestedSchema":{"properties":{"count":{"type":"integer","enum":[2,3]}}}}`, response: `{"kind":"mcp-elicitation","decision":"accept","content":{"count":4}}`},
+		{name: "mcp decline with content", kind: "mcp_elicitation", request: `{}`, response: `{"kind":"mcp-elicitation","decision":"decline","content":{"name":"Ada"}}`},
+		{name: "disallowed dynamic content", kind: "dynamic_tool", request: `{"acceptedContentKinds":["text"]}`, response: `{"kind":"dynamic-tool","success":true,"content":[{"kind":"image","url":"https://example.com/image.png"}]}`},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			if interactionResponseMatchesRequest(test.kind, test.request, json.RawMessage(test.response)) {
+				t.Fatal("invalid interaction response was accepted")
+			}
+		})
 	}
 }

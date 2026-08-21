@@ -1,45 +1,19 @@
 "use client";
 
-import * as React from "react";
-import dynamic from "next/dynamic";
 import { Box, CornerDownRight, Eye, EyeOff, Film, Image, ImageOff, ImagePlus, LoaderCircle, PencilLine, Plug, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import dynamic from "next/dynamic";
 import { useLocale, useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
 
 import { AudioLines } from "@/components/animate-ui/icons/audio-lines";
 import { Blocks } from "@/components/animate-ui/icons/blocks";
+import { Crop } from "@/components/animate-ui/icons/crop";
+import { Link as LinkIcon } from "@/components/animate-ui/icons/link";
 import { Pause } from "@/components/animate-ui/icons/pause";
 import { Send } from "@/components/animate-ui/icons/send";
-import { Link as LinkIcon } from "@/components/animate-ui/icons/link";
-import { Crop } from "@/components/animate-ui/icons/crop";
 import { X as XIcon } from "@/components/animate-ui/icons/x";
-import { PlusIcon } from "@/components/ui/plus";
-import type {
-  ChatModelOption,
-  PendingAttachment,
-  UploadingAttachment,
-} from "@/features/chat/types/chat-runtime";
-import {
-  formatClipboardMarkdownPaste,
-  resolveClipboardMarkdownPaste,
-} from "@/features/chat/utils/markdown-paste";
-import {
-  useChatSpeechInput,
-  type SpeechInputErrorCode,
-} from "@/features/chat/hooks/use-chat-speech-input";
-import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
-import {
-  useChatMentionMenu,
-  type ChatMentionMenuKind,
-} from "@/features/chat/hooks/use-chat-mention-menu";
-import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
-import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
-import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
-import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
-import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
-import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
-import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
 import {
   Attachment,
   AttachmentAction,
@@ -63,17 +37,45 @@ import {
   InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
+import { PlusIcon } from "@/components/ui/plus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
-import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
-import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { ChatAgentSettings } from "@/features/chat/components/sections/chat-agent-settings";
+import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
+import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
+import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
+import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
+import {
+  type ChatMentionMenuKind,
+  useChatMentionMenu,
+} from "@/features/chat/hooks/use-chat-mention-menu";
+import {
+  type SpeechInputErrorCode,
+  useChatSpeechInput,
+} from "@/features/chat/hooks/use-chat-speech-input";
+import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
+import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
+import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
+import type {
+  ChatModelOption,
+  PendingAttachment,
+  UploadingAttachment,
+} from "@/features/chat/types/chat-runtime";
+import {
+  formatClipboardMarkdownPaste,
+  resolveClipboardMarkdownPaste,
+} from "@/features/chat/utils/markdown-paste";
+import type { SendShortcut } from "@/features/settings/types/settings";
 import { cn } from "@/lib/utils";
+import type { AgentModelDTO, AgentTurnSettings } from "@/shared/api/agent-gateway";
 import type { ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
+import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
+import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
+import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
-import type { SendShortcut } from "@/features/settings/types/settings";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
 
 const FilePreviewDialog = dynamic(
@@ -85,6 +87,8 @@ type QueuedComposerMessage = {
   id: string;
   content: string;
   attachmentCount: number;
+  executionMode: "cloud" | "gateway";
+  steering: boolean;
 };
 
 type ChatInputProps = {
@@ -94,6 +98,7 @@ type ChatInputProps = {
   gatewayStatus?: string;
   loading: boolean;
   sending: boolean;
+  agentSettingsDisabled: boolean;
   uploading: boolean;
   isConversationMode: boolean;
   maxFilesPerMessage: number;
@@ -106,6 +111,11 @@ type ChatInputProps = {
   requestProtocol: string;
   selectedKeyBindingID: string;
   selectedPlatformModelName: string;
+  agentModels: AgentModelDTO[];
+  agentSettings: AgentTurnSettings | null;
+  agentSettingsLoading: boolean;
+  agentSettingsError?: string;
+  agentAutoReviewEnabled: boolean;
   availableTools: MCPToolDTO[];
   inputResources?: ConversationInputResourceDTO[];
   selectedToolIDs: number[];
@@ -125,6 +135,7 @@ type ChatInputProps = {
   dropActive?: boolean;
   onDraftChange: (value: string) => void;
   onModelChange: (platformModelName: string) => void;
+  onAgentSettingsChange: (settings: AgentTurnSettings) => void;
   onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
@@ -241,6 +252,7 @@ function ChatInputComponent({
   gatewayStatus,
   loading,
   sending,
+  agentSettingsDisabled,
   uploading,
   isConversationMode,
   fileMode,
@@ -252,6 +264,11 @@ function ChatInputComponent({
   requestProtocol,
   selectedKeyBindingID,
   selectedPlatformModelName,
+  agentModels,
+  agentSettings,
+  agentSettingsLoading,
+  agentSettingsError,
+  agentAutoReviewEnabled,
   availableTools,
   inputResources,
   selectedToolIDs,
@@ -271,6 +288,7 @@ function ChatInputComponent({
   dropActive = false,
   onDraftChange,
   onModelChange,
+  onAgentSettingsChange,
   onModelCatalogRefresh,
   onSelectedToolsChange,
   onSelectedSkillsChange,
@@ -586,6 +604,7 @@ function ChatInputComponent({
                     <button
                       type="button"
                       className="flex min-w-0 flex-1 items-center text-left font-medium text-muted-foreground transition-colors hover:text-foreground"
+                      disabled={message.steering}
                       aria-label={tComposer("editQueuedMessage")}
                       onClick={() => {
                         setEditingQueuedMessageID(message.id);
@@ -605,12 +624,14 @@ function ChatInputComponent({
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/35"
-                          aria-label={tComposer("guideQueuedMessageTitle")}
+                          className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/35 disabled:pointer-events-none disabled:opacity-50"
+                          disabled={message.steering}
+                          aria-busy={message.steering}
+                          aria-label={tComposer(message.executionMode === "gateway" ? "steerQueuedMessageTitle" : "guideQueuedMessageTitle")}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
                             onGuideQueuedMessage(message.id);
-                            if (sending) {
+                            if (message.executionMode === "cloud" && sending) {
                               onStopMessage();
                             }
                           }}
@@ -619,7 +640,7 @@ function ChatInputComponent({
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="top" className="text-xs">
-                        {tComposer("guideQueuedMessageTitle")}
+                        {tComposer(message.executionMode === "gateway" ? "steerQueuedMessageTitle" : "guideQueuedMessageTitle")}
                       </TooltipContent>
                     </Tooltip>
                     <Tooltip>
@@ -627,6 +648,7 @@ function ChatInputComponent({
                         <button
                           type="button"
                           className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/35"
+                          disabled={message.steering}
                           aria-label={tComposer("editQueuedMessage")}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => {
@@ -646,6 +668,7 @@ function ChatInputComponent({
                         <button
                           type="button"
                           className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-destructive focus-visible:ring-[3px] focus-visible:ring-ring/35"
+                          disabled={message.steering}
                           aria-label={tComposer("deleteQueuedMessage")}
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => onDeleteQueuedMessage(message.id)}
@@ -943,8 +966,8 @@ function ChatInputComponent({
             }}
           />
 
-          <InputGroupAddon align="block-end" className="items-center justify-between pt-2">
-            <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <InputGroupAddon align="block-end" className="min-w-0 items-center justify-between gap-1 pt-2">
+            <div className={cn("flex items-center gap-0.5 sm:gap-1", executionMode === "gateway" ? "min-w-0 flex-1" : "shrink-0")}>
               <DropdownMenu
                 modal={false}
                 open={toolsMenuOpen}
@@ -1000,7 +1023,19 @@ function ChatInputComponent({
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {!modelOptionPolicyDisabled ? (
+              {executionMode === "gateway" ? (
+                <ChatAgentSettings
+                  models={agentModels}
+                  settings={agentSettings}
+                  autoReviewEnabled={agentAutoReviewEnabled}
+                  loading={agentSettingsLoading}
+                  disabled={agentSettingsDisabled || loading || uploading || !gatewayReady}
+                  error={agentSettingsError}
+                  onChange={onAgentSettingsChange}
+                />
+              ) : null}
+
+              {executionMode === "cloud" && !modelOptionPolicyDisabled ? (
                 <ChatModelConfig
                   disabled={loading || uploading || modelLoading}
                   options={options}
@@ -1093,7 +1128,7 @@ function ChatInputComponent({
               ) : null}
             </div>
 
-            <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden sm:gap-1.5">
+            <div className={cn("flex items-center justify-end gap-1 sm:gap-1.5", executionMode === "cloud" ? "min-w-0 flex-1 overflow-hidden" : "shrink-0")}>
               {composerModeIndicator && ComposerModeIcon ? (
                 <Tooltip>
                   <TooltipTrigger asChild>

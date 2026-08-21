@@ -1,22 +1,33 @@
 import type {
-  BatchSetConversationProjectRequest as ContractBatchSetConversationProjectRequest,
   BatchSetConversationProjectResponse,
   ContextArtifactResponse,
-  ConversationDefaultModelCandidateResponse,
-  ConversationInputResourceResponse,
-  ConversationInputResourceCatalogResponse,
-  ConversationDeleteResponse,
-  ConversationExportResponse,
-  ConversationProjectResponse,
-  ConversationPreviewMessageResponse,
-  ConversationResponse,
-  ConversationSearchPageResponse,
-  ConversationSearchResultResponse,
-  ConversationShareResponse,
+  BatchSetConversationProjectRequest as ContractBatchSetConversationProjectRequest,
   CreateConversationProjectRequest as ContractCreateConversationProjectRequest,
   CreateConversationRequest as ContractCreateConversationRequest,
   CreateConversationShareRequest as ContractCreateConversationShareRequest,
   InteractionResponse as ContractInteractionResponse,
+  RenameConversationRequest as ContractRenameConversationRequest,
+  ReorderConversationProjectsRequest as ContractReorderConversationProjectsRequest,
+  RevokeConversationSharesRequest as ContractRevokeConversationSharesRequest,
+  SendMessageRequest as ContractSendMessageRequest,
+  SetConversationArchiveRequest as ContractSetConversationArchiveRequest,
+  SetConversationProjectRequest as ContractSetConversationProjectRequest,
+  SetConversationStarRequest as ContractSetConversationStarRequest,
+  SetMessageFeedbackRequest as ContractSetMessageFeedbackRequest,
+  UpdateConversationLabelsRequest as ContractUpdateConversationLabelsRequest,
+  UpdateConversationProjectRequest as ContractUpdateConversationProjectRequest,
+  UpdateMessageRequest as ContractUpdateMessageRequest,
+  ConversationDefaultModelCandidateResponse,
+  ConversationDeleteResponse,
+  ConversationExportResponse,
+  ConversationInputResourceCatalogResponse,
+  ConversationInputResourceResponse,
+  ConversationPreviewMessageResponse,
+  ConversationProjectResponse,
+  ConversationResponse,
+  ConversationSearchPageResponse,
+  ConversationSearchResultResponse,
+  ConversationShareResponse,
   MessageFeedbackResponse,
   MessageProcessTraceResponse,
   MessagePromptTraceBlockResponse,
@@ -28,20 +39,9 @@ import type {
   ModelProbeDebugResponse,
   PublicSharedConversationResponse,
   PublicSharedMessageResponse,
-  RenameConversationRequest as ContractRenameConversationRequest,
-  ReorderConversationProjectsRequest as ContractReorderConversationProjectsRequest,
-  RevokeConversationSharesRequest as ContractRevokeConversationSharesRequest,
   RevokeConversationSharesResponse,
   RunResponse,
-  SendMessageRequest as ContractSendMessageRequest,
   SendMessageResponse,
-  SetConversationArchiveRequest as ContractSetConversationArchiveRequest,
-  SetConversationProjectRequest as ContractSetConversationProjectRequest,
-  SetConversationStarRequest as ContractSetConversationStarRequest,
-  SetMessageFeedbackRequest as ContractSetMessageFeedbackRequest,
-  UpdateConversationProjectRequest as ContractUpdateConversationProjectRequest,
-  UpdateConversationLabelsRequest as ContractUpdateConversationLabelsRequest,
-  UpdateMessageRequest as ContractUpdateMessageRequest,
 } from "@deeix/api-contract";
 import type { UserStorageQuotaDTO } from "@/shared/api/file.types";
 
@@ -55,20 +55,87 @@ export type ConversationInteractionKind =
   | "mcp_elicitation"
   | "dynamic_tool";
 
-export type ConversationInteractionDTO = Omit<ContractInteractionResponse, "kind" | "request"> & {
-  kind: ConversationInteractionKind;
-  request: Record<string, unknown>;
+export type ConversationInteractionStatus = "pending" | "responding" | "resolved" | "failed";
+
+export type AgentInteractionQuestionOptionDTO = {
+  label: string;
+  description?: string;
 };
+
+export type AgentInteractionQuestionDTO = {
+  questionRef: string;
+  header?: string;
+  label?: string;
+  question?: string;
+  prompt?: string;
+  required?: boolean;
+  allowFreeform?: boolean;
+  secret?: boolean;
+  options?: AgentInteractionQuestionOptionDTO[];
+};
+
+export type AgentInteractionSchemaFieldDTO = {
+  type?: "string" | "number" | "integer" | "boolean";
+  title?: string;
+  description?: string;
+  enum?: Array<string | number>;
+};
+
+type ConversationInteractionBaseDTO<K extends ConversationInteractionKind, R> = Omit<
+  ContractInteractionResponse,
+  "kind" | "request" | "status"
+> & {
+  kind: K;
+  status: ConversationInteractionStatus;
+  request: R;
+};
+
+export type ConversationInteractionDTO =
+  | ConversationInteractionBaseDTO<"command_approval", {
+      command?: string;
+      reason?: string;
+      risk?: string;
+    }>
+  | ConversationInteractionBaseDTO<"file_approval", {
+      reason?: string;
+      files?: Array<{ path?: string; change?: string }>;
+      changes?: Array<{ path?: string; change?: string }>;
+    }>
+  | ConversationInteractionBaseDTO<"user_input", {
+      questions?: AgentInteractionQuestionDTO[];
+    }>
+  | ConversationInteractionBaseDTO<"permission", {
+      title?: string;
+      description?: string;
+      permissions?: string[] | { names?: string[] };
+      allowedScopes?: Array<"turn" | "session">;
+      highImpact?: boolean;
+    }>
+  | ConversationInteractionBaseDTO<"mcp_elicitation", {
+      serverName?: string;
+      message?: string;
+      prompt?: string;
+      requestedSchema?: {
+        properties?: Record<string, AgentInteractionSchemaFieldDTO>;
+        required?: string[];
+      };
+    }>
+  | ConversationInteractionBaseDTO<"dynamic_tool", {
+      tool?: string;
+      name?: string;
+      argumentsPreview?: string;
+      acceptedContentKinds?: Array<"text" | "image">;
+    }>;
 
 export type ConversationInteractionResponse =
   | { kind: "approval"; decision: "accept" | "decline" }
   | { kind: "user-input"; answers: Record<string, string> }
   | { kind: "permission"; decision: "accept" | "decline"; scope?: "turn" | "session" }
-  | { kind: "mcp-elicitation"; decision: "accept" | "decline"; content?: Record<string, string> }
+  | { kind: "mcp-elicitation"; decision: "accept" | "decline"; content?: Record<string, string | number | boolean> }
   | {
       kind: "dynamic-tool";
       success: boolean;
-      content: Array<{ kind: "text"; text: string } | { kind: "image" | "audio"; url: string }>;
+      content: Array<{ kind: "text"; text: string } | { kind: "image"; url: string }>;
     };
 
 export type ConversationSearchResultDTO = ConversationSearchResultResponse;
@@ -150,6 +217,80 @@ export type ReasoningDeltaDTO = {
   kind: "summary_text" | "content_text" | "summary_part_added" | "signature";
   signature?: string;
   encrypted_content?: string;
+};
+
+export type AgentPlanStepDTO = {
+  step?: string;
+  text?: string;
+  status?: "pending" | "inProgress" | "completed" | string;
+};
+
+export type AgentFileChangeDTO = {
+  fileID?: string;
+  path?: string;
+  previousPath?: string;
+  change?: string;
+  additions?: number;
+  deletions?: number;
+  binary?: boolean;
+  diff?: string;
+  truncated?: boolean;
+};
+
+export type AgentExecutionItemDTO = {
+  itemID?: string;
+  type?: string;
+  kind?: string;
+  status?: string;
+  command?: string;
+  output?: string;
+  aggregatedOutput?: string;
+  exitCode?: number;
+  changes?: AgentFileChangeDTO[];
+  files?: AgentFileChangeDTO[];
+  diff?: string;
+  truncated?: boolean;
+};
+
+export type AgentTokenUsageDTO = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+};
+
+export type AgentExecutionEventPayloadDTO = {
+  status?: string;
+  error?: { code?: string; message?: string } | string;
+  turn?: { status?: string; error?: { code?: string; message?: string } | string };
+  explanation?: string;
+  plan?: AgentPlanStepDTO[];
+  itemID?: string;
+  item?: AgentExecutionItemDTO;
+  delta?: string;
+  outputDelta?: string;
+  patch?: string;
+  diff?: string;
+  truncated?: boolean;
+  files?: AgentFileChangeDTO[];
+  changes?: AgentFileChangeDTO[];
+  tokenUsage?: AgentTokenUsageDTO & { total?: AgentTokenUsageDTO; last?: AgentTokenUsageDTO };
+  usage?: AgentTokenUsageDTO;
+  model?: string;
+  fromModel?: string;
+  toModel?: string;
+  reason?: string;
+  interactionID?: string;
+};
+
+export type ConversationExecutionEventDTO = {
+  runID: string;
+  seq: number;
+  kind: string;
+  payload: AgentExecutionEventPayloadDTO;
+  occurredAt: string;
 };
 
 export type MessageProcessTraceDTO = Omit<
@@ -306,6 +447,15 @@ export type StreamMessageEvent =
       cache_read_tokens: number;
       cache_write_tokens: number;
       reasoning_tokens: number;
+    }
+  | {
+      type: "execution_event";
+      seq?: number;
+      executionSeq: number;
+      runID: string;
+      kind: string;
+      payload: AgentExecutionEventPayloadDTO;
+      occurredAt: string;
     }
   | {
       type: "media_status";

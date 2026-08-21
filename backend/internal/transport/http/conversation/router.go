@@ -47,6 +47,7 @@ func (m *Module) RegisterRoutes(authRequired *gin.RouterGroup) {
 	authRequired.GET("/context-artifacts/:id", m.Handler.GetContextArtifact)
 	authRequired.GET("/conversation-runs/:run_id/stream", m.Handler.ResumeMessageGenerationStream)
 	authRequired.POST("/conversation-runs/:run_id/interrupt", m.Handler.InterruptTurn)
+	authRequired.POST("/conversation-runs/:run_id/steer", m.Handler.SteerTurn)
 	authRequired.PATCH("/messages/:id", m.Handler.UpdateMessage)
 	authRequired.PUT("/messages/:id/feedback", m.Handler.SetMessageFeedback)
 	authRequired.POST("/files", m.Handler.UploadFile)

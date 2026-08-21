@@ -1,6 +1,7 @@
 package agentgateway
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,17 @@ import (
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	"github.com/gin-gonic/gin"
 )
+
+func TestRuntimeProfileProjectionPreservesApprovalReviewerCapability(t *testing.T) {
+	items := toRuntimeProfileDocs([]appagent.RuntimeProfileView{{
+		ProfileID: "codex-default", DeviceID: "agd_device", Provider: "codex", Status: "ready",
+		Manifest: json.RawMessage(`{"provider":"codex","threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write"]}}`),
+	}})
+	if len(items) != 1 || len(items[0].Manifest.ThreadSettings.ApprovalsReviewer) != 2 ||
+		items[0].Manifest.ThreadSettings.ApprovalsReviewer[1] != "auto_review" {
+		t.Fatalf("runtime profile approval reviewers = %#v", items)
+	}
+}
 
 func TestBindStrictJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)

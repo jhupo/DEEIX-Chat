@@ -3906,6 +3906,10 @@ definitions:
         items:
           type: string
         type: array
+      approvalsReviewer:
+        items:
+          type: string
+        type: array
       model:
         type: boolean
       reasoningEffort:
@@ -3918,6 +3922,7 @@ definitions:
         type: array
     required:
     - approvalPolicy
+    - approvalsReviewer
     - model
     - reasoningEffort
     - sandboxPolicy
@@ -4819,6 +4824,14 @@ definitions:
     - title
     - trigger
     - updatedAt
+    type: object
+  SteerConversationRunRequest:
+    properties:
+      content:
+        maxLength: 1048576
+        type: string
+    required:
+    - content
     type: object
   StorageQuotaResponse:
     properties:
@@ -6857,7 +6870,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.71"
+  version: "0.4.74"
 paths:
   /admin/announcements:
     get:
@@ -11405,6 +11418,53 @@ paths:
       security:
       - BearerAuth: []
       summary: 取消流式生成
+      tags:
+      - chat
+  /conversation-runs/{run_id}/steer:
+    post:
+      consumes:
+      - application/json
+      description: Sends guidance to the active Gateway turn without interrupting
+        it or creating another run
+      parameters:
+      - description: Run ID
+        in: path
+        name: run_id
+        required: true
+        type: string
+      - description: Idempotency key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Turn guidance
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/SteerConversationRunRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/ConversationErrorDoc'
+      security:
+      - BearerAuth: []
+      summary: Adjust the active Gateway turn
       tags:
       - chat
   /conversation-runs/{run_id}/stream:

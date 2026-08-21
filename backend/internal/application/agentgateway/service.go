@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -285,6 +286,11 @@ type StartTurnInput struct {
 	ThreadID, IdempotencyKey string
 	RunID                    string
 	Input, Settings          json.RawMessage
+}
+
+type SteerRunInput struct {
+	RunID, IdempotencyKey string
+	Input                 json.RawMessage
 }
 
 type RespondInteractionInput struct {
@@ -869,6 +875,22 @@ func (s *Service) InterruptRun(ctx context.Context, userID uint, runID, idempote
 	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "turn.interrupt"}
 	request := struct{ RunID string }{RunID: runID}
 	created, err := s.repo.QueueTurnInterrupt(ctx, idempotencyKey, requestHash(request), userID, turn.PublicID, command, s.now().UTC())
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	s.notifyUser(userID)
+	return &CommandView{CommandID: created.PublicID, Status: created.State}, nil
+}
+
+func (s *Service) SteerRun(ctx context.Context, userID uint, input SteerRunInput) (*CommandView, error) {
+	input.RunID = normalizeAgentRunID(input.RunID)
+	if userID == 0 || input.RunID == "" || !validIdempotencyKey(input.IdempotencyKey) || !validInput(input.Input) {
+		return nil, ErrInvalidInput
+	}
+	command := &domainagent.Command{PublicID: newPublicID("agcmd"), Kind: "turn.steer"}
+	created, err := s.repo.QueueTurnSteer(
+		ctx, input.IdempotencyKey, requestHash(input), userID, input.RunID, input.Input, command, s.now().UTC(),
+	)
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
@@ -1481,13 +1503,14 @@ func validSettings(value json.RawMessage) bool {
 		return false
 	}
 	var settings map[string]json.RawMessage
-	if json.Unmarshal(value, &settings) != nil || len(settings) > 4 {
+	if json.Unmarshal(value, &settings) != nil || len(settings) != 5 {
 		return false
 	}
 	allowed := map[string][]string{
-		"reasoningEffort": {"low", "medium", "high", "xhigh"},
-		"approvalPolicy":  {"untrusted", "on-request", "never"},
-		"sandboxPolicy":   {"read-only", "workspace-write"},
+		"reasoningEffort":   {"low", "medium", "high", "xhigh"},
+		"approvalPolicy":    {"on-request", "never"},
+		"approvalsReviewer": {"user", "auto_review"},
+		"sandboxPolicy":     {"workspace-write", "danger-full-access"},
 	}
 	for key, raw := range settings {
 		if key == "model" {
@@ -1506,7 +1529,19 @@ func validSettings(value json.RawMessage) bool {
 			return false
 		}
 	}
-	return true
+	var approvalPolicy, approvalsReviewer, sandboxPolicy string
+	if json.Unmarshal(settings["approvalPolicy"], &approvalPolicy) != nil ||
+		json.Unmarshal(settings["approvalsReviewer"], &approvalsReviewer) != nil ||
+		json.Unmarshal(settings["sandboxPolicy"], &sandboxPolicy) != nil {
+		return false
+	}
+	return validApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy)
+}
+
+func validApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy string) bool {
+	return approvalPolicy == "on-request" && approvalsReviewer == "user" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "on-request" && approvalsReviewer == "auto_review" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access"
 }
 
 func validInput(value json.RawMessage) bool {
@@ -1570,11 +1605,11 @@ func validInteractionResponse(value json.RawMessage) bool {
 	}
 	switch kind {
 	case "approval":
-		return len(response) == 2 && validDecision(response["decision"])
+		return exactRawFields(response, []string{"kind", "decision"}, nil) && validDecision(response["decision"])
 	case "user-input":
-		return len(response) == 2 && validStringRecord(response["answers"])
+		return exactRawFields(response, []string{"kind", "answers"}, nil) && validStringRecord(response["answers"])
 	case "permission":
-		if len(response) < 2 || len(response) > 3 || !validDecision(response["decision"]) {
+		if !exactRawFields(response, []string{"kind", "decision"}, []string{"scope"}) || !validDecision(response["decision"]) {
 			return false
 		}
 		if response["scope"] == nil {
@@ -1583,14 +1618,14 @@ func validInteractionResponse(value json.RawMessage) bool {
 		var scope string
 		return json.Unmarshal(response["scope"], &scope) == nil && (scope == "turn" || scope == "session")
 	case "mcp-elicitation":
-		if len(response) < 2 || len(response) > 3 || !validDecision(response["decision"]) {
+		if !exactRawFields(response, []string{"kind", "decision"}, []string{"content"}) || !validDecision(response["decision"]) {
 			return false
 		}
 		var decision string
 		_ = json.Unmarshal(response["decision"], &decision)
-		return response["content"] == nil || (decision == "accept" && validStringRecord(response["content"]))
+		return response["content"] == nil || (decision == "accept" && validScalarRecord(response["content"]))
 	case "dynamic-tool":
-		if len(response) != 3 {
+		if !exactRawFields(response, []string{"kind", "success", "content"}, nil) {
 			return false
 		}
 		var success bool
@@ -1606,7 +1641,7 @@ func validInteractionResponse(value json.RawMessage) bool {
 			field := "url"
 			if itemKind == "text" {
 				field = "text"
-			} else if itemKind != "image" && itemKind != "audio" {
+			} else if itemKind != "image" {
 				return false
 			}
 			if json.Unmarshal(item[field], &text) != nil || text == "" || len(text) > 1024*1024 {
@@ -1617,6 +1652,25 @@ func validInteractionResponse(value json.RawMessage) bool {
 	default:
 		return false
 	}
+}
+
+func exactRawFields(value map[string]json.RawMessage, required, optional []string) bool {
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, key := range required {
+		allowed[key] = true
+		if _, ok := value[key]; !ok {
+			return false
+		}
+	}
+	for _, key := range optional {
+		allowed[key] = true
+	}
+	for key := range value {
+		if !allowed[key] {
+			return false
+		}
+	}
+	return true
 }
 
 func validProviderManifest(value json.RawMessage, provider string) bool {
@@ -1636,10 +1690,11 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		} `json:"resources"`
 		InputKinds     []string `json:"inputKinds"`
 		ThreadSettings struct {
-			Model           *bool    `json:"model"`
-			ReasoningEffort []string `json:"reasoningEffort"`
-			ApprovalPolicy  []string `json:"approvalPolicy"`
-			SandboxPolicy   []string `json:"sandboxPolicy"`
+			Model             *bool    `json:"model"`
+			ReasoningEffort   []string `json:"reasoningEffort"`
+			ApprovalPolicy    []string `json:"approvalPolicy"`
+			ApprovalsReviewer []string `json:"approvalsReviewer"`
+			SandboxPolicy     []string `json:"sandboxPolicy"`
 		} `json:"threadSettings"`
 		InteractionKinds []string `json:"interactionKinds"`
 	}
@@ -1663,8 +1718,9 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 	}) && validManifestValues(manifest.Resources.Workspace, []string{"sessions", "skills", "hooks"}) &&
 		validManifestValues(manifest.InputKinds, []string{"text", "artifact", "skill", "app-mention"}) &&
 		validManifestValues(manifest.ThreadSettings.ReasoningEffort, []string{"low", "medium", "high", "xhigh"}) &&
-		validManifestValues(manifest.ThreadSettings.ApprovalPolicy, []string{"untrusted", "on-request", "never"}) &&
-		validManifestValues(manifest.ThreadSettings.SandboxPolicy, []string{"read-only", "workspace-write"}) &&
+		validManifestValues(manifest.ThreadSettings.ApprovalPolicy, []string{"on-request", "never"}) &&
+		validManifestValues(manifest.ThreadSettings.ApprovalsReviewer, []string{"user", "auto_review"}) &&
+		validManifestValues(manifest.ThreadSettings.SandboxPolicy, []string{"workspace-write", "danger-full-access"}) &&
 		validManifestValues(manifest.InteractionKinds, []string{
 			"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool",
 		})
@@ -1704,6 +1760,50 @@ func validStringRecord(raw json.RawMessage) bool {
 	}
 	for key, item := range value {
 		if !validOpaqueRef(key) || len(item) > 64*1024 {
+			return false
+		}
+	}
+	return true
+}
+
+func validScalarRecord(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value map[string]any
+	if decoder.Decode(&value) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(value) > 128 {
+		return false
+	}
+	for key, item := range value {
+		if !validTextValue(key, 256) {
+			return false
+		}
+		switch typed := item.(type) {
+		case string:
+			if len(typed) > 64*1024 || !utf8.ValidString(typed) {
+				return false
+			}
+		case bool:
+		case json.Number:
+			if len(typed.String()) > 128 {
+				return false
+			}
+			parsed, err := typed.Float64()
+			if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validTextValue(value string, limit int) bool {
+	if value == "" || len(value) > limit || !utf8.ValidString(value) {
+		return false
+	}
+	for _, character := range value {
+		if character < 32 && character != '\n' && character != '\r' && character != '\t' {
 			return false
 		}
 	}

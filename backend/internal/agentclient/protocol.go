@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -63,10 +64,11 @@ type ArtifactGrant struct {
 }
 
 type Settings struct {
-	Model           string `json:"model,omitempty"`
-	ReasoningEffort string `json:"reasoningEffort,omitempty"`
-	ApprovalPolicy  string `json:"approvalPolicy,omitempty"`
-	SandboxPolicy   string `json:"sandboxPolicy,omitempty"`
+	Model             string `json:"model,omitempty"`
+	ReasoningEffort   string `json:"reasoningEffort,omitempty"`
+	ApprovalPolicy    string `json:"approvalPolicy,omitempty"`
+	ApprovalsReviewer string `json:"approvalsReviewer,omitempty"`
+	SandboxPolicy     string `json:"sandboxPolicy,omitempty"`
 }
 
 type AgentInput struct {
@@ -117,10 +119,11 @@ type ProviderManifest struct {
 	} `json:"resources"`
 	InputKinds     []string `json:"inputKinds"`
 	ThreadSettings struct {
-		Model           bool     `json:"model"`
-		ReasoningEffort []string `json:"reasoningEffort"`
-		ApprovalPolicy  []string `json:"approvalPolicy"`
-		SandboxPolicy   []string `json:"sandboxPolicy"`
+		Model             bool     `json:"model"`
+		ReasoningEffort   []string `json:"reasoningEffort"`
+		ApprovalPolicy    []string `json:"approvalPolicy"`
+		ApprovalsReviewer []string `json:"approvalsReviewer"`
+		SandboxPolicy     []string `json:"sandboxPolicy"`
 	} `json:"threadSettings"`
 	InteractionKinds []string `json:"interactionKinds"`
 }
@@ -295,10 +298,15 @@ func validateTargets(command AgentCommand) bool {
 }
 
 func validSettings(settings Settings) bool {
-	return (settings.Model == "" || validText(settings.Model, 256)) &&
-		(settings.ReasoningEffort == "" || containsString([]string{"low", "medium", "high", "xhigh"}, settings.ReasoningEffort)) &&
-		(settings.ApprovalPolicy == "" || containsString([]string{"untrusted", "on-request", "never"}, settings.ApprovalPolicy)) &&
-		(settings.SandboxPolicy == "" || containsString([]string{"read-only", "workspace-write"}, settings.SandboxPolicy))
+	return validText(settings.Model, 256) &&
+		containsString([]string{"low", "medium", "high", "xhigh"}, settings.ReasoningEffort) &&
+		validApprovalMode(settings.ApprovalPolicy, settings.ApprovalsReviewer, settings.SandboxPolicy)
+}
+
+func validApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy string) bool {
+	return approvalPolicy == "on-request" && approvalsReviewer == "user" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "on-request" && approvalsReviewer == "auto_review" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access"
 }
 
 func validInputs(inputs []AgentInput) bool {
@@ -371,7 +379,7 @@ func validInteractionResponse(raw json.RawMessage) bool {
 		}
 		for _, item := range content {
 			var itemKind string
-			if json.Unmarshal(item["kind"], &itemKind) != nil || !containsString([]string{"text", "image", "audio"}, itemKind) {
+			if json.Unmarshal(item["kind"], &itemKind) != nil || !containsString([]string{"text", "image"}, itemKind) {
 				return false
 			}
 			field := "url"
@@ -392,13 +400,44 @@ func validInteractionResponse(raw json.RawMessage) bool {
 			return false
 		}
 		if rawContent := response["content"]; len(rawContent) > 0 {
-			var content map[string]string
-			return json.Unmarshal(rawContent, &content) == nil && len(content) <= 128
+			return validScalarRecord(rawContent)
 		}
 		return true
 	default:
 		return false
 	}
+}
+
+func validScalarRecord(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value map[string]any
+	if decoder.Decode(&value) != nil || requireEOF(decoder) != nil || len(value) > 128 {
+		return false
+	}
+	for key, item := range value {
+		if !validText(key, 256) {
+			return false
+		}
+		switch typed := item.(type) {
+		case string:
+			if len(typed) > 64*1024 || !utf8.ValidString(typed) {
+				return false
+			}
+		case bool:
+		case json.Number:
+			if len(typed.String()) > 128 {
+				return false
+			}
+			parsed, err := typed.Float64()
+			if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func validateReviewTarget(target map[string]any) error {

@@ -132,6 +132,39 @@ func TestInstallRejectsOldCodexBeforeUpdatingConfig(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsIncompatibleProjectSessionAPIBeforeEnrollment(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir := t.TempDir()
+	t.Setenv("DEEIX_TEST_CODEX_VERSION", minimumCodexVersion)
+	t.Setenv("DEEIX_TEST_THREAD_CWD", dataDir)
+	t.Setenv("DEEIX_TEST_THREAD_LIST_ERROR", "Invalid request: invalid type: sequence, expected a string")
+	_, err = Install(context.Background(), InstallOptions{
+		Server:          "https://example.com",
+		UserPublicID:    "0123456789abcdef0123456789abcdef",
+		Name:            "test device",
+		CodexExecutable: executable,
+		DataDir:         dataDir,
+	}, io.Discard)
+	if err == nil {
+		t.Fatal("Install accepted an incompatible Codex project session API")
+	}
+	for _, value := range []string{
+		"project session API is incompatible", "detected " + minimumCodexVersion,
+		"invalid type: sequence, expected a string", "https://chatgpt.com/codex/install.ps1",
+		"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
+	} {
+		if !strings.Contains(err.Error(), value) {
+			t.Fatalf("Install error %q does not contain %q", err, value)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(dataDir, "config.json")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("config was saved after project session compatibility rejection: %v", statErr)
+	}
+}
+
 func TestRuntimeProofDeadline(t *testing.T) {
 	now := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
 	want := now.Add(time.Minute)
@@ -162,6 +195,151 @@ func TestBridgeAuthErrorIncludesStableCode(t *testing.T) {
 	})
 	if err == nil || err.Error() != "key rejected (runtime_key_rejected)" {
 		t.Fatalf("bridgeAuthError() = %v", err)
+	}
+}
+
+func TestMCPElicitationResponsePreservesSchemaScalars(t *testing.T) {
+	raw := json.RawMessage(`{"kind":"mcp-elicitation","decision":"accept","content":{"name":"Ada","count":3,"ratio":0.5,"enabled":true}}`)
+	if !validInteractionResponse(raw) {
+		t.Fatal("bridge validator rejected MCP schema scalar content")
+	}
+	mapped, err := mapInteractionResponse(&pendingInteraction{Method: "mcpServer/elicitation/request"}, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(mapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"name":"Ada"`, `"count":3`, `"ratio":0.5`, `"enabled":true`} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("mapped MCP response %s lost %s", encoded, expected)
+		}
+	}
+}
+
+func TestElicitationSchemaProjectionUsesStableAllowlist(t *testing.T) {
+	adapter := &CodexAdapter{}
+	projected, _, err := adapter.projectServerRequest("mcpServer/elicitation/request", map[string]any{
+		"serverName": "forms",
+		"message":    "Provide values",
+		"requestedSchema": map[string]any{
+			"type": "object", "$ref": "secret", "id": "provider-schema-id",
+			"properties": map[string]any{
+				"name":   map[string]any{"type": "string", "title": "Name", "description": "Display name", "enum": []any{"Ada", "Lin"}, "default": "Ada", "$ref": "leak"},
+				"count":  map[string]any{"type": "integer", "enum": []any{float64(1), float64(2)}},
+				"nested": map[string]any{"type": "object", "properties": map[string]any{"secret": map[string]any{"type": "string"}}},
+			},
+			"required": []any{"name", "nested", "missing"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(projected)
+	text := string(encoded)
+	for _, expected := range []string{`"name"`, `"type":"string"`, `"count"`, `"required":["name"]`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("schema projection %s is missing %s", text, expected)
+		}
+	}
+	for _, forbidden := range []string{"provider-schema-id", `"nested"`, `"default"`, `"$ref"`, `"secret"`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("schema projection %s leaked %s", text, forbidden)
+		}
+	}
+}
+
+func TestUserInputProjectionUsesOpaqueRequiredQuestions(t *testing.T) {
+	adapter := &CodexAdapter{}
+	projected, answerKeys, err := adapter.projectServerRequest("item/tool/requestUserInput", map[string]any{
+		"questions": []any{map[string]any{
+			"id": "provider-question-id", "header": "Account", "question": "Enter the token",
+			"isOther": true, "isSecret": true,
+			"required": false, "allowFreeform": false, "label": "provider label", "prompt": "provider prompt",
+			"options": []any{map[string]any{"label": "Use saved", "description": "Use the saved token"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions, ok := projected["questions"].([]any)
+	if !ok || len(questions) != 1 {
+		t.Fatalf("projected questions = %#v", projected["questions"])
+	}
+	question, ok := questions[0].(map[string]any)
+	if !ok || question["required"] != true || question["allowFreeform"] != true || question["secret"] != true ||
+		question["header"] != "Account" || question["question"] != "Enter the token" {
+		t.Fatalf("projected question = %#v", questions[0])
+	}
+	questionRef, ok := question["questionRef"].(string)
+	if !ok || !strings.HasPrefix(questionRef, "question_") || answerKeys[questionRef] != "provider-question-id" {
+		t.Fatalf("question ref = %q, answer keys = %#v", questionRef, answerKeys)
+	}
+	for _, forbidden := range []string{"id", "isOther", "isSecret", "label", "prompt"} {
+		if _, exists := question[forbidden]; exists {
+			t.Fatalf("projected question leaked provider field %q: %#v", forbidden, question)
+		}
+	}
+}
+
+func TestApprovalProjectionUsesBoundedStartedItemContext(t *testing.T) {
+	state, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]json.RawMessage, 0, 4)
+	adapter := &CodexAdapter{profileID: "codex-default", state: state, onEvent: func(event json.RawMessage) error {
+		events = append(events, append(json.RawMessage(nil), event...))
+		return nil
+	}}
+	emit := func(method, params string) {
+		t.Helper()
+		if err := adapter.notification(RPCNotification{Method: method, Params: json.RawMessage(params)}); err != nil {
+			t.Fatalf("notification %s: %v", method, err)
+		}
+	}
+
+	emit("item/started", `{"threadId":"thread-provider","turnId":"turn-provider","item":{"id":"command-provider-item","type":"commandExecution","command":"git status"}}`)
+	commandRequest, _, err := adapter.projectServerRequest("item/commandExecution/requestApproval", map[string]any{
+		"itemId": "command-provider-item", "reason": "Inspect repository state",
+	})
+	if err != nil || commandRequest["command"] != "git status" {
+		t.Fatalf("command approval projection = %#v, %v", commandRequest, err)
+	}
+	encodedCommand, _ := json.Marshal(commandRequest)
+	if strings.Contains(string(encodedCommand), "command-provider-item") || strings.Contains(string(events[0]), "command-provider-item") {
+		t.Fatalf("provider item id leaked: request=%s event=%s", encodedCommand, events[0])
+	}
+	emit("item/completed", `{"threadId":"thread-provider","turnId":"turn-provider","item":{"id":"command-provider-item","type":"commandExecution","status":"completed"}}`)
+	commandAfterCompletion, _, _ := adapter.projectServerRequest("item/commandExecution/requestApproval", map[string]any{"itemId": "command-provider-item"})
+	if _, exists := commandAfterCompletion["command"]; exists {
+		t.Fatalf("completed command item remained cached: %#v", commandAfterCompletion)
+	}
+
+	emit("item/started", `{"threadId":"thread-provider","turnId":"turn-provider","item":{"id":"file-provider-item","type":"fileChange","changes":[{"path":"src/main.go","kind":"update"},{"path":"src/new.go","kind":{"type":"create"}}]}}`)
+	fileRequest, _, err := adapter.projectServerRequest("item/fileChange/requestApproval", map[string]any{
+		"itemId": "file-provider-item", "reason": "Apply changes",
+	})
+	files, ok := fileRequest["files"].([]any)
+	if err != nil || !ok || len(files) != 2 {
+		t.Fatalf("file approval projection = %#v, %v", fileRequest, err)
+	}
+	encodedFiles, _ := json.Marshal(fileRequest)
+	if strings.Contains(string(encodedFiles), "file-provider-item") || !strings.Contains(string(encodedFiles), `"path":"src/main.go"`) {
+		t.Fatalf("file approval context is invalid: %s", encodedFiles)
+	}
+	emit("turn/completed", `{"threadId":"thread-provider","turn":{"id":"turn-provider","status":"completed"}}`)
+	fileAfterTurn, _, _ := adapter.projectServerRequest("item/fileChange/requestApproval", map[string]any{"itemId": "file-provider-item"})
+	if files, _ := fileAfterTurn["files"].([]any); len(files) != 0 {
+		t.Fatalf("completed turn items remained cached: %#v", fileAfterTurn)
+	}
+
+	for index := 0; index <= maxApprovalItemProjections; index++ {
+		adapter.rememberApprovalItem(fmt.Sprintf("item-%03d", index), "turn-bounded", map[string]any{"type": "commandExecution", "command": "pwd"})
+	}
+	if len(adapter.approvalItems) != maxApprovalItemProjections || adapter.approvalItem("item-000").Command != "" {
+		t.Fatalf("approval item cache is not bounded: size=%d", len(adapter.approvalItems))
 	}
 }
 
@@ -1264,6 +1442,12 @@ func runFakeAppServer() {
 				result = map[string]any{"turn": map[string]any{"id": "turn-input-test"}}
 			}
 		case "thread/list":
+			if message := os.Getenv("DEEIX_TEST_THREAD_LIST_ERROR"); message != "" {
+				var id any
+				_ = json.Unmarshal(request["id"], &id)
+				_ = encoder.Encode(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": message}})
+				continue
+			}
 			root := os.Getenv("DEEIX_TEST_THREAD_CWD")
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)

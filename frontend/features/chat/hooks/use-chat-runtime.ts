@@ -2,11 +2,10 @@
 
 import * as React from "react";
 
-import type { PendingAttachment, PendingExchangeMap } from "@/features/chat/types/chat-runtime";
-import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
 import { useChatBranchState } from "@/features/chat/hooks/use-chat-branch-state";
 import { useChatSubmitStream } from "@/features/chat/hooks/use-chat-submit-stream";
 import { mergeGatewayAssistantTurns } from "@/features/chat/model/chat-thread";
+import type { ChatModelOption, PendingAttachment, PendingExchangeMap } from "@/features/chat/types/chat-runtime";
 import type {
   ConversationDTO,
   ConversationInputResourceDTO,
@@ -169,6 +168,12 @@ export function useChatRuntime({
     () => executionMode === "gateway" ? mergeGatewayAssistantTurns(messages) : messages,
     [executionMode, messages],
   );
+  const persistedRunActive = React.useMemo(
+    () => executionMessages.some(
+      (message) => message.role === "assistant" && message.status === "pending",
+    ),
+    [executionMessages],
+  );
 
   const branchState = useChatBranchState({
     conversationID,
@@ -270,6 +275,8 @@ export function useChatRuntime({
     onGuideQueuedMessage: submitState.onGuideQueuedMessage,
     queuedMessages: submitState.queuedMessages,
     sending: submitState.sending || visibleResumeGenerationActive,
+    conversationRunActive:
+      submitState.conversationRunActive || persistedRunActive || Boolean(resumingRunID.trim()),
     visibleMessageCount: branchState.visibleMessageCount,
     visibleMessages: branchState.visibleMessages,
     isConversationMode: showConversationLayout || branchState.visibleMessageCount > 0,

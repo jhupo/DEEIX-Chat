@@ -4,54 +4,55 @@ import type {
   MessageTraceEventResponse,
 } from "@deeix/api-contract";
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
-import { apiRequest, ApiError, pathParam } from "@/shared/api/http-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
-  ConversationDTO,
+  BatchSetConversationProjectRequest,
+  BatchSetConversationProjectResult,
+  ContextArtifactDTO,
   ConversationDefaultModelCandidateDTO,
+  ConversationDTO,
+  ConversationExecutionEventDTO,
   ConversationExportDTO,
-  ConversationProjectDTO,
   ConversationInputResourceCatalogDTO,
+  ConversationInteractionDTO,
+  ConversationInteractionResponse,
+  ConversationPreviewMessageDTO,
+  ConversationProjectDTO,
   ConversationProjectFilter,
   ConversationProjectStatusFilter,
-  ConversationPreviewMessageDTO,
+  ConversationRunDTO,
   ConversationSearchPageDTO,
   ConversationShareDTO,
-  ConversationRunDTO,
   ConversationShareFilter,
   ConversationStarredFilter,
   ConversationStatusFilter,
-  ContextArtifactDTO,
   CreateConversationProjectRequest,
   CreateConversationRequest,
   CreateConversationShareRequest,
-  ConversationInteractionDTO,
-  ConversationInteractionResponse,
-  BatchSetConversationProjectRequest,
-  BatchSetConversationProjectResult,
   DeleteConversationData,
+  MediaImageRequest,
+  MediaVideoRequest,
   MessageDTO,
   MessageFeedbackResult,
   MessageProcessTraceDTO,
   PublicSharedConversationDTO,
   RenameConversationRequest,
+  ReorderConversationProjectsRequest,
   RevokeConversationSharesRequest,
   RevokeConversationSharesResult,
-  ReorderConversationProjectsRequest,
   SendMessageRequest,
-  MediaImageRequest,
-  MediaVideoRequest,
   SendMessageResult,
   SetConversationArchiveRequest,
   SetConversationProjectRequest,
   SetConversationStarRequest,
   SetMessageFeedbackRequest,
-  UpdateMessageRequest,
-  UpdateConversationLabelsRequest,
-  UpdateConversationProjectRequest,
   StreamMessageEvent,
   TraceBlockDTO,
+  UpdateConversationLabelsRequest,
+  UpdateConversationProjectRequest,
+  UpdateMessageRequest,
 } from "@/shared/api/conversation.types";
+import { ApiError, apiRequest, pathParam } from "@/shared/api/http-client";
 
 type RawTraceBlock = MessageTraceBlockResponse;
 
@@ -266,6 +267,18 @@ function handleStreamEvent(event: StreamMessageEvent, options: ConversationStrea
 
   if (event.type === "usage") {
     options.onUsage?.(event);
+    return null;
+  }
+
+  if (event.type === "execution_event") {
+    const executionEvent: ConversationExecutionEventDTO = {
+      runID: event.runID,
+      seq: event.executionSeq,
+      kind: event.kind,
+      payload: event.payload,
+      occurredAt: event.occurredAt,
+    };
+    options.onExecutionEvent?.(executionEvent);
     return null;
   }
 
@@ -930,6 +943,19 @@ export async function getConversationHistory(
   );
 }
 
+export async function listConversationExecutionEvents(
+  accessToken: string,
+  conversationPublicID: string,
+  after = 0,
+): Promise<ConversationExecutionEventDTO[]> {
+  const cursor = Number.isSafeInteger(after) && after > 0 ? Math.floor(after) : 0;
+  return authedRequest<ConversationExecutionEventDTO[]>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/events?after=${cursor}`,
+    { accessToken },
+    true,
+  );
+}
+
 export async function listConversationInteractions(
   accessToken: string,
   conversationPublicID: string,
@@ -969,6 +995,24 @@ export async function cancelMessageGeneration(
     {
       method: "POST",
       accessToken,
+    },
+    true,
+  );
+}
+
+export async function steerConversationRun(
+  accessToken: string,
+  runID: string,
+  content: string,
+  idempotencyKey: string,
+): Promise<void> {
+  await authedRequest<unknown>(
+    `/api/v1/conversation-runs/${pathParam(runID)}/steer`,
+    {
+      method: "POST",
+      accessToken,
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: { content },
     },
     true,
   );
@@ -1050,6 +1094,7 @@ export type ConversationStreamOptions = {
   onProcessUpdate?: (event: Extract<StreamMessageEvent, { type: "process_update" }>) => void;
   onUpstreamThinkDelta?: (event: Extract<StreamMessageEvent, { type: "upstream_think_delta" }>) => void;
   onUsage?: (event: Extract<StreamMessageEvent, { type: "usage" }>) => void;
+  onExecutionEvent?: (event: ConversationExecutionEventDTO) => void;
   onInterrupted?: (event: Extract<StreamMessageEvent, { type: "error" }>) => void;
 };
 

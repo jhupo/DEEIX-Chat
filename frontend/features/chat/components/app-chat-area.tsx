@@ -1,38 +1,9 @@
 "use client";
 
-import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 import { toast } from "sonner";
-
-import {
-  ConversationShareDialog,
-  sharePatchFromDTO,
-  useConversationExport,
-  useSidebarConversations,
-} from "@/entities/conversation";
-import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
-import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
-import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
-import { useChatSession } from "@/features/chat/context/chat-session-context";
-import { useChatArtifacts } from "@/features/chat/hooks/use-chat-artifacts";
-import { useChatAttachments } from "@/features/chat/hooks/use-chat-attachments";
-import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-state";
-import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
-import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
-import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
-import { useChatKeyBindings } from "@/features/chat/hooks/use-chat-key-bindings";
-import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
-import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
-import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
-import { parseConversationLabelsJSON } from "@/shared/lib/conversation-labels";
-import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
-import { ChatInput } from "@/features/chat/components/sections/chat-input";
-import { ChatScreenshotPreviewDialog } from "@/features/chat/components/sections/chat-screenshot-preview-dialog";
-import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
-import { DeleteFilesOption } from "@/shared/components/delete-files-option";
-import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
-import { useDevices } from "@/features/devices";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,28 +15,70 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  ConversationShareDialog,
+  sharePatchFromDTO,
+  useConversationExport,
+  useSidebarConversations,
+} from "@/entities/conversation";
+import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
+import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
+import { ChatEmptyState } from "@/features/chat/components/sections/chat-empty";
+import { ChatInput } from "@/features/chat/components/sections/chat-input";
+import { ChatScreenshotPreviewDialog } from "@/features/chat/components/sections/chat-screenshot-preview-dialog";
+import { useChatSession } from "@/features/chat/context/chat-session-context";
+import { useAgentRunHydration } from "@/features/chat/hooks/use-agent-run-hydration";
+import { useChatArtifacts } from "@/features/chat/hooks/use-chat-artifacts";
+import { useChatAttachments } from "@/features/chat/hooks/use-chat-attachments";
+import { useChatComposerSelection } from "@/features/chat/hooks/use-chat-composer-selection";
+import { useChatComposerState } from "@/features/chat/hooks/use-chat-composer-state";
+import { useChatData } from "@/features/chat/hooks/use-chat-data";
+import { useChatKeyBindings } from "@/features/chat/hooks/use-chat-key-bindings";
+import { useChatModelOptions } from "@/features/chat/hooks/use-chat-model-options";
+import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
+import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
+import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
+import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
+import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { useChatData } from "@/features/chat/hooks/use-chat-data";
-import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
+import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
+import { useDevices } from "@/features/devices";
+import { useSettingsChatPreferences } from "@/features/settings/hooks/use-settings-chat-preferences";
+import { cn } from "@/lib/utils";
+import {
+  type AgentModelDTO,
+  type AgentProviderManifestDTO,
+  type AgentTurnSettings,
+  getAgentProfileResource,
+  listAgentRuntimeProfiles,
+  listAgentWorkspaces,
+  parseAgentModelsResource,
+  refreshAgentProfileResource,
+  waitForAgentCommand,
+} from "@/shared/api/agent-gateway";
 import { getConversation, listConversationInputResources } from "@/shared/api/conversation";
-import { listAvailableMCPTools } from "@/shared/api/mcp";
-import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import type { ConversationDTO, ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
 import type { FileObjectDTO } from "@/shared/api/file.types";
+import { listAvailableMCPTools } from "@/shared/api/mcp";
 import type { MCPToolDTO } from "@/shared/api/mcp.types";
+import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import { DeleteFilesOption } from "@/shared/components/delete-files-option";
+import { parseConversationLabelsJSON } from "@/shared/lib/conversation-labels";
 import {
   hasMultipleImageAttachmentProcessors,
   normalizeImageAttachmentProcessorSelection,
 } from "@/shared/lib/mcp-tool-selection";
+import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 import { resolveChatProtocol } from "@/shared/model/chat-protocol";
-import { cn } from "@/lib/utils";
 
 const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
+const AGENT_SETTINGS_STORAGE_PREFIX = "deeix-chat:agent-settings:v1:";
+const AGENT_MODELS_STALE_MS = 5 * 60 * 1000;
 const DEFAULT_MCP_TOOLS_SETTING_KEY = "chat.default_mcp_tool_ids";
 const EMPTY_CONVERSATION_OPTIONS: ConversationOptions = {};
 const TOP_LOAD_OLDER_MESSAGES_THRESHOLD_PX = 48;
@@ -80,6 +93,54 @@ function droppedFiles(event: React.DragEvent<HTMLElement>): File[] {
 
 function modelOptionsStorageKey(platformModelName: string): string {
   return `${MODEL_OPTIONS_STORAGE_PREFIX}${encodeURIComponent(platformModelName)}`;
+}
+
+function agentSettingsStorageKey(
+  deviceID: string,
+  profileID: string,
+  workspaceID: string,
+  conversationID: string,
+): string {
+  return `${AGENT_SETTINGS_STORAGE_PREFIX}${encodeURIComponent(deviceID)}:${encodeURIComponent(profileID)}:${encodeURIComponent(workspaceID)}:${encodeURIComponent(conversationID)}`;
+}
+
+function readAgentSettings(storageKey: string): AgentTurnSettings | null {
+  if (typeof window === "undefined" || !storageKey) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as Partial<AgentTurnSettings> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    if (
+      typeof parsed.model !== "string" ||
+      !["low", "medium", "high", "xhigh"].includes(parsed.reasoningEffort ?? "") ||
+      !["on-request", "never"].includes(parsed.approvalPolicy ?? "") ||
+      !["user", "auto_review"].includes(parsed.approvalsReviewer ?? "") ||
+      !["workspace-write", "danger-full-access"].includes(parsed.sandboxPolicy ?? "")
+    ) {
+      return null;
+    }
+    return parsed as AgentTurnSettings;
+  } catch {
+    return null;
+  }
+}
+
+function writeAgentSettings(storageKey: string, settings: AgentTurnSettings): void {
+  if (typeof window === "undefined" || !storageKey) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(storageKey, JSON.stringify(settings));
+  } catch {
+    // Settings remain valid for the current page when storage is unavailable.
+  }
+}
+
+function manifestSupportsAutoReview(manifest: AgentProviderManifestDTO): boolean {
+  return manifest.threadSettings.approvalsReviewer?.includes("auto_review") === true;
 }
 
 function readCachedModelOptions(platformModelName: string): ConversationOptions | null {
@@ -298,6 +359,12 @@ export function AppChatArea() {
   }, [activeConversation?.publicID, conversationID]);
   const currentConversation =
     activeConversation ?? (loadedConversation?.publicID === conversationID ? loadedConversation : null);
+  useAgentRunHydration({
+    conversationID,
+    deviceID: currentConversation?.executionDeviceID,
+    profileID: currentConversation?.executionProfileID,
+    workspaceID: currentConversation?.executionWorkspaceID,
+  });
   const executionModeConversationRef = React.useRef("");
   React.useEffect(() => {
     if (!currentConversation) {
@@ -357,7 +424,7 @@ export function AppChatArea() {
     showTokenUsage,
     modelOptionPolicy,
     mcpMaxSelectedTools,
-    selectedPlatformModelName,
+    selectedPlatformModelName: cloudSelectedPlatformModelName,
     setSelectedPlatformModelName,
   } = useChatModelOptions({
     conversationPublicID: conversationID,
@@ -377,8 +444,8 @@ export function AppChatArea() {
     resetToken: newConversationRevision,
   });
   const selectedModel = React.useMemo(
-    () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
-    [modelOptions, selectedPlatformModelName],
+    () => modelOptions.find((item) => item.platformModelName === cloudSelectedPlatformModelName) ?? null,
+    [cloudSelectedPlatformModelName, modelOptions],
   );
   const selectedChatProtocol = resolveChatProtocol(
     chatKeyBindings.selectedRemoteKey?.groupPlatform ?? "",
@@ -470,6 +537,237 @@ export function AppChatArea() {
     const availableRefs = new Set(inputResources.map((item) => item.resourceRef));
     setSelectedInputResources((current) => current.filter((item) => availableRefs.has(item.resourceRef)));
   }, [executionMode, inputResourceDeviceID, inputResourceScope, inputResourceWorkspaceID, inputResources, inputResourcesReady, setSelectedInputResources]);
+  const [agentModels, setAgentModels] = React.useState<AgentModelDTO[]>([]);
+  const [agentSettings, setAgentSettings] = React.useState<AgentTurnSettings | null>(null);
+  const [agentSettingsLoading, setAgentSettingsLoading] = React.useState(false);
+  const [agentSettingsError, setAgentSettingsError] = React.useState("");
+  const [agentAutoReviewEnabled, setAgentAutoReviewEnabled] = React.useState(false);
+  const [agentApprovalModeSelectionRequired, setAgentApprovalModeSelectionRequired] = React.useState(false);
+  const [agentSettingsStorageScope, setAgentSettingsStorageScope] = React.useState("");
+  const [agentSettingsProfileID, setAgentSettingsProfileID] = React.useState("");
+  React.useEffect(() => {
+    if (executionMode !== "gateway") {
+      setAgentModels([]);
+      setAgentSettings(null);
+      setAgentSettingsError("");
+      setAgentAutoReviewEnabled(false);
+      setAgentApprovalModeSelectionRequired(false);
+      setAgentSettingsStorageScope("");
+      setAgentSettingsProfileID("");
+      setAgentSettingsLoading(false);
+      return;
+    }
+    if (!inputResourceDeviceID || !inputResourceWorkspaceID) {
+      setAgentModels([]);
+      setAgentSettings(null);
+      setAgentSettingsError("");
+      setAgentAutoReviewEnabled(false);
+      setAgentApprovalModeSelectionRequired(false);
+      setAgentSettingsStorageScope("");
+      setAgentSettingsProfileID("");
+      setAgentSettingsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAgentModels([]);
+    setAgentSettings(null);
+    setAgentSettingsError("");
+    setAgentAutoReviewEnabled(false);
+    setAgentApprovalModeSelectionRequired(false);
+    setAgentSettingsStorageScope("");
+    setAgentSettingsProfileID("");
+    setAgentSettingsLoading(true);
+    void (async () => {
+      const token = await resolveAccessToken();
+      if (!token) {
+        throw new Error(t("agent.settings.errors.unauthorized"));
+      }
+      const [profiles, workspaces] = await Promise.all([
+        listAgentRuntimeProfiles(token, inputResourceDeviceID),
+        listAgentWorkspaces(token, inputResourceDeviceID),
+      ]);
+      if (cancelled) {
+        return;
+      }
+      const workspace = workspaces.find((item) => item.workspaceId === inputResourceWorkspaceID);
+      const profileID = currentConversation?.executionType === "gateway"
+        ? currentConversation.executionProfileID
+        : workspace?.profileId ?? "";
+      const profile = profiles.find((item) => item.profileId === profileID && item.status === "ready");
+      if (!workspace || !profile || profile.provider !== "codex" || !profile.manifest.threadSettings.model) {
+        throw new Error(t("agent.settings.errors.profileUnavailable"));
+      }
+      if (
+        !profile.manifest.threadSettings.approvalPolicy.includes("on-request") ||
+        !profile.manifest.threadSettings.approvalPolicy.includes("never") ||
+        !profile.manifest.threadSettings.sandboxPolicy.includes("workspace-write") ||
+        !profile.manifest.threadSettings.sandboxPolicy.includes("danger-full-access")
+      ) {
+        throw new Error(t("agent.settings.errors.capabilityUnavailable"));
+      }
+
+      let snapshot: Awaited<ReturnType<typeof getAgentProfileResource>> | null = null;
+      try {
+        snapshot = await getAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
+      } catch {
+        snapshot = null;
+      }
+      const refreshedAt = snapshot ? Date.parse(snapshot.refreshedAt) : Number.NaN;
+      const snapshotStale = !Number.isFinite(refreshedAt) || Date.now() - refreshedAt > AGENT_MODELS_STALE_MS;
+      if ((!snapshot || snapshotStale) && inputResourceDeviceOnline) {
+        const queued = await refreshAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
+        const completed = await waitForAgentCommand(token, queued.commandId);
+        if (!completed || completed.status !== "completed") {
+          throw new Error(completed?.errorMessage || t("agent.settings.errors.modelsUnavailable"));
+        }
+        snapshot = await getAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
+      }
+      if (!snapshot) {
+        throw new Error(t("agent.settings.errors.modelsUnavailable"));
+      }
+
+      const models = parseAgentModelsResource(
+        snapshot.data,
+        profile.manifest.threadSettings.reasoningEffort,
+      );
+      if (models.length === 0) {
+        throw new Error(t("agent.settings.errors.modelsUnavailable"));
+      }
+      const gatewayConversationID = currentConversation?.executionType === "gateway"
+        ? currentConversation.publicID.trim()
+        : "";
+      const storageScope = gatewayConversationID
+        ? agentSettingsStorageKey(
+            inputResourceDeviceID,
+            profile.profileId,
+            inputResourceWorkspaceID,
+            gatewayConversationID,
+          )
+        : "";
+      const persisted = storageScope ? readAgentSettings(storageScope) : null;
+      const conversationModel = currentConversation?.executionType === "gateway"
+        ? currentConversation.model.trim()
+        : "";
+      const selectedModel = conversationModel
+        ? models.find((item) => item.id === conversationModel)
+        : persisted
+          ? models.find((item) => item.id === persisted.model)
+          : models.find((item) => item.isDefault) ?? models[0];
+      if (!selectedModel) {
+        throw new Error(t("agent.settings.errors.currentModelUnavailable"));
+      }
+      const autoReviewEnabled = manifestSupportsAutoReview(profile.manifest);
+      const persistedModeValid = Boolean(
+        persisted && (
+          persisted.approvalPolicy === "on-request" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "workspace-write" ||
+          persisted.approvalPolicy === "on-request" && persisted.approvalsReviewer === "auto_review" && persisted.sandboxPolicy === "workspace-write" ||
+          persisted.approvalPolicy === "never" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "danger-full-access"
+        ),
+      );
+      const reasoningEffort = persisted?.model === selectedModel.id &&
+        selectedModel.supportedReasoningEfforts.includes(persisted.reasoningEffort)
+        ? persisted.reasoningEffort
+        : selectedModel.defaultReasoningEffort;
+      const nextSettings: AgentTurnSettings = {
+        model: selectedModel.id,
+        reasoningEffort,
+        approvalPolicy: persistedModeValid ? persisted!.approvalPolicy : "on-request",
+        approvalsReviewer: persistedModeValid ? persisted!.approvalsReviewer : "user",
+        sandboxPolicy: persistedModeValid ? persisted!.sandboxPolicy : "workspace-write",
+      };
+      if (cancelled) {
+        return;
+      }
+      setAgentModels(models);
+      setAgentSettings(nextSettings);
+      setAgentAutoReviewEnabled(autoReviewEnabled);
+      setAgentApprovalModeSelectionRequired(
+        nextSettings.approvalsReviewer === "auto_review" && !autoReviewEnabled,
+      );
+      setAgentSettingsStorageScope(storageScope);
+      setAgentSettingsProfileID(profile.profileId);
+      if (storageScope) {
+        writeAgentSettings(storageScope, nextSettings);
+      }
+    })().catch((error: unknown) => {
+      if (!cancelled) {
+        setAgentModels([]);
+        setAgentSettings(null);
+        setAgentSettingsError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : t("agent.settings.errors.modelsUnavailable"),
+        );
+        setAgentAutoReviewEnabled(false);
+        setAgentApprovalModeSelectionRequired(false);
+        setAgentSettingsStorageScope("");
+        setAgentSettingsProfileID("");
+      }
+    }).finally(() => {
+      if (!cancelled) {
+        setAgentSettingsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentConversation?.executionProfileID,
+    currentConversation?.publicID,
+    currentConversation?.executionType,
+    currentConversation?.model,
+    executionMode,
+    inputResourceDeviceID,
+    inputResourceDeviceOnline,
+    inputResourceWorkspaceID,
+    t,
+  ]);
+  const onAgentSettingsChange = React.useCallback((nextSettings: AgentTurnSettings) => {
+    setAgentSettings(nextSettings);
+    setAgentApprovalModeSelectionRequired(
+      nextSettings.approvalsReviewer === "auto_review" && !agentAutoReviewEnabled,
+    );
+    writeAgentSettings(agentSettingsStorageScope, nextSettings);
+  }, [agentAutoReviewEnabled, agentSettingsStorageScope]);
+  const onConversationCreated = React.useCallback((conversationPublicID: string) => {
+    if (
+      executionMode === "gateway" &&
+      agentSettings &&
+      agentSettingsProfileID &&
+      inputResourceDeviceID &&
+      inputResourceWorkspaceID
+    ) {
+      writeAgentSettings(
+        agentSettingsStorageKey(
+          inputResourceDeviceID,
+          agentSettingsProfileID,
+          inputResourceWorkspaceID,
+          conversationPublicID,
+        ),
+        agentSettings,
+      );
+    }
+    setLocallyCreatedConversationID(conversationPublicID);
+  }, [
+    agentSettings,
+    agentSettingsProfileID,
+    executionMode,
+    inputResourceDeviceID,
+    inputResourceWorkspaceID,
+  ]);
+  const selectedPlatformModelName = executionMode === "gateway"
+    ? agentSettings?.model ?? ""
+    : cloudSelectedPlatformModelName;
+  const effectiveOptions = React.useMemo<ConversationOptions>(() => executionMode === "gateway" && agentSettings
+    ? {
+        reasoningEffort: agentSettings.reasoningEffort,
+        approvalPolicy: agentSettings.approvalPolicy,
+        approvalsReviewer: agentSettings.approvalsReviewer,
+        sandboxPolicy: agentSettings.sandboxPolicy,
+      }
+    : modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
+  [agentSettings, executionMode, modelOptionPolicyDisabled, options]);
   const [defaultToolIDs, setDefaultToolIDs] = React.useState<number[]>([]);
   const newConversationSelectionKey = `${newConversationRevision}:${newConversationProjectID || "unassigned"}`;
   const newConversationDefaultMCPToolIDs = React.useMemo(
@@ -595,13 +893,13 @@ export function AppChatArea() {
   }, [selectedModel]);
 
   const restoreBackendDefaultModelOptions = React.useCallback(async () => {
-    const platformModelName = selectedModel?.platformModelName.trim() || selectedPlatformModelName.trim();
+    const platformModelName = selectedModel?.platformModelName.trim() || cloudSelectedPlatformModelName.trim();
     if (!platformModelName) {
       return null;
     }
     const refreshedModel = await refreshModelOption(platformModelName);
     return refreshedModel ? cloneConversationOptions(refreshedModel.defaultOptions) : null;
-  }, [refreshModelOption, selectedModel?.platformModelName, selectedPlatformModelName]);
+  }, [cloudSelectedPlatformModelName, refreshModelOption, selectedModel?.platformModelName]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -715,6 +1013,7 @@ export function AppChatArea() {
     onGuideQueuedMessage,
     queuedMessages,
     sending,
+    conversationRunActive,
     visibleMessageCount,
     visibleMessages,
     isConversationMode,
@@ -731,7 +1030,7 @@ export function AppChatArea() {
     selectedSkills,
     selectedInputResources,
     htmlVisualPromptEnabled: executionMode === "cloud" && htmlVisualPrompt.enabled,
-    options: modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options,
+    options: effectiveOptions,
     draft,
     attachments,
     maxFilesPerMessage,
@@ -739,7 +1038,7 @@ export function AppChatArea() {
     restoreDraftOnFailure,
     autoGenerateLabels,
     prependNewConversation: prependNewConversationInContext,
-    onConversationCreated: setLocallyCreatedConversationID,
+    onConversationCreated,
     touchByPublicID,
     reload,
     replaceMessage,
@@ -1183,7 +1482,6 @@ export function AppChatArea() {
     resizeHandle.addEventListener("lostpointercapture", stopResize);
   }, [artifactWorkspace]);
 
-  const effectiveOptions = modelOptionPolicyDisabled ? EMPTY_CONVERSATION_OPTIONS : options;
   const selectedModelDefaultOptions = modelOptionPolicyDisabled
     ? EMPTY_CONVERSATION_OPTIONS
     : (selectedModel?.defaultOptions ?? EMPTY_CONVERSATION_OPTIONS);
@@ -1245,16 +1543,25 @@ export function AppChatArea() {
     ? devices.find((device) => device.deviceId === currentConversation.executionDeviceID) ?? null
     : defaultDevice;
   const gatewayReady = executionMode === "cloud" || Boolean(gatewayDevice?.online) &&
-    (Boolean(currentConversation) || Boolean(executionProjectID));
-  const gatewayStatus = executionMode !== "gateway"
-    ? ""
-    : !gatewayDevice
-      ? t("submit.deviceUnavailable")
-      : !gatewayDevice.online
-        ? t("submit.deviceOffline")
-        : !currentConversation && !executionProjectID
-          ? t("submit.projectRequired")
-          : "";
+    (Boolean(currentConversation) || Boolean(executionProjectID)) &&
+    Boolean(agentSettings) && !agentSettingsLoading && !agentSettingsError &&
+    !agentApprovalModeSelectionRequired;
+  let gatewayStatus = "";
+  if (executionMode === "gateway") {
+    if (!gatewayDevice) {
+      gatewayStatus = t("submit.deviceUnavailable");
+    } else if (!gatewayDevice.online) {
+      gatewayStatus = t("submit.deviceOffline");
+    } else if (!currentConversation && !executionProjectID) {
+      gatewayStatus = t("submit.projectRequired");
+    } else if (agentSettingsLoading) {
+      gatewayStatus = t("agent.settings.loading");
+    } else if (agentSettingsError || !agentSettings) {
+      gatewayStatus = agentSettingsError || t("agent.settings.unavailable");
+    } else if (agentApprovalModeSelectionRequired) {
+      gatewayStatus = t("agent.settings.errors.autoReviewUnavailable");
+    }
+  }
 
   const chatInputProps = {
     draft,
@@ -1263,6 +1570,7 @@ export function AppChatArea() {
     gatewayStatus,
     loading,
     sending: generating,
+    agentSettingsDisabled: executionMode === "gateway" && conversationRunActive,
     uploading,
     isConversationMode,
     maxFilesPerMessage,
@@ -1274,7 +1582,12 @@ export function AppChatArea() {
     modelOptions,
     requestProtocol: selectedChatProtocol,
     selectedKeyBindingID: chatKeyBindings.selectedKeyBindingID,
-    selectedPlatformModelName,
+    selectedPlatformModelName: cloudSelectedPlatformModelName,
+    agentModels,
+    agentSettings,
+    agentSettingsLoading,
+    agentSettingsError,
+    agentAutoReviewEnabled,
     availableTools: executionMode === "cloud" ? availableTools : [],
     inputResources: executionMode === "gateway" ? inputResources : undefined,
     selectedToolIDs: executionMode === "cloud" ? selectedToolIDs : [],
@@ -1292,6 +1605,7 @@ export function AppChatArea() {
     dropActive: fileDragActive,
     onDraftChange: setDraft,
     onModelChange: setSelectedPlatformModelName,
+    onAgentSettingsChange,
     onModelCatalogRefresh: refreshModelCatalogForComposer,
     onSelectedToolsChange,
     maxSelectedSkills: mcpMaxSelectedTools,

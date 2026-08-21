@@ -2,12 +2,75 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
+
+type steerConversationRepoStub struct {
+	repository.ConversationRepository
+	executionType string
+}
+
+func (s *steerConversationRepoStub) GetConversationExecutionByRunID(context.Context, uint, string) (*model.Conversation, error) {
+	return &model.Conversation{ExecutionType: s.executionType}, nil
+}
+
+type steerGatewayExecutorStub struct {
+	gatewayExecutor
+	steerCalls, startCalls, interruptCalls int
+	steerErr                               error
+	steerInput                             []byte
+}
+
+func (s *steerGatewayExecutorStub) SteerRun(_ context.Context, _ uint, _, _ string, input []byte) error {
+	s.steerCalls++
+	s.steerInput = append([]byte(nil), input...)
+	return s.steerErr
+}
+
+func (s *steerGatewayExecutorStub) StartTurn(context.Context, uint, GatewayStartTurnInput) error {
+	s.startCalls++
+	return nil
+}
+
+func (s *steerGatewayExecutorStub) InterruptRun(context.Context, uint, string, string) error {
+	s.interruptCalls++
+	return nil
+}
+
+func TestSteerConversationRunUsesOnlyActiveGatewaySteer(t *testing.T) {
+	gateway := &steerGatewayExecutorStub{}
+	service := &Service{
+		repo: &steerConversationRepoStub{executionType: model.ExecutionTypeGateway}, gatewayExecutor: gateway,
+	}
+	if err := service.SteerConversationRun(context.Background(), 7, "run_active", "change direction", "idem-1"); err != nil {
+		t.Fatal(err)
+	}
+	if gateway.steerCalls != 1 || gateway.startCalls != 0 || gateway.interruptCalls != 0 ||
+		string(gateway.steerInput) != `[{"kind":"text","text":"change direction"}]` {
+		t.Fatalf("gateway calls steer=%d start=%d interrupt=%d input=%s", gateway.steerCalls, gateway.startCalls, gateway.interruptCalls, gateway.steerInput)
+	}
+
+	nonGateway := &steerGatewayExecutorStub{}
+	cloudService := &Service{
+		repo: &steerConversationRepoStub{executionType: model.ExecutionTypeCloud}, gatewayExecutor: nonGateway,
+	}
+	if err := cloudService.SteerConversationRun(context.Background(), 7, "run_cloud", "guide", "idem-2"); !errors.Is(err, ErrExecutionConflict) || nonGateway.steerCalls != 0 {
+		t.Fatalf("non-Gateway steer error=%v calls=%d", err, nonGateway.steerCalls)
+	}
+
+	terminal := &steerGatewayExecutorStub{steerErr: ErrExecutionConflict}
+	terminalService := &Service{
+		repo: &steerConversationRepoStub{executionType: model.ExecutionTypeGateway}, gatewayExecutor: terminal,
+	}
+	if err := terminalService.SteerConversationRun(context.Background(), 7, "run_done", "guide", "idem-3"); !errors.Is(err, ErrExecutionConflict) || terminal.steerCalls != 1 {
+		t.Fatalf("terminal steer error=%v calls=%d", err, terminal.steerCalls)
+	}
+}
 
 type gatewayProjectionRepoStub struct {
 	repository.ConversationRepository
@@ -92,12 +155,23 @@ func TestAttachReasoningSummaryTrace(t *testing.T) {
 }
 
 func TestGatewayTurnSettingsRejectsUnknownOptions(t *testing.T) {
-	settings, err := gatewayTurnSettings(map[string]interface{}{"reasoningEffort": "high"})
-	if err != nil || string(settings) != `{"reasoningEffort":"high"}` {
+	valid := map[string]interface{}{
+		"reasoningEffort": "high", "approvalPolicy": "on-request",
+		"approvalsReviewer": "auto_review", "sandboxPolicy": "workspace-write",
+	}
+	settings, err := gatewayTurnSettings("gpt-5.6-codex", valid)
+	if err != nil || string(settings) != `{"approvalPolicy":"on-request","approvalsReviewer":"auto_review","model":"gpt-5.6-codex","reasoningEffort":"high","sandboxPolicy":"workspace-write"}` {
 		t.Fatalf("settings = %s, %v", settings, err)
 	}
-	if _, err := gatewayTurnSettings(map[string]interface{}{"temperature": 0.5}); err == nil {
-		t.Fatal("unknown gateway option was accepted")
+	for _, invalid := range []map[string]interface{}{
+		{"reasoningEffort": "high"},
+		{"reasoningEffort": "high", "approvalPolicy": "never", "approvalsReviewer": "auto_review", "sandboxPolicy": "workspace-write"},
+		{"reasoningEffort": "high", "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandboxPolicy": "danger-full-access"},
+		{"reasoningEffort": "high", "approvalPolicy": "on-request", "approvalsReviewer": "user", "temperature": 0.5},
+	} {
+		if _, err := gatewayTurnSettings("gpt-5.6-codex", invalid); err == nil {
+			t.Fatalf("invalid gateway settings accepted: %#v", invalid)
+		}
 	}
 }
 

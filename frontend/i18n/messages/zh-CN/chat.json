@@ -15,6 +15,101 @@
   "time": "时间",
   "tokens": "Token",
   "details": "详情",
+  "agent": {
+    "settings": {
+      "model": "模型",
+      "reasoning": "推理强度",
+      "approvalMode": "审批模式",
+      "loading": "正在加载 Agent 设置",
+      "unavailable": "Agent 设置不可用",
+      "efforts": {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "xhigh": "超高"
+      },
+      "modes": {
+        "request": "请求批准",
+        "auto": "帮我批准",
+        "full": "完全访问"
+      },
+      "fullAccessTitle": "允许完全访问？",
+      "fullAccessDescription": "Agent 可以在无需批准且不受工作区限制的情况下读取、修改文件和执行命令。",
+      "cancel": "取消",
+      "confirmFullAccess": "允许完全访问",
+      "errors": {
+        "unauthorized": "请重新登录后加载 Agent 设置。",
+        "profileUnavailable": "Agent 运行配置不可用。",
+        "capabilityUnavailable": "此 Agent 不支持所需的审批模式。",
+        "currentModelUnavailable": "此会话保存的模型在所选设备上不可用。",
+        "autoReviewUnavailable": "此会话已无法使用自动审批，请先选择其他审批模式。",
+        "modelsUnavailable": "Agent 模型目录不可用。"
+      }
+    },
+    "activity": {
+      "title": {
+        "running": "执行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "interrupted": "已中断"
+      },
+      "status": {
+        "running": "运行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "interrupted": "已中断",
+        "pending": "待处理",
+        "inProgress": "进行中"
+      },
+      "commandFallback": "命令",
+      "truncated": "内容已截断",
+      "exitCode": "退出码 {code}",
+      "fileChanges": "已更改 {count} 个文件",
+      "plan": "{count} 个步骤",
+      "diff": "文件差异",
+      "modelRerouted": "已切换到 {model}",
+      "tokenUsage": "线程用量",
+      "tokenSummary": "输入 {input} · 输出 {output} · 总计 {total}"
+    },
+    "interaction": {
+      "title": {
+        "command_approval": "命令审批",
+        "file_approval": "文件审批",
+        "user_input": "补充信息",
+        "permission": "权限请求",
+        "mcp_elicitation": "MCP 请求",
+        "dynamic_tool": "工具响应"
+      },
+      "status": {
+        "pending": "待处理",
+        "responding": "提交中",
+        "resolved": "已处理",
+        "failed": "提交失败"
+      },
+      "accept": "允许",
+      "decline": "拒绝",
+      "submit": "提交",
+      "success": "成功",
+      "failure": "失败",
+      "questionFallback": "请输入回答",
+      "answerPlaceholder": "回答",
+      "responsePlaceholder": "输入响应",
+      "imageUrlPlaceholder": "图片 URL",
+      "boolean": {
+        "true": "是",
+        "false": "否"
+      },
+      "responseFailed": "响应失败，请重试。",
+      "confirmTitle": "确认授予权限",
+      "confirmDescription": "此权限会作用于本次会话，请确认继续。",
+      "cancel": "取消",
+      "confirm": "确认允许",
+      "scope": {
+        "turn": "本轮",
+        "session": "本次会话"
+      }
+    }
+  },
   "greeting": {
     "morning": "上午好",
     "afternoon": "下午好",
@@ -265,6 +360,9 @@
     "processingAttachments": "正在处理附件…",
     "retrievingContent": "正在检索相关内容…",
     "retryLater": "请稍后重试。",
+    "steerFailed": "无法调整当前任务",
+    "steerTurnEnded": "当前任务已经结束，排队消息已保留。",
+    "steerTextOnly": "只有纯文本排队消息可以调整当前任务，该消息已保留。",
     "concurrentGenerationLimit": "最多同时进行 {count} 个生成任务，请等待当前生成完成。",
     "imagePreviewAlt": "生成图片预览",
     "mediaInputUnsupported": "当前输入无法使用所选模型",
@@ -397,6 +495,7 @@
     "queuedEmptyMessage": "空消息",
     "queuedEditPlaceholder": "编辑排队消息",
     "guideQueuedMessageTitle": "停止当前生成并发送这条排队消息",
+    "steerQueuedMessageTitle": "用这条排队消息调整当前任务",
     "editQueuedMessage": "编辑排队消息",
     "deleteQueuedMessage": "删除排队消息",
     "voiceInput": "语音输入",

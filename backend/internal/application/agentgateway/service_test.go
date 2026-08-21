@@ -107,7 +107,7 @@ func TestEnrollmentChallengeBindsPublicIdentityAndDevice(t *testing.T) {
 }
 
 func TestAgentWorkPayloadValidation(t *testing.T) {
-	validSettingsJSON := json.RawMessage(`{"model":"gpt-5.6","reasoningEffort":"high","approvalPolicy":"on-request","sandboxPolicy":"workspace-write"}`)
+	validSettingsJSON := json.RawMessage(`{"model":"gpt-5.6","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"auto_review","sandboxPolicy":"workspace-write"}`)
 	validInputJSON := json.RawMessage(`[{"kind":"text","text":"inspect the repository"},{"kind":"skill","resourceRef":"skill_0123456789abcdef0123456789abcdef"},{"kind":"app-mention","resourceRef":"app_0123456789abcdef0123456789abcdef"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`)
 	validResponseJSON := json.RawMessage(`{"kind":"approval","decision":"accept"}`)
 	if !validSettings(validSettingsJSON) || !validInput(validInputJSON) || !validInteractionResponse(validResponseJSON) {
@@ -140,6 +140,8 @@ func TestAgentWorkPayloadValidation(t *testing.T) {
 	invalidResponses := []json.RawMessage{
 		json.RawMessage(`{"kind":"approval","decision":"maybe"}`),
 		json.RawMessage(`{"kind":"permission","decision":"accept","scope":"device"}`),
+		json.RawMessage(`{"kind":"permission","decision":"accept","unexpected":true}`),
+		json.RawMessage(`{"kind":"mcp-elicitation","decision":"accept","content":{"nested":{"value":1}}}`),
 		json.RawMessage(`{"kind":"unknown"}`),
 	}
 	for _, value := range invalidResponses {
@@ -149,8 +151,24 @@ func TestAgentWorkPayloadValidation(t *testing.T) {
 	}
 }
 
+func TestMCPElicitationResponseAcceptsSchemaScalarsOnly(t *testing.T) {
+	valid := json.RawMessage(`{"kind":"mcp-elicitation","decision":"accept","content":{"name":"Ada","count":3,"ratio":0.5,"enabled":true}}`)
+	if !validInteractionResponse(valid) {
+		t.Fatal("MCP elicitation scalar content was rejected")
+	}
+	for _, invalid := range []json.RawMessage{
+		json.RawMessage(`{"kind":"mcp-elicitation","decision":"decline","content":{"name":"Ada"}}`),
+		json.RawMessage(`{"kind":"mcp-elicitation","decision":"accept","content":{"items":[1,2]}}`),
+		json.RawMessage(`{"kind":"mcp-elicitation","decision":"accept","content":{"value":null}}`),
+	} {
+		if validInteractionResponse(invalid) {
+			t.Fatalf("invalid MCP elicitation response accepted: %s", invalid)
+		}
+	}
+}
+
 func TestProviderManifestValidation(t *testing.T) {
-	valid := json.RawMessage(`{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update","thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`)
+	valid := json.RawMessage(`{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update","thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]},"interactionKinds":["command_approval"]}`)
 	if !validProviderManifest(valid, "codex") {
 		t.Fatal("valid provider manifest rejected")
 	}

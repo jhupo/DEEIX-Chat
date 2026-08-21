@@ -54,6 +54,7 @@ type gatewayExecutor interface {
 	DeleteThread(context.Context, uint, string, string) error
 	SetThreadArchived(context.Context, uint, string, bool, string) error
 	StartTurn(context.Context, uint, GatewayStartTurnInput) error
+	SteerRun(context.Context, uint, string, string, []byte) error
 	InterruptRun(context.Context, uint, string, string) error
 	ListInteractions(context.Context, uint, uint, string) ([]GatewayInteraction, error)
 	RespondInteraction(context.Context, uint, GatewayInteractionResponse) (*GatewayInteraction, error)

@@ -1,22 +1,9 @@
 "use client";
 
-import * as React from "react";
 import { ChevronDown, CircleAlert, Film } from "lucide-react";
 import { useTranslations } from "next-intl";
-
-import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
-import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
-import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
+import * as React from "react";
 import { GrainientBackground } from "@/components/reactbits/backgrounds/grainient";
-import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
-import type {
-  ChatAreaMessage,
-  ChatInlineAlert,
-  MessageAttachment,
-} from "@/features/chat/types/messages";
-import { MarkdownImage, type MarkdownArtifactActions } from "@/shared/components/markdown/streamdown-components";
-import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
-import { PreviewMedia } from "@/shared/components/file-preview/preview-media";
 import {
   Accordion,
   AccordionContent,
@@ -30,18 +17,32 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-import { isUpstreamStreamingDebugBody, summarizeUpstreamError } from "@/features/chat/utils/chat-runtime";
-import { fetchFileContent, type FileContentResult } from "@/shared/api/file";
-import type { PreviewDialogFile } from "@/shared/components/file-preview/preview-dialog";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { MessageAgentActivity } from "@/features/chat/components/message/message-agent-activity";
+import { MessageAgentInteraction } from "@/features/chat/components/message/message-agent-interaction";
+import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
+import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
+import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
+import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
 import {
   clearLiveUpstreamThinkTrace,
   mergeLiveUpstreamThinkTrace,
   useLiveUpstreamThinkTrace,
 } from "@/features/chat/model/upstream-think-store";
+import type {
+  ChatAreaMessage,
+  ChatInlineAlert,
+  MessageAttachment,
+} from "@/features/chat/types/messages";
+import { isUpstreamStreamingDebugBody, summarizeUpstreamError } from "@/features/chat/utils/chat-runtime";
+import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { cn } from "@/lib/utils";
+import { type FileContentResult, fetchFileContent } from "@/shared/api/file";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
+import type { PreviewDialogFile } from "@/shared/components/file-preview/preview-dialog";
+import { PreviewMedia } from "@/shared/components/file-preview/preview-media";
+import { type MarkdownArtifactActions, MarkdownImage } from "@/shared/components/markdown/streamdown-components";
+import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { useBranding } from "@/shared/config/branding-provider";
 
 const EMPTY_TRACE_EVENTS: NonNullable<ChatAreaMessage["processTrace"]>["events"] = [];
@@ -334,6 +335,8 @@ export function ChatMessageBot({
         messageStreaming={messageStreaming}
         autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
       />
+      <MessageAgentActivity runID={item.runID} />
+      <MessageAgentInteraction runID={item.runID} />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

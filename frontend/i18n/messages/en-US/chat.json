@@ -15,6 +15,101 @@
   "time": "Time",
   "tokens": "Tokens",
   "details": "Details",
+  "agent": {
+    "settings": {
+      "model": "Model",
+      "reasoning": "Reasoning effort",
+      "approvalMode": "Approval mode",
+      "loading": "Loading Agent settings",
+      "unavailable": "Agent settings are unavailable",
+      "efforts": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra high"
+      },
+      "modes": {
+        "request": "Ask for approval",
+        "auto": "Approve for me",
+        "full": "Full access"
+      },
+      "fullAccessTitle": "Allow full access?",
+      "fullAccessDescription": "The Agent can read, edit, and run commands without approval or workspace restrictions.",
+      "cancel": "Cancel",
+      "confirmFullAccess": "Allow full access",
+      "errors": {
+        "unauthorized": "Sign in again to load Agent settings.",
+        "profileUnavailable": "The Agent runtime profile is unavailable.",
+        "capabilityUnavailable": "This Agent does not support the required approval modes.",
+        "currentModelUnavailable": "The model saved for this conversation is not available on the selected device.",
+        "autoReviewUnavailable": "Automatic approval is no longer available for this conversation. Select another approval mode before continuing.",
+        "modelsUnavailable": "The Agent model catalog is unavailable."
+      }
+    },
+    "activity": {
+      "title": {
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "interrupted": "Interrupted"
+      },
+      "status": {
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "pending": "Pending",
+        "inProgress": "In progress"
+      },
+      "commandFallback": "Command",
+      "truncated": "Content truncated",
+      "exitCode": "Exit code {code}",
+      "fileChanges": "{count} files changed",
+      "plan": "{count} steps",
+      "diff": "File changes",
+      "modelRerouted": "Switched to {model}",
+      "tokenUsage": "Thread usage",
+      "tokenSummary": "Input {input} · output {output} · total {total}"
+    },
+    "interaction": {
+      "title": {
+        "command_approval": "Command approval",
+        "file_approval": "File approval",
+        "user_input": "More information",
+        "permission": "Permission request",
+        "mcp_elicitation": "MCP request",
+        "dynamic_tool": "Tool response"
+      },
+      "status": {
+        "pending": "Pending",
+        "responding": "Submitting",
+        "resolved": "Resolved",
+        "failed": "Submission failed"
+      },
+      "accept": "Allow",
+      "decline": "Decline",
+      "submit": "Submit",
+      "success": "Success",
+      "failure": "Failure",
+      "questionFallback": "Enter an answer",
+      "answerPlaceholder": "Answer",
+      "responsePlaceholder": "Enter a response",
+      "imageUrlPlaceholder": "Image URL",
+      "boolean": {
+        "true": "True",
+        "false": "False"
+      },
+      "responseFailed": "Response failed. Try again.",
+      "confirmTitle": "Grant this permission?",
+      "confirmDescription": "This permission applies to the current session. Confirm to continue.",
+      "cancel": "Cancel",
+      "confirm": "Allow",
+      "scope": {
+        "turn": "This turn",
+        "session": "This session"
+      }
+    }
+  },
   "greeting": {
     "morning": "Good morning",
     "afternoon": "Good afternoon",
@@ -265,6 +360,9 @@
     "processingAttachments": "Processing attachments...",
     "retrievingContent": "Retrieving relevant content...",
     "retryLater": "Please try again later.",
+    "steerFailed": "Could not adjust the active task",
+    "steerTurnEnded": "The active task has already ended. The queued message was kept.",
+    "steerTextOnly": "Only queued text can adjust an active task. The message was kept.",
     "concurrentGenerationLimit": "Up to {count} generations can run at once. Wait for an active generation to finish.",
     "imagePreviewAlt": "Generated image preview",
     "mediaInputUnsupported": "The selected model cannot process this input",
@@ -405,6 +503,7 @@
     "queuedEmptyMessage": "Empty message",
     "queuedEditPlaceholder": "Edit queued message",
     "guideQueuedMessageTitle": "Stop the current generation and send this queued message",
+    "steerQueuedMessageTitle": "Adjust the active task with this queued message",
     "editQueuedMessage": "Edit queued message",
     "deleteQueuedMessage": "Delete queued message",
     "voiceInput": "Voice input",

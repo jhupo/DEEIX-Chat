@@ -52,8 +52,13 @@ try {
   Write-Host "DEEIX Agent: configuring this device..."
   $installArgs = @("install", "--server", $Server, "--user", $User, "--name", $Name, "--codex", $Codex, "--data-dir", $dataDir)
   if ($Workspace) { $installArgs += @("--workspace", $Workspace) }
-  & $download @installArgs
-  if ($LASTEXITCODE -ne 0) { throw "DEEIX Agent configuration failed" }
+  $installOutput = ((& $download @installArgs 2>&1) | Out-String).Trim()
+  $installExitCode = $LASTEXITCODE
+  if ($installExitCode -ne 0) {
+    $detail = if ($installOutput) { $installOutput } else { "no diagnostic output was returned" }
+    throw "DEEIX Agent configuration failed: $detail"
+  }
+  if ($installOutput) { Write-Host $installOutput }
 
   $installedLiteral = $installed.Replace("'", "''")
   $downloadLiteral = $download.Replace("'", "''")

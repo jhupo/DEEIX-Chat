@@ -389,6 +389,40 @@ func (h *Handler) InterruptTurn(c *gin.Context) {
 	response.Success(c, CancelMessageGenerationResponse{Canceled: canceled})
 }
 
+// SteerTurn godoc
+// @Summary Adjust the active Gateway turn
+// @Description Sends guidance to the active Gateway turn without interrupting it or creating another run
+// @Tags chat
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param run_id path string true "Run ID"
+// @Param Idempotency-Key header string true "Idempotency key"
+// @Param body body SteerConversationRunRequest true "Turn guidance"
+// @Success 200 {object} response.SuccessDoc
+// @Failure 400,404,409 {object} ErrorDoc
+// @Router /conversation-runs/{run_id}/steer [post]
+func (h *Handler) SteerTurn(c *gin.Context) {
+	runID, err := stringParam(c, "run_id")
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "invalid run id")
+		return
+	}
+	var request SteerConversationRunRequest
+	if err = bindConversationJSON(c, &request, 1024*1024+1024); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	err = h.service.SteerConversationRun(
+		c.Request.Context(), middleware.MustUserID(c), runID, request.Content, c.GetHeader("Idempotency-Key"),
+	)
+	if err != nil {
+		handleSendMessageError(c, err)
+		return
+	}
+	response.Success(c, map[string]bool{"accepted": true})
+}
+
 // ResumeMessageGenerationStream godoc
 // @Summary 恢复流式生成订阅
 // @Description 页面刷新后按 run_id 重新订阅仍在运行的生成流，返回 NDJSON 事件
