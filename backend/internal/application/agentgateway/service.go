@@ -171,13 +171,14 @@ type RuntimeProfileView struct {
 }
 
 type WorkspaceView struct {
-	WorkspaceID string
-	DeviceID    string
-	ProfileID   string
-	Name        string
-	Managed     bool
-	Status      string
-	LastSeenAt  time.Time
+	WorkspaceID    string
+	DeviceID       string
+	ProfileID      string
+	Name           string
+	Managed        bool
+	Status         string
+	LastSeenAt     time.Time
+	LastActivityAt time.Time
 }
 
 type ArtifactView struct {
@@ -564,7 +565,7 @@ func (s *Service) ListWorkspaces(ctx context.Context, userID uint, devicePublicI
 	for _, item := range items {
 		result = append(result, WorkspaceView{
 			WorkspaceID: item.PublicID, DeviceID: devicePublicID, ProfileID: item.ProfilePublicID, Name: item.Name,
-			Managed: item.Managed, Status: item.Status, LastSeenAt: item.LastSeenAt,
+			Managed: item.Managed, Status: item.Status, LastSeenAt: item.LastSeenAt, LastActivityAt: item.LastActivityAt,
 		})
 	}
 	return result, nil

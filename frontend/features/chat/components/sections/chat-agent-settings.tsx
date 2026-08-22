@@ -84,30 +84,25 @@ function rememberFullAccessConfirmation(): void {
 }
 
 type ChatAgentSettingsProps = {
-  settings: AgentTurnSettings | null;
+  settings: AgentTurnSettings;
   autoReviewEnabled: boolean;
-  loading: boolean;
   disabled: boolean;
-  error?: string;
   onChange: (settings: AgentTurnSettings) => void;
 };
 
 export function ChatAgentSettings({
   settings,
   autoReviewEnabled,
-  loading,
   disabled,
-  error,
   onChange,
 }: ChatAgentSettingsProps) {
   const t = useTranslations("chat.agent.settings");
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = React.useState(false);
-  const selectedMode = settings ? approvalMode(settings) : "request";
-  const unavailable = disabled || loading || !settings || Boolean(error);
+  const selectedMode = approvalMode(settings);
   const ModeIcon = selectedMode === "full" ? ShieldOff : selectedMode === "auto" ? ShieldCheck : ShieldAlert;
 
   const selectMode = React.useCallback((value: string) => {
-    if (!settings || !["request", "auto", "full"].includes(value)) {
+    if (!["request", "auto", "full"].includes(value)) {
       return;
     }
     const mode = value as AgentApprovalMode;
@@ -125,51 +120,9 @@ export function ChatAgentSettings({
   }, [autoReviewEnabled, onChange, settings]);
 
   const confirmFullAccess = React.useCallback(() => {
-    if (!settings) {
-      return;
-    }
     rememberFullAccessConfirmation();
     onChange({ ...settings, ...FULL_ACCESS_SETTINGS });
   }, [onChange, settings]);
-
-  if (loading) {
-    return (
-      <InputGroupButton
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="size-7 rounded-md text-muted-foreground sm:size-8"
-        disabled
-        aria-label={t("loading")}
-      >
-        <ShieldAlert className="size-4 animate-pulse" strokeWidth={1.7} />
-      </InputGroupButton>
-    );
-  }
-
-  if (!settings || error) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">
-            <InputGroupButton
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="size-7 rounded-md text-destructive sm:size-8"
-              disabled
-              aria-label={error || t("unavailable")}
-            >
-              <ShieldAlert className="size-4" strokeWidth={1.7} />
-            </InputGroupButton>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-72 text-xs">
-          {error || t("unavailable")}
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
 
   return (
     <>
@@ -182,7 +135,7 @@ export function ChatAgentSettings({
                   variant="ghost"
                   size="sm"
                   className="h-7 rounded-md px-1.5 text-xs text-muted-foreground sm:h-8 sm:px-2"
-                  disabled={unavailable}
+                  disabled={disabled}
                   aria-label={t("approvalMode")}
                 >
                   <ModeIcon className="size-3.5" strokeWidth={1.7} />

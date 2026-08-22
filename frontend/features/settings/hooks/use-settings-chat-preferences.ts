@@ -10,7 +10,6 @@ type ChatPreferences = {
   autoGenerateTitle: boolean;
   autoGenerateLabels: boolean;
   deleteFilesByDefault: boolean;
-  reuseModelOptions: boolean;
 };
 
 type ChatPreferencesState = ChatPreferences & {
@@ -21,7 +20,6 @@ const DEFAULT_CHAT_PREFERENCES: ChatPreferences = {
   autoGenerateTitle: true,
   autoGenerateLabels: true,
   deleteFilesByDefault: false,
-  reuseModelOptions: true,
 };
 
 let cachedAccessToken: string | null = null;
@@ -34,7 +32,6 @@ function resolveChatPreferences(settings: Record<string, string>): ChatPreferenc
     autoGenerateTitle: settings["chat.auto_generate_title"] !== "false",
     autoGenerateLabels: settings["chat.auto_generate_labels"] !== "false",
     deleteFilesByDefault: settings["chat.delete_conversation_files_by_default"] === "true",
-    reuseModelOptions: settings["chat.reuse_model_options"] !== "false",
   };
 }
 

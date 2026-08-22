@@ -109,6 +109,11 @@ const PROJECT_TREE_ACCORDION_MASK_STYLE = {
 } satisfies React.CSSProperties;
 const PROJECTS_OPEN_STORAGE_KEY = "deeix.sidebar.projects.open";
 
+function activityTimestamp(value: string | null | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 type ProjectFolderIconHandle = {
   startAnimation: () => void;
   stopAnimation: () => void;
@@ -480,7 +485,28 @@ export function NavProjects() {
     successMessage: tRecent("exported"),
     failureMessage: tRecent("exportFailed"),
   });
-  const projectIDs = React.useMemo(() => projects.map((project) => project.publicID), [projects]);
+  const orderedProjects = React.useMemo(() => {
+    if (executionMode !== "gateway") {
+      return projects;
+    }
+    return [...projects].sort((left, right) => {
+      const leftConversationActivity = projectConversationState[left.publicID]?.items.reduce(
+        (latest, item) => Math.max(latest, activityTimestamp(item.updatedAt)),
+        0,
+      ) ?? 0;
+      const rightConversationActivity = projectConversationState[right.publicID]?.items.reduce(
+        (latest, item) => Math.max(latest, activityTimestamp(item.updatedAt)),
+        0,
+      ) ?? 0;
+      const activityDifference = Math.max(activityTimestamp(right.updatedAt), rightConversationActivity) -
+        Math.max(activityTimestamp(left.updatedAt), leftConversationActivity);
+      if (activityDifference !== 0) {
+        return activityDifference;
+      }
+      return left.name.localeCompare(right.name) || left.publicID.localeCompare(right.publicID);
+    });
+  }, [executionMode, projectConversationState, projects]);
+  const projectIDs = React.useMemo(() => orderedProjects.map((project) => project.publicID), [orderedProjects]);
   const projectSortSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -807,7 +833,7 @@ export function NavProjects() {
               >
                 <SortableContext items={projectIDs} strategy={verticalListSortingStrategy}>
                   <SidebarMenu className="gap-0.5">
-                    {projects.map((project) => {
+                    {orderedProjects.map((project) => {
                       const expanded = canExpandProjects && expandedProjectIDs.has(project.publicID);
                       const conversationState = canExpandProjects ? projectConversationState[project.publicID] : undefined;
                       const conversationLoading = expanded && (!conversationState || conversationState.loading);

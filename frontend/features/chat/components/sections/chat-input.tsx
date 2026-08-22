@@ -41,7 +41,6 @@ import { PlusIcon } from "@/components/ui/plus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatAgentSettings } from "@/features/chat/components/sections/chat-agent-settings";
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
-import { ChatModelConfig } from "@/features/chat/components/sections/chat-model-config";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
 import {
@@ -150,8 +149,6 @@ type ChatInputProps = {
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
   onHTMLVisualPromptChange: (enabled: boolean) => void;
   onOptionsChange: React.Dispatch<React.SetStateAction<ConversationOptions>>;
-  onOptionsReset: (defaults?: ConversationOptions) => void;
-  onOptionsDefaultRestore: () => Promise<ConversationOptions | null>;
   onAttachExistingFile: (file: FileObjectDTO) => void | Promise<void>;
   onUploadFiles: (files: File[]) => void | Promise<void>;
   onCaptureScreenshot: () => void | Promise<void>;
@@ -303,8 +300,6 @@ function ChatInputComponent({
   onDefaultToolsChange,
   onHTMLVisualPromptChange,
   onOptionsChange,
-  onOptionsReset,
-  onOptionsDefaultRestore,
   onAttachExistingFile,
   onUploadFiles,
   onCaptureScreenshot,
@@ -552,7 +547,6 @@ function ChatInputComponent({
   const isMediaMode = isMediaSubmitTask(submitTask);
   const composerModeIndicator = resolveComposerModeIndicator(submitDecision, tComposer);
   const ComposerModeIcon = composerModeIndicator?.icon;
-  const modelOptionPolicyDisabled = modelOptionPolicy?.mode?.trim() === "disabled";
   const showMCPToolsButton = availableTools.length > 0 && !isMediaMode;
   const showHTMLVisualPromptButton = executionMode === "cloud" && !isMediaMode;
   const hasComposerAttachments = attachments.length > 0 || uploadingAttachments.length > 0;
@@ -805,14 +799,6 @@ function ChatInputComponent({
         style={inputGroupHeight === null ? undefined : { height: inputGroupHeight }}
       >
         <div ref={inputGroupMeasureRef} className="flex w-full flex-col">
-          {executionMode === "gateway" && !gatewayReady && gatewayStatus ? (
-            <div
-              role="status"
-              className="px-5 pt-3 text-xs leading-5 text-muted-foreground"
-            >
-              {gatewayStatus}
-            </div>
-          ) : null}
           {showSelectedResources ? (
             <div className="flex w-full max-h-14 flex-wrap items-center justify-start gap-x-3 gap-y-1 overflow-y-auto px-5 pt-3">
               {selectedSkills.map((skill) => (
@@ -1110,32 +1096,12 @@ function ChatInputComponent({
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              {executionMode === "gateway" ? (
+              {executionMode === "gateway" && agentSettings ? (
                 <ChatAgentSettings
                   settings={agentSettings}
                   autoReviewEnabled={agentAutoReviewEnabled}
-                  loading={agentSettingsLoading}
                   disabled={agentSettingsDisabled || loading || uploading}
-                  error={agentSettingsError}
                   onChange={onAgentSettingsChange}
-                />
-              ) : null}
-
-              {executionMode === "cloud" && !modelOptionPolicyDisabled ? (
-                <ChatModelConfig
-                  disabled={loading || uploading || modelLoading}
-                  options={options}
-                  defaultOptions={defaultOptions}
-                  optionControls={selectedModel?.optionControls ?? []}
-                  lockedOptionPaths={selectedModel?.lockedOptionPaths ?? []}
-                  nativeToolKeys={selectedModel?.nativeToolKeys ?? []}
-                  nativeTools={selectedModel?.nativeTools ?? []}
-                  modelOptionPolicy={modelOptionPolicy}
-                  selectedProtocol={selectedProtocol}
-                  selectedModelName={selectedModelName}
-                  onOptionsChange={onOptionsChange}
-                  onOptionsReset={onOptionsReset}
-                  onDefaultOptionsRestore={onOptionsDefaultRestore}
                 />
               ) : null}
 

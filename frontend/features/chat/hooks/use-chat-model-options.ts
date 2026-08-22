@@ -400,21 +400,6 @@ export function useChatModelOptions({
     return catalog.models;
   }, [applyModelCatalog, loadModelCatalog]);
 
-  const refreshModelOption = React.useCallback(async (platformModelName: string): Promise<ChatModelOption | null> => {
-    const normalizedName = platformModelName.trim();
-    if (!normalizedName) {
-      return null;
-    }
-
-    const nextModels = await refreshModelCatalog();
-    const nextModel = nextModels.find(
-      (item) => item.platformModelName === normalizedName &&
-        parseKindsJSON(item.kindsJSON).includes("chat") &&
-        Boolean(resolveChatProtocol(groupPlatform ?? "", parseProtocolsJSON(item.protocolsJSON))),
-    );
-    return nextModel ? toChatModelOption(nextModel) : null;
-  }, [groupPlatform, refreshModelCatalog]);
-
   React.useEffect(() => {
     let cancelled = false;
 
@@ -583,7 +568,6 @@ export function useChatModelOptions({
   return {
     modelOptions,
     refreshModelCatalog,
-    refreshModelOption,
     modelsLoading,
     modelsErrorMsg,
     sendShortcut,

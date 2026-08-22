@@ -145,7 +145,7 @@ func (a localGatewayAdapter) ListProjects(ctx context.Context, userID uint, devi
 			ProfileID: item.ProfileID,
 			Name:      item.Name,
 			Managed:   item.Managed,
-			UpdatedAt: item.LastSeenAt,
+			UpdatedAt: item.LastActivityAt,
 		})
 	}
 	return projects, nil

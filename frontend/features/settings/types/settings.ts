@@ -20,7 +20,6 @@ export type ChatSettings = {
   contextCompactAuto: boolean;
   restoreDraftOnFailure: boolean;
   preserveConversationDrafts: boolean;
-  reuseModelOptions: boolean;
   reasoningContentPassback: boolean;
   inputHeight: ChatInputHeight;
   contentWidth: ChatContentWidth;

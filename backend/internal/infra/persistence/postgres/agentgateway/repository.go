@@ -2205,19 +2205,33 @@ func (r *Repo) ListRuntimeProfiles(ctx context.Context, userID uint, devicePubli
 func (r *Repo) ListWorkspaces(ctx context.Context, userID uint, devicePublicID string) ([]domainagent.Workspace, error) {
 	type row struct {
 		model.AgentWorkspace
-		ProfilePublicID string `gorm:"column:profile_public_id"`
+		ProfilePublicID string    `gorm:"column:profile_public_id"`
+		LastActivityAt  time.Time `gorm:"column:last_activity_at"`
 	}
 	var rows []row
+	lastActivitySQL := `COALESCE((
+		SELECT MAX(conversations.updated_at)
+		FROM chat_conversations AS conversations
+		WHERE conversations.user_id = workspaces.user_id
+			AND conversations.execution_type = 'gateway'
+			AND conversations.execution_device_id = devices.public_id
+			AND conversations.execution_workspace_id = workspaces.public_id
+			AND conversations.status <> 'archived'
+			AND conversations.deleted_at IS NULL
+	), workspaces.created_at)`
 	err := r.db.WithContext(ctx).Table("agent_workspaces AS workspaces").
-		Select("workspaces.*, profiles.public_id AS profile_public_id").
+		Select("workspaces.*, profiles.public_id AS profile_public_id, "+lastActivitySQL+" AS last_activity_at").
 		Joins("JOIN agent_devices AS devices ON devices.id = workspaces.device_id").
 		Joins("JOIN agent_runtime_profiles AS profiles ON profiles.id = workspaces.runtime_profile_id").
 		Where("workspaces.user_id = ? AND devices.public_id = ? AND workspaces.status = ? AND workspaces.hidden = ?", userID, devicePublicID, "available", false).
-		Order("workspaces.name ASC").Scan(&rows).Error
+		Order("last_activity_at DESC").
+		Order("workspaces.name ASC").
+		Order("workspaces.public_id ASC").Scan(&rows).Error
 	result := make([]domainagent.Workspace, 0, len(rows))
 	for _, row := range rows {
 		item := toDomainWorkspace(row.AgentWorkspace)
 		item.DevicePublicID, item.ProfilePublicID = devicePublicID, row.ProfilePublicID
+		item.LastActivityAt = row.LastActivityAt
 		result = append(result, *item)
 	}
 	return result, errFor(err)

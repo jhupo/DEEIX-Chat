@@ -86,6 +86,7 @@ type Workspace struct {
 	Hidden           bool
 	Status           string
 	LastSeenAt       time.Time
+	LastActivityAt   time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

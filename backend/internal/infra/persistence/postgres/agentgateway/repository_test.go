@@ -172,7 +172,7 @@ func TestRuntimeProofPersistsManifestSnapshot(t *testing.T) {
 
 func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 	database := testutil.Postgres(t)
-	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
+	if err := database.AutoMigrate(&model.Conversation{}, &model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
 		t.Fatalf("migrate workspace tables: %v", err)
 	}
 	now := time.Date(2026, 8, 15, 2, 0, 0, 0, time.UTC)
@@ -212,7 +212,7 @@ func TestEmptyWorkspaceSyncRemovesStaleProjects(t *testing.T) {
 
 func TestListWorkspacesHidesRecentRuntimeWorkspace(t *testing.T) {
 	database := testutil.Postgres(t)
-	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
+	if err := database.AutoMigrate(&model.Conversation{}, &model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
@@ -236,6 +236,50 @@ func TestListWorkspacesHidesRecentRuntimeWorkspace(t *testing.T) {
 	visible, err := repo.ListWorkspaces(context.Background(), 7, device.PublicID)
 	if err != nil || len(visible) != 1 || visible[0].PublicID != "workspace-project" {
 		t.Fatalf("visible workspaces = %#v, %v", visible, err)
+	}
+}
+
+func TestListWorkspacesOrdersByActiveConversationActivity(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.Conversation{}, &model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7, Name: "desktop", Platform: "windows", PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64), CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	lease := now.Add(time.Hour)
+	profile := model.AgentRuntimeProfile{PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &lease}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	olderWorkspace := model.AgentWorkspace{ControlPlaneModel: model.ControlPlaneModel{CreatedAt: now.Add(-4 * time.Hour), UpdatedAt: now}, PublicID: "workspace-a", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Name: "A project", Status: "available", LastSeenAt: now}
+	newerWorkspace := model.AgentWorkspace{ControlPlaneModel: model.ControlPlaneModel{CreatedAt: now.Add(-3 * time.Hour), UpdatedAt: now}, PublicID: "workspace-z", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Name: "Z project", Status: "available", LastSeenAt: now}
+	if err := database.Create(&olderWorkspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Create(&newerWorkspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversations := []model.Conversation{
+		{BaseModel: model.BaseModel{CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour)}, UserID: 7, PublicID: "conversation-older", Title: "Older", LabelsJSON: "[]", ExecutionType: "gateway", ExecutionDeviceID: device.PublicID, ExecutionWorkspaceID: olderWorkspace.PublicID, SessionKey: "session-older", Status: "active", ContextPolicy: "{}"},
+		{BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour)}, UserID: 7, PublicID: "conversation-newer", Title: "Newer", LabelsJSON: "[]", ExecutionType: "gateway", ExecutionDeviceID: device.PublicID, ExecutionWorkspaceID: newerWorkspace.PublicID, SessionKey: "session-newer", Status: "active", ContextPolicy: "{}"},
+		{BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now}, UserID: 7, PublicID: "conversation-archived", Title: "Archived", LabelsJSON: "[]", ExecutionType: "gateway", ExecutionDeviceID: device.PublicID, ExecutionWorkspaceID: olderWorkspace.PublicID, SessionKey: "session-archived", Status: "archived", ContextPolicy: "{}"},
+	}
+	if err := database.Create(&conversations).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := NewRepo(database).ListWorkspaces(context.Background(), 7, device.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].PublicID != newerWorkspace.PublicID || items[1].PublicID != olderWorkspace.PublicID {
+		t.Fatalf("workspace activity order = %#v", items)
+	}
+	if !items[0].LastActivityAt.Equal(now.Add(-time.Hour)) || !items[1].LastActivityAt.Equal(now.Add(-2*time.Hour)) {
+		t.Fatalf("workspace activity timestamps = %#v", items)
 	}
 }
 

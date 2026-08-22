@@ -76,7 +76,6 @@ import {
 import { resolveChatContentWidthClassName } from "@/shared/model/chat-content-width";
 import { resolveChatProtocol } from "@/shared/model/chat-protocol";
 
-const MODEL_OPTIONS_STORAGE_PREFIX = "deeix-chat:chat-model-options:";
 const AGENT_SETTINGS_STORAGE_PREFIX = "deeix-chat:agent-settings:v1:";
 const AGENT_MODELS_STALE_MS = 5 * 60 * 1000;
 const DEFAULT_MCP_TOOLS_SETTING_KEY = "chat.default_mcp_tool_ids";
@@ -89,10 +88,6 @@ function dragEventContainsFiles(event: React.DragEvent<HTMLElement>): boolean {
 
 function droppedFiles(event: React.DragEvent<HTMLElement>): File[] {
   return Array.from(event.dataTransfer.files ?? []).filter((file) => file.name.trim() || file.size > 0);
-}
-
-function modelOptionsStorageKey(platformModelName: string): string {
-  return `${MODEL_OPTIONS_STORAGE_PREFIX}${encodeURIComponent(platformModelName)}`;
 }
 
 function agentSettingsStorageKey(
@@ -141,44 +136,6 @@ function writeAgentSettings(storageKey: string, settings: AgentTurnSettings): vo
 
 function manifestSupportsAutoReview(manifest: AgentProviderManifestDTO): boolean {
   return manifest.threadSettings.approvalsReviewer?.includes("auto_review") === true;
-}
-
-function readCachedModelOptions(platformModelName: string): ConversationOptions | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    const raw = window.localStorage.getItem(modelOptionsStorageKey(platformModelName));
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    return isConversationOptionsObject(parsed) ? sanitizeConversationOptions(parsed) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedModelOptions(platformModelName: string, options: ConversationOptions): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem(modelOptionsStorageKey(platformModelName), JSON.stringify(sanitizeConversationOptions(options)));
-  } catch {
-    // localStorage may be unavailable in private browsing or strict environments.
-  }
-}
-
-function removeCachedModelOptions(platformModelName: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.removeItem(modelOptionsStorageKey(platformModelName));
-  } catch {
-    // localStorage may be unavailable in private browsing or strict environments.
-  }
 }
 
 function parseDefaultMCPToolIDs(raw: string | null | undefined): number[] {
@@ -282,8 +239,6 @@ export function AppChatArea() {
   const {
     autoGenerateLabels,
     deleteFilesByDefault,
-    loaded: chatPreferencesLoaded,
-    reuseModelOptions,
   } = useSettingsChatPreferences();
   const {
     items,
@@ -410,7 +365,6 @@ export function AppChatArea() {
   const {
     modelOptions,
     refreshModelCatalog,
-    refreshModelOption,
     modelsLoading,
     modelsErrorMsg,
     sendShortcut,
@@ -692,17 +646,20 @@ export function AppChatArea() {
       }
     })().catch((error: unknown) => {
       if (!cancelled) {
+        const message = error instanceof Error && error.message.trim()
+          ? error.message
+          : t("agent.settings.errors.modelsUnavailable");
         setAgentModels([]);
         setAgentSettings(null);
-        setAgentSettingsError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : t("agent.settings.errors.modelsUnavailable"),
-        );
+        setAgentSettingsError(message);
         setAgentAutoReviewEnabled(false);
         setAgentApprovalModeSelectionRequired(false);
         setAgentSettingsStorageScope("");
         setAgentSettingsProfileID("");
+        toast.error(t("agent.settings.unavailable"), {
+          id: `agent-settings-${inputResourceDeviceID}-${inputResourceWorkspaceID}`,
+          description: message,
+        });
       }
     }).finally(() => {
       if (!cancelled) {
@@ -842,16 +799,12 @@ export function AppChatArea() {
       setOptions({});
       return;
     }
-    if (!chatPreferencesLoaded) {
-      return;
-    }
     const nextDefaultOptions = cloneConversationOptions(selectedModel.defaultOptions);
     const previousDefaultOptions = selectedModelDefaultOptionsRef.current;
     if (initializedOptionsModelRef.current !== platformModelName) {
       initializedOptionsModelRef.current = platformModelName;
       selectedModelDefaultOptionsRef.current = nextDefaultOptions;
-      const cachedOptions = reuseModelOptions ? readCachedModelOptions(platformModelName) : null;
-      setOptions(cloneConversationOptions(cachedOptions ?? nextDefaultOptions));
+      setOptions(nextDefaultOptions);
       return;
     }
     selectedModelDefaultOptionsRef.current = nextDefaultOptions;
@@ -863,43 +816,19 @@ export function AppChatArea() {
       if (JSON.stringify(currentOptions) !== previousDefaultOptionsJSON) {
         return currentOptions;
       }
-      removeCachedModelOptions(platformModelName);
       return cloneConversationOptions(nextDefaultOptions);
     });
-  }, [chatPreferencesLoaded, reuseModelOptions, selectedModel]);
+  }, [selectedModel]);
 
   const setModelOptions = React.useCallback(
     (action: React.SetStateAction<ConversationOptions>) => {
       setOptions((previous) => {
         const next = typeof action === "function" ? action(previous) : action;
-        const normalized = isConversationOptionsObject(next) ? sanitizeConversationOptions(next) : {};
-        const platformModelName = selectedModel?.platformModelName.trim() || "";
-        if (platformModelName) {
-          writeCachedModelOptions(platformModelName, normalized);
-        }
-        return normalized;
+        return isConversationOptionsObject(next) ? sanitizeConversationOptions(next) : {};
       });
     },
-    [selectedModel?.platformModelName],
+    [],
   );
-
-  const resetModelOptions = React.useCallback((defaults?: ConversationOptions) => {
-    const platformModelName = selectedModel?.platformModelName.trim() || "";
-    const nextDefaults = cloneConversationOptions(defaults ?? selectedModel?.defaultOptions ?? {});
-    if (platformModelName) {
-      removeCachedModelOptions(platformModelName);
-    }
-    setOptions(nextDefaults);
-  }, [selectedModel]);
-
-  const restoreBackendDefaultModelOptions = React.useCallback(async () => {
-    const platformModelName = selectedModel?.platformModelName.trim() || cloudSelectedPlatformModelName.trim();
-    if (!platformModelName) {
-      return null;
-    }
-    const refreshedModel = await refreshModelOption(platformModelName);
-    return refreshedModel ? cloneConversationOptions(refreshedModel.defaultOptions) : null;
-  }, [cloudSelectedPlatformModelName, refreshModelOption, selectedModel?.platformModelName]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -1614,8 +1543,6 @@ export function AppChatArea() {
     onDefaultToolsChange: onDefaultToolIDsChange,
     onHTMLVisualPromptChange: htmlVisualPrompt.setEnabled,
     onOptionsChange: setModelOptions,
-    onOptionsReset: resetModelOptions,
-    onOptionsDefaultRestore: restoreBackendDefaultModelOptions,
     onAttachExistingFile,
     onUploadFiles,
     onCaptureScreenshot,
