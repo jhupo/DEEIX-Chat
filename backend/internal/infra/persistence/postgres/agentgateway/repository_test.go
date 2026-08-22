@@ -577,6 +577,16 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Create(&workspace).Error; err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	conversation := model.Conversation{
+		BaseModel: model.BaseModel{ID: 41}, UserID: 7,
+		PublicID: "conversation-agent-work", Title: "Agent work", Status: "active",
+		ExecutionType: "gateway", ExecutionDeviceID: device.PublicID,
+		ExecutionProfileID: profile.PublicID, ExecutionWorkspaceID: workspace.PublicID,
+		SessionKey: "agent-work-conversation-41",
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
 	imageFile := model.FileObject{
 		FileID: "file_0123456789abcdef0123456789abcdef", UserID: 7, Purpose: "agent_input",
 		FileName: "fixture.png", MimeType: "image/png", DetectedMIME: "image/png",
