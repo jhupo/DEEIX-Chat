@@ -759,7 +759,7 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 			return repository.ErrConflict
 		}
 		var workspace model.AgentWorkspace
-		if err := tx.Where("id = ? AND user_id = ? AND device_id = ? AND managed = ?", *command.WorkspaceID, command.UserID, device.ID, true).
+		if err := tx.Where("id = ? AND user_id = ? AND device_id = ?", *command.WorkspaceID, command.UserID, device.ID).
 			First(&workspace).Error; err != nil {
 			return err
 		}
@@ -776,7 +776,7 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 			strings.TrimSpace(outcome.Result.Name) != strings.TrimSpace(payload.Name) {
 			return repository.ErrConflict
 		}
-		return tx.Model(&workspace).Updates(map[string]any{"name": strings.TrimSpace(payload.Name), "updated_at": now}).Error
+		return tx.Model(&workspace).Updates(map[string]any{"name": strings.TrimSpace(payload.Name), "managed": true, "updated_at": now}).Error
 	}
 	if outcome.Result.Kind == "accepted" && command.ThreadID != nil {
 		switch command.Kind {
@@ -966,9 +966,12 @@ type workspaceSession struct {
 	Preview         string                    `json:"preview"`
 	Name            string                    `json:"name"`
 	ModelProvider   string                    `json:"modelProvider"`
+	Model           string                    `json:"model"`
+	ReasoningEffort string                    `json:"reasoningEffort"`
 	Status          string                    `json:"status"`
 	CreatedAt       int64                     `json:"createdAt"`
 	UpdatedAt       int64                     `json:"updatedAt"`
+	RecencyAt       int64                     `json:"recencyAt"`
 	HistoryLoaded   bool                      `json:"historyLoaded"`
 	Messages        []workspaceSessionMessage `json:"messages"`
 }
@@ -1023,13 +1026,13 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 		}
 		title = truncateRunes(title, 255)
 		createdAt := validSessionTime(session.CreatedAt, now)
-		updatedAt := validSessionTime(session.UpdatedAt, now)
+		updatedAt := workspaceSessionActivityTime(session, now)
 		if updatedAt.Before(createdAt) {
 			updatedAt = createdAt
 		}
 		conversation := model.Conversation{
 			UserID: device.UserID, PublicID: newChatPublicID(), Title: title, LabelsJSON: "[]",
-			Provider: profile.Provider, ExecutionType: "gateway", ExecutionDeviceID: device.PublicID,
+			Model: session.Model, ReasoningEffort: session.ReasoningEffort, Provider: profile.Provider, ExecutionType: "gateway", ExecutionDeviceID: device.PublicID,
 			ExecutionProfileID: profile.PublicID, ExecutionWorkspaceID: workspace.PublicID,
 			SessionKey: uuid.NewString(), MessageCount: len(session.Messages), Status: session.Status, ContextPolicy: "{}",
 			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: updatedAt},
@@ -1065,7 +1068,8 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, command *mode
 
 func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
-		len(session.Messages) > maxWorkspaceSessionMessages || len(session.Name) > 1024 || len(session.Preview) > 4096 {
+		len(session.Messages) > maxWorkspaceSessionMessages || len(session.Name) > 1024 || len(session.Preview) > 4096 ||
+		len(session.Model) > 128 || len(session.ReasoningEffort) > 32 {
 		return false
 	}
 	if requireStatus && session.Status != "active" && session.Status != "archived" {
@@ -1112,8 +1116,12 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if title := strings.TrimSpace(session.Name); title != "" {
 		conversationUpdates["title"] = truncateRunes(title, 255)
 	}
-	if updatedAt := validSessionTime(session.UpdatedAt, now); updatedAt.After(conversation.UpdatedAt) {
+	if updatedAt := workspaceSessionActivityTime(session, conversation.UpdatedAt); updatedAt.After(conversation.UpdatedAt) {
 		conversationUpdates["updated_at"] = updatedAt
+	}
+	if session.HistoryLoaded {
+		conversationUpdates["model"] = strings.TrimSpace(session.Model)
+		conversationUpdates["reasoning_effort"] = strings.TrimSpace(session.ReasoningEffort)
 	}
 	if len(conversationUpdates) > 0 {
 		if err := tx.Model(&conversation).Updates(conversationUpdates).Error; err != nil {
@@ -1195,7 +1203,10 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "history_version": historyProjectionVersion, "updated_at": now}).Error; err != nil {
 		return err
 	}
-	updates := map[string]any{"message_count": len(session.Messages), "updated_at": validSessionTime(session.UpdatedAt, now)}
+	updates := map[string]any{
+		"message_count": len(session.Messages), "updated_at": workspaceSessionActivityTime(session, conversation.UpdatedAt),
+		"model": strings.TrimSpace(session.Model), "reasoning_effort": strings.TrimSpace(session.ReasoningEffort),
+	}
 	if title := strings.TrimSpace(session.Name); title != "" {
 		updates["title"] = truncateRunes(title, 255)
 	}
@@ -1257,6 +1268,18 @@ func validSessionTime(seconds int64, fallback time.Time) time.Time {
 		return fallback
 	}
 	return value
+}
+
+func workspaceSessionActivityTime(session workspaceSession, fallback time.Time) time.Time {
+	updatedAt := validSessionTime(session.UpdatedAt, fallback)
+	if session.RecencyAt <= 0 {
+		return updatedAt
+	}
+	recencyAt := validSessionTime(session.RecencyAt, updatedAt)
+	if recencyAt.After(updatedAt) {
+		return recencyAt
+	}
+	return updatedAt
 }
 
 func enqueueInitialTurn(tx *gorm.DB, device *model.AgentDevice, thread *model.AgentThread, createCommand *model.AgentCommand, now time.Time) error {
@@ -2621,7 +2644,7 @@ func (r *Repo) QueueWorkspaceMutation(
 			return err
 		}
 		var workspaceLookup model.AgentWorkspace
-		if err := tx.Where("user_id = ? AND device_id = ? AND public_id = ? AND status = ? AND managed = ?", userID, device.ID, workspacePublicID, "available", true).
+		if err := tx.Where("user_id = ? AND device_id = ? AND public_id = ? AND status = ?", userID, device.ID, workspacePublicID, "available").
 			First(&workspaceLookup).Error; err != nil {
 			return err
 		}
@@ -2633,7 +2656,7 @@ func (r *Repo) QueueWorkspaceMutation(
 		}
 		var workspace model.AgentWorkspace
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND user_id = ? AND device_id = ? AND runtime_profile_id = ? AND status = ? AND managed = ?", workspaceLookup.ID, userID, device.ID, profile.ID, "available", true).
+			Where("id = ? AND user_id = ? AND device_id = ? AND runtime_profile_id = ? AND status = ?", workspaceLookup.ID, userID, device.ID, profile.ID, "available").
 			First(&workspace).Error; err != nil {
 			return err
 		}
@@ -2890,6 +2913,29 @@ func (r *Repo) QueueThreadLifecycle(
 	return toDomainCommand(created), nil
 }
 
+func updateGatewayConversationSettings(tx *gorm.DB, userID, conversationID uint, provider string, raw json.RawMessage) error {
+	var settings struct {
+		Model           string `json:"model"`
+		ReasoningEffort string `json:"reasoningEffort"`
+	}
+	if json.Unmarshal(raw, &settings) != nil || len(settings.Model) > 128 || len(settings.ReasoningEffort) > 32 {
+		return repository.ErrInvalidInput
+	}
+	result := tx.Model(&model.Conversation{}).
+		Where("id = ? AND user_id = ? AND execution_type = ?", conversationID, userID, "gateway").
+		Updates(map[string]any{
+			"model": strings.TrimSpace(settings.Model), "reasoning_effort": strings.TrimSpace(settings.ReasoningEffort),
+			"provider": strings.TrimSpace(provider),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return repository.ErrConflict
+	}
+	return nil
+}
+
 func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash string, input *domainagent.Thread, initialTurn *domainagent.Turn, command *domainagent.Command, now time.Time) (*domainagent.Thread, *domainagent.Turn, error) {
 	var thread model.AgentThread
 	var turn *model.AgentTurn
@@ -2937,6 +2983,9 @@ func (r *Repo) StartThread(ctx context.Context, idempotencyKey, requestHash stri
 			return repository.ErrConflict
 		}
 		if err := tx.Where("user_id = ? AND device_id = ? AND runtime_profile_id = ? AND public_id = ? AND status = ?", input.UserID, device.ID, profile.ID, target.WorkspaceID, "available").First(&workspace).Error; err != nil {
+			return err
+		}
+		if err := updateGatewayConversationSettings(tx, input.UserID, input.ConversationID, profile.Provider, target.Settings); err != nil {
 			return err
 		}
 		if initialTurn != nil {
@@ -3235,6 +3284,9 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 			return err
 		}
 		if err := validateCommandArtifacts(tx, input.UserID, workspace.ID, input.InputJSON); err != nil {
+			return err
+		}
+		if err := updateGatewayConversationSettings(tx, input.UserID, thread.ConversationID, profile.Provider, json.RawMessage(input.SettingsJSON)); err != nil {
 			return err
 		}
 		turn = model.AgentTurn{PublicID: input.PublicID, UserID: input.UserID, ThreadID: thread.ID, RunID: input.RunID, Status: input.Status, InputJSON: input.InputJSON, SettingsJSON: input.SettingsJSON}

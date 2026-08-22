@@ -21,7 +21,7 @@
 
 | 数据 | 权威来源 | DEEIX 用途 |
 | --- | --- | --- |
-| 活动/归档、标题、预览、`cwd`、详情与消息 | app-server `thread/list` / `thread/read` | Conversation 目录与历史 |
+| 活动/归档、标题、预览、`cwd`、详情、消息与模型设置 | app-server `thread/list` / `thread/resume` | Conversation 目录、历史、模型与推理等级 |
 | Desktop 项目名称和根目录 | `.codex-global-state.json` 的 `local-projects` | Agent 同步可见 Workspace |
 | Desktop 项目顺序/置顶 | Desktop 状态中的 `project-order`、`pinned-project-ids` | 仅属于 Desktop UI 元数据；当前不作为运行时 Workspace 排序依据 |
 | 项目会话范围 | `local-projects.rootPaths` 与 app-server `thread/list` 的 cwd 过滤 | thread 进入一个项目 |
@@ -43,11 +43,11 @@ Agent 为每个可见 Desktop 项目同步一个普通 Workspace。另为 projec
 
 Web 添加的本地文件夹使用同一个 Workspace 投影，但额外标记为 `managed`：
 
-- 只有 `managed` Workspace 在工作项目菜单中显示“重命名”和“从 DEEIX 移除”；Desktop 自动发现的项目保持只读，避免建立第二套 Desktop 项目元数据。
+- 所有当前可见 Workspace 都显示“重命名”和“从 DEEIX 移除”；自动发现项目第一次执行操作时才在设备端写入管理或排除记录。
 - 重命名只修改 DEEIX/Agent 配置中的显示名称，不修改本地目录名或路径。
 - 移除会在 Agent 配置中保存排除记录，再把 Cloud 投影标为不可用；本地目录、文件及 Codex 历史不做删除。
 - 排除记录阻止 Desktop 状态或历史扫描在下一次刷新时立即把同一路径重新加入。用户后续从 Web 再次添加该目录时，登记命令会恢复它。
-- rename/unregister 都通过 Bridge 持久命令执行并等待终态；服务端在入队和终态投影时校验用户、设备、Profile、Workspace、`managed` 标志及 manifest capability。
+- rename/unregister 都通过 Bridge 持久命令执行并等待终态；服务端在入队和终态投影时校验用户、设备、Profile、Workspace 及 manifest capability。移除只隐藏 DEEIX 投影，本地目录与历史文件保持不变。
 
 本机 provider thread ID 与 thread `cwd` 只保存在 Agent 内存/WAL source 映射中。Web 继续执行 projectless thread 时，Adapter 使用该 thread 的真实 `cwd` 调用 `thread/resume` 和 `turn/start`，不会把 Recent 根目录错误地当作所有 thread 的工作目录。
 

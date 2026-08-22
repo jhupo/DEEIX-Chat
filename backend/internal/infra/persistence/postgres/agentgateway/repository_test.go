@@ -760,13 +760,13 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || coalescedResource.PublicID != queued.PublicID {
 		t.Fatalf("unfinished resource refresh was duplicated: %#v %v", coalescedResource, err)
 	}
-	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"historyLoaded":false}]}}}`
+	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"historyLoaded":false}]}}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, 4, resourceCommand.PublicID, strings.Repeat("9", 64), resourceTerminal, now.Add(8*time.Second)); err != nil || ack != 6 {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
 	}
 	snapshot, err := repo.GetResourceSnapshot(context.Background(), 7, device.PublicID, "", workspace.PublicID, "sessions")
 	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID ||
-		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"historyLoaded":false}]}`) {
+		!jsonEqual(snapshot.DataJSON, `{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"historyLoaded":false}]}`) {
 		t.Fatalf("resource snapshot mismatch: %#v %v", snapshot, err)
 	}
 	var importedConversation model.Conversation
@@ -792,7 +792,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Where("public_id = ?", historyCommand.PublicID).First(&storedHistoryCommand).Error; err != nil {
 		t.Fatal(err)
 	}
-	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
@@ -800,6 +800,11 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
 		importedMessages[1].ParentMessageID == nil || *importedMessages[1].ParentMessageID != importedMessages[0].ID {
 		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
+	}
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil ||
+		importedConversation.Model != "gpt-test" || importedConversation.ReasoningEffort != "high" ||
+		importedConversation.UpdatedAt.Unix() != 1786615360 {
+		t.Fatalf("imported settings or recency mismatch: %#v %v", importedConversation, err)
 	}
 	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"historyLoaded":false}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
@@ -1026,7 +1031,7 @@ func TestQueueAgentUpdateRequiresCapabilityAndCoalesces(t *testing.T) {
 	}
 }
 
-func TestQueueWorkspaceMutationRequiresManagedWorkspaceAndCapability(t *testing.T) {
+func TestQueueWorkspaceMutationSupportsDiscoveredWorkspaceAndRequiresCapability(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentCommand{}, &model.AgentIdempotencyRecord{},
@@ -1058,22 +1063,20 @@ func TestQueueWorkspaceMutationRequiresManagedWorkspaceAndCapability(t *testing.
 		t.Fatal(err)
 	}
 	repo := NewRepo(database)
-	if _, err := repo.QueueWorkspaceMutation(
+	firstQueued, err := repo.QueueWorkspaceMutation(
 		context.Background(), "71234567-89ab-4def-8123-456789abcdef", strings.Repeat("7", 64), 7,
 		device.PublicID, workspace.PublicID, "workspace.rename", "renamed",
 		&domainagent.Command{PublicID: "agcmd_7123456789abcdef0123456789abcdef", Kind: "workspace.rename"}, now,
-	); err == nil {
-		t.Fatal("unmanaged Workspace mutation was queued")
-	}
-	if err := database.Model(&workspace).Update("managed", true).Error; err != nil {
-		t.Fatal(err)
+	)
+	if err != nil || firstQueued.ServerSeq != 1 {
+		t.Fatalf("queue discovered Workspace rename: %#v %v", firstQueued, err)
 	}
 	queued, err := repo.QueueWorkspaceMutation(
 		context.Background(), "81234567-89ab-4def-8123-456789abcdef", strings.Repeat("8", 64), 7,
 		device.PublicID, workspace.PublicID, "workspace.rename", "renamed",
 		&domainagent.Command{PublicID: "agcmd_8123456789abcdef0123456789abcdef", Kind: "workspace.rename"}, now,
 	)
-	if err != nil || queued.ServerSeq != 1 || !strings.Contains(queued.PayloadJSON, `"name":"renamed"`) {
+	if err != nil || queued.ServerSeq != 2 || !strings.Contains(queued.PayloadJSON, `"name":"renamed"`) {
 		t.Fatalf("queue Workspace rename: %#v %v", queued, err)
 	}
 	if err = database.Model(&profile).Update("manifest_json", `{"commands":["workspace.rename"]}`).Error; err != nil {

@@ -490,22 +490,13 @@ export function NavProjects() {
       return projects;
     }
     return [...projects].sort((left, right) => {
-      const leftConversationActivity = projectConversationState[left.publicID]?.items.reduce(
-        (latest, item) => Math.max(latest, activityTimestamp(item.updatedAt)),
-        0,
-      ) ?? 0;
-      const rightConversationActivity = projectConversationState[right.publicID]?.items.reduce(
-        (latest, item) => Math.max(latest, activityTimestamp(item.updatedAt)),
-        0,
-      ) ?? 0;
-      const activityDifference = Math.max(activityTimestamp(right.updatedAt), rightConversationActivity) -
-        Math.max(activityTimestamp(left.updatedAt), leftConversationActivity);
+      const activityDifference = activityTimestamp(right.updatedAt) - activityTimestamp(left.updatedAt);
       if (activityDifference !== 0) {
         return activityDifference;
       }
       return left.name.localeCompare(right.name) || left.publicID.localeCompare(right.publicID);
     });
-  }, [executionMode, projectConversationState, projects]);
+  }, [executionMode, projects]);
   const projectIDs = React.useMemo(() => orderedProjects.map((project) => project.publicID), [orderedProjects]);
   const projectSortSensors = useSensors(
     useSensor(PointerSensor, {
@@ -848,7 +839,7 @@ export function NavProjects() {
                       const menuHovered = hoveredProjectMenuID === project.publicID;
                       const menuOpen = openProjectMenuID === project.publicID;
                       const rowDragging = draggingProjectID === project.publicID;
-                      const canManageCurrentProject = canManageProjects || (executionMode === "gateway" && project.managed);
+                      const canManageCurrentProject = canManageProjects || executionMode === "gateway";
                       const canSortProjects = canManageProjects && projects.length >= 2;
                       const projectActionPaddingClassName = canManageCurrentProject
                         ? canSortProjects ? "pr-24" : "pr-16"

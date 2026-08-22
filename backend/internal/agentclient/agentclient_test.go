@@ -520,17 +520,17 @@ func TestRegisterWorkspacePersistsAndRejectsAgentData(t *testing.T) {
 	}
 }
 
-func TestManagedWorkspaceRenameAndRemovalKeepLocalDirectory(t *testing.T) {
+func TestDiscoveredWorkspaceRenameAndRemovalKeepLocalDirectory(t *testing.T) {
 	dataDir := repositoryTestDir(t)
 	root := repositoryTestDir(t)
 	workspace := Workspace{
 		WorkspaceID: "workspace-0123456789abcdef01234567",
-		Root:        root, Name: "original", Registered: true,
+		Root:        root, Name: "original",
 	}
 	config := Config{
 		Version: 1, CloudURL: "https://example.com", UserPublicID: "0123456789abcdef0123456789abcdef",
 		DeviceID: "agd_0123456789abcdef0123456789abcdef", ProfileID: "codex-default", CodexExecutable: os.Args[0],
-		Workspaces: []Workspace{workspace},
+		Workspaces: []Workspace{},
 	}
 	configPath := filepath.Join(dataDir, "config.json")
 	if err := SaveConfig(configPath, config); err != nil {
@@ -1422,6 +1422,9 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if session["historyLoaded"] != true || len(messages) != 2 {
 		t.Fatalf("thread detail did not project messages: %#v", session)
 	}
+	if session["model"] != "gpt-test" || session["reasoningEffort"] != "high" {
+		t.Fatalf("thread detail did not preserve settings: %#v", session)
+	}
 }
 
 func TestReadCodexAPIKeyRejectsInvalidCredential(t *testing.T) {
@@ -1538,8 +1541,8 @@ func runFakeAppServer() {
 					map[string]any{"id": "thread-missing-cwd"},
 				}, "nextCursor": "next"}
 			}
-		case "thread/read":
-			result = map[string]any{"thread": map[string]any{
+		case "thread/resume":
+			result = map[string]any{"model": "gpt-test", "reasoningEffort": "high", "thread": map[string]any{
 				"id": "thread-1", "name": "First thread", "preview": "first",
 				"turns": []any{map[string]any{"startedAt": 1, "completedAt": 2, "items": []any{
 					map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}}},

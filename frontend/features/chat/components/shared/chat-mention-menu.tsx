@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { Box, Check, Plug } from "lucide-react";
+import { Box, Check, Plug, SlidersHorizontal } from "lucide-react";
 
 import type {
   ChatMentionMenuItem,
@@ -36,6 +36,10 @@ function ChatMentionMenuItemButton({
       {item.kind === "plugin" ? (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
           <Plug className="size-3.5" strokeWidth={1.7} />
+        </span>
+      ) : item.kind === "command" ? (
+        <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">
+          <SlidersHorizontal className="size-3.5" strokeWidth={1.7} />
         </span>
       ) : (
         <span className="flex size-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground">

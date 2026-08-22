@@ -504,6 +504,7 @@
     "tool": "Tool {id}",
     "mention": {
       "sections": {
+        "command": "Model capabilities",
         "plugin": "Plugins",
         "skill": "Skills"
       }

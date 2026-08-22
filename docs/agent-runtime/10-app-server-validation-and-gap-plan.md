@@ -73,7 +73,7 @@ deeix-agent doctor
 | `mcp` | `mcpServerStatus/list` | 真实进程通过 |
 | `plugins` | `plugin/list` | 真实进程通过；官方仍标为 under development |
 | `auth-status` | `account/read` | 真实进程通过；只投影模式和是否需要认证 |
-| `sessions` | 分页 `thread/list` 摘要 + 按需 `thread/read` | 真实进程通过；目录与消息历史可恢复 |
+| `sessions` | 分页 `thread/list` 摘要 + 按需 `thread/resume` | 真实进程通过；目录、消息历史、模型与推理等级可恢复 |
 | `skills` | `skills/list` | 真实进程通过 |
 | `hooks` | `hooks/list` | 真实进程通过 |
 
@@ -111,8 +111,8 @@ deeix-agent doctor
 | 用户能力 | app-server/Bridge | Web 当前状态 | 结论 |
 | --- | --- | --- | --- |
 | 新建本地会话 | `thread/start` 已映射并通过真实进程测试 | Web 在设备 Workspace 中创建 gateway conversation，首次发送输入时创建并绑定本地 thread | 已接通；空白 Web 会话在首次输入后才产生 app-server thread |
-| 读取本地项目与会话历史 | 读取 Desktop `local-projects.rootPaths`、`projectless-thread-ids` 和 root hints；app-server `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 和旧版未分类的 `unknown` 顶层会话，项目按 root/assignment 过滤，Recent 按 projectless ID 精确过滤；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/read(includeTurns:true)` | 所选设备连接后自动刷新目录；项目会话只显示在所属项目，projectless 会话只显示在“最近”；Conversation history API 按需加载 user/assistant/reasoning 消息，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；Desktop 状态只在设备端读取，历史仍以 app-server 为权威；不混入明确的 `subAgent*` 子线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
-| 管理工作项目 | `0.147.0` 稳定锁没有 `project/*`；官方 `main` 已出现实验 `project/list|read|create|import|update|move|delete` | 项目内 Conversation 支持置顶、改名、归档和删除；Web 添加的 managed Workspace 支持改显示名和从 DEEIX 移除，Desktop 自动发现项目保持只读 | 已接通 Workspace 控制面；移除只写排除记录并下线投影，本地目录、文件和历史保留。待正式 `project/*` release 后再评估 Desktop 项目写操作 |
+| 读取本地项目与会话历史 | 读取 Desktop `local-projects.rootPaths`、`projectless-thread-ids` 和 root hints；app-server `thread/list` 显式读取 `cli`、`vscode`、`exec`、`appServer` 和旧版未分类的 `unknown` 顶层会话，项目按 root/assignment 过滤，Recent 按 projectless ID 精确过滤；活动与归档目录消费 opaque cursor 读取摘要，打开会话时才调用 `thread/resume` | 所选设备连接后自动刷新目录；项目会话只显示在所属项目，projectless 会话只显示在“最近”；Conversation history API 按需加载 user/assistant/reasoning 消息和会话模型设置，同一 turn 的多个 `agentMessage` 项合并成一条助手消息 | 已接通；Desktop 状态只在设备端读取，历史仍以 app-server 为权威；不混入明确的 `subAgent*` 子线程，设备间隔离，每个 Workspace 最多投影 500 个活动会话和 500 个归档会话 |
+| 管理工作项目 | `0.147.0` 稳定锁没有 `project/*`；官方 `main` 已出现实验 `project/list|read|create|import|update|move|delete` | 项目内 Conversation 支持置顶、改名、归档和删除；所有可见 Workspace 支持改显示名和从 DEEIX 移除 | 已接通 Workspace 控制面；自动发现项目首次操作时在设备端写入管理或排除记录，移除只下线投影，本地目录、文件和历史保留。待正式 `project/*` release 后再评估 Desktop 项目写操作 |
 | 从 Web 继续本地会话 | `thread/resume` + `turn/start` 已映射并实测 | Conversation 通过持久化 `sourceThreadRef` 找回同一 provider thread | 已接通；支持文本、已授权附件、Workspace Skill 与 App mention |
 | 输入队列 | app-server 以同一 thread 的连续 turn 表示顺序输入；活动 turn 可用 `turn/steer` | Web 已有排队、编辑、删除和优先发送 UI，但队列只在 React 内存中 | 普通聊天已有临时队列；刷新会丢失，本地 gateway 尚未形成正确闭环 |
 | 调整方向 | `turn/steer` 已映射并通过真实活动 turn 测试 | 当前“调整方向”会中断当前生成，再把选中项作为下一轮发送 | UI 语义与 app-server 不一致，需直接接入 `turn/steer` |

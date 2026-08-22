@@ -12916,6 +12916,7 @@ const docTemplate = `{
                 "projectName",
                 "provider",
                 "publicID",
+                "reasoningEffort",
                 "sessionKey",
                 "shareID",
                 "shareStatus",
@@ -12987,6 +12988,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "publicID": {
+                    "type": "string"
+                },
+                "reasoningEffort": {
                     "type": "string"
                 },
                 "sessionKey": {
@@ -20593,7 +20597,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.74",
+	Version:          "0.4.79",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

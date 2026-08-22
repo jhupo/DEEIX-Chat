@@ -44,6 +44,7 @@ import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
 import {
+  type ChatMentionCommand,
   type ChatMentionMenuKind,
   useChatMentionMenu,
 } from "@/features/chat/hooks/use-chat-mention-menu";
@@ -504,6 +505,33 @@ function ChatInputComponent({
     }
     onOptionsChange((current) => setChatModelReasoningEffort(current, cloudReasoningSetting.path, value));
   }, [agentSettings, cloudReasoningSetting, executionMode, onAgentSettingsChange, onOptionsChange, selectedAgentModel]);
+  const agentSlashCommands = React.useMemo<ChatMentionCommand[]>(() => {
+    if (executionMode !== "gateway" || !agentSettings) {
+      return [];
+    }
+    const modelCommands = agentModels.map((model) => ({
+      id: `model:${model.id}`,
+      label: `${tChat("agent.settings.model")} · ${model.displayName}`,
+      description: model.description,
+      selected: model.id === agentSettings.model,
+    }));
+    const reasoningCommands = (selectedAgentModel?.supportedReasoningEfforts ?? []).map((effort) => ({
+      id: `reasoning:${effort}`,
+      label: `${tChat("agent.settings.reasoning")} · ${tChat(`agent.settings.efforts.${effort}`)}`,
+      description: effort,
+      selected: effort === agentSettings.reasoningEffort,
+    }));
+    return [...modelCommands, ...reasoningCommands];
+  }, [agentModels, agentSettings, executionMode, selectedAgentModel, tChat]);
+  const selectAgentSlashCommand = React.useCallback((commandID: string) => {
+    if (commandID.startsWith("model:")) {
+      changePickerModel(commandID.slice("model:".length));
+      return;
+    }
+    if (commandID.startsWith("reasoning:")) {
+      changePickerReasoning(commandID.slice("reasoning:".length));
+    }
+  }, [changePickerModel, changePickerReasoning]);
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const submitDecision = resolveChatSubmitDecision(
     selectedModel,
@@ -567,6 +595,7 @@ function ChatInputComponent({
     select: selectMentionItem,
   } = useChatMentionMenu({
     availableTools,
+    commands: agentSlashCommands,
     inputResources,
     disabled: loading || uploading || modelLoading || modelDisabled,
     draft,
@@ -579,6 +608,7 @@ function ChatInputComponent({
     textareaRef,
     toolsDisabled: isMediaMode,
     onDraftChange,
+    onCommandSelect: selectAgentSlashCommand,
     onSelectedSkillsChange,
     onSelectedInputResourcesChange,
     placementAnchor: "container",

@@ -22,6 +22,7 @@ type ConversationResponse struct {
 	Title                string     `json:"title"`
 	LabelsJSON           string     `json:"labelsJSON"`
 	Model                string     `json:"model"`
+	ReasoningEffort      string     `json:"reasoningEffort"`
 	Provider             string     `json:"provider"`
 	ExecutionType        string     `json:"executionType" enums:"cloud,gateway"`
 	ExecutionDeviceID    string     `json:"executionDeviceID"`
@@ -136,6 +137,7 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 		Title:                item.Title,
 		LabelsJSON:           labelsJSON,
 		Model:                item.Model,
+		ReasoningEffort:      item.ReasoningEffort,
 		Provider:             item.Provider,
 		ExecutionType:        item.ExecutionType,
 		ExecutionDeviceID:    item.ExecutionDeviceID,

@@ -496,6 +496,7 @@
     "tool": "工具 {id}",
     "mention": {
       "sections": {
+        "command": "模型能力",
         "plugin": "插件",
         "skill": "技能"
       }

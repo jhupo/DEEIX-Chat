@@ -744,10 +744,11 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 	case "thread.compact":
 		err = adapter.rpc.Request(ctx, "thread/compact/start", map[string]any{"threadId": providerThreadID}, nil)
 	case "thread.read":
-		detail, requestErr := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": providerThreadID, "includeTurns": true})
+		detail, requestErr := adapter.requestMap(ctx, "thread/resume", map[string]any{"threadId": providerThreadID, "cwd": cwd})
 		if requestErr != nil {
 			return nil, requestErr
 		}
+		adapter.setActive(providerThreadID, true)
 		session, requestErr := adapter.projectSessionDetail(detail, providerThreadID)
 		if requestErr != nil {
 			return nil, requestErr
@@ -1072,6 +1073,8 @@ func (adapter *CodexAdapter) projectSessionDetail(detail map[string]any, provide
 		"createdAt":       thread["createdAt"],
 		"updatedAt":       thread["updatedAt"],
 		"recencyAt":       thread["recencyAt"],
+		"model":           sessionText(detail["model"], 128),
+		"reasoningEffort": sessionText(detail["reasoningEffort"], 32),
 		"historyLoaded":   true,
 		"messages":        projectSessionMessages(detail),
 	}, nil

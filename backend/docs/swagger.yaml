@@ -1519,6 +1519,8 @@ definitions:
         type: string
       publicID:
         type: string
+      reasoningEffort:
+        type: string
       sessionKey:
         type: string
       shareID:
@@ -1560,6 +1562,7 @@ definitions:
     - projectName
     - provider
     - publicID
+    - reasoningEffort
     - sessionKey
     - shareID
     - shareStatus
@@ -6870,7 +6873,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.74"
+  version: "0.4.79"
 paths:
   /admin/announcements:
     get:

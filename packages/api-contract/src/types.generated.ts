@@ -658,6 +658,7 @@ export interface ConversationResponse {
   projectName: string;
   provider: string;
   publicID: string;
+  reasoningEffort: string;
   sessionKey: string;
   shareID: string;
   shareStatus: string;

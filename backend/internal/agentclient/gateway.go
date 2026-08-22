@@ -835,6 +835,9 @@ func (gateway *Gateway) mutateWorkspace(command AgentCommand) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
+	gateway.workspaceMu.RLock()
+	discovered, discoveredExists := gateway.workspaces[command.WorkspaceID]
+	gateway.workspaceMu.RUnlock()
 	index := -1
 	for currentIndex := range persisted.Workspaces {
 		current := persisted.Workspaces[currentIndex]
@@ -844,7 +847,16 @@ func (gateway *Gateway) mutateWorkspace(command AgentCommand) (map[string]any, e
 		}
 	}
 	if index < 0 {
-		return nil, errors.New("workspace is not managed by DEEIX")
+		if !discoveredExists || discovered.Excluded || strings.TrimSpace(discovered.Root) == "" {
+			return nil, errors.New("workspace is not available on this device")
+		}
+		if len(persisted.Workspaces) >= 128 {
+			return nil, errors.New("workspace limit reached")
+		}
+		discovered.Registered = true
+		discovered.Excluded = false
+		persisted.Workspaces = append(persisted.Workspaces, discovered)
+		index = len(persisted.Workspaces) - 1
 	}
 	workspace := persisted.Workspaces[index]
 	if command.Kind == "workspace.unregister" && workspace.Excluded {
@@ -891,7 +903,7 @@ func (gateway *Gateway) mutateWorkspace(command AgentCommand) (map[string]any, e
 	sort.Slice(registered, func(i, j int) bool { return registered[i].Name < registered[j].Name })
 	gateway.config = persisted
 	gateway.workspaces = visible
-	gateway.adapter.replaceWorkspaces(persisted.Workspaces)
+	gateway.adapter.replaceWorkspaces(registered)
 	gateway.workspaceMu.Unlock()
 	gateway.signalWorkspaceUpdate(registered)
 

@@ -619,10 +619,17 @@ export function AppChatArea() {
           persisted.approvalPolicy === "never" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "danger-full-access"
         ),
       );
-      const reasoningEffort = persisted?.model === selectedModel.id &&
-        selectedModel.supportedReasoningEfforts.includes(persisted.reasoningEffort)
-        ? persisted.reasoningEffort
-        : selectedModel.defaultReasoningEffort;
+      const conversationReasoningEffort = currentConversation?.executionType === "gateway"
+        ? currentConversation.reasoningEffort
+        : "";
+      const storedConversationReasoningEffort = selectedModel.supportedReasoningEfforts.find(
+        (effort) => effort === conversationReasoningEffort,
+      );
+      const reasoningEffort = storedConversationReasoningEffort
+        ? storedConversationReasoningEffort
+        : persisted?.model === selectedModel.id && selectedModel.supportedReasoningEfforts.includes(persisted.reasoningEffort)
+          ? persisted.reasoningEffort
+          : selectedModel.defaultReasoningEffort;
       const nextSettings: AgentTurnSettings = {
         model: selectedModel.id,
         reasoningEffort,
@@ -674,6 +681,7 @@ export function AppChatArea() {
     currentConversation?.publicID,
     currentConversation?.executionType,
     currentConversation?.model,
+    currentConversation?.reasoningEffort,
     executionMode,
     inputResourceDeviceID,
     inputResourceDeviceOnline,

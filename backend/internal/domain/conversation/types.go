@@ -22,6 +22,7 @@ type Conversation struct {
 	LabelsJSON            string
 	LabelsManuallyManaged bool
 	Model                 string
+	ReasoningEffort       string
 	Provider              string
 	ExecutionType         string
 	ExecutionDeviceID     string
