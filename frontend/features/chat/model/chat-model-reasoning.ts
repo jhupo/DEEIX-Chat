@@ -35,21 +35,31 @@ export function resolveChatModelReasoningSetting({
   defaultOptions,
   optionControls,
   lockedOptionPaths,
+  isPathAvailable = () => true,
 }: {
   options: ConversationOptions;
   defaultOptions: ConversationOptions;
   optionControls: ModelOptionControl[];
   lockedOptionPaths: string[];
+  isPathAvailable?: (path: string) => boolean;
 }): ChatModelReasoningSetting | null {
-  const control = optionControls.find((item) => Object.hasOwn(REASONING_OPTION_VALUES, item.path));
+  const control = optionControls.find(
+    (item) => Object.hasOwn(REASONING_OPTION_VALUES, item.path) && isPathAvailable(item.path),
+  );
   const path = control?.path ?? Object.keys(REASONING_OPTION_VALUES).find(
-    (candidate) => optionAtPath(options, candidate) !== undefined || optionAtPath(defaultOptions, candidate) !== undefined,
+    (candidate) =>
+      isPathAvailable(candidate) &&
+      (optionAtPath(options, candidate) !== undefined || optionAtPath(defaultOptions, candidate) !== undefined),
   );
   if (!path) {
     return null;
   }
 
-  const rawValue = optionAtPath(options, path) ?? optionAtPath(defaultOptions, path);
+  const locked = control?.locked === true || lockedOptionPaths.includes(path);
+  const defaultValue = optionAtPath(defaultOptions, path);
+  const rawValue = locked && defaultValue !== undefined
+    ? defaultValue
+    : optionAtPath(options, path) ?? defaultValue;
   const value = typeof rawValue === "string" ? rawValue.trim() : "";
   const configuredOptions = control?.options?.map((item) => item.trim()).filter(Boolean) ?? [];
   const supportedOptions = configuredOptions.length > 0 ? configuredOptions : REASONING_OPTION_VALUES[path];
@@ -62,7 +72,7 @@ export function resolveChatModelReasoningSetting({
     path,
     value,
     options: normalizedOptions,
-    disabled: control?.locked === true || lockedOptionPaths.includes(path),
+    disabled: locked,
   };
 }
 

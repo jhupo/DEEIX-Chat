@@ -464,13 +464,10 @@ function ChatInputComponent({
       defaultOptions,
       optionControls: selectedModel.optionControls,
       lockedOptionPaths: selectedModel.lockedOptionPaths,
+      isPathAvailable: (path) =>
+        !modelOptionPolicy ||
+        !isModelOptionPathFiltered({ policy: modelOptionPolicy, protocol: selectedProtocol, path }),
     });
-    if (
-      setting && modelOptionPolicy &&
-      isModelOptionPathFiltered({ policy: modelOptionPolicy, protocol: selectedProtocol, path: setting.path })
-    ) {
-      return null;
-    }
     return setting;
   }, [defaultOptions, modelOptionPolicy, options, selectedModel, selectedProtocol]);
   const changePickerModel = React.useCallback((modelID: string) => {

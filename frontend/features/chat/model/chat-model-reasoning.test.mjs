@@ -25,3 +25,34 @@ test("resolves and updates a nested reasoning effort", () => {
     { temperature: 0.2, reasoning: { effort: "low" } },
   );
 });
+
+test("uses the locked default instead of a stale user value", () => {
+  const setting = resolveChatModelReasoningSetting({
+    options: { reasoning: { effort: "low" } },
+    defaultOptions: { reasoning: { effort: "high" } },
+    optionControls: [{ path: "reasoning.effort", type: "select", options: ["low", "high"] }],
+    lockedOptionPaths: ["reasoning.effort"],
+  });
+
+  assert.equal(setting?.value, "high");
+  assert.equal(setting?.disabled, true);
+});
+
+test("selects a reasoning path allowed by the active protocol", () => {
+  const setting = resolveChatModelReasoningSetting({
+    options: {
+      reasoning: { effort: "high" },
+      reasoning_effort: "medium",
+    },
+    defaultOptions: {},
+    optionControls: [
+      { path: "reasoning.effort", type: "select" },
+      { path: "reasoning_effort", type: "select" },
+    ],
+    lockedOptionPaths: [],
+    isPathAvailable: (path) => path === "reasoning_effort",
+  });
+
+  assert.equal(setting?.path, "reasoning_effort");
+  assert.equal(setting?.value, "medium");
+});
