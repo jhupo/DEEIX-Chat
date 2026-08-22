@@ -26,7 +26,7 @@ import (
 )
 
 const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
-const minimumCodexVersion = "0.147.0"
+const minimumCodexVersion = "0.142.0"
 const maxCodexDesktopStateBytes = 4 << 20
 
 const codexUpgradeInstructions = "Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh"

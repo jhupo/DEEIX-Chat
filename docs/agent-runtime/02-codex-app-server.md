@@ -8,7 +8,11 @@
 
 The native `deeix-agent` launches the user-installed `codex app-server` with stdio JSONL. The provider protocol is JSON-RPC 2.0 without a header; each line is one object. WebSocket and Unix transports exist upstream, but the Agent uses stdio because it binds process lifecycle locally and keeps app-server off the network. Upstream WebSocket transport is not the DEEIX transport.
 
-The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-07). Its reproducible authority is [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions. Adapter startup follows this procedure:
+The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-07). Its reproducible authority is [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions.
+
+The runtime accepts official Codex CLI `0.142.0` or newer. The lower bound is based on generated stable schemas and a real-process probe for the mapped methods, including `thread/list` with `sortKey: "recency_at"`; the reviewed protocol schema remains pinned to `0.147.0`.
+
+Adapter startup follows this procedure:
 
 1. Keep the stable lock as the reviewed protocol evidence and update the native method registry with it.
 2. Run the native Agent tests and build all three target executables.

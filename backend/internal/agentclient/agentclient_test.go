@@ -53,21 +53,22 @@ func TestResolveCodexEnforcesMinimumVersionBeforeAppServer(t *testing.T) {
 	}{
 		{name: "minimum version", version: minimumCodexVersion, wantAccept: true},
 		{
-			name: "older version", version: "0.120.0",
+			name: "immediately older version", version: "0.141.0",
 			wantError: []string{
-				"Codex CLI is too old", "detected 0.120.0", "requires 0.147.0 or newer",
+				"Codex CLI is too old", "detected 0.141.0", "requires 0.142.0 or newer",
 				"powershell -ExecutionPolicy ByPass", "https://chatgpt.com/codex/install.ps1",
 				"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
 			},
 		},
 		{
-			name: "minimum prerelease", version: "0.147.0-rc.1",
-			wantError: []string{"Codex CLI is too old", "detected 0.147.0-rc.1", "requires 0.147.0 or newer"},
+			name: "minimum prerelease", version: "0.142.0-rc.1",
+			wantError: []string{"Codex CLI is too old", "detected 0.142.0-rc.1", "requires 0.142.0 or newer"},
 		},
-		{name: "newer patch", version: "0.147.1", wantAccept: true},
-		{name: "newer prerelease", version: "0.148.0-alpha.1", wantAccept: true},
-		{name: "newer minor", version: "0.148.0", wantAccept: true},
-		{name: "invalid semver", version: "0.147.0-alpha..1", wantError: []string{"version \"0.147.0-alpha..1\" is invalid"}},
+		{name: "newer patch", version: "0.142.1", wantAccept: true},
+		{name: "supported installed version", version: "0.144.6", wantAccept: true},
+		{name: "newer prerelease", version: "0.143.0-alpha.1", wantAccept: true},
+		{name: "newer minor", version: "0.143.0", wantAccept: true},
+		{name: "invalid semver", version: "0.142.0-alpha..1", wantError: []string{"version \"0.142.0-alpha..1\" is invalid"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

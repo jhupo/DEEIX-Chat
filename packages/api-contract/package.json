@@ -1,6 +1,6 @@
 {
   "name": "@deeix/api-contract",
-  "version": "0.4.74",
+  "version": "0.4.75",
   "private": true,
   "type": "module",
   "types": "./src/index.ts",
