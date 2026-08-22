@@ -110,19 +110,30 @@ func (store *StateStore) Receive(serverSeq uint64, commandID string, command jso
 	if err != nil {
 		return commandRecord{}, false, errors.New("gateway command JSON is invalid")
 	}
+	if err := validateArtifactGrants(artifacts); err != nil {
+		return commandRecord{}, false, err
+	}
 	if current, ok := store.state.Commands[commandID]; ok {
 		if current.ServerSeq != serverSeq || current.Hash != hashText {
 			return commandRecord{}, false, errors.New("gateway command identity was reused")
+		}
+		if !reflect.DeepEqual(current.Artifacts, artifacts) {
+			refreshed, refreshErr := refreshArtifactGrants(current.Artifacts, artifacts)
+			if refreshErr != nil {
+				return commandRecord{}, false, refreshErr
+			}
+			previous := cloneDurableState(store.state)
+			current.Artifacts = refreshed
+			store.state.Commands[commandID] = current
+			if err := store.persistLocked(); err != nil {
+				store.state = previous
+				return commandRecord{}, false, err
+			}
 		}
 		return cloneCommandRecord(current), false, nil
 	}
 	if serverSeq != store.state.AckServerSeq+1 {
 		return commandRecord{}, false, fmt.Errorf("gateway command sequence gap: got %d after %d", serverSeq, store.state.AckServerSeq)
-	}
-	for _, artifact := range artifacts {
-		if err := validateArtifactGrant(artifact); err != nil {
-			return commandRecord{}, false, err
-		}
 	}
 	previous := cloneDurableState(store.state)
 	record := commandRecord{ServerSeq: serverSeq, Hash: hashText, Command: append(json.RawMessage(nil), command...), Artifacts: append([]ArtifactGrant(nil), artifacts...), State: "received"}
@@ -133,6 +144,38 @@ func (store *StateStore) Receive(serverSeq uint64, commandID string, command jso
 		return commandRecord{}, false, err
 	}
 	return cloneCommandRecord(record), true, nil
+}
+
+func refreshArtifactGrants(current, next []ArtifactGrant) ([]ArtifactGrant, error) {
+	if len(current) != len(next) {
+		return nil, errors.New("gateway command artifact identity changed")
+	}
+	currentByRef := make(map[string]ArtifactGrant, len(current))
+	for _, grant := range current {
+		currentByRef[grant.ArtifactRef] = grant
+	}
+	for _, grant := range next {
+		previous, ok := currentByRef[grant.ArtifactRef]
+		if !ok || previous.FileName != grant.FileName || previous.MimeType != grant.MimeType ||
+			previous.SizeBytes != grant.SizeBytes || previous.SHA256 != grant.SHA256 {
+			return nil, errors.New("gateway command artifact identity changed")
+		}
+	}
+	return append([]ArtifactGrant(nil), next...), nil
+}
+
+func validateArtifactGrants(grants []ArtifactGrant) error {
+	seen := make(map[string]struct{}, len(grants))
+	for _, grant := range grants {
+		if err := validateArtifactGrant(grant); err != nil {
+			return err
+		}
+		if _, exists := seen[grant.ArtifactRef]; exists {
+			return errors.New("artifact grant is duplicated")
+		}
+		seen[grant.ArtifactRef] = struct{}{}
+	}
+	return nil
 }
 
 func (store *StateStore) MarkStarted(commandID string) error {
@@ -384,10 +427,8 @@ func (store *StateStore) validateLocked() error {
 		if err != nil || record.Hash != hash {
 			return errors.New("agent command state checksum is invalid")
 		}
-		for _, artifact := range record.Artifacts {
-			if err := validateArtifactGrant(artifact); err != nil {
-				return errors.New("agent command artifact state is invalid")
-			}
+		if err := validateArtifactGrants(record.Artifacts); err != nil {
+			return errors.New("agent command artifact state is invalid")
 		}
 	}
 	for _, mapping := range store.state.Sources {

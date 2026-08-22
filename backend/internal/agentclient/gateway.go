@@ -34,6 +34,8 @@ type RuntimeStatus struct {
 	LastError    string `json:"lastError,omitempty"`
 }
 
+const artifactStagingTimeout = 35 * time.Second
+
 type Gateway struct {
 	ctx              context.Context
 	config           Config
@@ -482,15 +484,26 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 				if parseErr != nil || command.DeviceID != gateway.config.DeviceID {
 					return errors.New("gateway command payload is invalid")
 				}
+				if err = validateArtifactGrants(*frame.Artifacts); err != nil {
+					return err
+				}
+				if len(*frame.Artifacts) > 0 {
+					stageCtx, stageCancel := context.WithTimeout(ctx, artifactStagingTimeout)
+					_, stageErr := gateway.downloadCommandArtifacts(stageCtx, frame.CommandID, command, *frame.Artifacts)
+					stageCancel()
+					if stageErr != nil {
+						return fmt.Errorf("stage command artifacts: %w", stageErr)
+					}
+				}
 				record, created, receiveErr := gateway.state.Receive(frame.ServerSeq, frame.CommandID, frame.Command, *frame.Artifacts)
 				if receiveErr != nil {
 					return receiveErr
 				}
-				if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ack.server", AckServerSeq: frame.ServerSeq}); err != nil {
-					return err
-				}
 				if created {
 					gateway.enqueue(frame.CommandID, record, concurrentCommand(command.Kind))
+				}
+				if err = writer.send(bridgeFrame{Version: bridgeVersion, Type: "ack.server", AckServerSeq: frame.ServerSeq}); err != nil {
+					return err
 				}
 			default:
 				return fmt.Errorf("unsupported gateway frame: %s", frame.Type)
@@ -642,18 +655,7 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 	var result map[string]any
 	updatePrepared := false
 	if err == nil {
-		gateway.workspaceMu.RLock()
-		registeredWorkspaces := make(map[string]Workspace, len(gateway.workspaces))
-		for id, workspace := range gateway.workspaces {
-			registeredWorkspaces[id] = workspace
-		}
-		gateway.workspaceMu.RUnlock()
-		var artifacts map[string]LocalArtifact
-		downloadErr := runAsConfiguredUser(func() error {
-			var artifactErr error
-			artifacts, artifactErr = gateway.cloud.DownloadArtifacts(ctx, item.ID, command, item.Record.Artifacts, registeredWorkspaces)
-			return artifactErr
-		})
+		artifacts, downloadErr := gateway.downloadCommandArtifacts(ctx, item.ID, command, item.Record.Artifacts)
 		if downloadErr != nil {
 			err = downloadErr
 		} else if command.Kind == "agent.update" {
@@ -688,6 +690,22 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 		gateway.updateBridgeSeq.Store(outgoing.BridgeSeq)
 	}
 	gateway.signalWake()
+}
+
+func (gateway *Gateway) downloadCommandArtifacts(ctx context.Context, commandID string, command AgentCommand, grants []ArtifactGrant) (map[string]LocalArtifact, error) {
+	gateway.workspaceMu.RLock()
+	registeredWorkspaces := make(map[string]Workspace, len(gateway.workspaces))
+	for id, workspace := range gateway.workspaces {
+		registeredWorkspaces[id] = workspace
+	}
+	gateway.workspaceMu.RUnlock()
+	var artifacts map[string]LocalArtifact
+	err := runAsConfiguredUser(func() error {
+		var downloadErr error
+		artifacts, downloadErr = gateway.cloud.DownloadArtifacts(ctx, commandID, command, grants, registeredWorkspaces)
+		return downloadErr
+	})
+	return artifacts, err
 }
 
 func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any, error) {

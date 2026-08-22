@@ -137,6 +137,72 @@ func TestGatewayProjectionTruncatesLongTerminalError(t *testing.T) {
 	}
 }
 
+func TestReconcileOrphanGatewayTurnsOnlyFailsUndispatchedRuns(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.AgentTurn{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(db)
+	now := time.Now().UTC()
+	conversation := model.Conversation{
+		UserID: 1, PublicID: "gateway_dispatch_reconcile", Title: "gateway dispatch reconcile", LabelsJSON: "[]",
+		ExecutionType: domainconversation.ExecutionTypeGateway, SessionKey: "gateway_dispatch_reconcile", Status: "active",
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	createRun := func(runID, endpoint string, createdAt time.Time) model.ConversationRun {
+		run := model.ConversationRun{
+			RunID: runID, UserID: 1, ConversationID: conversation.ID, TaskType: "agent", Endpoint: endpoint,
+			ProviderProtocol: endpoint, Status: "queued", StartedAt: createdAt, BaseModel: model.BaseModel{CreatedAt: createdAt},
+		}
+		if err := db.Create(&run).Error; err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	old := now.Add(-5 * time.Minute)
+	orphan := createRun("run_gateway_orphan", "local_gateway", old)
+	dispatched := createRun("run_gateway_dispatched", "local_gateway", old)
+	young := createRun("run_gateway_young", "local_gateway", now)
+	cloud := createRun("run_cloud_queued", "responses", old)
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_orphan_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "pending", RunID: orphan.RunID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_orphan_assistant", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending", RunID: orphan.RunID},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	turn := model.AgentTurn{
+		PublicID: "agturn_dispatched_0123456789abcdef", UserID: 1, ThreadID: 1, RunID: dispatched.RunID,
+		Status: "queued", InputJSON: `[]`, SettingsJSON: `{}`,
+	}
+	if err := db.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	runIDs, err := repo.ReconcileOrphanGatewayTurns(context.Background(), now.Add(-time.Minute), 10)
+	if err != nil || !reflect.DeepEqual(runIDs, []string{orphan.RunID}) {
+		t.Fatalf("ReconcileOrphanGatewayTurns() = %v, %v", runIDs, err)
+	}
+	if err := db.First(&orphan, orphan.ID).Error; err != nil || orphan.Status != "error" || orphan.ErrorCode != "gateway_dispatch_interrupted" || orphan.EndedAt == nil {
+		t.Fatalf("orphan run = %#v, %v", orphan, err)
+	}
+	for _, message := range messages {
+		if err := db.First(&message, message.ID).Error; err != nil || message.Status != "error" || message.ErrorCode != "gateway_dispatch_interrupted" {
+			t.Fatalf("orphan message = %#v, %v", message, err)
+		}
+	}
+	for _, run := range []*model.ConversationRun{&dispatched, &young, &cloud} {
+		if err := db.First(run, run.ID).Error; err != nil || run.Status != "queued" {
+			t.Fatalf("protected run = %#v, %v", run, err)
+		}
+	}
+	if replay, err := repo.ReconcileOrphanGatewayTurns(context.Background(), now.Add(-time.Minute), 10); err != nil || len(replay) != 0 {
+		t.Fatalf("replayed reconciliation = %v, %v", replay, err)
+	}
+}
+
 func TestAttachmentDurationSecondsFromMetaJSON(t *testing.T) {
 	if got := attachmentDurationSecondsFromMetaJSON(`{"duration_seconds":6}`); got != 6 {
 		t.Fatalf("expected attachment duration 6, got %d", got)

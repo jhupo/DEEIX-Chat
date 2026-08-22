@@ -1127,6 +1127,47 @@ func (r *Repo) FailGatewayTurn(ctx context.Context, userID uint, runID, errorCod
 	}))
 }
 
+func (r *Repo) ReconcileOrphanGatewayTurns(ctx context.Context, createdBefore time.Time, limit int) ([]string, error) {
+	if createdBefore.IsZero() || limit < 1 || limit > 1000 {
+		return nil, repository.ErrInvalidInput
+	}
+	const (
+		errorCode    = "gateway_dispatch_interrupted"
+		errorMessage = "Gateway dispatch was interrupted before the device command was queued."
+	)
+	runIDs := make([]string, 0, limit)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []models.ConversationRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Select("id", "user_id", "run_id").
+			Where("endpoint = ? AND status = ? AND created_at < ?", "local_gateway", "queued", createdBefore).
+			Where("NOT EXISTS (SELECT 1 FROM agent_turns WHERE agent_turns.user_id = chat_runs.user_id AND agent_turns.run_id = chat_runs.run_id)").
+			Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		for _, row := range rows {
+			messageUpdates := map[string]any{"status": "error", "error_code": errorCode, "error_message": errorMessage}
+			if err := tx.Model(&models.Message{}).
+				Where("user_id = ? AND run_id = ? AND status = ?", row.UserID, row.RunID, "pending").
+				Updates(messageUpdates).Error; err != nil {
+				return err
+			}
+			result := tx.Model(&models.ConversationRun{}).
+				Where("id = ? AND status = ?", row.ID, "queued").
+				Updates(map[string]any{"status": "error", "error_code": errorCode, "error_message": errorMessage, "ended_at": now})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 1 {
+				runIDs = append(runIDs, row.RunID)
+			}
+		}
+		return nil
+	})
+	return runIDs, translateError(err)
+}
+
 // GetMessageByPublicID 查询归属会话的消息。
 func (r *Repo) GetMessageByPublicID(
 	ctx context.Context,

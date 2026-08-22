@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -136,6 +137,13 @@ func (client *CloudClient) DownloadArtifacts(ctx context.Context, commandID stri
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
+	type downloadResult struct {
+		ref      string
+		artifact LocalArtifact
+		err      error
+	}
+	results := make(chan downloadResult, len(refs))
+	var downloads sync.WaitGroup
 	for ref := range refs {
 		grant, ok := byRef[ref]
 		if !ok {
@@ -149,12 +157,46 @@ func (client *CloudClient) DownloadArtifacts(ctx context.Context, commandID stri
 		if !pathWithin(directory, target) {
 			return nil, errors.New("artifact target escapes its directory")
 		}
-		if err := client.downloadArtifact(ctx, commandID, grant, target); err != nil {
-			return nil, err
+		downloads.Go(func() {
+			matches, matchErr := artifactFileMatches(target, grant)
+			if matchErr == nil && !matches {
+				matchErr = client.downloadArtifact(ctx, commandID, grant, target)
+			}
+			results <- downloadResult{ref: ref, artifact: LocalArtifact{Path: target, MimeType: grant.MimeType}, err: matchErr}
+		})
+	}
+	downloads.Wait()
+	close(results)
+	for item := range results {
+		if item.err != nil {
+			return nil, item.err
 		}
-		result[ref] = LocalArtifact{Path: target, MimeType: grant.MimeType}
+		result[item.ref] = item.artifact
 	}
 	return result, nil
+}
+
+func artifactFileMatches(path string, grant ArtifactGrant) (bool, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() != grant.SizeBytes {
+		return false, nil
+	}
+	hash := sha256.New()
+	if _, err = io.Copy(hash, file); err != nil {
+		return false, err
+	}
+	return strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), grant.SHA256), nil
 }
 
 func (client *CloudClient) downloadArtifact(ctx context.Context, commandID string, grant ArtifactGrant, target string) error {

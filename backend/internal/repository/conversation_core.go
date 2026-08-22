@@ -85,6 +85,7 @@ type MessageRepository interface {
 	CreateGatewayTurn(ctx context.Context, userMessage *domainconversation.Message, assistantMessage *domainconversation.Message, userAttachments []domainconversation.Attachment, run *domainconversation.Run) error
 	GetMessagePairByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Message, *domainconversation.Message, error)
 	FailGatewayTurn(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string, endedAt time.Time) error
+	ReconcileOrphanGatewayTurns(ctx context.Context, createdBefore time.Time, limit int) ([]string, error)
 	CompleteAssistantMessageWithAttachments(ctx context.Context, userMessageID uint, userUsage MessageUsageUpdate, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	CompleteAssistantMessageWithGeneratedAttachments(ctx context.Context, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	GetMessageByPublicID(ctx context.Context, conversationID uint, userID uint, publicID string) (*domainconversation.Message, error)

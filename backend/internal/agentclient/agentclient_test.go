@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -808,6 +809,78 @@ func TestStatePersistsCommandOutcomeAndSourceMapping(t *testing.T) {
 	}
 	if pending := reopened.PendingOutgoing(0); len(pending) != 0 {
 		t.Fatalf("acknowledged frames were retained: %#v", pending)
+	}
+}
+
+func TestStateRefreshesArtifactGrantForReplayedCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "agcmd_artifact_0123456789abcdef01234567"
+	command := json.RawMessage(`{"kind":"turn.start","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-0123456789abcdef01234567","threadId":"agth_0123456789abcdef0123456789abcdef","turnId":"agturn_0123456789abcdef0123456789abcdef","input":[{"kind":"artifact","artifactRef":"artifact-0123456789abcdef"}],"settings":{"model":"gpt-5.6"}}`)
+	grant := ArtifactGrant{
+		ArtifactRef: "artifact-0123456789abcdef", FileName: "input.png", MimeType: "image/png", SizeBytes: 5,
+		SHA256: strings.Repeat("a", 64), ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano), Grant: strings.Repeat("a", 43),
+	}
+	if _, created, receiveErr := store.Receive(1, commandID, command, []ArtifactGrant{grant}); receiveErr != nil || !created {
+		t.Fatalf("initial Receive() created=%v err=%v", created, receiveErr)
+	}
+	grant.ExpiresAt = time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339Nano)
+	grant.Grant = strings.Repeat("b", 43)
+	record, created, err := store.Receive(1, commandID, command, []ArtifactGrant{grant})
+	if err != nil || created || len(record.Artifacts) != 1 || record.Artifacts[0].Grant != grant.Grant {
+		t.Fatalf("replayed Receive() = %#v, created=%v err=%v", record, created, err)
+	}
+	reopened, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.RecoverableCommands()[commandID].Artifacts; len(got) != 1 || got[0].Grant != grant.Grant {
+		t.Fatalf("refreshed grant was not durable: %#v", got)
+	}
+	changed := grant
+	changed.SHA256 = strings.Repeat("b", 64)
+	if _, _, err = reopened.Receive(1, commandID, command, []ArtifactGrant{changed}); err == nil {
+		t.Fatal("replayed command changed immutable artifact identity")
+	}
+}
+
+func TestDownloadArtifactsReusesVerifiedStagedFile(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(response, "expired", http.StatusForbidden)
+	}))
+	defer server.Close()
+	root := repositoryTestDir(t)
+	workspaceID := "workspace-0123456789abcdef01234567"
+	artifactRef := "artifact-0123456789abcdef"
+	content := []byte("staged attachment")
+	directory := filepath.Join(root, ".deeix", "artifacts")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(directory, artifactRef+".png")
+	if err := os.WriteFile(target, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(content)
+	grant := ArtifactGrant{
+		ArtifactRef: artifactRef, FileName: "input.png", MimeType: "image/png", SizeBytes: int64(len(content)),
+		SHA256: hex.EncodeToString(hash[:]), ExpiresAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano), Grant: strings.Repeat("a", 43),
+	}
+	command := AgentCommand{Kind: "turn.start", WorkspaceID: workspaceID, Input: []AgentInput{{Kind: "artifact", ArtifactRef: artifactRef}}}
+	client := NewCloudClient(server.URL)
+	artifacts, err := client.DownloadArtifacts(context.Background(), "agcmd_staged", command, []ArtifactGrant{grant}, map[string]Workspace{
+		workspaceID: {WorkspaceID: workspaceID, Root: root},
+	})
+	if err != nil || artifacts[artifactRef].Path != target {
+		t.Fatalf("DownloadArtifacts() = %#v, %v", artifacts, err)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("verified staged artifact made %d network requests", requests.Load())
 	}
 }
 
