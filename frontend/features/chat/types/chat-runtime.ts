@@ -1,8 +1,8 @@
 import type {
   ChatInlineAlert,
+  ChatMessageProcessTrace,
   ImageLoadingAspectRatio,
   MessageAttachment,
-  ChatMessageProcessTrace,
 } from "@/features/chat/types/messages";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
 import type { ModelNativeToolConfig } from "@/shared/lib/model-option-policy";
@@ -14,6 +14,8 @@ export type ViewerProfile = {
 
 export type ChatModelOption = {
   platformModelName: string;
+  displayName?: string;
+  description?: string;
   icon: string;
   vendor: string;
   vendorName: string;

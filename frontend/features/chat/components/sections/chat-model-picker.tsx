@@ -1,30 +1,37 @@
 "use client";
 
-import * as React from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
-
+import * as React from "react";
+import { InputGroupButton } from "@/components/ui/input-group";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { InputGroupButton } from "@/components/ui/input-group";
 import type { ChatModelOption } from "@/features/chat/types/chat-runtime";
+import { cn } from "@/lib/utils";
+import { ModelIcon } from "@/shared/components/model-icon";
+import { useIsMobile } from "@/shared/hooks/use-mobile";
+import { resolveModelIconURL, resolveModelIdentity } from "@/shared/lib/model-identity";
+import { resolveModelPresentationGroup } from "@/shared/lib/model-presentation";
 import {
   resolveDesktopMenuListMaxHeight,
   resolveDesktopModelMenuListMaxHeight,
 } from "./chat-model-picker-layout";
-import { useIsMobile } from "@/shared/hooks/use-mobile";
-import { ModelIcon } from "@/shared/components/model-icon";
-import { resolveModelIconURL, resolveModelIdentity } from "@/shared/lib/model-identity";
-import { resolveModelPresentationGroup } from "@/shared/lib/model-presentation";
-import { cn } from "@/lib/utils";
 
 type ChatModelPickerProps = {
   modelOptions: ChatModelOption[];
   selectedPlatformModelName: string;
+  reasoning?: ChatModelPickerReasoning;
   loading: boolean;
   disabled: boolean;
   onModelCatalogRefresh?: () => void | Promise<void>;
   onModelChange: (platformModelName: string) => void;
+};
+
+export type ChatModelPickerReasoning = {
+  value: string;
+  options: string[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
 };
 
 const MODEL_MENU_COLLISION_PADDING = 24;
@@ -34,8 +41,10 @@ const DESKTOP_MODEL_MENU_SIDE_OFFSET = 8;
 const DESKTOP_MODEL_MENU_MIN_SCROLL_HEIGHT = 96;
 /** Group panel non-list chrome: p-1.5 × 2 + header h-7. */
 const DESKTOP_GROUP_MENU_VERTICAL_CHROME = 40;
+const DESKTOP_REASONING_MENU_VERTICAL_CHROME = 32;
 /** Model submenu non-list chrome: p-1.5 × 2. */
 const DESKTOP_SUBMENU_VERTICAL_CHROME = 12;
+const REASONING_MENU_KEY = "__reasoning__";
 
 function resolveModelGroups(modelOptions: ChatModelOption[]) {
   const groupMap = new Map<string, { label: string; icon: string; items: ChatModelOption[] }>();
@@ -64,6 +73,7 @@ function ChatModelIdentity({
   density?: "default" | "compact";
 }) {
   const platformModelName = model.platformModelName.trim();
+  const displayName = model.displayName?.trim() || platformModelName;
   const identity = React.useMemo(
     () =>
       resolveModelIdentity({
@@ -78,7 +88,7 @@ function ChatModelIdentity({
 
   return (
     <div className={cn("flex min-w-0 items-center", compact ? "gap-2" : "gap-2.5")}>
-      <ModelIcon iconUrl={iconURL} label={platformModelName} />
+      <ModelIcon iconUrl={iconURL} label={displayName} />
       <div className="min-w-0 flex-1 overflow-hidden">
         <div className={cn("flex items-center", compact ? "gap-1" : "gap-1.5")}>
           <p
@@ -87,7 +97,7 @@ function ChatModelIdentity({
               compact ? "text-[12.5px] leading-4" : "text-[13px] leading-4.5",
             )}
           >
-            {platformModelName}
+            {displayName}
           </p>
         </div>
       </div>
@@ -191,6 +201,7 @@ function ChatModelMenuItem({
   buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   const platformModelName = model.platformModelName.trim();
+  const displayName = model.displayName?.trim() || platformModelName;
   const identity = React.useMemo(
     () =>
       resolveModelIdentity({
@@ -211,11 +222,12 @@ function ChatModelMenuItem({
         ref={buttonRef}
         type="button"
         className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-transparent py-0 pl-2 pr-1 text-left text-[11px] font-medium leading-none text-inherit outline-none"
+        title={model.description?.trim() || displayName}
         onClick={onSelect}
       >
-        <ModelIcon iconUrl={iconURL} label={platformModelName} />
+        <ModelIcon iconUrl={iconURL} label={displayName} />
         <span className="min-w-0 flex-1 truncate leading-4">
-          {platformModelName}
+          {displayName}
         </span>
         <span className="flex size-3 shrink-0 items-center justify-center">
           {selected ? <Check className="size-3 text-current" strokeWidth={1.7} /> : null}
@@ -225,9 +237,39 @@ function ChatModelMenuItem({
   );
 }
 
+function ReasoningMenuItems({
+  reasoning,
+  formatLabel,
+  onSelect,
+}: {
+  reasoning: ChatModelPickerReasoning;
+  formatLabel: (value: string) => string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {reasoning.options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
+          aria-pressed={option === reasoning.value}
+          onClick={() => onSelect(option)}
+        >
+          <span className="min-w-0 flex-1 truncate">{formatLabel(option)}</span>
+          <span className="flex size-3 shrink-0 items-center justify-center">
+            {option === reasoning.value ? <Check className="size-3 text-current" strokeWidth={1.7} /> : null}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ChatModelPicker({
   modelOptions,
   selectedPlatformModelName,
+  reasoning,
   loading,
   disabled,
   onModelCatalogRefresh,
@@ -247,6 +289,7 @@ export function ChatModelPicker({
   const desktopGroupMenuRef = React.useRef<HTMLDivElement | null>(null);
   const desktopSubmenuRef = React.useRef<HTMLDivElement | null>(null);
   const selectedModelButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const reasoningButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const desktopGroupItemRefs = React.useRef(new Map<string, HTMLButtonElement>());
   const selectedModel = React.useMemo(
     () => modelOptions.find((item) => item.platformModelName === selectedPlatformModelName) ?? null,
@@ -265,21 +308,36 @@ export function ChatModelPicker({
     return resolveModelPresentationGroup(selectedModel).label;
   }, [selectedModel]);
   const modelGroups = React.useMemo(() => resolveModelGroups(modelOptions), [modelOptions]);
-  const activeDesktopGroupKey = activeGroupKey || selectedGroupKey || modelGroups[0]?.key || "";
+  const reasoningAvailable = Boolean(reasoning && reasoning.options.length > 0);
+  const reasoningActive = reasoningAvailable && activeGroupKey === REASONING_MENU_KEY;
+  const formatReasoningLabel = React.useCallback(
+    (value: string) => t.has(`efforts.${value}`) ? t(`efforts.${value}`) : value,
+    [t],
+  );
+  const reasoningValueLabel = reasoning ? formatReasoningLabel(reasoning.value) : "";
+  const activeDesktopGroupKey = activeGroupKey && activeGroupKey !== REASONING_MENU_KEY
+    ? activeGroupKey
+    : selectedGroupKey || modelGroups[0]?.key || "";
   const activeDesktopGroup = React.useMemo(
     () => modelGroups.find((group) => group.key === activeDesktopGroupKey) ?? modelGroups[0] ?? null,
     [activeDesktopGroupKey, modelGroups],
   );
-  const hasDesktopModelSubmenu = Boolean(activeDesktopGroup?.items.length);
+  const hasDesktopSubmenu = reasoningActive || Boolean(activeDesktopGroup?.items.length);
   const mobileGroup = React.useMemo(
     () => modelGroups.find((group) => group.key === mobileGroupKey) ?? null,
     [mobileGroupKey, modelGroups],
   );
+  const mobileReasoningOpen = reasoningAvailable && mobileGroupKey === REASONING_MENU_KEY;
   React.useEffect(() => {
     if (!open || !isMobile) {
       setMobileGroupKey(null);
     }
   }, [isMobile, open]);
+  React.useEffect(() => {
+    if (disabled || loading) {
+      setOpen(false);
+    }
+  }, [disabled, loading]);
 
   const updateDesktopSubmenuMetrics = React.useCallback(() => {
     if (!open || isMobile) {
@@ -301,9 +359,11 @@ export function ChatModelPicker({
     const groupMenuRect = groupMenu.getBoundingClientRect();
     const submenu = desktopSubmenuRef.current;
     const submenuRect = submenu?.getBoundingClientRect();
-    const activeGroupButton = activeDesktopGroup
-      ? desktopGroupItemRefs.current.get(activeDesktopGroup.key)
-      : null;
+    const activeGroupButton = reasoningActive
+      ? reasoningButtonRef.current
+      : activeDesktopGroup
+        ? desktopGroupItemRefs.current.get(activeDesktopGroup.key)
+        : null;
     const activeGroupRect = activeGroupButton?.getBoundingClientRect();
     const triggerRect = document.getElementById("chat-model-menu-trigger")?.getBoundingClientRect();
     const viewportLeft = MODEL_MENU_COLLISION_PADDING;
@@ -330,12 +390,13 @@ export function ChatModelPicker({
       triggerTop: triggerRect?.top,
       triggerBottom: triggerRect?.bottom,
       sideOffset: DESKTOP_MODEL_MENU_SIDE_OFFSET,
-      verticalChrome: DESKTOP_GROUP_MENU_VERTICAL_CHROME,
+      verticalChrome: DESKTOP_GROUP_MENU_VERTICAL_CHROME +
+        (reasoningAvailable ? DESKTOP_REASONING_MENU_VERTICAL_CHROME : 0),
     });
 
     let nextSubmenuTop = 0;
     let nextSubmenuListMaxHeight = nextGroupListMaxHeight;
-    if (hasDesktopModelSubmenu && activeGroupRect) {
+    if (hasDesktopSubmenu && activeGroupRect) {
       const submenuHeight = submenuRect?.height ?? nextGroupListMaxHeight + DESKTOP_SUBMENU_VERTICAL_CHROME;
       const submenuOuterHeight = Math.min(submenuHeight, viewportHeight);
       const maxViewportTop = Math.max(viewportTop, viewportBottom - submenuOuterHeight);
@@ -358,7 +419,7 @@ export function ChatModelPicker({
     setDesktopSubmenuWidth(nextSubmenuWidth);
     setDesktopGroupListMaxHeight(nextGroupListMaxHeight);
     setDesktopSubmenuListMaxHeight(nextSubmenuListMaxHeight);
-  }, [activeDesktopGroup, hasDesktopModelSubmenu, isMobile, open]);
+  }, [activeDesktopGroup, hasDesktopSubmenu, isMobile, open, reasoningActive, reasoningAvailable]);
 
   React.useLayoutEffect(() => {
     updateDesktopSubmenuMetrics();
@@ -386,9 +447,11 @@ export function ChatModelPicker({
     if (desktopSubmenuRef.current) {
       observer.observe(desktopSubmenuRef.current);
     }
-    const activeGroupButton = activeDesktopGroup
-      ? desktopGroupItemRefs.current.get(activeDesktopGroup.key)
-      : null;
+    const activeGroupButton = reasoningActive
+      ? reasoningButtonRef.current
+      : activeDesktopGroup
+        ? desktopGroupItemRefs.current.get(activeDesktopGroup.key)
+        : null;
     if (activeGroupButton) {
       observer.observe(activeGroupButton);
     }
@@ -398,7 +461,7 @@ export function ChatModelPicker({
       window.removeEventListener("scroll", updateDesktopSubmenuMetrics, true);
       observer.disconnect();
     };
-  }, [activeDesktopGroup, hasDesktopModelSubmenu, isMobile, open, updateDesktopSubmenuMetrics]);
+  }, [activeDesktopGroup, hasDesktopSubmenu, isMobile, open, reasoningActive, updateDesktopSubmenuMetrics]);
 
   const handleOpenChange = React.useCallback(
     (nextOpen: boolean) => {
@@ -418,11 +481,11 @@ export function ChatModelPicker({
   }, [handleOpenChange]);
 
   const selectDesktopGroup = React.useCallback((groupKey: string) => {
-    if (groupKey === activeDesktopGroupKey) {
+    if (groupKey === activeGroupKey) {
       return;
     }
     setActiveGroupKey(groupKey);
-  }, [activeDesktopGroupKey]);
+  }, [activeGroupKey]);
 
   return (
     <>
@@ -440,16 +503,28 @@ export function ChatModelPicker({
             >
               {loading ? (
                 <ChatModelTriggerSkeleton />
-              ) : selectedModel ? (
-                <ChatModelIdentity model={selectedModel} density="compact" />
-              ) : selectedPlatformModelName.trim() ? (
-                <span className="truncate text-[12px] font-medium text-foreground">
-                  {selectedPlatformModelName}
-                </span>
               ) : (
-                <span className="truncate text-[12px] font-medium text-muted-foreground">
-                  {t("selectModel")}
-                </span>
+                <>
+                  <span className="min-w-0 flex-1">
+                    {selectedModel ? (
+                      <ChatModelIdentity model={selectedModel} density="compact" />
+                    ) : selectedPlatformModelName.trim() ? (
+                      <span className="block truncate text-[12px] font-medium text-foreground">
+                        {selectedPlatformModelName}
+                      </span>
+                    ) : (
+                      <span className="block truncate text-[12px] font-medium text-muted-foreground">
+                        {t("selectModel")}
+                      </span>
+                    )}
+                  </span>
+                  {reasoningAvailable ? (
+                    <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+                      {reasoningValueLabel}
+                    </span>
+                  ) : null}
+                  <ChevronDown className="size-3 shrink-0 text-muted-foreground/70" strokeWidth={1.8} />
+                </>
               )}
             </InputGroupButton>
           </PopoverTrigger>
@@ -474,29 +549,33 @@ export function ChatModelPicker({
             {isMobile ? (
               <>
                 <div className="flex h-7 items-center justify-between gap-2 px-2">
-                  {mobileGroup ? (
+                  {mobileGroup || mobileReasoningOpen ? (
                     <button
                       type="button"
                       className="-ml-1.5 flex h-7 min-w-0 items-center gap-0.5 rounded-md px-0.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground"
                       onClick={() => setMobileGroupKey(null)}
                     >
                       <ChevronLeft className="size-3.5" strokeWidth={1.8} />
-                      <span>{t("group")}</span>
+                      <span>{mobileReasoningOpen ? t("reasoning") : t("group")}</span>
                     </button>
                   ) : (
                     <span className="text-[11px] font-medium text-foreground">{t("group")}</span>
                   )}
                   <span className="min-w-0 truncate text-right text-[10px] font-medium text-muted-foreground">
-                    {mobileGroup ? mobileGroup.label : selectedGroupLabel}
+                    {mobileReasoningOpen ? reasoningValueLabel : mobileGroup ? mobileGroup.label : selectedGroupLabel}
                   </span>
                 </div>
-                {modelGroups.length === 0 ? (
-                  <div className="px-2 py-3 text-[11px] leading-4 text-muted-foreground">
-                    {t("empty")}
-                  </div>
-                ) : (
-                  <ModelMenuScrollContainer>
-                    {mobileGroup ? (
+                <ModelMenuScrollContainer>
+                  {mobileReasoningOpen && reasoning ? (
+                    <ReasoningMenuItems
+                      reasoning={reasoning}
+                      formatLabel={formatReasoningLabel}
+                      onSelect={(value) => {
+                        reasoning.onChange(value);
+                        closeMenu();
+                      }}
+                    />
+                  ) : mobileGroup ? (
                       <div className="flex flex-col gap-0.5">
                         {mobileGroup.items.map((item) => (
                           <ChatModelMenuItem
@@ -510,9 +589,14 @@ export function ChatModelPicker({
                           />
                         ))}
                       </div>
-                    ) : (
+                  ) : (
+                    <>
                       <div className="flex flex-col gap-0.5">
-                        {modelGroups.map((group) => {
+                        {modelGroups.length === 0 ? (
+                          <div className="px-2 py-3 text-[11px] leading-4 text-muted-foreground">
+                            {t("empty")}
+                          </div>
+                        ) : modelGroups.map((group) => {
                           const selectedGroup = group.key === selectedGroupKey;
                           const groupIconURL = resolveModelIconURL(group.icon);
                           return (
@@ -536,13 +620,28 @@ export function ChatModelPicker({
                           );
                         })}
                       </div>
-                    )}
-                  </ModelMenuScrollContainer>
-                )}
+                      {reasoningAvailable ? (
+                        <div className="mt-1 border-t border-border/60 pt-1">
+                          <button
+                            type="button"
+                            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                            disabled={reasoning?.disabled}
+                            onClick={() => setMobileGroupKey(REASONING_MENU_KEY)}
+                          >
+                            <Brain className="size-3.5 shrink-0" strokeWidth={1.7} />
+                            <span className="min-w-0 flex-1 truncate">{t("reasoning")}</span>
+                            <span className="shrink-0 text-[10px] text-muted-foreground/80">{reasoningValueLabel}</span>
+                            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/65" strokeWidth={1.8} />
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </ModelMenuScrollContainer>
               </>
             ) : (
               <div ref={desktopMenuRootRef} className="relative min-w-0">
-                {hasDesktopModelSubmenu ? (
+                {hasDesktopSubmenu ? (
                   <div
                     ref={desktopSubmenuRef}
                     style={{
@@ -555,20 +654,31 @@ export function ChatModelPicker({
                     )}
                   >
                     <ModelMenuScrollContainer maxHeight={desktopSubmenuListMaxHeight}>
-                      <div className="flex flex-col gap-0.5">
-                        {activeDesktopGroup?.items.map((item) => (
-                          <ChatModelMenuItem
-                            key={item.platformModelName}
-                            model={item}
-                            selected={item.platformModelName === selectedPlatformModelName}
-                            buttonRef={item.platformModelName === selectedPlatformModelName ? selectedModelButtonRef : undefined}
-                            onSelect={() => {
-                              onModelChange(item.platformModelName);
-                              closeMenu();
-                            }}
-                          />
-                        ))}
-                      </div>
+                      {reasoningActive && reasoning ? (
+                        <ReasoningMenuItems
+                          reasoning={reasoning}
+                          formatLabel={formatReasoningLabel}
+                          onSelect={(value) => {
+                            reasoning.onChange(value);
+                            closeMenu();
+                          }}
+                        />
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          {activeDesktopGroup?.items.map((item) => (
+                            <ChatModelMenuItem
+                              key={item.platformModelName}
+                              model={item}
+                              selected={item.platformModelName === selectedPlatformModelName}
+                              buttonRef={item.platformModelName === selectedPlatformModelName ? selectedModelButtonRef : undefined}
+                              onSelect={() => {
+                                onModelChange(item.platformModelName);
+                                closeMenu();
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </ModelMenuScrollContainer>
                   </div>
                 ) : null}
@@ -593,7 +703,7 @@ export function ChatModelPicker({
                         <div className="flex flex-col gap-0.5">
                           {modelGroups.map((group) => {
                             const selectedGroup = group.key === selectedGroupKey;
-                            const activeGroup = group.key === activeDesktopGroup?.key;
+                            const activeGroup = !reasoningActive && group.key === activeDesktopGroup?.key;
                             const groupIconURL = resolveModelIconURL(group.icon);
                             return (
                               <button
@@ -628,6 +738,27 @@ export function ChatModelPicker({
                       </ModelMenuScrollContainer>
                     </div>
                   )}
+                  {reasoningAvailable ? (
+                    <div className="mt-1 shrink-0 border-t border-border/60 pt-1">
+                      <button
+                        ref={reasoningButtonRef}
+                        type="button"
+                        className={cn(
+                          "flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground disabled:pointer-events-none disabled:opacity-50",
+                          reasoningActive && "bg-accent text-accent-foreground",
+                        )}
+                        disabled={reasoning?.disabled}
+                        onMouseEnter={() => setActiveGroupKey(REASONING_MENU_KEY)}
+                        onFocus={() => setActiveGroupKey(REASONING_MENU_KEY)}
+                        onClick={() => setActiveGroupKey(REASONING_MENU_KEY)}
+                      >
+                        <Brain className="size-3.5 shrink-0" strokeWidth={1.7} />
+                        <span className="min-w-0 flex-1 truncate">{t("reasoning")}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground/80">{reasoningValueLabel}</span>
+                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/65" strokeWidth={1.8} />
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             )}

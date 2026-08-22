@@ -53,6 +53,10 @@ import {
   useChatSpeechInput,
 } from "@/features/chat/hooks/use-chat-speech-input";
 import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
+import {
+  resolveChatModelReasoningSetting,
+  setChatModelReasoningEffort,
+} from "@/features/chat/model/chat-model-reasoning";
 import type { ChatSubmitDecision } from "@/features/chat/model/chat-task";
 import { isMediaSubmitTask, resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
 import type {
@@ -75,7 +79,10 @@ import { StreamdownRender } from "@/shared/components/markdown/streamdown-render
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { formatBytes, resolveFileExtension, resolveFileIcon } from "@/shared/lib/file-display";
 import { resolveFileProcessingBadge } from "@/shared/lib/file-processing";
-import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
+import {
+  isModelOptionPathFiltered,
+  type ModelOptionPolicy,
+} from "@/shared/lib/model-option-policy";
 import { isSendShortcutEvent } from "@/shared/lib/platform-shortcuts";
 
 const FilePreviewDialog = dynamic(
@@ -422,6 +429,89 @@ function ChatInputComponent({
     [executionMode, modelOptions, selectedPlatformModelName],
   );
   const selectedProtocol = requestProtocol.trim();
+  const selectedAgentModel = React.useMemo(
+    () => agentSettings ? agentModels.find((model) => model.id === agentSettings.model) ?? null : null,
+    [agentModels, agentSettings],
+  );
+  const agentPickerModels = React.useMemo<ChatModelOption[]>(
+    () => agentModels.map((model) => ({
+      platformModelName: model.id,
+      displayName: model.displayName,
+      description: model.description,
+      icon: "openai",
+      vendor: "openai",
+      vendorName: "OpenAI",
+      vendorIcon: "openai",
+      displayGroupID: null,
+      displayGroupName: "",
+      displayGroupIcon: "",
+      kinds: ["chat"],
+      protocols: [],
+      defaultOptions: {},
+      optionControls: [],
+      lockedOptionPaths: [],
+      nativeToolKeys: [],
+      nativeTools: [],
+    })),
+    [agentModels],
+  );
+  const cloudReasoningSetting = React.useMemo(() => {
+    if (!selectedModel) {
+      return null;
+    }
+    const setting = resolveChatModelReasoningSetting({
+      options,
+      defaultOptions,
+      optionControls: selectedModel.optionControls,
+      lockedOptionPaths: selectedModel.lockedOptionPaths,
+    });
+    if (
+      setting && modelOptionPolicy &&
+      isModelOptionPathFiltered({ policy: modelOptionPolicy, protocol: selectedProtocol, path: setting.path })
+    ) {
+      return null;
+    }
+    return setting;
+  }, [defaultOptions, modelOptionPolicy, options, selectedModel, selectedProtocol]);
+  const changePickerModel = React.useCallback((modelID: string) => {
+    if (executionMode === "cloud") {
+      onModelChange(modelID);
+      return;
+    }
+    if (!agentSettings) {
+      return;
+    }
+    const model = agentModels.find((item) => item.id === modelID);
+    if (!model) {
+      return;
+    }
+    onAgentSettingsChange({
+      ...agentSettings,
+      model: model.id,
+      reasoningEffort: model.supportedReasoningEfforts.includes(agentSettings.reasoningEffort)
+        ? agentSettings.reasoningEffort
+        : model.defaultReasoningEffort,
+    });
+  }, [agentModels, agentSettings, executionMode, onAgentSettingsChange, onModelChange]);
+  const changePickerReasoning = React.useCallback((value: string) => {
+    if (executionMode === "gateway") {
+      if (
+        agentSettings && selectedAgentModel?.supportedReasoningEfforts.includes(
+          value as AgentTurnSettings["reasoningEffort"],
+        )
+      ) {
+        onAgentSettingsChange({
+          ...agentSettings,
+          reasoningEffort: value as AgentTurnSettings["reasoningEffort"],
+        });
+      }
+      return;
+    }
+    if (!cloudReasoningSetting || !cloudReasoningSetting.options.includes(value)) {
+      return;
+    }
+    onOptionsChange((current) => setChatModelReasoningEffort(current, cloudReasoningSetting.path, value));
+  }, [agentSettings, cloudReasoningSetting, executionMode, onAgentSettingsChange, onOptionsChange, selectedAgentModel]);
   const selectedModelName = selectedModel?.platformModelName || selectedPlatformModelName;
   const submitDecision = resolveChatSubmitDecision(
     selectedModel,
@@ -1025,11 +1115,10 @@ function ChatInputComponent({
 
               {executionMode === "gateway" ? (
                 <ChatAgentSettings
-                  models={agentModels}
                   settings={agentSettings}
                   autoReviewEnabled={agentAutoReviewEnabled}
                   loading={agentSettingsLoading}
-                  disabled={agentSettingsDisabled || loading || uploading || !gatewayReady}
+                  disabled={agentSettingsDisabled || loading || uploading}
                   error={agentSettingsError}
                   onChange={onAgentSettingsChange}
                 />
@@ -1149,16 +1238,29 @@ function ChatInputComponent({
                   </TooltipContent>
                 </Tooltip>
               ) : null}
-              {executionMode === "cloud" ? (
-                <ChatModelPicker
-                  modelOptions={modelOptions}
-                  selectedPlatformModelName={selectedPlatformModelName}
-                  loading={modelLoading}
-                  disabled={modelDisabled}
-                  onModelCatalogRefresh={onModelCatalogRefresh}
-                  onModelChange={onModelChange}
-                />
-              ) : null}
+              <ChatModelPicker
+                modelOptions={executionMode === "gateway" ? agentPickerModels : modelOptions}
+                selectedPlatformModelName={executionMode === "gateway" ? agentSettings?.model ?? "" : selectedPlatformModelName}
+                reasoning={executionMode === "gateway"
+                  ? selectedAgentModel && agentSettings ? {
+                      value: agentSettings.reasoningEffort,
+                      options: selectedAgentModel.supportedReasoningEfforts,
+                      disabled: agentSettingsDisabled,
+                      onChange: changePickerReasoning,
+                    } : undefined
+                  : cloudReasoningSetting ? {
+                      value: cloudReasoningSetting.value,
+                      options: cloudReasoningSetting.options,
+                      disabled: cloudReasoningSetting.disabled,
+                      onChange: changePickerReasoning,
+                    } : undefined}
+                loading={executionMode === "gateway" ? agentSettingsLoading : modelLoading}
+                disabled={executionMode === "gateway"
+                  ? agentSettingsDisabled || loading || uploading || !agentSettings || Boolean(agentSettingsError)
+                  : modelDisabled}
+                onModelCatalogRefresh={executionMode === "cloud" ? onModelCatalogRefresh : undefined}
+                onModelChange={changePickerModel}
+              />
 
               <InputGroupButton
                 type="button"

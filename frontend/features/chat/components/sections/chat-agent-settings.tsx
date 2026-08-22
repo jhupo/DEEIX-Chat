@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, Brain, ChevronDown, ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
+import { ShieldAlert, ShieldCheck, ShieldOff } from "lucide-react";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { InputGroupButton } from "@/components/ui/input-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { AgentModelDTO, AgentTurnSettings } from "@/shared/api/agent-gateway";
+import type { AgentTurnSettings } from "@/shared/api/agent-gateway";
 
 const FULL_ACCESS_CONFIRMATION_KEY = "deeix-chat:agent-full-access-confirmed:v1";
 
@@ -84,7 +84,6 @@ function rememberFullAccessConfirmation(): void {
 }
 
 type ChatAgentSettingsProps = {
-  models: AgentModelDTO[];
   settings: AgentTurnSettings | null;
   autoReviewEnabled: boolean;
   loading: boolean;
@@ -94,7 +93,6 @@ type ChatAgentSettingsProps = {
 };
 
 export function ChatAgentSettings({
-  models,
   settings,
   autoReviewEnabled,
   loading,
@@ -104,27 +102,9 @@ export function ChatAgentSettings({
 }: ChatAgentSettingsProps) {
   const t = useTranslations("chat.agent.settings");
   const [fullAccessDialogOpen, setFullAccessDialogOpen] = React.useState(false);
-  const selectedModel = settings ? models.find((model) => model.id === settings.model) ?? null : null;
   const selectedMode = settings ? approvalMode(settings) : "request";
-  const unavailable = disabled || loading || !settings || models.length === 0 || Boolean(error);
+  const unavailable = disabled || loading || !settings || Boolean(error);
   const ModeIcon = selectedMode === "full" ? ShieldOff : selectedMode === "auto" ? ShieldCheck : ShieldAlert;
-
-  const selectModel = React.useCallback((modelID: string) => {
-    if (!settings) {
-      return;
-    }
-    const model = models.find((item) => item.id === modelID);
-    if (!model) {
-      return;
-    }
-    onChange({
-      ...settings,
-      model: model.id,
-      reasoningEffort: model.supportedReasoningEfforts.includes(settings.reasoningEffort)
-        ? settings.reasoningEffort
-        : model.defaultReasoningEffort,
-    });
-  }, [models, onChange, settings]);
 
   const selectMode = React.useCallback((value: string) => {
     if (!settings || !["request", "auto", "full"].includes(value)) {
@@ -162,12 +142,12 @@ export function ChatAgentSettings({
         disabled
         aria-label={t("loading")}
       >
-        <Bot className="size-4 animate-pulse" strokeWidth={1.6} />
+        <ShieldAlert className="size-4 animate-pulse" strokeWidth={1.7} />
       </InputGroupButton>
     );
   }
 
-  if (!settings || models.length === 0 || error) {
+  if (!settings || error) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
@@ -193,80 +173,7 @@ export function ChatAgentSettings({
 
   return (
     <>
-      <div className="flex min-w-0 shrink items-center gap-0.5 sm:gap-1">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <InputGroupButton
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="min-w-0 max-w-40 flex-1 shrink overflow-hidden rounded-lg px-1.5 text-xs sm:max-w-52 sm:px-2"
-              disabled={unavailable}
-              aria-label={t("model")}
-            >
-              <Bot className="size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.7} />
-              <span className="min-w-0 truncate">{selectedModel?.displayName ?? settings.model}</span>
-              <ChevronDown className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.7} />
-            </InputGroupButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="bottom" sideOffset={8} className="w-64 max-w-[calc(100vw-2rem)]">
-            <DropdownMenuLabel>{t("model")}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={settings.model} onValueChange={selectModel}>
-              {models.map((model) => (
-                <DropdownMenuRadioItem key={model.id} value={model.id} className="items-start whitespace-normal">
-                  <span className="min-w-0">
-                    <span className="block font-medium [overflow-wrap:anywhere]">{model.displayName}</span>
-                    {model.description ? (
-                      <span className="mt-0.5 line-clamp-2 block text-[11px] leading-4 text-muted-foreground [overflow-wrap:anywhere]">
-                        {model.description}
-                      </span>
-                    ) : null}
-                  </span>
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <InputGroupButton
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 rounded-md px-1.5 text-xs text-muted-foreground sm:h-8 sm:px-2"
-                  disabled={unavailable}
-                  aria-label={t("reasoning")}
-                >
-                  <Brain className="size-3.5" strokeWidth={1.7} />
-                  <span className="hidden sm:inline">{t(`efforts.${settings.reasoningEffort}`)}</span>
-                </InputGroupButton>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs">{t("reasoning")}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" side="bottom" sideOffset={8}>
-            <DropdownMenuLabel>{t("reasoning")}</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={settings.reasoningEffort}
-              onValueChange={(value) => {
-                if (selectedModel?.supportedReasoningEfforts.includes(value as AgentTurnSettings["reasoningEffort"])) {
-                  onChange({ ...settings, reasoningEffort: value as AgentTurnSettings["reasoningEffort"] });
-                }
-              }}
-            >
-              {selectedModel?.supportedReasoningEfforts.map((effort) => (
-                <DropdownMenuRadioItem key={effort} value={effort}>
-                  {t(`efforts.${effort}`)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
+      <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
@@ -297,8 +204,7 @@ export function ChatAgentSettings({
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      </DropdownMenu>
 
       <AlertDialog open={fullAccessDialogOpen} onOpenChange={setFullAccessDialogOpen}>
         <AlertDialogContent size="compact">
