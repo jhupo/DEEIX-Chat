@@ -21,7 +21,7 @@
 
 Gateway 连接或刷新 `sessions` 资源时，Bridge 消费 `thread/list` 的 opaque cursor，分别读取最多 500 个活动会话和 500 个归档会话，并只上传裁剪后的目录摘要。新投影的 AgentThread 历史状态为 `unloaded`；用户打开会话时，Conversation API 排队一次强类型 `thread.read` 内部命令，Bridge 调用 `thread/resume`，一次取得完整消息、模型和推理等级并投影到统一 Conversation。Web 归档/恢复通过持久化 `thread.lifecycle` 命令调用本机 `thread/archive`/`thread/unarchive`；本机 Codex 发出的 `thread/archived`/`thread/unarchived` 通知也会反向更新 Web Conversation。命令失败时回滚 AgentThread 与 Conversation 状态。
 
-主输入框保留两个显式触发器：`/` 打开当前 Agent 的模型、推理等级与 Skill，`@` 打开可 mention 的 Profile App 和 Workspace Skill。模型选择仍复用同一 Agent 设置状态，文件继续使用附件入口，Prompt 不再混入触发菜单。Cloud 将“插件”能力投影到可执行 MCP 工具；Gateway 从 Conversation Resource API 读取 Workspace Skill 与 Profile App，并只提交 opaque ref。页面不直接读取 `/agent/*`，只读 `plugin/list` 包也不伪装成 App mention。
+主输入框保留两个显式触发器：`/` 只打开当前 Workspace Skill，`@` 只打开可 mention 的 Profile App/Plugin。模型与推理等级继续使用输入框右下角现有选择器，文件继续使用附件入口，Prompt 不再混入触发菜单。Cloud 将“插件”能力投影到可执行 MCP 工具；Gateway 从 Conversation Resource API 读取 Workspace Skill 与 Profile App，并只提交 opaque ref。页面不直接读取 `/agent/*`，只读 `plugin/list` 包也不伪装成 App mention。
 
 “插件”保留原 `/skills-prompt` 页面。页面未来通过统一 Resource API 获取平台或设备资源，不直接调用 Agent resource endpoint，也不增加设备专用插件页。
 
