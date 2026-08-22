@@ -565,7 +565,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
 		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
-		ManifestJSON: `{"commands":["thread.read"]}`,
+		ManifestJSON: `{"commands":["thread.read"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user"],"sandboxPolicy":["workspace-write"]}}`,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatalf("create runtime profile: %v", err)
