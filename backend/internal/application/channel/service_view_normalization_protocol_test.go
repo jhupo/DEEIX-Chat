@@ -53,6 +53,59 @@ func TestResolveModelDisplayCapabilitiesAddsAdapterReasoningControls(t *testing.
 	}
 }
 
+func TestResolveModelDisplayCapabilitiesPrefersResponsesReasoningForDualProtocolModel(t *testing.T) {
+	resolved := resolveModelDisplayCapabilitiesJSON(
+		"gpt-5.6-sol",
+		`["openai_chat_completions","openai_responses"]`,
+		`{"defaultOptions":{"reasoning_effort":"high"},"optionControls":[{"path":"reasoning_effort","type":"select"}],"lockedOptionPaths":["reasoning_effort"]}`,
+	)
+
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(resolved), &capabilities); err != nil {
+		t.Fatalf("unmarshal capabilities: %v", err)
+	}
+	defaults := capabilities["defaultOptions"].(map[string]interface{})
+	if _, exists := defaults["reasoning_effort"]; exists {
+		t.Fatalf("did not expect duplicate Chat Completions reasoning default, got %#v", defaults)
+	}
+	reasoning := defaults["reasoning"].(map[string]interface{})
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("expected Responses reasoning default, got %#v", defaults)
+	}
+	controls := capabilities["optionControls"].([]interface{})
+	if len(controls) != 1 || controls[0].(map[string]interface{})["path"] != "reasoning.effort" {
+		t.Fatalf("expected only the Responses reasoning control, got %#v", controls)
+	}
+	if _, exists := capabilities["lockedOptionPaths"]; exists {
+		t.Fatalf("did not expect stale Chat Completions lock, got %#v", capabilities)
+	}
+}
+
+func TestResolveModelDisplayCapabilitiesUsesFlatReasoningForChatCompletions(t *testing.T) {
+	resolved := resolveModelDisplayCapabilitiesJSON(
+		"gpt-5.6-sol",
+		`["openai_chat_completions"]`,
+		`{"defaultOptions":{"reasoning":{"effort":"high","summary":"auto"}},"optionControls":[{"path":"reasoning.effort","type":"select"}]}`,
+	)
+
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(resolved), &capabilities); err != nil {
+		t.Fatalf("unmarshal capabilities: %v", err)
+	}
+	defaults := capabilities["defaultOptions"].(map[string]interface{})
+	if defaults["reasoning_effort"] != "medium" {
+		t.Fatalf("expected Chat Completions reasoning default, got %#v", defaults)
+	}
+	reasoning := defaults["reasoning"].(map[string]interface{})
+	if _, exists := reasoning["effort"]; exists || reasoning["summary"] != "auto" {
+		t.Fatalf("expected only incompatible nested effort to be removed, got %#v", reasoning)
+	}
+	controls := capabilities["optionControls"].([]interface{})
+	if len(controls) != 1 || controls[0].(map[string]interface{})["path"] != "reasoning_effort" {
+		t.Fatalf("expected only the Chat Completions reasoning control, got %#v", controls)
+	}
+}
+
 func TestResolveModelDisplayCapabilitiesLeavesUnknownModelsUntouched(t *testing.T) {
 	raw := `{"nativeTools":[{"key":"openai.web_search"}]}`
 	if resolved := resolveModelDisplayCapabilitiesJSON("gpt-4o", `["openai_responses"]`, raw); resolved != raw {

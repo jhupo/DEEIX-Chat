@@ -8,9 +8,6 @@ import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 50;
 const STREAM_THINK_FLUSH_INTERVAL_MS = 40;
-const STREAM_THINK_BASE_CHARS_PER_FLUSH = 48;
-const STREAM_THINK_CATCHUP_THRESHOLD = 1024;
-const STREAM_THINK_CATCHUP_CHARS_PER_FLUSH = 256;
 
 type UpstreamThinkDeltaEvent = Extract<StreamMessageEvent, { type: "upstream_think_delta" }>;
 
@@ -40,13 +37,6 @@ function createStreamBuffer(runID?: string): StreamBuffer {
     thinkTimeout: null,
     lastThinkFlushAt: 0,
   };
-}
-
-function resolveThinkFlushSize(pendingLength: number) {
-  if (pendingLength > STREAM_THINK_CATCHUP_THRESHOLD) {
-    return Math.min(pendingLength, STREAM_THINK_CATCHUP_CHARS_PER_FLUSH);
-  }
-  return Math.min(pendingLength, STREAM_THINK_BASE_CHARS_PER_FLUSH);
 }
 
 function reasoningEventTarget(event: UpstreamThinkDeltaEvent) {
@@ -130,22 +120,15 @@ export function useChatStreamBuffer({
       return;
     }
 
-    const flushSize = resolveThinkFlushSize(buffer.pendingThinkDelta.length);
-    const delta = flushSize > 0 ? buffer.pendingThinkDelta.slice(0, flushSize) : "";
-    buffer.pendingThinkDelta = flushSize > 0 ? buffer.pendingThinkDelta.slice(flushSize) : "";
+    const delta = buffer.pendingThinkDelta;
+    buffer.pendingThinkDelta = "";
     const event: UpstreamThinkDeltaEvent = {
       ...buffer.pendingThinkEvent,
       delta,
-      contentMarkdown: flushSize > 0 ? undefined : buffer.pendingThinkEvent.contentMarkdown,
+      contentMarkdown: delta ? undefined : buffer.pendingThinkEvent.contentMarkdown,
     };
-    if (!buffer.pendingThinkDelta) {
-      buffer.pendingThinkEvent = null;
-    }
+    buffer.pendingThinkEvent = null;
     upsertLiveUpstreamThinkTrace(buffer.runID, event);
-
-    if (buffer.pendingThinkDelta) {
-      scheduleThinkFlushRef.current(exchangeKey);
-    }
   }, []);
 
   const scheduleStreamFlush = React.useCallback((exchangeKey: string) => {

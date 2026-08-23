@@ -15,7 +15,6 @@ export const MODEL_SORT_OPTIONS = [
   { labelKey: "sort.updatedDesc", value: "updated_desc" },
   { labelKey: "sort.idDesc", value: "id_desc" },
   { labelKey: "sort.platformModelNameAsc", value: "platformModelName_asc" },
-  { labelKey: "sort.sourceCountDesc", value: "sourceCount_desc" },
 ] as const;
 
 export type ModelSortValue = (typeof MODEL_SORT_OPTIONS)[number]["value"];

@@ -129,6 +129,58 @@ func TestResolveCodexExecutableFindsWindowsUserInstall(t *testing.T) {
 	}
 }
 
+func TestWindowsCodexCandidatesPreferNewestDesktopManagedCLI(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows fallback paths only")
+	}
+	localAppData := t.TempDir()
+	binDir := filepath.Join(localAppData, "OpenAI", "Codex", "bin")
+	older := filepath.Join(binDir, "1111111111111111", "codex.exe")
+	newer := filepath.Join(binDir, "2222222222222222", "codex.exe")
+	for _, path := range []string{older, newer} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	if err := os.Chtimes(older, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, now, now); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_INSTALL_DIR", "")
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("APPDATA", "")
+	t.Setenv("ProgramFiles", "")
+
+	candidates := windowsCodexCandidates()
+	if len(candidates) < 4 || candidates[1] != newer || candidates[2] != older || candidates[3] != filepath.Join(binDir, "codex.exe") {
+		t.Fatalf("windowsCodexCandidates() = %q", candidates)
+	}
+	if candidates[0] != filepath.Join(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe") {
+		t.Fatalf("official standalone candidate = %q", candidates[0])
+	}
+}
+
+func TestOutgoingBatchBoundsInFlightEvents(t *testing.T) {
+	pending := make([]outgoingFrame, gatewayOutgoingBatchSize+5)
+	for index := range pending {
+		pending[index].BridgeSeq = uint64(index + 1)
+	}
+	batch := outgoingBatch(pending)
+	if len(batch) != gatewayOutgoingBatchSize || batch[0].BridgeSeq != 1 || batch[len(batch)-1].BridgeSeq != gatewayOutgoingBatchSize {
+		t.Fatalf("outgoingBatch() = %v", batch)
+	}
+	if short := outgoingBatch(pending[:2]); len(short) != 2 {
+		t.Fatalf("short outgoingBatch() length = %d", len(short))
+	}
+}
+
 func TestInstallRejectsOldCodexBeforeUpdatingConfig(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -1055,6 +1107,88 @@ func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {
 	}
 	if len(result.Payload) != 5<<20 {
 		t.Fatalf("large app-server response was truncated: %d", len(result.Payload))
+	}
+}
+
+func TestUploadHistoryImagesUsesBoundedConcurrencyAndPreservesOrder(t *testing.T) {
+	var active atomic.Int32
+	var maximum atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/v1/agent/bridge/token-challenges":
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{
+				"challengeId": "agc_00000000000000000000000000000001",
+				"challenge":   "deeix_challenge_test", "expiresAt": time.Now().Add(time.Minute).Format(time.RFC3339Nano),
+			}})
+		case "/api/v1/agent/bridge/tokens":
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{
+				"connectionToken": "deeix_connection_test", "expiresAt": time.Now().Add(time.Minute).Format(time.RFC3339Nano),
+			}})
+		case "/api/v1/agent/bridge/history-attachments":
+			current := active.Add(1)
+			defer active.Add(-1)
+			for previous := maximum.Load(); current > previous && !maximum.CompareAndSwap(previous, current); previous = maximum.Load() {
+			}
+			encodedName := request.Header.Get("X-DEEIX-File-Name")
+			name, err := base64.RawURLEncoding.DecodeString(encodedName)
+			if err != nil {
+				t.Errorf("decode history image name: %v", err)
+				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			var index int
+			if _, err = fmt.Sscanf(string(name), "image-%d.png", &index); err != nil {
+				t.Errorf("parse history image name %q: %v", name, err)
+				response.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			time.Sleep(time.Duration(8-index) * 5 * time.Millisecond)
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{
+				"fileId": fmt.Sprintf("file_%032x", index+1),
+			}})
+		default:
+			response.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	directory := t.TempDir()
+	localAttachments := make([]any, 8)
+	for index := range localAttachments {
+		path := filepath.Join(directory, fmt.Sprintf("image-%d.png", index))
+		if err := os.WriteFile(path, []byte("\x89PNG\r\n\x1a\nfixture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		localAttachments[index] = map[string]any{"path": path}
+	}
+	identity, err := LoadOrCreateIdentity(filepath.Join(directory, "identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := &Gateway{
+		cloud: NewCloudClient(server.URL), config: Config{DeviceID: "agd_00000000000000000000000000000001"}, identity: identity,
+	}
+	message := map[string]any{"content": "images", "localAttachments": localAttachments}
+	result := map[string]any{"session": map[string]any{"messages": []any{message}}}
+	if err = gateway.uploadHistoryImages(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	if got := maximum.Load(); got <= 1 || got > historyImageUploadConcurrency {
+		t.Fatalf("history image upload concurrency = %d", got)
+	}
+	attachments, ok := message["attachments"].([]any)
+	if !ok || len(attachments) != len(localAttachments) {
+		t.Fatalf("history attachments = %#v", message["attachments"])
+	}
+	for index, rawAttachment := range attachments {
+		attachment, _ := rawAttachment.(map[string]any)
+		if got, want := attachment["fileID"], fmt.Sprintf("file_%032x", index+1); got != want {
+			t.Fatalf("history attachment %d = %v, want %v", index, got, want)
+		}
+	}
+	if _, exists := message["localAttachments"]; exists {
+		t.Fatal("local attachment paths leaked into the history response")
 	}
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { Check, ChevronDownIcon, CircleHelp, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Check, ChevronDownIcon, CircleHelp } from "lucide-react";
 import { toast } from "sonner";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -11,7 +11,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -47,22 +46,12 @@ import {
 } from "@/components/ui/sheet";
 import { SpinnerLabel } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
-import { getModelOptionPolicy } from "@/shared/api/settings";
 import {
-  bindAdminLLMModelUpstreamSource,
   createAdminLLMModel,
   getAdminReferenceData,
   invalidateAdminReferenceDataCache,
-  listAdminLLMModelUpstreamSources,
-  listAdminLLMUpstreamModels,
-  listAdminLLMUpstreams,
   updateAdminLLMModel,
 } from "@/features/admin/api";
 import {
@@ -77,23 +66,16 @@ import type {
   AdminLLMModelDisplayGroupDTO,
   AdminLLMModelDTO,
   AdminLLMModelAccessScope,
-  AdminLLMModelCbPolicyMode,
-  AdminLLMModelUpstreamSourceDTO,
   AdminLLMModelVendor,
   AdminLLMModelVendorDTO,
   AdminLLMStatus,
-  AdminLLMUpstreamModelDTO,
-  AdminLLMUpstreamView,
-  AdminLLMAdapter,
   UpdateAdminLLMModelRequest,
 } from "@/features/admin/api/llm.types";
 
 import {
-  ADAPTER_LABELS,
   MODEL_STATUS_OPTIONS,
   MODEL_KIND_OPTIONS,
   formatDateTime,
-  resolveValue,
 } from "@/features/admin/types/llm";
 import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
 import {
@@ -110,15 +92,6 @@ import {
   normalizeModelCapabilitiesJSON,
   setImageStreamEnabledInCapabilities,
 } from "@/features/admin/components/sections/models/models-capabilities-config";
-import type { NativeToolDefinition } from "@/shared/lib/model-option-policy";
-import {
-  DEFAULT_MODEL_SOURCE_BIND_DRAFT,
-  createModelSourceBindDraftRow,
-  modelSourceBindDraftHasSelection,
-  type ModelSourceBindDraftRow,
-  resolveModelSourceBindDraftRows,
-  uniqueUpstreamModels,
-} from "@/features/admin/model/models-source-binding";
 import { PermissionGroupSelector } from "@/features/admin/components/sections/groups/permission-group-selector";
 
 // ---------------------------------------------------------------------------
@@ -136,10 +109,6 @@ type FormState = {
   accessScope: AdminLLMModelAccessScope;
   status: AdminLLMStatus;
   description: string;
-  cbPolicyMode: AdminLLMModelCbPolicyMode;
-  cbFailureThreshold: string;
-  cbDurationMin: string;
-  cbWindowMin: string;
 };
 
 type VendorOption = {
@@ -159,24 +128,6 @@ const IMAGE_MEDIA_PROTOCOLS = new Set([
   "xai_image_edits",
 ]);
 
-function formatCircuitUntil(until: string, locale: string): string {
-  const raw = until.trim();
-  if (!raw) {
-    return "-";
-  }
-  const timestamp = Number(raw);
-  const date = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000) : new Date(raw);
-  if (Number.isNaN(date.getTime())) {
-    return raw;
-  }
-  return new Intl.DateTimeFormat(locale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
 function buildInitialState(target: AdminLLMModelDTO | null): FormState {
   if (!target) {
     return {
@@ -190,10 +141,6 @@ function buildInitialState(target: AdminLLMModelDTO | null): FormState {
       accessScope: "public",
       status: "active",
       description: "",
-      cbPolicyMode: "default",
-      cbFailureThreshold: "0",
-      cbDurationMin: "0",
-      cbWindowMin: "0",
     };
   }
   let kinds: string[] = [];
@@ -209,10 +156,6 @@ function buildInitialState(target: AdminLLMModelDTO | null): FormState {
     accessScope: target.accessScope === "internal" ? "internal" : "public",
     status: target.status,
     description: target.description ?? "",
-    cbPolicyMode: target.cbPolicyMode === "enforced" ? "enforced" : "default",
-    cbFailureThreshold: String(target.cbFailureThreshold ?? 0),
-    cbDurationMin: String(target.cbDurationMin ?? 0),
-    cbWindowMin: String(target.cbWindowMin ?? 0),
   };
 }
 
@@ -276,17 +219,7 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [showCapabilitiesJSONAdvanced, setShowCapabilitiesJSONAdvanced] = useState(false);
   const sheetContentRef = useRef<HTMLDivElement | null>(null);
-  const [nativeTools, setNativeTools] = useState<NativeToolDefinition[]>([]);
   const [capabilitySourceModels, setCapabilitySourceModels] = useState<AdminLLMModelDTO[]>(models);
-  // Upstream sources for accordion
-  const [sources, setSources] = useState<AdminLLMModelUpstreamSourceDTO[]>([]);
-  const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [bindRows, setBindRows] = useState<ModelSourceBindDraftRow[]>(() => [createModelSourceBindDraftRow()]);
-  const [upstreams, setUpstreams] = useState<AdminLLMUpstreamView[]>([]);
-  const [upstreamsLoading, setUpstreamsLoading] = useState(false);
-  const [upstreamsLoaded, setUpstreamsLoaded] = useState(false);
-  const [upstreamModelsByID, setUpstreamModelsByID] = useState<Record<string, AdminLLMUpstreamModelDTO[]>>({});
-  const [upstreamModelsLoadingByID, setUpstreamModelsLoadingByID] = useState<Record<string, boolean>>({});
   const [permissionGroups, setPermissionGroups] = useState<PermissionGroup[]>([]);
   const [manualPermissionGroupIDs, setManualPermissionGroupIDs] = useState<number[]>([]);
   const [matchedPermissionGroupIDs, setMatchedPermissionGroupIDs] = useState<number[]>([]);
@@ -307,126 +240,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
     }));
   }
 
-  const loadUpstreams = useCallback(async () => {
-    setUpstreamsLoading(true);
-    try {
-      const token = await resolveAccessToken();
-      if (!token) {
-        return;
-      }
-      const data = await listAdminLLMUpstreams(token, {
-        page: 1,
-        pageSize: 2000,
-        status: "active",
-        sort: "name_asc",
-      });
-      setUpstreams(data.results);
-    } catch (error) {
-      toast.error(t("toast.upstreamsLoadFailed"), { description: resolveAdminErrorMessage(error) });
-    } finally {
-      setUpstreamsLoaded(true);
-      setUpstreamsLoading(false);
-    }
-  }, [t]);
-
-  const loadUpstreamModels = useCallback(async (upstreamID: string) => {
-    const parsedUpstreamID = Number.parseInt(upstreamID, 10);
-    if (!Number.isFinite(parsedUpstreamID) || parsedUpstreamID <= 0) {
-      return;
-    }
-    if (upstreamModelsByID[upstreamID] || upstreamModelsLoadingByID[upstreamID]) {
-      return;
-    }
-    setUpstreamModelsLoadingByID((current) => ({ ...current, [upstreamID]: true }));
-    try {
-      const token = await resolveAccessToken();
-      if (!token) {
-        return;
-      }
-      const data = await listAdminLLMUpstreamModels(token, parsedUpstreamID, {
-        page: 1,
-        pageSize: 2000,
-        upstreamStatus: "active",
-        sort: "upstream_asc",
-      });
-      const items = uniqueUpstreamModels(data.results).filter((item) => item.upstreamModelStatus === "active");
-      setUpstreamModelsByID((current) => ({ ...current, [upstreamID]: items }));
-    } catch (error) {
-      toast.error(t("toast.upstreamModelsLoadFailed"), { description: resolveAdminErrorMessage(error) });
-    } finally {
-      setUpstreamModelsLoadingByID((current) => ({ ...current, [upstreamID]: false }));
-    }
-  }, [t, upstreamModelsByID, upstreamModelsLoadingByID]);
-
-  function addBindRow() {
-    setBindRows((current) => [createModelSourceBindDraftRow(), ...current]);
-  }
-
-  function removeBindRow(rowID: string) {
-    setBindRows((current) => {
-      if (current.length <= 1) {
-        return [createModelSourceBindDraftRow()];
-      }
-      return current.filter((row) => row.id !== rowID);
-    });
-  }
-
-  function handleBindRowUpstreamChange(rowID: string, upstreamID: string) {
-    setBindRows((current) =>
-      current.map((row) =>
-        row.id === rowID
-          ? {
-              ...row,
-              draft: {
-                ...DEFAULT_MODEL_SOURCE_BIND_DRAFT,
-                upstreamID,
-              },
-            }
-          : row,
-      ),
-    );
-    void loadUpstreamModels(upstreamID);
-  }
-
-  function handleBindRowModelChange(rowID: string, upstreamModelID: string) {
-    setBindRows((current) =>
-      current.map((row) => {
-        if (row.id !== rowID) {
-          return row;
-        }
-        const upstreamModels = upstreamModelsByID[row.draft.upstreamID] ?? [];
-        const selected = upstreamModels.find((item) => String(item.id) === upstreamModelID);
-        return {
-          ...row,
-          draft: {
-            ...row.draft,
-            upstreamModelID,
-            protocol: selected?.suggestedProtocol ?? "",
-          },
-        };
-      }),
-    );
-  }
-
-  function setBindRowField<K extends keyof ModelSourceBindDraftRow["draft"]>(
-    rowID: string,
-    key: K,
-    value: ModelSourceBindDraftRow["draft"][K],
-  ) {
-    setBindRows((current) =>
-      current.map((row) =>
-        row.id === rowID
-          ? {
-              ...row,
-              draft: {
-                ...row.draft,
-                [key]: value,
-              },
-            }
-          : row,
-      ),
-    );
-  }
 
   const selectedKindLabel = form.kinds
     .map((kind) =>
@@ -441,29 +254,29 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
     iconUrl: resolveModelIconURL(item.icon),
   }));
   const routeProtocols = useMemo(
-    () => Array.from(new Set([
-      ...parseProtocolsJSON(target?.protocolsJSON ?? ""),
-      ...sources.map((source) => source.protocol.trim()).filter(Boolean),
-      ...bindRows.map((row) => row.draft.protocol).filter(Boolean),
-    ])),
-    [bindRows, sources, target?.protocolsJSON],
+    () => {
+      const configured = parseProtocolsJSON(target?.protocolsJSON ?? "");
+      if (configured.length > 0) {
+        return configured;
+      }
+      switch (form.vendor.trim().toLowerCase()) {
+        case "openai":
+        case "grok":
+        case "xai":
+          return ["openai_chat_completions", "openai_responses"];
+        case "anthropic":
+        case "claude":
+          return ["anthropic_messages"];
+        case "gemini":
+        case "google":
+        case "antigravity":
+          return ["openai_chat_completions"];
+        default:
+          return [];
+      }
+    },
+    [form.vendor, target?.protocolsJSON],
   );
-  function getBindProtocolOptions(row: ModelSourceBindDraftRow): AdminLLMAdapter[] {
-    const upstreamModels = upstreamModelsByID[row.draft.upstreamID] ?? [];
-    const selectedUpstreamModel = upstreamModels.find((item) => String(item.id) === row.draft.upstreamModelID);
-    const values = new Set<string>(Object.keys(ADAPTER_LABELS));
-    if (selectedUpstreamModel?.suggestedProtocol) {
-      values.add(selectedUpstreamModel.suggestedProtocol);
-    }
-    if (selectedUpstreamModel?.protocol) {
-      values.add(selectedUpstreamModel.protocol);
-    }
-    return Array.from(values).sort((a, b) => {
-      const labelA = ADAPTER_LABELS[a as AdminLLMAdapter] ?? a;
-      const labelB = ADAPTER_LABELS[b as AdminLLMAdapter] ?? b;
-      return labelA.localeCompare(labelB);
-    }) as AdminLLMAdapter[];
-  }
   const imageStreamEnabled = imageStreamEnabledFromCapabilities(form.capabilitiesJSON);
   const showImageStreamControl = routeProtocols.some((protocol) => IMAGE_MEDIA_PROTOCOLS.has(protocol.trim()));
   const showPermissionGroupUnassigned =
@@ -496,7 +309,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
 
   useEffect(() => {
     if (!open) {
-      setNativeTools([]);
       setCapabilitySourceModels(models);
       return;
     }
@@ -507,17 +319,12 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
         if (!token) {
           return;
         }
-        const policy = await getModelOptionPolicy(token);
-        if (!cancelled) {
-          setNativeTools(policy.nativeTools);
-        }
         const referenceData = await getAdminReferenceData(token);
         if (!cancelled) {
           setCapabilitySourceModels(referenceData.models);
         }
       } catch {
         if (!cancelled) {
-          setNativeTools([]);
           setCapabilitySourceModels(models);
         }
       }
@@ -581,56 +388,10 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
   }, [mode, open, t, target]);
 
   useEffect(() => {
-    if (!open) {
-      setSources([]);
-      setForm(buildInitialState(null));
-      setBindRows([createModelSourceBindDraftRow()]);
-      setExpandedSections([]);
-      setShowCapabilitiesJSONAdvanced(false);
-      setUpstreams([]);
-      setUpstreamsLoaded(false);
-      setUpstreamModelsByID({});
-      setUpstreamModelsLoadingByID({});
-      return;
-    }
-
-    if (mode === "create" || !target) {
-      setSources([]);
-      setForm(buildInitialState(null));
-      setBindRows([createModelSourceBindDraftRow()]);
-      setExpandedSections(["capabilities", "sources"]);
-      setShowCapabilitiesJSONAdvanced(false);
-      return;
-    }
-
-    setForm(buildInitialState(target));
-    setBindRows([createModelSourceBindDraftRow()]);
-    setExpandedSections(["capabilities"]);
+    setForm(buildInitialState(open && mode === "edit" ? target : null));
+    setExpandedSections(open ? ["capabilities"] : []);
     setShowCapabilitiesJSONAdvanced(false);
-
-    setSourcesLoading(true);
-    void (async () => {
-      try {
-        const token = await resolveAccessToken();
-        if (!token) return;
-        const data = await listAdminLLMModelUpstreamSources(token, target.id, {
-          page: 1,
-          pageSize: 100,
-        });
-        setSources(data.results);
-      } catch {
-        setSources([]);
-      } finally {
-        setSourcesLoading(false);
-      }
-    })();
   }, [mode, open, target]);
-
-  useEffect(() => {
-    if (open && mode === "create" && !upstreamsLoaded && !upstreamsLoading) {
-      void loadUpstreams();
-    }
-  }, [loadUpstreams, mode, open, upstreamsLoaded, upstreamsLoading]);
 
   // -------------------------------------------------------------------------
   // Submit
@@ -640,39 +401,11 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
     e.preventDefault();
     if (mode === "edit" && !target) return;
 
-    const bindDraftResult = mode === "create"
-      ? resolveModelSourceBindDraftRows(bindRows)
-      : { status: "empty" as const };
-    if (bindDraftResult.status === "invalid") {
-      const messageKey = {
-        required: "toast.bindRequired",
-        protocolRequired: "toast.bindProtocolRequired",
-        priorityMustBePositive: "sources.priorityMustBePositive",
-        weightMustBePositive: "sources.weightMustBePositive",
-        duplicate: "toast.bindDuplicateSource",
-      }[bindDraftResult.error];
-      toast.error(t(messageKey));
-      return;
-    }
-
     setPending(true);
     try {
       const token = await resolveAccessToken();
       const kindsJson =
         form.kinds.length > 0 ? stringifyKinds(form.kinds) : undefined;
-      const cbFailureThreshold = Math.max(
-        0,
-        Number.parseInt(form.cbFailureThreshold.trim() || "0", 10) || 0,
-      );
-      const cbDurationMin = Math.max(
-        0,
-        Number.parseInt(form.cbDurationMin.trim() || "0", 10) || 0,
-      );
-      const cbWindowMin = Math.max(
-        0,
-        Number.parseInt(form.cbWindowMin.trim() || "0", 10) || 0,
-      );
-
       if (mode === "create") {
         const data = await createAdminLLMModel(token, {
           platformModelName: form.platformModelName.trim(),
@@ -680,42 +413,17 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
           displayGroupID: form.displayGroupID === FOLLOW_VENDOR_GROUP ? undefined : Number(form.displayGroupID),
           kindsJSON: kindsJson,
           icon: form.icon.trim() || undefined,
-          capabilitiesJSON: normalizeModelCapabilitiesJSON(form.capabilitiesJSON, nativeTools, routeProtocols) || undefined,
+          capabilitiesJSON: normalizeModelCapabilitiesJSON(form.capabilitiesJSON, routeProtocols) || undefined,
           systemPrompt: form.systemPrompt.trim() || undefined,
           accessScope: form.accessScope,
           status: form.status,
           description: form.description.trim() || undefined,
-          cbPolicyMode: form.cbPolicyMode,
-          cbFailureThreshold,
-          cbDurationMin,
-          cbWindowMin,
         });
         if (manualPermissionGroupIDs.length > 0) {
           await saveModelPermissionGroups(token, data.model.id);
         }
-        if (bindDraftResult.status === "valid" && bindDraftResult.payloads.length > 0) {
-          let failedCount = 0;
-          let lastBindError: unknown = null;
-          for (const payload of bindDraftResult.payloads) {
-            try {
-              await bindAdminLLMModelUpstreamSource(token, data.model.id, payload);
-            } catch (bindError) {
-              failedCount += 1;
-              lastBindError = bindError;
-            }
-          }
-          if (failedCount > 0) {
-            toast.error(t("toast.modelCreatedSourcesBindPartialFailed", { count: failedCount }), {
-              description: lastBindError ? resolveAdminErrorMessage(lastBindError) : undefined,
-            });
-          } else {
-            toast.success(t("toast.modelCreatedWithSources", { count: bindDraftResult.payloads.length }));
-          }
-        } else {
-          toast.success(t("toast.modelCreated"));
-        }
+        toast.success(t("toast.modelCreated"));
         setForm(buildInitialState(data.model));
-        setBindRows([createModelSourceBindDraftRow()]);
         invalidateAdminReferenceDataCache();
         handleClose();
         onSuccess();
@@ -729,15 +437,11 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
         displayGroupID: form.displayGroupID === FOLLOW_VENDOR_GROUP ? 0 : Number(form.displayGroupID),
         kindsJSON: kindsJson,
         icon: form.icon.trim(),
-        capabilitiesJSON: normalizeModelCapabilitiesJSON(form.capabilitiesJSON, nativeTools, routeProtocols),
+        capabilitiesJSON: normalizeModelCapabilitiesJSON(form.capabilitiesJSON, routeProtocols),
         systemPrompt: form.systemPrompt.trim(),
         accessScope: form.accessScope,
         status: form.status,
         description: form.description.trim() || undefined,
-        cbPolicyMode: form.cbPolicyMode,
-        cbFailureThreshold,
-        cbDurationMin,
-        cbWindowMin,
       };
       await updateAdminLLMModel(token, target.id, payload);
       await saveModelPermissionGroups(token, target.id);
@@ -997,7 +701,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
                       disabled={pending}
                       presetModels={capabilitySourceModels}
                       currentModelID={target?.id ?? null}
-                      nativeTools={nativeTools}
                       routeProtocols={routeProtocols}
                       t={t}
                       commonT={commonT}
@@ -1043,78 +746,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
                 </AccordionContent>
               </AccordionItem>
 
-              <AccordionItem value="circuit-breaker" className="border-border/60">
-                <AccordionTrigger className="h-11 items-center py-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:no-underline data-[state=open]:font-medium data-[state=open]:text-foreground [&_.accordion-trigger-icon]:translate-y-0">
-                  {t("sheet.circuitBreak")}
-                </AccordionTrigger>
-                <AccordionContent className="space-y-3 pb-4 pt-0">
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {t("sheet.circuitBreakDescription")}
-                  </p>
-                  <div className="grid min-w-0 grid-cols-1 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs font-normal text-muted-foreground" htmlFor="model-cb-policy-mode">
-                        {t("sheet.circuitPolicyMode")}
-                      </Label>
-                      <Select
-                        value={form.cbPolicyMode}
-                        onValueChange={(v) => setField("cbPolicyMode", v as AdminLLMModelCbPolicyMode)}
-                        disabled={pending}
-                      >
-                        <SelectTrigger id="model-cb-policy-mode">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="default">{t("sheet.circuitPolicyDefault")}</SelectItem>
-                          <SelectItem value="enforced">{t("sheet.circuitPolicyEnforced")}</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-normal text-muted-foreground" htmlFor="model-cb-failure-threshold">
-                        {t("sheet.failureThreshold")}
-                      </Label>
-                      <Input
-                        id="model-cb-failure-threshold"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={form.cbFailureThreshold}
-                        onChange={(e) => setField("cbFailureThreshold", e.target.value)}
-                        disabled={pending}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-normal text-muted-foreground" htmlFor="model-cb-duration-min">
-                        {t("sheet.circuitDuration")}
-                      </Label>
-                      <Input
-                        id="model-cb-duration-min"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={form.cbDurationMin}
-                        onChange={(e) => setField("cbDurationMin", e.target.value)}
-                        disabled={pending}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs font-normal text-muted-foreground" htmlFor="model-cb-window-min">
-                        {t("sheet.circuitWindow")}
-                      </Label>
-                      <Input
-                        id="model-cb-window-min"
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={form.cbWindowMin}
-                        onChange={(e) => setField("cbWindowMin", e.target.value)}
-                        disabled={pending}
-                      />
-                    </div>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
 
               <AccordionItem value="other" className="border-border/60">
                 <AccordionTrigger className="h-11 items-center py-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:no-underline data-[state=open]:font-medium data-[state=open]:text-foreground [&_.accordion-trigger-icon]:translate-y-0">
@@ -1187,281 +818,6 @@ export function ModelSheet({ open, mode, target, models, vendors, displayGroups,
                       {t("sheet.systemPromptDescription")}
                     </p>
                   </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              <AccordionItem value="sources" className="border-border/60">
-                <AccordionTrigger className="h-11 items-center py-0 text-xs font-normal text-muted-foreground hover:text-foreground hover:no-underline data-[state=open]:font-medium data-[state=open]:text-foreground [&_.accordion-trigger-icon]:translate-y-0">
-                  {mode === "create"
-                    ? t("sheet.bindInitialSource")
-                    : t("sheet.upstreamSources", { count: sourcesLoading ? "..." : sources.length })}
-                </AccordionTrigger>
-                <AccordionContent className="space-y-3 pb-4 pt-0">
-                  {mode === "create" ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="min-w-0 text-xs text-muted-foreground">
-                          {t("sources.initialSourcesHelp")}
-                        </p>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          className="h-8 shrink-0 px-2 text-xs font-normal shadow-none"
-                          disabled={pending}
-                          onClick={addBindRow}
-                        >
-                          <Plus className="size-3.5 stroke-1" />
-                          {t("sources.addSource")}
-                        </Button>
-                      </div>
-
-                      <div className="space-y-2.5">
-                        {bindRows.map((row, index) => {
-                          const draft = row.draft;
-                          const rowModels = upstreamModelsByID[draft.upstreamID] ?? [];
-                          const rowModelsLoading = upstreamModelsLoadingByID[draft.upstreamID] === true;
-                          const rowProtocolOptions = getBindProtocolOptions(row);
-                          const rowHasSelection = modelSourceBindDraftHasSelection(draft);
-
-                          return (
-                            <div
-                              key={row.id}
-                              className="space-y-2.5 rounded-md border border-border/60 bg-muted/15 p-3"
-                            >
-                              <div className="flex h-6 items-center justify-between gap-2">
-                                <span className="text-[11px] font-medium text-muted-foreground">
-                                  {t("sources.sourceDraft", { index: index + 1 })}
-                                </span>
-                                <Button
-                                  type="button"
-                                  size="icon-sm"
-                                  variant="ghost"
-                                  className="size-6 text-muted-foreground shadow-none"
-                                  disabled={pending}
-                                  onClick={() => removeBindRow(row.id)}
-                                  aria-label={t("sources.removeSource")}
-                                >
-                                  <Trash2 className="size-3.5 stroke-1" />
-                                </Button>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="min-w-0 space-y-1">
-                                  <Label className="text-xs font-normal text-muted-foreground">{t("sources.upstream")}</Label>
-                                  <Select
-                                    value={draft.upstreamID}
-                                    onValueChange={(value) => handleBindRowUpstreamChange(row.id, value)}
-                                    disabled={pending || upstreamsLoading}
-                                  >
-                                    <SelectTrigger className="h-8 bg-background text-xs">
-                                      <SelectValue placeholder={upstreamsLoading ? t("sources.loadingUpstreams") : t("sources.selectUpstream")} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {upstreams.map((item) => (
-                                        <SelectItem key={item.id} value={String(item.id)}>
-                                          {item.name}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
-                                <div className="min-w-0 space-y-1">
-                                  <Label className="text-xs font-normal text-muted-foreground">{t("sources.upstreamModel")}</Label>
-                                  <Select
-                                    value={draft.upstreamModelID}
-                                    onValueChange={(value) => handleBindRowModelChange(row.id, value)}
-                                    disabled={pending || !draft.upstreamID || rowModelsLoading}
-                                  >
-                                    <SelectTrigger className="h-8 bg-background font-mono text-xs">
-                                      <SelectValue placeholder={rowModelsLoading ? t("sources.loadingUpstreamModels") : t("sources.selectUpstreamModel")} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {rowModels.map((item) => (
-                                        <SelectItem key={item.id} value={String(item.id)}>
-                                          {item.upstreamModelName}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="min-w-0 space-y-1">
-                                  <Label className="text-xs font-normal text-muted-foreground">{t("sources.protocol")}</Label>
-                                  <Select
-                                    value={draft.protocol}
-                                    onValueChange={(value) => setBindRowField(row.id, "protocol", value as AdminLLMAdapter)}
-                                    disabled={pending || !draft.upstreamModelID}
-                                  >
-                                    <SelectTrigger className="h-8 bg-background text-xs">
-                                      <SelectValue placeholder={t("sources.selectProtocol")} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {rowProtocolOptions.map((protocol) => (
-                                        <SelectItem key={protocol} value={protocol}>
-                                          {ADAPTER_LABELS[protocol] ?? protocol}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
-                                <div className="min-w-0 space-y-1">
-                                  <Label className="text-xs font-normal text-muted-foreground">{t("sources.status")}</Label>
-                                  <Select
-                                    value={draft.status}
-                                    onValueChange={(value) => setBindRowField(row.id, "status", value as AdminLLMStatus)}
-                                    disabled={pending || !rowHasSelection}
-                                  >
-                                    <SelectTrigger className="h-8 bg-background text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="active">{t("status.active")}</SelectItem>
-                                      <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="min-w-0 space-y-1">
-                                  <div className="inline-flex items-center gap-1">
-                                    <Label className="text-xs font-normal leading-4 text-muted-foreground" htmlFor={`model-source-priority-${row.id}`}>
-                                      {t("sources.priority")}
-                                    </Label>
-                                    <Popover>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <PopoverTrigger asChild>
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="icon-xs"
-                                              className="-translate-y-0.5 text-muted-foreground hover:bg-transparent hover:text-foreground"
-                                              aria-label={t("sources.priorityDesc")}
-                                            >
-                                              <CircleHelp className="size-3" />
-                                            </Button>
-                                          </PopoverTrigger>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top" className="max-w-xs text-xs">
-                                          {t("sources.priorityDesc")}
-                                        </TooltipContent>
-                                      </Tooltip>
-                                      <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-3 text-xs leading-5">
-                                        {t("sources.priorityDesc")}
-                                      </PopoverContent>
-                                    </Popover>
-                                  </div>
-                                  <Input
-                                    id={`model-source-priority-${row.id}`}
-                                    value={draft.priority}
-                                    inputMode="numeric"
-                                    disabled={pending || !rowHasSelection}
-                                    onChange={(event) => setBindRowField(row.id, "priority", event.target.value)}
-                                    className="h-8 bg-background font-mono text-xs tabular-nums"
-                                  />
-                                </div>
-                                <div className="min-w-0 space-y-1">
-                                  <div className="inline-flex items-center gap-1">
-                                    <Label className="text-xs font-normal leading-4 text-muted-foreground" htmlFor={`model-source-weight-${row.id}`}>
-                                      {t("sources.weight")}
-                                    </Label>
-                                    <Popover>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <PopoverTrigger asChild>
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              size="icon-xs"
-                                              className="-translate-y-0.5 text-muted-foreground hover:bg-transparent hover:text-foreground"
-                                              aria-label={t("sources.weightDesc")}
-                                            >
-                                              <CircleHelp className="size-3" />
-                                            </Button>
-                                          </PopoverTrigger>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top" className="max-w-xs text-xs">
-                                          {t("sources.weightDesc")}
-                                        </TooltipContent>
-                                      </Tooltip>
-                                      <PopoverContent className="w-72 max-w-[calc(100vw-2rem)] p-3 text-xs leading-5">
-                                        {t("sources.weightDesc")}
-                                      </PopoverContent>
-                                    </Popover>
-                                  </div>
-                                  <Input
-                                    id={`model-source-weight-${row.id}`}
-                                    value={draft.weight}
-                                    inputMode="numeric"
-                                    disabled={pending || !rowHasSelection}
-                                    onChange={(event) => setBindRowField(row.id, "weight", event.target.value)}
-                                    className="h-8 bg-background font-mono text-xs tabular-nums"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : sourcesLoading ? (
-                    <div className="h-3 w-24 animate-pulse rounded-sm bg-muted/70" aria-hidden="true" />
-                  ) : sources.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">{t("sources.empty")}</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {sources.map((src) => (
-                        <div
-                          key={src.id}
-                          className="flex h-8 items-center rounded-md bg-secondary px-2.5 text-xs"
-                        >
-                          <div className="flex min-w-0 flex-1 items-center justify-between gap-1.5">
-                            <div className="flex min-w-0 items-center gap-1">
-                              <span className="truncate font-medium">
-                                {resolveValue(src.upstreamName)}
-                              </span>
-                              <span className="text-muted-foreground">→</span>
-                              <span className="truncate font-mono text-muted-foreground">
-                                {resolveValue(src.upstreamModelName)}
-                              </span>
-                            </div>
-                            <div className="flex shrink-0 items-center">
-                              {src.circuitOpen ? (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <ShieldAlert
-                                      className="size-4 text-destructive"
-                                      aria-label={t("status.circuitOpen")}
-                                    />
-                                  </TooltipTrigger>
-                                  <TooltipContent side="top" className="text-xs">
-                                    <div className="space-y-1">
-                                      <div>{t("status.circuitOpen")}</div>
-                                      <div>{t("sources.circuitUntil", { time: formatCircuitUntil(src.circuitUntil, locale) })}</div>
-                                    </div>
-                                  </TooltipContent>
-                                </Tooltip>
-                              ) : src.status === "inactive" || src.upstreamStatus === "inactive" || src.upstreamModelStatus === "inactive" ? (
-                                <Badge variant="ghost" className="h-5 rounded-md px-1.5 text-[10px] font-normal text-muted-foreground">
-                                  {t("status.inactive")}
-                                </Badge>
-                              ) : (
-                                <Badge variant="ghost" className="h-5 rounded-md px-1.5 text-[10px] font-normal text-foreground/75">
-                                  {t("status.active")}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </AccordionContent>
               </AccordionItem>
 

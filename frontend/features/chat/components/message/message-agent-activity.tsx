@@ -122,11 +122,15 @@ function ActivityItemRow({ item }: { item: AgentActivityItem }) {
   const t = useTranslations("chat.agent");
   if (item.kind === "command") return <CommandRow item={item} />;
   if (item.kind === "file") {
+    const firstPath = item.files[0]?.path;
     return (
       <div className="flex min-w-0 items-center gap-2 border-t border-border/25 py-2 first:border-t-0">
         <FileCode2 className="size-3.5 shrink-0 text-muted-foreground/62" />
         <ActivityStatus status={item.status} />
-        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/82">{t("activity.fileChanges", { count: item.files.length })}</span>
+        <code className="min-w-0 flex-1 truncate text-[12px] text-foreground/82" title={firstPath}>
+          {firstPath || t("activity.fileChanges", { count: item.files.length })}
+        </code>
+        {item.files.length > 1 ? <span className="shrink-0 text-[11px] text-muted-foreground/60">+{item.files.length - 1}</span> : null}
       </div>
     );
   }

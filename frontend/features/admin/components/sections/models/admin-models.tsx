@@ -2,9 +2,8 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { Building2, Cable, Check, ChevronDownIcon, Layers3, ListOrdered, Plus, Tags, ToggleLeft, Trash2 } from "lucide-react";
+import { Building2, Check, ChevronDownIcon, Layers3, ListOrdered, Plus, Tags, ToggleLeft, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,15 +21,9 @@ import {
 
 import { TablePagination, TableToolbar } from "@/components/ui/table-tools";
 import { AdminBulkConfirmDialog } from "@/features/admin/components/bulk-confirm-dialog";
-import {
-  deleteAdminLLMUpstreamModel,
-  testAdminLLMModelAll,
-  testAdminLLMUpstreamModelRoute,
-} from "@/features/admin/api";
 import { useAdminModels } from "@/features/admin/hooks/use-admin-models";
 import { useAdminModelPresentation } from "@/features/admin/hooks/use-admin-model-presentation";
 import { BulkDeleteModelsDialog, DeleteModelDialog } from "./models-dialog";
-import { ModelProbeDialog } from "./models-probe-dialog";
 import { ModelsTable } from "./models-table";
 import {
   ADAPTER_LABELS,
@@ -38,27 +31,12 @@ import {
   MODEL_SORT_OPTIONS,
   type ModelSortValue,
 } from "@/features/admin/types/llm";
-import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
-import type {
-  AdminLLMAdapter,
-  AdminLLMModelDTO,
-  AdminLLMModelProbeResult,
-  AdminLLMModelUpstreamSourceDTO,
-  AdminLLMStatus,
-} from "@/features/admin/api/llm.types";
+import type { AdminLLMStatus } from "@/features/admin/api/llm.types";
 import { cn } from "@/lib/utils";
-import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const ModelSheet = dynamic(() => import("./models-sheet").then((module) => module.ModelSheet), {
   ssr: false,
 });
-
-const UpstreamSourcesSheet = dynamic(
-  () => import("./models-sources-sheet").then((module) => module.UpstreamSourcesSheet),
-  {
-    ssr: false,
-  },
-);
 
 const ModelOrderSheet = dynamic(
   () => import("./models-order-sheet").then((module) => module.ModelOrderSheet),
@@ -72,7 +50,7 @@ const ModelPresentationDialog = dynamic(
   { ssr: false },
 );
 
-type ModelBulkAction = "kinds" | "protocol" | "vendor" | "displayGroup" | "status";
+type ModelBulkAction = "kinds" | "vendor" | "displayGroup" | "status";
 
 function BulkActionControlRow({
   icon,
@@ -183,10 +161,6 @@ export function AdminModelsPage() {
   const [orderOpen, setOrderOpen] = React.useState(false);
   const [presentationOpen, setPresentationOpen] = React.useState(false);
   const [bulkConfirmAction, setBulkConfirmAction] = React.useState<ModelBulkAction | null>(null);
-  const [probeOpen, setProbeOpen] = React.useState(false);
-  const [probeLoading, setProbeLoading] = React.useState(false);
-  const [probeTargetName, setProbeTargetName] = React.useState("");
-  const [probeResults, setProbeResults] = React.useState<AdminLLMModelProbeResult[]>([]);
 
   const bulkConfirmOpen = bulkConfirmAction !== null;
 
@@ -194,9 +168,6 @@ export function AdminModelsPage() {
     switch (bulkConfirmAction) {
       case "kinds":
         void models.handleBulkApplyKinds().then(() => setBulkConfirmAction(null));
-        break;
-      case "protocol":
-        void models.handleBulkApplyProtocol().then(() => setBulkConfirmAction(null));
         break;
       case "vendor":
         void models.handleBulkApplyVendor().then(() => setBulkConfirmAction(null));
@@ -207,61 +178,6 @@ export function AdminModelsPage() {
       case "status":
         void models.handleBulkApplyStatus().then(() => setBulkConfirmAction(null));
         break;
-    }
-  }
-
-  async function runProbe(
-    targetName: string,
-    loader: (token: string) => Promise<AdminLLMModelProbeResult | AdminLLMModelProbeResult[]>,
-  ) {
-    setProbeTargetName(targetName);
-    setProbeResults([]);
-    setProbeOpen(true);
-    setProbeLoading(true);
-    try {
-      const token = await resolveAccessToken();
-      if (!token) {
-        toast.error(t("toast.sessionExpired"), { description: t("toast.signInAgain") });
-        setProbeOpen(false);
-        return;
-      }
-      const data = await loader(token);
-      setProbeResults(Array.isArray(data) ? data : [data]);
-    } catch (error) {
-      toast.error(t("toast.operationFailed"), { description: resolveAdminErrorMessage(error) });
-      setProbeOpen(false);
-    } finally {
-      setProbeLoading(false);
-    }
-  }
-
-  function handleTestModel(item: AdminLLMModelDTO) {
-    void runProbe(item.platformModelName, async (token) => (await testAdminLLMModelAll(token, item.id)).results);
-  }
-
-  function handleTestSource(source: AdminLLMModelUpstreamSourceDTO) {
-    const targetName = `${source.upstreamName} / ${source.upstreamModelName}`;
-    void runProbe(targetName, (token) => testAdminLLMUpstreamModelRoute(token, source.upstreamID, source.id));
-  }
-
-  async function handleDeleteProbeRoute(result: AdminLLMModelProbeResult) {
-    const token = await resolveAccessToken();
-    if (!token) {
-      toast.error(t("toast.sessionExpired"), { description: t("toast.signInAgain") });
-      throw new Error("session expired");
-    }
-    try {
-      await deleteAdminLLMUpstreamModel(token, result.upstreamID, result.routeID);
-      const nextResults = probeResults.filter((item) => item.routeID !== result.routeID);
-      setProbeResults(nextResults);
-      if (nextResults.length === 0) {
-        setProbeOpen(false);
-      }
-      toast.success(t("toast.sourceDeleted"));
-      void models.loadModels(models.page, models.pageSize);
-    } catch (error) {
-      toast.error(t("toast.sourceDeleteFailed"), { description: resolveAdminErrorMessage(error) });
-      throw error;
     }
   }
 
@@ -354,30 +270,6 @@ export function AdminModelsPage() {
                     {presentation.displayGroups.map((item) => (
                       <SelectItem key={item.id} value={String(item.id)} className="text-[11px]">
                         {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </BulkActionControlRow>
-
-              <BulkActionControlRow
-                icon={<Cable className="size-3 stroke-1" />}
-                label={t("actions.apply")}
-                onApply={() => setBulkConfirmAction("protocol")}
-                disabled={models.loading || models.batchApplying || models.selectedModels.length === 0 || !models.batchProtocol}
-              >
-                <Select
-                  value={models.batchProtocol || undefined}
-                  onValueChange={(value) => models.setBatchProtocol(value as AdminLLMAdapter)}
-                  disabled={models.loading || models.batchApplying || models.selectedModels.length === 0}
-                >
-                  <SelectTrigger size="xs" className="h-7 px-2 text-[11px] text-muted-foreground">
-                    <SelectValue placeholder={t("fields.protocol")} />
-                  </SelectTrigger>
-                  <SelectContent position="popper" align="start" className="z-[100]" viewportClassName="max-h-[220px]">
-                    {Object.entries(ADAPTER_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value} className="text-[11px]">
-                        {label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -484,15 +376,9 @@ export function AdminModelsPage() {
           selectedModelIDs={models.selectedModelIDs}
           onSelectedModelIDsChange={models.setSelectedModelIDs}
           onEdit={models.setEditTarget}
-          onViewSources={models.setSourcesModel}
           onToggleStatus={(item, status) => void models.handleToggleStatus(item, status)}
           onToggleAccessScope={(item, scope) => void models.handleToggleAccessScope(item, scope)}
           onDelete={models.setDeleteTarget}
-          onTestModel={handleTestModel}
-          onTestSource={handleTestSource}
-          onRefreshModels={() => void models.loadModels(models.page, models.pageSize)}
-          onSourceAvailabilityChange={models.handleSourceAvailabilityChange}
-          onSourceDeleteChange={models.handleSourceDeleteChange}
         />
 
         <TablePagination
@@ -562,15 +448,6 @@ export function AdminModelsPage() {
         onDeleted={models.handleBulkDeleted}
       />
 
-      {models.sourcesModel ? (
-        <UpstreamSourcesSheet
-          model={models.sourcesModel}
-          onClose={() => models.setSourcesModel(null)}
-          onRefreshModel={() => void models.loadModels(models.page, models.pageSize)}
-          onSourceAvailabilityChange={models.handleSourceAvailabilityChange}
-        />
-      ) : null}
-
       <AdminBulkConfirmDialog
         open={bulkConfirmOpen}
         onOpenChange={(open) => {
@@ -586,19 +463,6 @@ export function AdminModelsPage() {
         onConfirm={handleConfirmBulkAction}
       />
 
-      <ModelProbeDialog
-        open={probeOpen}
-        loading={probeLoading}
-        targetName={probeTargetName}
-        result={null}
-        results={probeResults}
-        onDeleteRoute={handleDeleteProbeRoute}
-        onOpenChange={(open) => {
-          if (!open && !probeLoading) {
-            setProbeOpen(false);
-          }
-        }}
-      />
     </div>
   );
 }

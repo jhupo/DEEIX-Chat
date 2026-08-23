@@ -4,18 +4,14 @@ import { toast } from "sonner";
 
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import {
-  listAdminLLMModelUpstreamSources,
   listAdminLLMModels,
   setAdminLLMModelsDisplayGroup,
-  upsertAdminLLMUpstreamModel,
   updateAdminLLMModel,
 } from "@/features/admin/api";
 import type {
-  AdminLLMAdapter,
   AdminBatchDeleteData,
   AdminLLMModelAccessScope,
   AdminLLMModelDTO,
-  AdminLLMModelUpstreamSourceDTO,
   AdminLLMStatus,
 } from "@/features/admin/api/llm.types";
 import {
@@ -24,11 +20,6 @@ import {
   type ModelSortValue,
 } from "@/features/admin/types/llm";
 import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
-import { resolveKindsDisplayForProtocols } from "@/features/admin/utils/llm-display";
-import {
-  applySourceAvailabilityDelta,
-  isAdminLLMSourceAvailable,
-} from "@/features/admin/utils/llm-source-availability";
 import { patchByID, removeByID, removeManyByID, replaceByID } from "@/shared/lib/optimistic-list";
 import { runSettledBulkItems } from "@/shared/lib/bulk-action";
 
@@ -56,8 +47,6 @@ type UseAdminModelsState = {
   batchApplying: boolean;
   batchKindsDisplay: string;
   setBatchKindsDisplay: (value: string) => void;
-  batchProtocol: AdminLLMAdapter | "";
-  setBatchProtocol: (value: AdminLLMAdapter | "") => void;
   batchVendor: string;
   setBatchVendor: (value: string) => void;
   batchDisplayGroupID: string;
@@ -70,18 +59,13 @@ type UseAdminModelsState = {
   setDeleteTarget: (target: AdminLLMModelDTO | null) => void;
   bulkDeleteTargets: AdminLLMModelDTO[];
   closeBulkDelete: () => void;
-  sourcesModel: AdminLLMModelDTO | null;
-  setSourcesModel: (target: AdminLLMModelDTO | null) => void;
   loadModels: (page?: number, pageSize?: number) => Promise<void>;
   handleToggleStatus: (item: AdminLLMModelDTO, nextStatus: AdminLLMStatus) => Promise<void>;
   handleToggleAccessScope: (item: AdminLLMModelDTO, nextScope: AdminLLMModelAccessScope) => Promise<void>;
   handleBulkApplyKinds: () => Promise<void>;
-  handleBulkApplyProtocol: () => Promise<void>;
   handleBulkApplyVendor: () => Promise<void>;
   handleBulkApplyDisplayGroup: () => Promise<void>;
   handleBulkApplyStatus: () => Promise<void>;
-  handleSourceAvailabilityChange: (modelID: number, previousAvailable: boolean, nextAvailable: boolean) => void;
-  handleSourceDeleteChange: (modelID: number, source: AdminLLMModelUpstreamSourceDTO, deleted: boolean) => void;
   handleRequestBulkDelete: () => void;
   handleDeleted: () => void;
   handleBulkDeleted: (result: AdminBatchDeleteData) => void;
@@ -105,10 +89,8 @@ export function useAdminModels(): UseAdminModelsState {
   const [deleteTarget, setDeleteTarget] = React.useState<AdminLLMModelDTO | null>(null);
   const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<AdminLLMModelDTO[]>([]);
   const [selectedModelIDs, setSelectedModelIDs] = React.useState<Set<number>>(new Set());
-  const [sourcesModel, setSourcesModel] = React.useState<AdminLLMModelDTO | null>(null);
   const [batchApplying, setBatchApplying] = React.useState(false);
   const [batchKindsDisplay, setBatchKindsDisplay] = React.useState("");
-  const [batchProtocol, setBatchProtocol] = React.useState<AdminLLMAdapter | "">("");
   const [batchVendor, setBatchVendor] = React.useState("");
   const [batchDisplayGroupID, setBatchDisplayGroupID] = React.useState("");
   const [batchStatus, setBatchStatus] = React.useState<AdminLLMStatus | "">("");
@@ -199,7 +181,6 @@ export function useAdminModels(): UseAdminModelsState {
       setItems((current) =>
         patchByID(current, item.id, (model) => model.id, {
           status: nextStatus,
-          ...(nextStatus === "inactive" ? { activeSourceCount: 0 } : {}),
         }),
       );
       try {
@@ -247,47 +228,6 @@ export function useAdminModels(): UseAdminModelsState {
     },
     [items, loadModels, page, pageSize, sortValue, t],
   );
-
-  const handleSourceAvailabilityChange = React.useCallback((modelID: number, previousAvailable: boolean, nextAvailable: boolean) => {
-    setItems((current) =>
-      current.map((item) =>
-        item.id === modelID
-          ? {
-              ...item,
-              activeSourceCount: applySourceAvailabilityDelta(
-                item.activeSourceCount,
-                item.sourceCount,
-                previousAvailable,
-                nextAvailable,
-              ),
-            }
-          : item,
-      ),
-    );
-  }, []);
-
-  const handleSourceDeleteChange = React.useCallback((modelID: number, source: AdminLLMModelUpstreamSourceDTO, deleted: boolean) => {
-    const sourceDelta = deleted ? -1 : 1;
-    setItems((current) =>
-      current.map((item) => {
-        if (item.id !== modelID) {
-          return item;
-        }
-        const nextSourceCount = Math.max(0, item.sourceCount + sourceDelta);
-        const wasAvailable = isAdminLLMSourceAvailable(source, item.status);
-        return {
-          ...item,
-          sourceCount: nextSourceCount,
-          activeSourceCount: applySourceAvailabilityDelta(
-            item.activeSourceCount,
-            nextSourceCount,
-            deleted ? wasAvailable : false,
-            deleted ? false : wasAvailable,
-          ),
-        };
-      }),
-    );
-  }, []);
 
   const runBulkModelUpdates = React.useCallback(async (options: {
     targets: AdminLLMModelDTO[];
@@ -459,92 +399,6 @@ export function useAdminModels(): UseAdminModelsState {
     });
   }, [batchApplying, batchStatus, runBulkModelUpdates, selectedModels, t]);
 
-  const handleBulkApplyProtocol = React.useCallback(async () => {
-    const nextProtocol = batchProtocol;
-    if (!selectedModels.length || !nextProtocol || batchApplying) {
-      return;
-    }
-
-    const targets = selectedModels.filter((item) => item.sourceCount > 0);
-    if (!targets.length) {
-      toast.info(t("bulkProtocolNoSources"));
-      return;
-    }
-
-    const token = await resolveAccessToken();
-    if (!token) {
-      toast.error(t("sessionExpired"), { description: t("signInAgain") });
-      return;
-    }
-
-    const rollbackModels = targets.map((item) => items.find((current) => current.id === item.id) ?? item);
-    const targetIDs = new Set(targets.map((item) => item.id));
-    const nextProtocolsJSON = JSON.stringify([nextProtocol]);
-    const nextKindsJSON = displayToKindsJson(resolveKindsDisplayForProtocols([nextProtocol]));
-    setBatchApplying(true);
-    setItems((current) =>
-      current.map((item) => (targetIDs.has(item.id) ? { ...item, protocolsJSON: nextProtocolsJSON, kindsJSON: nextKindsJSON } : item)),
-    );
-    try {
-      const results = await runSettledBulkItems({
-        items: targets,
-        title: t("bulkProtocolUpdated", { count: targets.length }),
-        runItem: async (model) => {
-          const sources = await listAdminLLMModelUpstreamSources(token, model.id, { page: 1, pageSize: 2000 });
-          if (sources.results.length === 0) {
-            throw new Error("model upstream sources not found");
-          }
-          for (const source of sources.results) {
-            await upsertAdminLLMUpstreamModel(token, source.upstreamID, {
-              routeID: source.id,
-              platformModelName: model.platformModelName,
-              upstreamModelName: source.upstreamModelName,
-              protocol: nextProtocol,
-              kindsJSON: nextKindsJSON,
-              status: source.status,
-              priority: source.priority,
-              weight: source.weight,
-            });
-          }
-          return { ...model, kindsJSON: nextKindsJSON, protocolsJSON: nextProtocolsJSON };
-        },
-      });
-      const failedModels = results.filter((result) => result.status === "rejected").map((result) => result.item);
-      const successModels = results.filter((result) => result.status === "fulfilled").map((result) => result.item);
-      const successResponses = results
-        .filter((result): result is Extract<typeof result, { status: "fulfilled" }> => result.status === "fulfilled")
-        .map((result) => result.value);
-      setItems((current) =>
-        successResponses.reduce((next, model) => replaceByID(next, model.id, (item) => item.id, model), current),
-      );
-      if (failedModels.length > 0) {
-        const failedIDs = new Set(failedModels.map((item) => item.id));
-        setItems((current) =>
-          rollbackModels.reduce(
-            (next, model) => (failedIDs.has(model.id) ? replaceByID(next, model.id, (item) => item.id, model) : next),
-            current,
-          ),
-        );
-        setSelectedModelIDs(new Set(failedModels.map((item) => item.id)));
-        toast.error(t("bulkProtocolPartialFailed"), {
-          description: t("bulkPartialDescription", { success: successModels.length, failed: failedModels.length }),
-        });
-        return;
-      }
-
-      toast.success(t("bulkProtocolUpdated", { count: targets.length }));
-      setSelectedModelIDs(new Set());
-      setBatchProtocol("");
-    } catch (error) {
-      setItems((current) =>
-        rollbackModels.reduce((next, model) => replaceByID(next, model.id, (item) => item.id, model), current),
-      );
-      toast.error(t("bulkProtocolFailed"), { description: resolveAdminErrorMessage(error) });
-    } finally {
-      setBatchApplying(false);
-    }
-  }, [batchApplying, batchProtocol, items, selectedModels, t]);
-
   const handleRequestBulkDelete = React.useCallback(() => {
     if (selectedModels.length === 0) {
       return;
@@ -615,8 +469,6 @@ export function useAdminModels(): UseAdminModelsState {
     batchApplying,
     batchKindsDisplay,
     setBatchKindsDisplay,
-    batchProtocol,
-    setBatchProtocol,
     batchVendor,
     setBatchVendor,
     batchDisplayGroupID,
@@ -629,18 +481,13 @@ export function useAdminModels(): UseAdminModelsState {
     setDeleteTarget,
     bulkDeleteTargets,
     closeBulkDelete,
-    sourcesModel,
-    setSourcesModel,
     loadModels,
     handleToggleStatus,
     handleToggleAccessScope,
     handleBulkApplyKinds,
-    handleBulkApplyProtocol,
     handleBulkApplyVendor,
     handleBulkApplyDisplayGroup,
     handleBulkApplyStatus,
-    handleSourceAvailabilityChange,
-    handleSourceDeleteChange,
     handleRequestBulkDelete,
     handleDeleted,
     handleBulkDeleted,

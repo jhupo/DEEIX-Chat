@@ -195,17 +195,57 @@ func windowsCodexCandidates() []string {
 			candidates = append(candidates, filepath.Join(append([]string{root}, paths...)...))
 		}
 	}
+	add(os.Getenv("CODEX_INSTALL_DIR"), "codex.exe")
+	localAppData := os.Getenv("LOCALAPPDATA")
+	add(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe")
+	if localAppData != "" {
+		desktopBin := filepath.Join(localAppData, "OpenAI", "Codex", "bin")
+		candidates = append(candidates, windowsVersionedCodexCandidates(desktopBin)...)
+		add(desktopBin, "codex.exe")
+	}
 	userProfile := os.Getenv("USERPROFILE")
 	add(userProfile, ".local", "bin", "codex.exe")
 	add(userProfile, ".local", "bin", "codex.cmd")
 	add(os.Getenv("APPDATA"), "npm", "codex.cmd")
 	add(os.Getenv("APPDATA"), "npm", "codex.exe")
-	localAppData := os.Getenv("LOCALAPPDATA")
 	add(localAppData, "Programs", "Codex", "codex.exe")
 	add(localAppData, "Programs", "Codex", "bin", "codex.exe")
 	add(localAppData, "Microsoft", "WinGet", "Links", "codex.exe")
 	add(os.Getenv("ProgramFiles"), "nodejs", "codex.cmd")
 	return candidates
+}
+
+func windowsVersionedCodexCandidates(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	type candidate struct {
+		path    string
+		modTime time.Time
+	}
+	items := make([]candidate, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name(), "codex.exe")
+		info, statErr := os.Stat(path)
+		if statErr == nil && !info.IsDir() {
+			items = append(items, candidate{path: path, modTime: info.ModTime()})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].modTime.Equal(items[j].modTime) {
+			return items[i].path < items[j].path
+		}
+		return items[i].modTime.After(items[j].modTime)
+	})
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.path)
+	}
+	return result
 }
 
 func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, stderr io.Writer, onEvent func(json.RawMessage) error) (*CodexAdapter, error) {

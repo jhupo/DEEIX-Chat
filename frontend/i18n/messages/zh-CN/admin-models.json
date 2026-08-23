@@ -105,11 +105,11 @@
   },
   "deleteDialog": {
     "title": "确认删除模型",
-    "description": "将删除模型「{model}」，并删除它在所有上游下的绑定关系，此操作不可撤销。",
+    "description": "将删除模型「{model}」，此操作不可撤销。",
     "confirm": "确认删除",
     "deleting": "删除中",
     "bulkTitle": "确认批量删除模型",
-    "bulkDescription": "将删除已选模型，并删除它们在所有上游下的绑定关系。",
+    "bulkDescription": "将删除已选模型，此操作不可撤销。",
     "bulkConfirm": "确认删除",
     "remaining": "其余项目",
     "batchSummary": "已删除 {success} 个，未找到 {notFound} 个，失败 {failed} 个"
@@ -185,8 +185,7 @@
     "sortOrderAsc": "显示顺序",
     "updatedDesc": "更新时间 从新到旧",
     "idDesc": "ID 从新到旧",
-    "platformModelNameAsc": "平台模型名 A-Z",
-    "sourceCountDesc": "来源数 从多到少"
+    "platformModelNameAsc": "平台模型名 A-Z"
   },
   "toast": {
     "sessionExpired": "登录状态已失效",
@@ -350,7 +349,7 @@
       "description": "选择协议模板，或从已有模型复制一份能力配置。",
       "presetsTab": "协议模板",
       "modelsTab": "复用模型",
-      "presetSummary": "{defaults} 个默认值，{controls} 个控件，{tools} 个工具",
+      "presetSummary": "{defaults} 个默认值，{controls} 个控件",
       "protocolNotMatched": "协议未匹配",
       "modelSearchPlaceholder": "搜索匹配相同协议和相同类型的模型复用配置",
       "emptyModels": "暂无可复用的模型能力配置",
@@ -364,7 +363,7 @@
     "capabilitiesQuick": {
       "button": "快速配置",
       "title": "模型能力配置",
-      "description": "配置模型参数、路由能力和允许启用的官方原生工具。",
+      "description": "配置聊天页可见的模型参数及其请求默认值。",
       "invalidJSON": "当前模型能力 JSON 格式不正确，请先修正后再使用可视化配置。",
       "parametersTab": "参数",
       "parametersIntro": "配置用户可见的模型参数；填写默认值时会同步作为该参数的请求默认值。",
@@ -447,7 +446,7 @@
     "capabilitiesGuide": {
       "button": "指南",
       "title": "模型能力 JSON 指南",
-      "description": "该 JSON 保存模型默认参数、可视化参数控件和官方原生工具能力；保存时会按当前路由协议规范化。",
+      "description": "该 JSON 保存模型默认参数和可视化参数控件；保存时会按当前协议规范化。",
       "defaultsTab": "默认参数",
       "controlsTab": "参数控件",
       "toolsTab": "官方工具",

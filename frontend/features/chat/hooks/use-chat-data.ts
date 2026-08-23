@@ -17,7 +17,7 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 100;
 const HISTORY_POLL_INTERVAL_MS = 500;
-const HISTORY_POLL_ATTEMPTS = 120;
+const HISTORY_POLL_ATTEMPTS = 250;
 
 type ChatDataState = {
   loading: boolean;

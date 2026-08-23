@@ -105,11 +105,11 @@
   },
   "deleteDialog": {
     "title": "Delete model",
-    "description": "Delete model \"{model}\" and remove its bindings from all upstreams. This action cannot be undone.",
+    "description": "Delete model \"{model}\". This action cannot be undone.",
     "confirm": "Delete",
     "deleting": "Deleting",
     "bulkTitle": "Bulk delete models",
-    "bulkDescription": "Delete selected models and remove their bindings from all upstreams.",
+    "bulkDescription": "Delete the selected models. This action cannot be undone.",
     "bulkConfirm": "Delete",
     "remaining": "More items",
     "batchSummary": "Deleted {success}, not found {notFound}, failed {failed}"
@@ -185,8 +185,7 @@
     "sortOrderAsc": "Display order",
     "updatedDesc": "Updated newest first",
     "idDesc": "ID newest first",
-    "platformModelNameAsc": "Platform model A-Z",
-    "sourceCountDesc": "Source count high to low"
+    "platformModelNameAsc": "Platform model A-Z"
   },
   "toast": {
     "sessionExpired": "Session expired",
@@ -350,7 +349,7 @@
       "description": "Choose a protocol template, or copy capabilities from an existing model.",
       "presetsTab": "Protocol templates",
       "modelsTab": "Reuse model",
-      "presetSummary": "{defaults} defaults, {controls} controls, {tools} tools",
+      "presetSummary": "{defaults} defaults, {controls} controls",
       "protocolNotMatched": "Protocol mismatch",
       "modelSearchPlaceholder": "Search reusable configs with the same protocol and type",
       "emptyModels": "No reusable model capability config",
@@ -364,7 +363,7 @@
     "capabilitiesQuick": {
       "button": "Quick config",
       "title": "Model capabilities config",
-      "description": "Configure model parameters, route capabilities, and allowed official native tools.",
+      "description": "Configure chat-visible model parameters and their request defaults.",
       "invalidJSON": "The current model capabilities JSON is invalid. Fix it before using visual config.",
       "parametersTab": "Parameters",
       "parametersIntro": "Configure user-visible model parameters. A default value is also used as that parameter's request default.",
@@ -447,7 +446,7 @@
     "capabilitiesGuide": {
       "button": "Guide",
       "title": "Model capabilities JSON guide",
-      "description": "This JSON stores model defaults, visual option controls, and official native tool capabilities. It is normalized against the current route protocol on save.",
+      "description": "This JSON stores model defaults and visual option controls. It is normalized against the current protocol on save.",
       "defaultsTab": "Defaults",
       "controlsTab": "Controls",
       "toolsTab": "Official tools",

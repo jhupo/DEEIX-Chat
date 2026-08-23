@@ -134,39 +134,87 @@ func resolveModelDisplayCapabilitiesJSON(modelName string, protocolsJSON string,
 		}
 	}
 
-	addControl := func(path string) {
+	addControl := func(path, label string) {
 		if _, exists := controlPaths[path]; exists {
 			return
 		}
 		controls = append(controls, map[string]interface{}{
 			"path":    path,
 			"type":    "select",
-			"label":   "Reasoning Effort",
+			"label":   label,
 			"options": defaultReasoningEffortOptions,
 		})
 		controlPaths[path] = struct{}{}
 	}
+	hasResponses := false
+	hasChatCompletions := false
 	for _, protocol := range protocols {
 		switch strings.TrimSpace(protocol) {
-		case llm.AdapterOpenAIResponses, llm.AdapterOpenRouterResponses:
-			reasoning, _ := defaults["reasoning"].(map[string]interface{})
-			if reasoning == nil {
-				reasoning = make(map[string]interface{})
-				defaults["reasoning"] = reasoning
-			}
-			if _, exists := reasoning["effort"]; !exists {
-				reasoning["effort"] = "medium"
-			}
-			addControl("reasoning.effort")
+		case llm.AdapterOpenAIResponses, llm.AdapterOpenRouterResponses, llm.AdapterXAIResponses:
+			hasResponses = true
 		case llm.AdapterOpenAIChatCompletions, llm.AdapterOpenRouterChat:
-			if _, exists := defaults["reasoning_effort"]; !exists {
-				defaults["reasoning_effort"] = "medium"
-			}
-			addControl("reasoning_effort")
+			hasChatCompletions = true
 		}
+	}
+	incompatiblePath := ""
+	if hasResponses {
+		incompatiblePath = "reasoning_effort"
+		delete(defaults, incompatiblePath)
+	} else if hasChatCompletions {
+		incompatiblePath = "reasoning.effort"
+		if reasoning, ok := defaults["reasoning"].(map[string]interface{}); ok {
+			delete(reasoning, "effort")
+			if len(reasoning) == 0 {
+				delete(defaults, "reasoning")
+			}
+		}
+	}
+	if incompatiblePath != "" {
+		filteredControls := controls[:0]
+		for _, item := range controls {
+			control, _ := item.(map[string]interface{})
+			path, _ := control["path"].(string)
+			if strings.TrimSpace(path) != incompatiblePath {
+				filteredControls = append(filteredControls, item)
+			}
+		}
+		controls = filteredControls
+		delete(controlPaths, incompatiblePath)
+		if lockedPaths, ok := capabilities["lockedOptionPaths"].([]interface{}); ok {
+			filteredLockedPaths := lockedPaths[:0]
+			for _, item := range lockedPaths {
+				path, _ := item.(string)
+				if strings.TrimSpace(path) != incompatiblePath {
+					filteredLockedPaths = append(filteredLockedPaths, item)
+				}
+			}
+			if len(filteredLockedPaths) > 0 {
+				capabilities["lockedOptionPaths"] = filteredLockedPaths
+			} else {
+				delete(capabilities, "lockedOptionPaths")
+			}
+		}
+	}
+	if hasResponses {
+		reasoning, _ := defaults["reasoning"].(map[string]interface{})
+		if reasoning == nil {
+			reasoning = make(map[string]interface{})
+			defaults["reasoning"] = reasoning
+		}
+		if _, exists := reasoning["effort"]; !exists {
+			reasoning["effort"] = "medium"
+		}
+		addControl("reasoning.effort", "Reasoning Effort (Responses)")
+	} else if hasChatCompletions {
+		if _, exists := defaults["reasoning_effort"]; !exists {
+			defaults["reasoning_effort"] = "medium"
+		}
+		addControl("reasoning_effort", "Reasoning Effort (Chat Completions)")
 	}
 	if len(controls) > 0 {
 		capabilities["optionControls"] = controls
+	} else {
+		delete(capabilities, "optionControls")
 	}
 	encoded, err := json.Marshal(capabilities)
 	if err != nil {

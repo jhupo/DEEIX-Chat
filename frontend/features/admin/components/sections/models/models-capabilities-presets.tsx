@@ -107,7 +107,7 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
         {
           path: "reasoning_effort",
           type: "select",
-          label: "Reasoning Effort",
+          label: "Reasoning Effort (Chat Completions)",
           options: OPENAI_REASONING_EFFORT_OPTIONS,
         },
         {
@@ -141,7 +141,7 @@ const MODEL_CAPABILITY_PRESETS: CapabilityPreset[] = [
         {
           path: "reasoning.effort",
           type: "select",
-          label: "Reasoning Effort",
+          label: "Reasoning Effort (Responses)",
           options: OPENAI_REASONING_EFFORT_OPTIONS,
         },
         {
@@ -529,14 +529,12 @@ function hasModelCapabilities(value: string | null | undefined): boolean {
   return Boolean(normalized && normalized !== "{}");
 }
 
-function capabilityPresetSummary(preset: CapabilityPreset): { defaults: number; controls: number; tools: number } {
+function capabilityPresetSummary(preset: CapabilityPreset): { defaults: number; controls: number } {
   const defaultOptions = preset.payload.defaultOptions;
   const optionControls = preset.payload.optionControls;
-  const nativeTools = preset.payload.nativeTools;
   return {
     defaults: flattenDefaultOptions(defaultOptions).length,
     controls: Array.isArray(optionControls) ? optionControls.length : 0,
-    tools: Array.isArray(nativeTools) ? nativeTools.length : 0,
   };
 }
 
@@ -697,7 +695,6 @@ export function ModelCapabilitiesPresetDialog({
                           {t("sheet.capabilitiesPreset.presetSummary", {
                             defaults: summary.defaults,
                             controls: summary.controls,
-                            tools: summary.tools,
                           })}
                         </span>
                         <span className="flex h-5 w-[76px] shrink-0 items-center justify-end">
@@ -717,7 +714,6 @@ export function ModelCapabilitiesPresetDialog({
                           {t("sheet.capabilitiesPreset.presetSummary", {
                             defaults: summary.defaults,
                             controls: summary.controls,
-                            tools: summary.tools,
                           })}
                         </span>
                       </button>

@@ -34,7 +34,11 @@ type RuntimeStatus struct {
 	LastError    string `json:"lastError,omitempty"`
 }
 
-const artifactStagingTimeout = 35 * time.Second
+const (
+	artifactStagingTimeout        = 35 * time.Second
+	gatewayOutgoingBatchSize      = 32
+	historyImageUploadConcurrency = 4
+)
 
 type Gateway struct {
 	ctx              context.Context
@@ -647,6 +651,8 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 	timeout := time.Minute
 	if command.Kind == "resource.refresh" {
 		timeout = 30 * time.Second
+	} else if command.Kind == "thread.read" {
+		timeout = 2 * time.Minute
 	} else if command.Kind == "turn.start" || command.Kind == "review.start" {
 		timeout = 10 * time.Minute
 	}
@@ -712,35 +718,77 @@ func (gateway *Gateway) downloadCommandArtifacts(ctx context.Context, commandID 
 }
 
 func (gateway *Gateway) uploadHistoryImages(ctx context.Context, result map[string]any) error {
+	type imageUpload struct {
+		path   string
+		fileID string
+		err    error
+	}
+	type messageUpload struct {
+		message map[string]any
+		images  []imageUpload
+	}
+
 	session, _ := result["session"].(map[string]any)
 	messages, _ := session["messages"].([]any)
+	work := make([]messageUpload, 0)
+	totalImages := 0
 	for _, rawMessage := range messages {
 		message, _ := rawMessage.(map[string]any)
 		localImages, _ := message["localAttachments"].([]any)
 		if len(localImages) == 0 {
 			continue
 		}
-		delete(message, "localAttachments")
-		attachments := make([]any, 0, len(localImages))
-		unavailable := 0
-		for _, rawImage := range localImages {
+		item := messageUpload{message: message, images: make([]imageUpload, len(localImages))}
+		for index, rawImage := range localImages {
 			image, _ := rawImage.(map[string]any)
-			path, _ := image["path"].(string)
-			var fileID string
-			err := runAsConfiguredUser(func() error {
-				var uploadErr error
-				fileID, uploadErr = gateway.cloud.UploadHistoryImage(ctx, gateway.config, gateway.identity, path)
-				return uploadErr
-			})
-			if err != nil {
-				if !errors.Is(err, errHistoryImageUnavailable) {
-					return err
+			item.images[index].path, _ = image["path"].(string)
+		}
+		totalImages += len(item.images)
+		work = append(work, item)
+	}
+	if totalImages == 0 {
+		return nil
+	}
+
+	tasks := make(chan *imageUpload)
+	var uploads sync.WaitGroup
+	workerCount := min(historyImageUploadConcurrency, totalImages)
+	uploads.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer uploads.Done()
+			for image := range tasks {
+				image.err = runAsConfiguredUser(func() error {
+					var uploadErr error
+					image.fileID, uploadErr = gateway.cloud.UploadHistoryImage(ctx, gateway.config, gateway.identity, image.path)
+					return uploadErr
+				})
+			}
+		}()
+	}
+	for index := range work {
+		for imageIndex := range work[index].images {
+			tasks <- &work[index].images[imageIndex]
+		}
+	}
+	close(tasks)
+	uploads.Wait()
+
+	for _, item := range work {
+		message := item.message
+		delete(message, "localAttachments")
+		attachments := make([]any, 0, len(item.images))
+		unavailable := 0
+		for _, image := range item.images {
+			if image.err != nil {
+				if !errors.Is(image.err, errHistoryImageUnavailable) {
+					return image.err
 				}
 				unavailable++
-				gateway.logger.Printf("history image unavailable: %s", publicMessage(err))
+				gateway.logger.Printf("history image unavailable: %s", publicMessage(image.err))
 				continue
 			}
-			attachments = append(attachments, map[string]any{"fileID": fileID})
+			attachments = append(attachments, map[string]any{"fileID": image.fileID})
 		}
 		if len(attachments) > 0 {
 			message["attachments"] = attachments
@@ -983,16 +1031,26 @@ func concurrentCommand(kind string) bool {
 }
 
 func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint64, error) {
-	pending := gateway.state.PendingOutgoing(after)
+	pending := outgoingBatch(gateway.state.PendingOutgoing(after))
 	if len(pending) == 0 {
 		return after, nil
 	}
-	outgoing := pending[0]
-	frame := bridgeFrame{Version: bridgeVersion, Type: outgoing.Type, BridgeSeq: outgoing.BridgeSeq, ServerSeq: outgoing.ServerSeq, CommandID: outgoing.CommandID, Outcome: outgoing.Outcome, Event: outgoing.Event}
-	if err := writer.send(frame); err != nil {
-		return after, err
+	sentThrough := after
+	for _, outgoing := range pending {
+		frame := bridgeFrame{Version: bridgeVersion, Type: outgoing.Type, BridgeSeq: outgoing.BridgeSeq, ServerSeq: outgoing.ServerSeq, CommandID: outgoing.CommandID, Outcome: outgoing.Outcome, Event: outgoing.Event}
+		if err := writer.send(frame); err != nil {
+			return sentThrough, err
+		}
+		sentThrough = outgoing.BridgeSeq
 	}
-	return outgoing.BridgeSeq, nil
+	return sentThrough, nil
+}
+
+func outgoingBatch(pending []outgoingFrame) []outgoingFrame {
+	if len(pending) > gatewayOutgoingBatchSize {
+		return pending[:gatewayOutgoingBatchSize]
+	}
+	return pending
 }
 
 func (gateway *Gateway) signalWake() {
