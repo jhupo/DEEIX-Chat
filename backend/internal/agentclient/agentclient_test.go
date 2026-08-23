@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -95,6 +96,36 @@ func TestResolveCodexEnforcesMinimumVersionBeforeAppServer(t *testing.T) {
 				t.Fatalf("app-server was started before version rejection: %v", statErr)
 			}
 		})
+	}
+}
+
+func TestResolveCodexExecutableFindsWindowsUserInstall(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows fallback paths only")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, ".local", "bin", "codex.exe")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	desktopDir := filepath.Join(t.TempDir(), "WindowsApps", "OpenAI.Codex_fixture")
+	if err := os.MkdirAll(desktopDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(desktopDir, "codex.exe"), []byte("desktop fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", desktopDir)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("APPDATA", "")
+	t.Setenv("LOCALAPPDATA", "")
+	t.Setenv("ProgramFiles", "")
+	got, err := resolveCodexExecutable("codex")
+	if err != nil || got != path {
+		t.Fatalf("resolveCodexExecutable() = %q, %v, want %q", got, err, path)
 	}
 }
 

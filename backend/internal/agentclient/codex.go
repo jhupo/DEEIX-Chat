@@ -30,6 +30,7 @@ const minimumCodexVersion = "0.142.0"
 const maxCodexDesktopStateBytes = 4 << 20
 
 const codexUpgradeInstructions = "Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
+const codexInstallInstructions = "Install the official standalone Codex CLI, reopen the terminal, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh. If Codex is installed elsewhere, pass its absolute path with --codex or -Codex."
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
@@ -123,9 +124,9 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	if executable == "" || len(executable) > 2048 || strings.ContainsRune(executable, 0) {
 		return "", "", errors.New("Codex executable is invalid")
 	}
-	path, err := exec.LookPath(executable)
+	path, err := resolveCodexExecutable(executable)
 	if err != nil {
-		return "", "", errors.New("Codex CLI was not found; install the official standalone Codex CLI and ensure it is on PATH")
+		return "", "", errors.New("Codex CLI was not found on PATH or in the standard per-user install locations. " + codexInstallInstructions)
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
@@ -141,7 +142,7 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	output, err := versionCommand.CombinedOutput()
 	cleanup()
 	if err != nil {
-		if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(path), `\windowsapps\openai.codex_`) {
+		if isCodexDesktopExecutable(path) {
 			return "", "", errors.New("the Codex Desktop internal executable is not a standalone CLI; install the official Codex CLI")
 		}
 		return "", "", fmt.Errorf("run Codex CLI: %w", err)
@@ -161,6 +162,50 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 		)
 	}
 	return path, match[1], nil
+}
+
+func resolveCodexExecutable(executable string) (string, error) {
+	path, err := exec.LookPath(executable)
+	if err == nil && (!strings.EqualFold(executable, "codex") || !isCodexDesktopExecutable(path)) {
+		return path, nil
+	}
+	if runtime.GOOS != "windows" || !strings.EqualFold(executable, "codex") {
+		return "", err
+	}
+	for _, candidate := range windowsCodexCandidates() {
+		info, statErr := os.Stat(candidate)
+		if statErr == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	if err == nil {
+		return path, nil
+	}
+	return "", err
+}
+
+func isCodexDesktopExecutable(path string) bool {
+	return runtime.GOOS == "windows" && strings.Contains(strings.ToLower(path), `\windowsapps\openai.codex_`)
+}
+
+func windowsCodexCandidates() []string {
+	var candidates []string
+	add := func(root string, paths ...string) {
+		if root != "" {
+			candidates = append(candidates, filepath.Join(append([]string{root}, paths...)...))
+		}
+	}
+	userProfile := os.Getenv("USERPROFILE")
+	add(userProfile, ".local", "bin", "codex.exe")
+	add(userProfile, ".local", "bin", "codex.cmd")
+	add(os.Getenv("APPDATA"), "npm", "codex.cmd")
+	add(os.Getenv("APPDATA"), "npm", "codex.exe")
+	localAppData := os.Getenv("LOCALAPPDATA")
+	add(localAppData, "Programs", "Codex", "codex.exe")
+	add(localAppData, "Programs", "Codex", "bin", "codex.exe")
+	add(localAppData, "Microsoft", "WinGet", "Links", "codex.exe")
+	add(os.Getenv("ProgramFiles"), "nodejs", "codex.cmd")
+	return candidates
 }
 
 func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, stderr io.Writer, onEvent func(json.RawMessage) error) (*CodexAdapter, error) {
