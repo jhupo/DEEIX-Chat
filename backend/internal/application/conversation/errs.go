@@ -65,6 +65,10 @@ var (
 	ErrSkillNotFound = errors.New("skill not found")
 	// ErrInvalidSkillUse 技能使用入参不合法。
 	ErrInvalidSkillUse = errors.New("invalid skill use")
+	// ErrConversationPluginUnavailable 表示聊天 Plugin 不存在或已被管理员关闭。
+	ErrConversationPluginUnavailable = errors.New("conversation plugin unavailable")
+	// ErrConversationPluginUnsupported 表示当前模型路由协议不支持所选聊天 Plugin。
+	ErrConversationPluginUnsupported = errors.New("conversation plugin unsupported by route")
 	// ErrInvalidMessageBranch 消息分支参数无效。
 	ErrInvalidMessageBranch = errors.New("invalid message branch")
 	// ErrInvalidMessageContent 消息内容不合法。

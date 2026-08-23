@@ -93,6 +93,40 @@ func filterModelOptions(options map[string]interface{}, protocol string, cfg mod
 	return filtered
 }
 
+// modelCapabilitiesWithoutNativeTools keeps model preferences while removing the legacy
+// provider-tool surface. Chat Plugins are compiled separately from trusted semantic refs.
+func modelCapabilitiesWithoutNativeTools(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return raw
+	}
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(value), &capabilities); err != nil {
+		return raw
+	}
+	delete(capabilities, "nativeTools")
+	delete(capabilities, "nativeToolKeys")
+	if defaults, ok := capabilities["defaultOptions"].(map[string]interface{}); ok {
+		delete(defaults, "tools")
+	}
+	if paths, ok := capabilities["lockedOptionPaths"].([]interface{}); ok {
+		filtered := paths[:0]
+		for _, path := range paths {
+			text, _ := path.(string)
+			if text == "tools" || strings.HasPrefix(text, "tools.") {
+				continue
+			}
+			filtered = append(filtered, path)
+		}
+		capabilities["lockedOptionPaths"] = filtered
+	}
+	encoded, err := json.Marshal(capabilities)
+	if err != nil {
+		return raw
+	}
+	return string(encoded)
+}
+
 // modelCapabilityDefaultOptions 提取管理员在模型能力 JSON 中声明的默认请求参数。
 func modelCapabilityDefaultOptions(raw string) map[string]interface{} {
 	value := strings.TrimSpace(raw)

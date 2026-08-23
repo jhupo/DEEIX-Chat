@@ -431,6 +431,14 @@ export function AppChatArea() {
     resetToken: newConversationRevision,
     hasConversation: Boolean(conversationID),
   });
+  const selectedComposerInputResources = React.useMemo(
+    () => selectedInputResources.filter((item) =>
+      executionMode === "cloud"
+        ? item.resourceRef.startsWith("plugin:")
+        : !item.resourceRef.startsWith("plugin:"),
+    ),
+    [executionMode, selectedInputResources],
+  );
   const [inputResources, setInputResources] = React.useState<ConversationInputResourceDTO[]>([]);
   const [inputResourceScope, setInputResourceScope] = React.useState("");
   const [inputResourcesReady, setInputResourcesReady] = React.useState(false);
@@ -974,7 +982,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
-    selectedInputResources,
+    selectedInputResources: selectedComposerInputResources,
     htmlVisualPromptEnabled: executionMode === "cloud" && htmlVisualPrompt.enabled,
     options: effectiveOptions,
     draft,
@@ -1540,7 +1548,7 @@ export function AppChatArea() {
     inputResources: executionMode === "gateway" ? inputResources : undefined,
     selectedToolIDs: executionMode === "cloud" ? selectedToolIDs : [],
     selectedSkills: executionMode === "cloud" ? selectedSkills : [],
-    selectedInputResources: executionMode === "gateway" ? selectedInputResources : [],
+    selectedInputResources: selectedComposerInputResources,
     defaultToolIDs,
     queuedMessages,
     htmlVisualPromptEnabled: htmlVisualPrompt.enabled,

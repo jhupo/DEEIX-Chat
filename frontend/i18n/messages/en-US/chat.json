@@ -507,6 +507,7 @@
     "mention": {
       "sections": {
         "skill": "Skills",
+        "plugin": "Plugins",
         "prompt": "Prompts"
       }
     },

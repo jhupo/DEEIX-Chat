@@ -385,6 +385,7 @@ type Config struct {
 	ConversationLabelsPrompt string
 	DefaultSystemPrompt      string
 	SkillsPrompt             string
+	ConversationPluginKeys   string
 	ModelOptionPolicyMode    string
 	ModelOptionAllowedPaths  string
 	ModelOptionDeniedPaths   string
@@ -592,6 +593,7 @@ func Load() Config {
 		ConversationLabelsPrompt:          "",
 		DefaultSystemPrompt:               "",
 		SkillsPrompt:                      "",
+		ConversationPluginKeys:            `["web_search","image_generation","code_interpreter"]`,
 		ModelOptionPolicyMode:             "allowlist",
 		ModelOptionAllowedPaths:           DefaultModelOptionAllowedPathsJSON(),
 		ModelOptionDeniedPaths:            DefaultModelOptionDeniedPathsJSON(),

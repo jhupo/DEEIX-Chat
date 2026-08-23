@@ -170,6 +170,12 @@ func mapStreamError(err error) streamError {
 	case errors.Is(err, appconversation.ErrInvalidSkillUse):
 		status = http.StatusBadRequest
 		message = "invalid skill use"
+	case errors.Is(err, appconversation.ErrConversationPluginUnavailable):
+		status = http.StatusNotFound
+		message = "conversation plugin unavailable"
+	case errors.Is(err, appconversation.ErrConversationPluginUnsupported):
+		status = http.StatusBadRequest
+		message = "conversation plugin unsupported by model route"
 	case errors.Is(err, appconversation.ErrFileProcessingNotReady):
 		status = http.StatusBadRequest
 		message = "file processing not ready"

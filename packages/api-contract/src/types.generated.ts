@@ -6840,6 +6840,27 @@ export namespace Models {
   }
 }
 
+export namespace Plugins {
+  /**
+   * No description
+   * @tags settings
+   * @name PluginsList
+   * @summary 查询聊天可用的系统 Plugins
+   * @request GET:/plugins
+   * @secure
+   */
+  export namespace PluginsList {
+    export type RequestParams = {};
+    export type RequestQuery = {
+      /** 包含已停用项 */
+      includeDisabled?: boolean;
+    };
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = Envelope;
+  }
+}
+
 export namespace PromptPresets {
   /**
    * @description 返回管理员内置和当前用户自定义的已启用提示词，用于 slash 选择器

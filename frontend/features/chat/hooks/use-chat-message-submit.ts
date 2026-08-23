@@ -774,9 +774,10 @@ export function useChatMessageSubmit({
       const requestSelectedSkills = requestExecutionMode === "cloud"
         ? queuedSubmission?.selectedSkills ?? selectedSkills
         : [];
-      const requestInputResourceRefs = requestExecutionMode === "gateway"
-        ? queuedSubmission?.inputResourceRefs ?? selectedInputResources.map((item) => item.resourceRef)
-        : [];
+      const requestSelectedInputResources = queuedSubmission
+        ? queuedSubmission.inputResourceRefs.map((resourceRef) => ({ resourceRef }))
+        : selectedInputResources;
+      const requestInputResourceRefs = requestSelectedInputResources.map((item) => item.resourceRef);
       const requestHTMLVisualPromptEnabled = requestExecutionMode === "cloud" &&
         (queuedSubmission?.htmlVisualPromptEnabled ?? htmlVisualPromptEnabled);
       let targetConversationScopeKey = queuedSubmission?.conversationScopeKey ?? conversationScopeKeyRef.current;
@@ -848,7 +849,12 @@ export function useChatMessageSubmit({
         });
       }
       const sanitizedOptions = sanitizeConversationOptions(requestOptions);
-      const submitDecision = resolveChatSubmitDecision(selectedModel, effectiveAttachments, sanitizedOptions);
+      const submitDecision = resolveChatSubmitDecision(
+        selectedModel,
+        effectiveAttachments,
+        sanitizedOptions,
+        requestSelectedInputResources,
+      );
       if (submitDecision.blockedReason) {
         toast.error(t("mediaInputUnsupported"), {
           description: resolveSubmitBlockDescription(submitDecision.blockedReason, t),
@@ -1628,9 +1634,7 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
-          inputResourceRefs: executionMode === "gateway"
-            ? selectedInputResources.map((item) => item.resourceRef)
-            : [],
+          inputResourceRefs: selectedInputResources.map((item) => item.resourceRef),
           htmlVisualPromptEnabled,
         },
       ];

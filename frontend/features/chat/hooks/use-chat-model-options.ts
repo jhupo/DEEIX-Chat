@@ -141,22 +141,6 @@ function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
   }));
 }
 
-function mergeDefaultNativeTools(defaultOptions: ConversationOptions, nativeTools: ModelNativeToolConfig[]): ConversationOptions {
-  const defaultToolPayloads = nativeTools
-    .filter((tool) => tool.enabled && tool.defaultEnabled && Object.keys(tool.payload).length > 0)
-    .map((tool) => ({ ...tool.payload }));
-  if (defaultToolPayloads.length === 0) {
-    return defaultOptions;
-  }
-  const currentTools = Array.isArray(defaultOptions.tools)
-    ? defaultOptions.tools.filter((item) => item !== null && typeof item === "object" && !Array.isArray(item))
-    : [];
-  return sanitizeConversationOptions({
-    ...defaultOptions,
-    tools: [...currentTools, ...defaultToolPayloads],
-  });
-}
-
 function resolveDefaultOptions(raw: string): ConversationOptions {
   const parsed = parseJSONObject(raw);
   if (!parsed) {
@@ -166,7 +150,7 @@ function resolveDefaultOptions(raw: string): ConversationOptions {
   const defaultOptions = defaults === null || Array.isArray(defaults) || typeof defaults !== "object"
     ? {}
     : sanitizeConversationOptions(defaults as ConversationOptions);
-  return mergeDefaultNativeTools(defaultOptions, resolveNativeTools(raw));
+  return defaultOptions;
 }
 
 const MODEL_OPTION_CONTROL_TYPES = new Set<ModelOptionControlType>(["boolean", "number", "select", "text"]);

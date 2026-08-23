@@ -9809,6 +9809,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/plugins": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "settings"
+                ],
+                "summary": "查询聊天可用的系统 Plugins",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "description": "包含已停用项",
+                        "name": "includeDisabled",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/prompt-presets": {
             "get": {
                 "security": [

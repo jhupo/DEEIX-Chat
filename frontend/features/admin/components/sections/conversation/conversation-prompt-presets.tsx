@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Box, FileBox, Plus, Save, Trash2 } from "lucide-react";
+import { Box, FileBox, Plug, Plus, Save, Trash2 } from "lucide-react";
 import { useLocale } from "next-intl";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
@@ -53,6 +53,8 @@ import { useAdminPromptPresets } from "@/features/admin/hooks/use-admin-prompt-p
 import { resolveAdminErrorMessage } from "@/features/admin/utils/admin-error";
 import { formatDateTime } from "@/features/admin/utils/account-display";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import { listConversationPlugins } from "@/shared/api/plugins";
+import type { ConversationPluginDTO } from "@/shared/api/plugins";
 import type { SkillDTO } from "@/shared/api/skills.types";
 import type { PatchSettingItem } from "@/shared/api/settings.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -65,7 +67,7 @@ import { PROMPT_PRESET_LIMITS } from "@/shared/model/prompt-presets";
 import { SKILL_LIMITS } from "@/shared/model/skills";
 
 const PROMPT_PRESET_TABLE_COLUMN_COUNT = 6;
-type PromptLibraryType = "prompts" | "skills";
+type PromptLibraryType = "prompts" | "skills" | "plugins";
 
 type PromptLibraryRow = {
   id: number;
@@ -237,9 +239,12 @@ export function ConversationPromptPresetsSection() {
   const [savedSkillsPromptValue, setSavedSkillsPromptValue] = React.useState("");
   const [skillsPromptLoading, setSkillsPromptLoading] = React.useState(true);
   const [skillsPromptSaving, setSkillsPromptSaving] = React.useState(false);
+  const [plugins, setPlugins] = React.useState<ConversationPluginDTO[]>([]);
+  const [pluginsLoading, setPluginsLoading] = React.useState(true);
+  const [pluginSavingKey, setPluginSavingKey] = React.useState("");
   const prompts = useAdminPromptPresets();
   const skills = useAdminSkills();
-  const activeLoading = activeType === "skills" ? skills.loading : prompts.loading;
+  const activeLoading = activeType === "plugins" ? pluginsLoading : activeType === "skills" ? skills.loading : prompts.loading;
   const activeQuery = activeType === "skills" ? skills.query : prompts.query;
   const activePage = activeType === "skills" ? skills.page : prompts.page;
   const activePageCount = activeType === "skills" ? skills.pageCount : prompts.pageCount;
@@ -282,6 +287,50 @@ export function ConversationPromptPresetsSection() {
       cancelled = true;
     };
   }, [t]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setPluginsLoading(true);
+    void (async () => {
+      const token = await resolveAccessToken();
+      if (!token) throw new Error("missing access token");
+      return listConversationPlugins(token, true);
+    })()
+      .then((items) => {
+        if (!cancelled) setPlugins(items);
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(t("toast.pluginsLoadFailed"), { description: resolveAdminErrorMessage(error) });
+      })
+      .finally(() => {
+        if (!cancelled) setPluginsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  const togglePlugin = React.useCallback(async (key: string, enabled: boolean) => {
+    const nextItems = plugins.map((item) => item.key === key ? { ...item, enabled } : item);
+    setPluginSavingKey(key);
+    try {
+      const token = await resolveAccessToken();
+      if (!token) throw new Error("missing access token");
+      await patchAdminSettings(token, {
+        items: [{
+          namespace: "chat",
+          key: "conversation_plugin_keys",
+          value: JSON.stringify(nextItems.filter((item) => item.enabled).map((item) => item.key)),
+        }],
+      });
+      setPlugins(nextItems);
+      toast.success(t("toast.pluginsUpdated"));
+    } catch (error) {
+      toast.error(t("toast.pluginsSaveFailed"), { description: resolveAdminErrorMessage(error) });
+    } finally {
+      setPluginSavingKey("");
+    }
+  }, [plugins, t]);
 
   const saveSkillsPrompt = React.useCallback(async () => {
     if (!skillsPromptDirty) {
@@ -330,6 +379,7 @@ export function ConversationPromptPresetsSection() {
       <TabsList>
         <TabsTrigger value="skills">{t("types.skills")}</TabsTrigger>
         <TabsTrigger value="prompts">{t("types.prompts")}</TabsTrigger>
+        <TabsTrigger value="plugins">{t("types.plugins")}</TabsTrigger>
       </TabsList>
     </Tabs>
   );
@@ -348,7 +398,7 @@ export function ConversationPromptPresetsSection() {
             />
           ) : null}
 
-          <div className="space-y-2">
+          {activeType !== "plugins" ? <div className="space-y-2">
             <div className="px-0.5">
               <p className="text-xs font-medium leading-snug text-foreground/80">
                 {activeType === "skills" ? t("libraryTitle.skills") : t("libraryTitle.prompts")}
@@ -373,9 +423,30 @@ export function ConversationPromptPresetsSection() {
                 {activeCreateLabel}
               </Button>
             </TableToolbar>
-          </div>
+          </div> : null}
 
-          {activeType === "skills" ? (
+          {activeType === "plugins" ? (
+            <div className="divide-y divide-border/60 border-y border-border/60">
+              {pluginsLoading ? Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="h-14 animate-pulse bg-muted/25" />
+              )) : plugins.map((plugin) => (
+                <div key={plugin.key} className="flex min-h-14 items-center gap-3 px-2 py-2.5">
+                  <Plug className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.7} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{plugin.key}</p>
+                    <p className="truncate text-xs text-muted-foreground">{plugin.description}</p>
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={plugin.enabled}
+                    disabled={Boolean(pluginSavingKey)}
+                    aria-label={plugin.key}
+                    onCheckedChange={(checked) => void togglePlugin(plugin.key, checked)}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : activeType === "skills" ? (
             <PromptLibraryTable<SkillDTO>
               emptyLabel={t("skillsEmpty")}
               getSummary={(item: SkillDTO) => item.description || item.markdown}
@@ -399,7 +470,7 @@ export function ConversationPromptPresetsSection() {
             />
           )}
 
-          <TablePagination
+          {activeType !== "plugins" ? <TablePagination
             page={activePage}
             pageCount={activePageCount}
             pageSize={activePageSize}
@@ -407,7 +478,7 @@ export function ConversationPromptPresetsSection() {
             onPageChange={activeType === "skills" ? skills.setPage : prompts.setPage}
             onPageSizeChange={activeType === "skills" ? skills.setPageSize : prompts.setPageSize}
             loading={activeLoading}
-          />
+          /> : null}
         </div>
       </SettingsSection>
 

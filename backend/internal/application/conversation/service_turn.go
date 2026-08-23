@@ -10,6 +10,7 @@ import (
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
 	"github.com/google/uuid"
 )
 
@@ -53,8 +54,8 @@ func (s *Service) StreamTurn(ctx context.Context, input SendMessageInput, onDelt
 }
 
 func (s *Service) executeCloudTurn(ctx context.Context, input SendMessageInput, onDelta func(string) error, stream bool) (*SendMessageResult, error) {
-	if len(input.InputResourceRefs) != 0 {
-		return nil, ErrInvalidMessageContent
+	if _, err := nativetool.ResolveConversationPluginRefs(input.InputResourceRefs, s.cfg.Snapshot().ConversationPluginKeys); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrConversationPluginUnavailable, err)
 	}
 	originalOnEvent := input.OnEvent
 	input.OnEvent = func(kind string, payload map[string]interface{}) error {

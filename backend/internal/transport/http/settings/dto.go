@@ -38,6 +38,14 @@ type LoginPageSettingsResponse struct {
 	DefaultNextPath string `json:"defaultNextPath"`
 }
 
+type ConversationPluginResponse struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	ResourceRef string `json:"resourceRef"`
+}
+
 type BrandingResponse struct {
 	Title                 string `json:"title"`
 	ShortName             string `json:"shortName"`

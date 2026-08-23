@@ -509,6 +509,7 @@ function ChatInputComponent({
     selectedModel,
     attachments,
     executionMode === "cloud" ? options : {},
+    selectedInputResources,
   );
   const submitTask = submitDecision.task;
   const chatRouteReady = executionMode === "gateway"

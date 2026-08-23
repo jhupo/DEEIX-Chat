@@ -9,6 +9,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
 )
 
 const (
@@ -118,6 +119,8 @@ func (r *RuntimeSettings) applyItem(cfg *config.Config, item domainsettings.Syst
 		cfg.DefaultSystemPrompt = item.Value
 	case "chat:skills_prompt":
 		cfg.SkillsPrompt = item.Value
+	case "chat:conversation_plugin_keys":
+		cfg.ConversationPluginKeys = item.Value
 	case "chat:model_option_policy_mode":
 		cfg.ModelOptionPolicyMode = strings.TrimSpace(item.Value)
 	case "chat:model_option_allowed_paths":
@@ -354,6 +357,9 @@ func (r *RuntimeSettings) normalizeConfig(cfg *config.Config) {
 	}
 	if strings.TrimSpace(cfg.ModelOptionDeniedPaths) == "" {
 		cfg.ModelOptionDeniedPaths = config.DefaultModelOptionDeniedPathsJSON()
+	}
+	if _, err := nativetool.ParseConversationPluginKeysJSON(cfg.ConversationPluginKeys); err != nil {
+		cfg.ConversationPluginKeys = nativetool.DefaultConversationPluginKeysJSON
 	}
 	if cfg.MCPMaxSelectedToolsPerMessage <= 0 {
 		cfg.MCPMaxSelectedToolsPerMessage = config.DefaultMCPMaxSelectedToolsPerMessage

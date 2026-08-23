@@ -125,6 +125,37 @@ func (h *Handler) GetLoginPageSettings(c *gin.Context) {
 	})
 }
 
+// ListConversationPlugins godoc
+// @Summary 查询聊天可用的系统 Plugins
+// @Tags settings
+// @Produce json
+// @Security BearerAuth
+// @Param includeDisabled query bool false "包含已停用项"
+// @Success 200 {object} Envelope
+// @Router /plugins [get]
+func (h *Handler) ListConversationPlugins(c *gin.Context) {
+	items, err := nativetool.ConversationPlugins(h.runtime.Snapshot().ConversationPluginKeys)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "list conversation plugins failed")
+		return
+	}
+	includeDisabled := c.Query("includeDisabled") == "true"
+	result := make([]ConversationPluginResponse, 0, len(items))
+	for _, item := range items {
+		if !includeDisabled && !item.Enabled {
+			continue
+		}
+		result = append(result, ConversationPluginResponse{
+			Key:         item.Key,
+			Label:       item.Label,
+			Description: item.Description,
+			Enabled:     item.Enabled,
+			ResourceRef: nativetool.ConversationPluginRefPrefix + item.Key,
+		})
+	}
+	response.Success(c, result)
+}
+
 // GetBranding godoc
 // @Summary 查询公开品牌配置
 // @Tags settings

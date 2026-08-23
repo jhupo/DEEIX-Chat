@@ -40,14 +40,14 @@ import {
   SkillsSection,
   type SkillsSectionHandle,
 } from "@/features/prompts/components/sections/skills-section";
-import { useDevices } from "@/features/devices";
 import {
   promptPresetKey,
   useSkillsPromptPage,
 } from "@/features/prompts/hooks/use-skills-prompt-page";
 import { cn } from "@/lib/utils";
+import { listConversationPlugins } from "@/shared/api/plugins";
+import type { ConversationPluginDTO } from "@/shared/api/plugins";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
-import { getAgentProfileResource, listAgentRuntimeProfiles } from "@/shared/api/agent-gateway";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { PROMPT_PRESET_LIMITS } from "@/shared/model/prompt-presets";
@@ -149,97 +149,17 @@ function PromptPresetListSkeleton() {
   );
 }
 
-type PluginInventoryItem = {
-  id: string;
-  name: string;
-  description: string;
-  profile: string;
-  source: "system" | "user";
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function pluginInventoryRows(value: unknown, profile: string): PluginInventoryItem[] {
-  const root = isRecord(value) ? value : null;
-  const rows = Array.isArray(value)
-    ? value
-    : Array.isArray(root?.data)
-      ? root.data
-      : Array.isArray(root?.plugins)
-        ? root.plugins
-        : Array.isArray(root?.items)
-          ? root.items
-          : [];
-  return rows.flatMap((value, index): PluginInventoryItem[] => {
-    if (!isRecord(value)) {
-      return [];
-    }
-    const name = [value.displayName, value.name, value.id]
-      .find((item): item is string => typeof item === "string" && item.trim().length > 0)
-      ?.trim() ?? "";
-    if (!name) {
-      return [];
-    }
-    const rawSource = [value.source, value.scope, value.origin]
-      .find((item): item is string => typeof item === "string")
-      ?.trim().toLowerCase() ?? "";
-    const source = value.system === true || value.builtin === true || /system|builtin|bundled/.test(rawSource)
-      ? "system"
-      : "user";
-    return [{
-      id: `${profile}:${typeof value.id === "string" ? value.id : name}:${index}`,
-      name,
-      description: typeof value.description === "string" ? value.description.trim() : "",
-      profile,
-      source,
-    }];
-  });
-}
-
 function PluginsSection({ query }: { query: string }) {
   const t = useTranslations("prompts");
-  const { defaultDevice, loading: devicesLoading } = useDevices();
-  const [items, setItems] = React.useState<PluginInventoryItem[]>([]);
+  const [items, setItems] = React.useState<ConversationPluginDTO[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
     let cancelled = false;
-    if (devicesLoading) {
-      setLoading(true);
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (!defaultDevice) {
-      setItems([]);
-      setLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
     setLoading(true);
     void (async () => {
       const token = await resolveAccessToken();
-      if (!token) {
-        return [];
-      }
-      const profiles = await listAgentRuntimeProfiles(token, defaultDevice.deviceId);
-      const snapshots = await Promise.allSettled(
-        profiles
-          .filter((profile) => profile.status === "ready" && profile.manifest.resources.profile.includes("plugins"))
-          .map(async (profile) => ({
-            profile: profile.provider || profile.profileId,
-            snapshot: await getAgentProfileResource(token, defaultDevice.deviceId, profile.profileId, "plugins"),
-          })),
-      );
-      return snapshots.flatMap((result) =>
-        result.status === "fulfilled"
-          ? pluginInventoryRows(result.value.snapshot.data, result.value.profile)
-          : [],
-      );
+      return token ? listConversationPlugins(token) : [];
     })()
       .then((rows) => {
         if (!cancelled) {
@@ -259,11 +179,11 @@ function PluginsSection({ query }: { query: string }) {
     return () => {
       cancelled = true;
     };
-  }, [defaultDevice, devicesLoading]);
+  }, []);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredItems = normalizedQuery
-    ? items.filter((item) => [item.name, item.description, item.profile].join(" ").toLowerCase().includes(normalizedQuery))
+    ? items.filter((item) => [item.key, item.label, item.description].join(" ").toLowerCase().includes(normalizedQuery))
     : items;
 
   return (
@@ -283,19 +203,19 @@ function PluginsSection({ query }: { query: string }) {
         <div className="h-full min-h-0 flex-1 overflow-y-auto pr-2" data-sidebar-scroll-root="true">
           <div className="grid gap-4 md:ml-13 md:w-[calc(100%-3.25rem)] md:grid-cols-2">
             {filteredItems.map((item) => (
-              <div key={item.id} className="flex min-h-16 min-w-0 items-center gap-2.5 rounded-lg bg-muted/35 px-3 py-2.5 text-left">
+              <div key={item.key} className="flex min-h-16 min-w-0 items-center gap-2.5 rounded-lg bg-muted/35 px-3 py-2.5 text-left">
                 <div className="flex size-7 shrink-0 items-center justify-center text-muted-foreground">
                   <Plug className="size-4.5" strokeWidth={1.8} />
                 </div>
                 <div className="grid min-w-0 flex-1 gap-0.5">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <h3 className="min-w-0 truncate text-sm font-medium text-foreground">{item.name}</h3>
+                    <h3 className="min-w-0 truncate text-sm font-medium text-foreground">{item.key}</h3>
                     <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px] font-normal">
-                      {t(item.source === "system" ? "pluginSystem" : "pluginUser")}
+                      {t("pluginSystem")}
                     </Badge>
                   </div>
                   <p className="min-w-0 truncate text-xs leading-5 text-muted-foreground">
-                    {item.description || item.profile}
+                    {item.description}
                   </p>
                 </div>
               </div>

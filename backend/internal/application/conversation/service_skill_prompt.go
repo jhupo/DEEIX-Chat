@@ -14,8 +14,6 @@ import (
 
 const skillPromptSystemMarker = "<skill_context>"
 
-const imageSkillTrigger = "image"
-
 type skillPrompts struct {
 	Skills   []domainskill.Skill
 	Rendered string
@@ -101,62 +99,6 @@ func skillPromptTriggers(skills []domainskill.Skill) []string {
 		}
 	}
 	return triggers
-}
-
-// withSelectedSkillCapabilities compiles trusted built-in Skill triggers into provider tools.
-// The model capability catalog remains the allowlist, so a Skill cannot enable an undeclared tool.
-func withSelectedSkillCapabilities(
-	options map[string]interface{},
-	prompt *skillPrompts,
-	protocol string,
-	modelCapabilitiesJSON string,
-) map[string]interface{} {
-	if prompt == nil || !hasBuiltinSkillTrigger(prompt.Skills, imageSkillTrigger) {
-		return options
-	}
-	protocolKey := modelOptionPolicyProtocolKey(protocol)
-	var imageTool map[string]interface{}
-	for _, capability := range nativeToolCapabilitiesFromConfig(modelCapabilitiesJSON, protocolKey) {
-		if capability.Protocol != "" && capability.Protocol != protocolKey {
-			continue
-		}
-		if capability.Type == "image_generation" || strings.HasSuffix(capability.Key, ".image_generation") {
-			imageTool = cloneModelOptionMap(capability.Payload)
-			if imageTool == nil {
-				imageTool = make(map[string]interface{})
-			}
-			if _, exists := imageTool["type"]; !exists && capability.Type != "" {
-				imageTool["type"] = capability.Type
-			}
-			break
-		}
-	}
-	if len(imageTool) == 0 {
-		return options
-	}
-
-	compiled := cloneModelOptionMap(options)
-	if compiled == nil {
-		compiled = make(map[string]interface{})
-	}
-	tools := providerToolOptionPayloads(compiled["tools"])
-	for _, tool := range tools {
-		if strings.TrimSpace(modelOptionStringValue(tool["type"])) == strings.TrimSpace(modelOptionStringValue(imageTool["type"])) {
-			return compiled
-		}
-	}
-	compiled["tools"] = append(tools, imageTool)
-	return compiled
-}
-
-func hasBuiltinSkillTrigger(skills []domainskill.Skill, trigger string) bool {
-	trigger = strings.TrimSpace(strings.ToLower(trigger))
-	for _, skill := range skills {
-		if skill.Scope == domainskill.ScopeBuiltin && strings.TrimSpace(strings.ToLower(skill.Trigger)) == trigger {
-			return true
-		}
-	}
-	return false
 }
 
 func renderSkillPrompts(prompt *skillPrompts, customPrompt string) string {

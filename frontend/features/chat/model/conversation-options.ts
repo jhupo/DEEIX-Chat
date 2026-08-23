@@ -10,6 +10,7 @@ const RESERVED_CONVERSATION_OPTION_KEYS = new Set([
   "stream",
   "system",
   "systemInstruction",
+  "tools",
 ]);
 
 export function isConversationOptionsObject(value: unknown): value is ConversationOptions {

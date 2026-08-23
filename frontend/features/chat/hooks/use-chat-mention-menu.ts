@@ -5,6 +5,8 @@ import * as React from "react";
 import type { ConversationInputResourceDTO } from "@/shared/api/conversation.types";
 import { listVisiblePromptPresets } from "@/shared/api/prompt-presets";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import { listConversationPlugins } from "@/shared/api/plugins";
+import type { ConversationPluginDTO } from "@/shared/api/plugins";
 import { listVisibleSkills } from "@/shared/api/skills";
 import type { SkillSummaryDTO } from "@/shared/api/skills.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
@@ -19,9 +21,9 @@ const MENTION_MENU_CHROME_HEIGHT = 12;
 const MENTION_MENU_VIEWPORT_GUTTER = 16;
 const MENTION_MENU_OFFSET = 8;
 const MENTION_MENU_QUERY_DELAY_MS = 180;
-const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = ["skill", "prompt"];
+const DEFAULT_MENTION_MENU_KINDS: readonly ChatMentionMenuKind[] = ["skill", "plugin", "prompt"];
 
-export type ChatMentionMenuKind = "skill" | "prompt";
+export type ChatMentionMenuKind = "skill" | "plugin" | "prompt";
 
 type ChatMentionSkillMenuItem = {
   id: string;
@@ -34,7 +36,7 @@ type ChatMentionSkillMenuItem = {
 
 type ChatMentionInputResourceMenuItem = {
   id: string;
-  kind: "skill";
+  kind: "skill" | "plugin";
   label: string;
   description: string;
   resource: ConversationInputResourceDTO;
@@ -302,10 +304,10 @@ function inputResourcesToItems(
 ): ChatMentionInputResourceMenuItem[] {
   const selectedRefs = new Set(selectedResources.map((item) => item.resourceRef));
   return resources
-    .filter((item) => item.kind === "skill" && itemMatchesQuery([item.name, item.description], query))
+    .filter((item) => itemMatchesQuery([item.name, item.description], query))
     .map((resource) => ({
       id: `resource:${resource.resourceRef}`,
-      kind: "skill" as const,
+      kind: resource.kind === "app-mention" ? "plugin" as const : "skill" as const,
       label: resource.name,
       description: resource.description,
       resource,
@@ -313,8 +315,27 @@ function inputResourcesToItems(
     }));
 }
 
+function pluginsToItems(
+  plugins: ConversationPluginDTO[],
+  query: string,
+  selectedResources: ConversationInputResourceDTO[],
+): ChatMentionInputResourceMenuItem[] {
+  return inputResourcesToItems(
+    plugins.map((plugin) => ({
+      kind: "app-mention" as const,
+      name: plugin.key,
+      description: plugin.description,
+      resourceRef: plugin.resourceRef,
+    })),
+    query,
+    selectedResources,
+  );
+}
+
 function buildSections({
   inputResources,
+  plugins,
+  pluginLoading,
   prompts,
   promptLoading,
   skillLoading,
@@ -326,6 +347,8 @@ function buildSections({
   enabledKinds,
 }: {
   inputResources?: ConversationInputResourceDTO[];
+  plugins: ConversationPluginDTO[];
+  pluginLoading: boolean;
   prompts: PromptPresetDTO[];
   promptLoading: boolean;
   skills: SkillSummaryDTO[];
@@ -340,13 +363,23 @@ function buildSections({
     return [];
   }
 
-  if (queryKind === "skill" && enabledKinds.has("skill")) {
+  if (queryKind === "skill" && (enabledKinds.has("skill") || enabledKinds.has("plugin"))) {
     if (inputResources !== undefined) {
       const items = inputResourcesToItems(inputResources, query, selectedInputResources);
-      return items.length > 0 ? [{ kind: "skill", items }] : [];
+      return (["skill", "plugin"] as const).flatMap((kind) => {
+        if (!enabledKinds.has(kind)) return [];
+        const sectionItems = items.filter((item) => item.kind === kind);
+        return sectionItems.length > 0 ? [{ kind, items: sectionItems }] : [];
+      });
     }
-    const items = skillLoading ? [] : skillsToItems(skills, selectedSkills);
-    return items.length > 0 ? [{ kind: "skill", items }] : [];
+    const sections: ChatMentionMenuSection[] = [];
+    const skillItems = skillLoading || !enabledKinds.has("skill") ? [] : skillsToItems(skills, selectedSkills);
+    const pluginItems = pluginLoading || !enabledKinds.has("plugin")
+      ? []
+      : pluginsToItems(plugins, query, selectedInputResources);
+    if (skillItems.length > 0) sections.push({ kind: "skill", items: skillItems });
+    if (pluginItems.length > 0) sections.push({ kind: "plugin", items: pluginItems });
+    return sections;
   }
 
   if (queryKind === "prompt" && enabledKinds.has("prompt")) {
@@ -474,6 +507,8 @@ export function useChatMentionMenu({
   const [menuLayout, setMenuLayout] = React.useState<ChatMentionMenuLayout | null>(null);
   const [skills, setSkills] = React.useState<SkillSummaryDTO[]>([]);
   const [skillsLoading, setSkillsLoading] = React.useState(false);
+  const [plugins, setPlugins] = React.useState<ConversationPluginDTO[]>([]);
+  const [pluginsLoading, setPluginsLoading] = React.useState(false);
   const [prompts, setPrompts] = React.useState<PromptPresetDTO[]>([]);
   const [promptsLoading, setPromptsLoading] = React.useState(false);
   const [selection, setSelection] = React.useState<ChatMentionSelection>(() => ({
@@ -542,6 +577,36 @@ export function useChatMentionMenu({
   }, [disabled, enabledKindSet, inputResources, skillQuery]);
 
   React.useEffect(() => {
+    if (inputResources !== undefined || skillQuery === null || disabled || !enabledKindSet.has("plugin")) {
+      setPlugins([]);
+      setPluginsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setPluginsLoading(true);
+      void (async () => {
+        try {
+          const token = await resolveAccessToken();
+          if (!token || controller.signal.aborted) return;
+          const data = await listConversationPlugins(token);
+          if (!controller.signal.aborted) setPlugins(data);
+        } catch {
+          if (!controller.signal.aborted) setPlugins([]);
+        } finally {
+          if (!controller.signal.aborted) setPluginsLoading(false);
+        }
+      })();
+    }, MENTION_MENU_QUERY_DELAY_MS);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [disabled, enabledKindSet, inputResources, skillQuery]);
+
+  React.useEffect(() => {
     if (promptQuery === null || disabled || !enabledKindSet.has("prompt")) {
       setPrompts([]);
       setPromptsLoading(false);
@@ -588,6 +653,8 @@ export function useChatMentionMenu({
     () =>
       buildSections({
         inputResources,
+        plugins,
+        pluginLoading: pluginsLoading,
         prompts,
         promptLoading: promptsLoading,
         skills,
@@ -600,6 +667,8 @@ export function useChatMentionMenu({
       }),
     [
       inputResources,
+      plugins,
+      pluginsLoading,
       prompts,
       promptsLoading,
       skills,

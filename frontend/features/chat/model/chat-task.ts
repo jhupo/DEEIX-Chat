@@ -1,5 +1,5 @@
 import type { ChatModelOption, PendingAttachment } from "@/features/chat/types/chat-runtime";
-import type { ConversationOptions } from "@/shared/api/conversation.types";
+import type { ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
 
 export type ChatSubmitTask = "chat" | "image_generation" | "image_edit" | "video_generation";
 export type ChatSubmitBlockReason =
@@ -67,27 +67,21 @@ function requestedResponseType(options?: ConversationOptions): "image" | "video"
   return responseFormatType(options.response_format ?? options.responseFormat);
 }
 
-export function modelSupportsChatImageTool(model: ChatModelOption | null): boolean {
+export function modelSupportsChatImageTool(
+  model: ChatModelOption | null,
+  selectedInputResources: Array<Pick<ConversationInputResourceDTO, "resourceRef">> = [],
+): boolean {
   if (!model || !model.kinds.includes("chat")) {
     return false;
   }
-  return model.nativeTools.some((tool) => {
-    const payloadType = typeof tool.payload.type === "string" ? tool.payload.type.trim() : "";
-    const imageTool =
-      tool.type === "image_generation" ||
-      payloadType === "image_generation" ||
-      tool.key.endsWith(".image_generation");
-    if (!imageTool) {
-      return false;
-    }
-    return tool.protocols.length === 0 || tool.protocols.some((protocol) => model.protocols.includes(protocol));
-  });
+  return selectedInputResources.some((item) => item.resourceRef === "plugin:image_generation");
 }
 
 export function resolveChatSubmitDecision(
   model: ChatModelOption | null,
   attachments: PendingAttachment[],
   options?: ConversationOptions,
+  selectedInputResources: Array<Pick<ConversationInputResourceDTO, "resourceRef">> = [],
 ): ChatSubmitDecision {
   const kinds = new Set(model?.kinds ?? []);
   const attachmentCount = attachments.length;
@@ -96,7 +90,7 @@ export function resolveChatSubmitDecision(
   const supportsChat = kinds.size === 0 || kinds.has("chat") || kinds.has("audio");
   const supportsImageGeneration = kinds.has("image_gen");
   const supportsDirectImageEdit = kinds.has("image_edit");
-  const supportsChatImageTool = modelSupportsChatImageTool(model);
+  const supportsChatImageTool = modelSupportsChatImageTool(model, selectedInputResources);
   const supportsImageEdit = supportsDirectImageEdit || supportsChatImageTool;
   const supportsVideoGeneration = kinds.has("video_gen");
   const baseDecision = {

@@ -499,6 +499,7 @@
     "mention": {
       "sections": {
         "skill": "技能",
+        "plugin": "Plugins",
         "prompt": "提示词"
       }
     },

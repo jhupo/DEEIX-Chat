@@ -12,6 +12,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	mineruextract "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/extract/mineru"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
@@ -342,6 +343,9 @@ func validatePatchItem(item PatchItem) error {
 	}
 	value := strings.TrimSpace(item.Value)
 	switch key {
+	case "chat:conversation_plugin_keys":
+		_, err := nativetool.ParseConversationPluginKeysJSON(value)
+		return err
 	case "chat:model_option_policy_mode":
 		switch value {
 		case "allowlist", "denylist", "disabled":

@@ -752,17 +752,14 @@ func (s *Service) sendMessageInternal(
 	attributionReferer, attributionTitle := s.llmAttribution()
 	routeConfig := messageRouteConfig(route, attributionReferer, attributionTitle)
 	responsesBackgroundRouteConfig = routeConfig
-	semanticOptions := withSelectedSkillCapabilities(
-		input.Options,
-		skillPrompts,
-		route.Protocol,
-		route.ModelCapabilitiesJSON,
-	)
+	semanticOptions := cloneModelOptionMap(input.Options)
+	delete(semanticOptions, "tools")
+	modelCapabilitiesJSON := modelCapabilitiesWithoutNativeTools(route.ModelCapabilitiesJSON)
 	filteredOptions = filterModelOptions(semanticOptions, route.Protocol, modelOptionPolicyConfig{
 		Mode:                  cfg.ModelOptionPolicyMode,
 		AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
 		DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,
-		ModelCapabilitiesJSON: route.ModelCapabilitiesJSON,
+		ModelCapabilitiesJSON: modelCapabilitiesJSON,
 	})
 	if shouldApplyReasoningPassbackRequestOptions(
 		reasoningContentPassback,
@@ -773,8 +770,18 @@ func (s *Service) sendMessageInternal(
 			filteredOptions,
 			route.ReasoningPassbackRequestOptions,
 			semanticOptions,
-			route.ModelCapabilitiesJSON,
+			modelCapabilitiesJSON,
 		)
+	}
+	filteredOptions, err = withConversationPluginTools(
+		filteredOptions,
+		input.InputResourceRefs,
+		route.Protocol,
+		cfg.ConversationPluginKeys,
+	)
+	if err != nil {
+		retErr = err
+		return nil, err
 	}
 	promptCacheSessionKey := strings.TrimSpace(conversation.SessionKey)
 	if promptCacheSessionKey == "" {

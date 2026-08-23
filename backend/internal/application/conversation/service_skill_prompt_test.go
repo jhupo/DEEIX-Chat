@@ -129,37 +129,3 @@ func TestNormalizeSelectedSkillIDsDeduplicatesAndDropsEmpty(t *testing.T) {
 		}
 	}
 }
-
-func TestSelectedBuiltinImageSkillEnablesConfiguredNativeTool(t *testing.T) {
-	prompt := &skillPrompts{Skills: []domainskill.Skill{{
-		Scope:   domainskill.ScopeBuiltin,
-		Trigger: "image",
-	}}}
-	options := withSelectedSkillCapabilities(
-		nil,
-		prompt,
-		llm.AdapterOpenAIResponses,
-		`{"nativeTools":[{"key":"openai.image_generation","protocols":["openai_responses"],"type":"image_generation","enabled":true,"payload":{"type":"image_generation"}}]}`,
-	)
-	tools, ok := options["tools"].([]map[string]interface{})
-	if !ok || len(tools) != 1 || tools[0]["type"] != "image_generation" {
-		t.Fatalf("expected one configured image tool, got %#v", options)
-	}
-}
-
-func TestUserSkillCannotEnableNativeToolByTriggerName(t *testing.T) {
-	prompt := &skillPrompts{Skills: []domainskill.Skill{{
-		Scope:   domainskill.ScopeUser,
-		Trigger: "image",
-	}}}
-	options := map[string]interface{}{"temperature": 0.2}
-	resolved := withSelectedSkillCapabilities(
-		options,
-		prompt,
-		llm.AdapterOpenAIResponses,
-		`{"nativeTools":[{"key":"openai.image_generation","protocols":["openai_responses"],"type":"image_generation","enabled":true,"payload":{"type":"image_generation"}}]}`,
-	)
-	if _, exists := resolved["tools"]; exists {
-		t.Fatalf("expected user skill trigger not to enable a provider tool, got %#v", resolved)
-	}
-}

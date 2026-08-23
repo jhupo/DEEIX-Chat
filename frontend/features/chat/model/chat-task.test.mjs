@@ -42,13 +42,20 @@ function model(overrides = {}) {
   };
 }
 
-test("keeps image editing in chat when the model has a Responses image tool", () => {
-  const decision = resolveChatSubmitDecision(model(), [imageAttachment]);
+const imagePlugin = {
+  kind: "app-mention",
+  name: "image_generation",
+  description: "Create or edit images",
+  resourceRef: "plugin:image_generation",
+};
+
+test("keeps image editing in chat when the image Plugin is selected", () => {
+  const decision = resolveChatSubmitDecision(model(), [imageAttachment], {}, [imagePlugin]);
   assert.equal(decision.task, "chat");
   assert.equal(decision.blockedReason, null);
 });
 
-test("uses the dedicated edit task when no chat image tool is available", () => {
-  const decision = resolveChatSubmitDecision(model({ nativeToolKeys: [], nativeTools: [] }), [imageAttachment]);
+test("uses the dedicated edit task when the image Plugin is not selected", () => {
+  const decision = resolveChatSubmitDecision(model(), [imageAttachment]);
   assert.equal(decision.task, "image_edit");
 });

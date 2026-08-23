@@ -207,6 +207,10 @@ func handleSendMessageError(c *gin.Context, err error) {
 		response.Error(c, http.StatusNotFound, "skill not found")
 	case errors.Is(err, appconversation.ErrInvalidSkillUse):
 		response.Error(c, http.StatusBadRequest, "invalid skill use")
+	case errors.Is(err, appconversation.ErrConversationPluginUnavailable):
+		response.Error(c, http.StatusNotFound, "conversation plugin unavailable")
+	case errors.Is(err, appconversation.ErrConversationPluginUnsupported):
+		response.Error(c, http.StatusBadRequest, "conversation plugin unsupported by model route")
 	case errors.Is(err, appconversation.ErrInvalidMessageBranch):
 		response.Error(c, http.StatusBadRequest, "invalid message branch")
 	case errors.Is(err, appconversation.ErrFileProcessingNotReady):

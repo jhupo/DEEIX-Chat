@@ -2,7 +2,8 @@
   "title": "提示词库",
   "types": {
     "prompts": "Prompts",
-    "skills": "Skills"
+    "skills": "Skills",
+    "plugins": "Plugins"
   },
   "libraryTitle": {
     "prompts": "Prompts 库",
@@ -58,6 +59,9 @@
     "deleted": "提示词已删除",
     "deleteFailed": "删除提示词失败",
     "skillsLoadFailed": "Skills 加载失败",
+    "pluginsLoadFailed": "Plugins 加载失败",
+    "pluginsUpdated": "Plugins 配置已更新",
+    "pluginsSaveFailed": "Plugins 配置保存失败",
     "skillInvalid": "请填写名称和 SKILL.md。",
     "skillTooLong": "名称最多 64 个字符，说明最多 256 个字符，SKILL.md 最多 10000 个字符。",
     "skillCreated": "Skill 已创建",

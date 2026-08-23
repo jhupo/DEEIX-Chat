@@ -14,6 +14,7 @@ func (m *Module) RegisterFrontendRoutes(engine *gin.Engine) {
 }
 
 func (m *Module) RegisterRoutes(api *gin.RouterGroup) {
+	api.GET("/plugins", m.Handler.ListConversationPlugins)
 	api.GET("/settings/model-option-policy", m.Handler.GetModelOptionPolicy)
 	api.GET("/settings/mcp-policy", m.Handler.GetMCPPolicy)
 	api.GET("/settings/chat-context-policy", m.Handler.GetChatContextPolicy)

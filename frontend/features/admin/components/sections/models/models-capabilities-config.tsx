@@ -640,8 +640,8 @@ function resolveNativeToolKeysFromCapabilities(
 
 export function normalizeModelCapabilitiesJSON(
   value: string | null | undefined,
-  nativeTools: NativeToolDefinition[],
-  routeProtocols: string[],
+  _nativeTools: NativeToolDefinition[],
+  _routeProtocols: string[],
 ): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed || trimmed === "{}") {
@@ -651,15 +651,31 @@ export function normalizeModelCapabilitiesJSON(
   if (!payload) {
     return trimmed;
   }
-  const nativeToolRows = parseNativeToolRows(payload, nativeTools, routeProtocols);
-  const nextNativeTools = buildNativeTools(nativeToolRows);
-  if (nextNativeTools.length > 0) {
-    payload.nativeTools = nextNativeTools;
-  } else {
-    delete payload.nativeTools;
-  }
-  delete payload.nativeToolKeys;
+  removeLegacyNativeToolConfig(payload);
   return Object.keys(payload).length > 0 ? JSON.stringify(payload, null, 2) : "";
+}
+
+function removeLegacyNativeToolConfig(payload: Record<string, unknown>) {
+  delete payload.nativeTools;
+  delete payload.nativeToolKeys;
+  if (isPlainJSONObject(payload.defaultOptions)) {
+    delete payload.defaultOptions.tools;
+    if (Object.keys(payload.defaultOptions).length === 0) delete payload.defaultOptions;
+  }
+  if (Array.isArray(payload.optionControls)) {
+    const optionControls = payload.optionControls.filter((item) =>
+      !isPlainJSONObject(item) || (item.path !== "tools" && !String(item.path ?? "").startsWith("tools.")),
+    );
+    if (optionControls.length > 0) payload.optionControls = optionControls;
+    else delete payload.optionControls;
+  }
+  if (Array.isArray(payload.lockedOptionPaths)) {
+    const lockedOptionPaths = payload.lockedOptionPaths.filter((item) =>
+      typeof item !== "string" || (item !== "tools" && !item.startsWith("tools.")),
+    );
+    if (lockedOptionPaths.length > 0) payload.lockedOptionPaths = lockedOptionPaths;
+    else delete payload.lockedOptionPaths;
+  }
 }
 
 function formatNativeToolProtocols(protocols: string[]): string {
@@ -878,80 +894,9 @@ function parseNativeToolRows(
   return rows;
 }
 
-function buildNativeTools(rows: NativeToolRow[]): Record<string, unknown>[] {
-  return rows.flatMap((row): Record<string, unknown>[] => {
-    if (!row.enabled) {
-      return [];
-    }
-    let payload: unknown;
-    try {
-      payload = JSON.parse(row.payload.trim() || "{}") as unknown;
-    } catch {
-      return [];
-    }
-    if (!isPlainJSONObject(payload)) {
-      return [];
-    }
-    const item: Record<string, unknown> = {
-      key: row.key.trim(),
-      protocols: parseNativeToolProtocolsInput(row.protocols),
-      label: row.label.trim() || row.type.trim() || row.key.trim(),
-      enabled: true,
-      defaultEnabled: row.defaultEnabled,
-      payload,
-    };
-    const provider = row.provider.trim();
-    const type = row.type.trim() || nativeToolPayloadType(payload);
-    const description = row.description.trim();
-    if (provider) {
-      item.provider = provider;
-    }
-    if (type) {
-      item.type = type;
-    }
-    if (description) {
-      item.description = description;
-    }
-    return [item];
-  });
-}
-
-function validateNativeToolRows(rows: NativeToolRow[], t: (key: string) => string): NativeToolRowErrors {
-  const errors: NativeToolRowErrors = {};
-  rows.forEach((row) => {
-    if (!row.enabled) {
-      return;
-    }
-    const rowErrors: Partial<Record<"key" | "protocols" | "type" | "payload", string>> = {};
-    if (!row.key.trim()) {
-      rowErrors.key = t("sheet.capabilitiesQuick.nativeToolKeyRequired");
-    }
-    if (parseNativeToolProtocolsInput(row.protocols).length === 0) {
-      rowErrors.protocols = t("sheet.capabilitiesQuick.nativeToolProtocolRequired");
-    }
-    let payload: unknown;
-    try {
-      payload = JSON.parse(row.payload.trim() || "{}") as unknown;
-    } catch {
-      rowErrors.payload = t("sheet.capabilitiesQuick.nativeToolPayloadInvalid");
-    }
-    if (payload !== undefined && !isPlainJSONObject(payload)) {
-      rowErrors.payload = t("sheet.capabilitiesQuick.nativeToolPayloadInvalid");
-    }
-    if (!row.type.trim() && isPlainJSONObject(payload) && !nativeToolPayloadType(payload)) {
-      rowErrors.type = t("sheet.capabilitiesQuick.nativeToolTypeRequired");
-    }
-    if (Object.keys(rowErrors).length > 0) {
-      errors[row.id] = rowErrors;
-    }
-  });
-  return errors;
-}
-
 function buildCapabilitiesJSON(
   currentJSON: string,
   parameterRows: ParameterRow[],
-  nativeToolRows: NativeToolRow[],
   promptCacheConfig: PromptCacheConfig,
   promptCacheSupported: boolean,
 ): string | null {
@@ -977,16 +922,10 @@ function buildCapabilitiesJSON(
   } else {
     delete payload.lockedOptionPaths;
   }
-  const nativeTools = buildNativeTools(nativeToolRows);
-  if (nativeTools.length > 0) {
-    payload.nativeTools = nativeTools;
-  } else {
-    delete payload.nativeTools;
-  }
   if (promptCacheSupported) {
     applyPromptCacheConfig(payload, promptCacheConfig);
   }
-  delete payload.nativeToolKeys;
+  removeLegacyNativeToolConfig(payload);
   return Object.keys(payload).length > 0 ? JSON.stringify(payload, null, 2) : "";
 }
 
@@ -1009,7 +948,6 @@ export function ModelCapabilitiesGuideButton({ t }: { t: (key: string) => string
           <TabsList className="shrink-0">
             <TabsTrigger value="defaults">{t("sheet.capabilitiesGuide.defaultsTab")}</TabsTrigger>
             <TabsTrigger value="controls">{t("sheet.capabilitiesGuide.controlsTab")}</TabsTrigger>
-            <TabsTrigger value="tools">{t("sheet.capabilitiesGuide.toolsTab")}</TabsTrigger>
             <TabsTrigger value="policy">{t("sheet.capabilitiesGuide.policyTab")}</TabsTrigger>
           </TabsList>
 
@@ -1273,18 +1211,16 @@ export function ModelCapabilitiesQuickConfig({
 
   function applyDraft() {
     const nextParameterErrors = validateParameterRows(parameterRows, t);
-    const nextNativeToolErrors = validateNativeToolRows(nativeToolRows, t);
     setParameterErrors(nextParameterErrors);
-    setNativeToolErrors(nextNativeToolErrors);
-    if (hasCapabilityErrors(nextParameterErrors) || Object.keys(nextNativeToolErrors).length > 0) {
-      setActiveTab(hasCapabilityErrors(nextParameterErrors) ? "parameters" : "tools");
+    setNativeToolErrors({});
+    if (hasCapabilityErrors(nextParameterErrors)) {
+      setActiveTab("parameters");
       toast.error(t("sheet.capabilitiesQuick.validationFailed"));
       return;
     }
     const nextValue = buildCapabilitiesJSON(
       draftBaseJSON,
       parameterRows,
-      nativeToolRows,
       promptCacheConfig,
       promptCacheSupported,
     );
@@ -1358,16 +1294,13 @@ export function ModelCapabilitiesQuickConfig({
         <div className="min-h-0 min-w-0 flex flex-1 flex-col overflow-hidden px-4 py-2">
           <Tabs
             value={activeTab}
-            onValueChange={(value) => setActiveTab(value as "parameters" | "tools")}
+            onValueChange={() => setActiveTab("parameters")}
             className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden"
           >
             <div className="min-w-0 shrink-0">
-              <TabsList className="grid h-8 w-full min-w-0 grid-cols-2">
+              <TabsList className="grid h-8 w-full min-w-0 grid-cols-1">
                 <TabsTrigger value="parameters" className="min-w-0">
                   <span className="min-w-0 truncate">{t("sheet.capabilitiesQuick.parametersTab")}</span>
-                </TabsTrigger>
-                <TabsTrigger value="tools" className="min-w-0">
-                  <span className="min-w-0 truncate">{t("sheet.capabilitiesGuide.toolsTab")}</span>
                 </TabsTrigger>
               </TabsList>
             </div>
