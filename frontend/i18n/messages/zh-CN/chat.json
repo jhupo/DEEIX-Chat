@@ -53,6 +53,7 @@
         "failed": "失败",
         "interrupted": "已中断"
       },
+      "elapsed": "耗时 {duration}",
       "status": {
         "running": "运行中",
         "completed": "已完成",
@@ -67,6 +68,7 @@
       "fileChanges": "已更改 {count} 个文件",
       "plan": "{count} 个步骤",
       "diff": "文件差异",
+      "selectFile": "选择文件",
       "modelRerouted": "已切换到 {model}",
       "tokenUsage": "线程用量",
       "tokenSummary": "输入 {input} · 输出 {output} · 总计 {total}"

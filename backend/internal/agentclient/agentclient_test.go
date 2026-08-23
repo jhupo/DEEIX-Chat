@@ -285,7 +285,7 @@ func TestUserInputProjectionUsesOpaqueRequiredQuestions(t *testing.T) {
 	}
 }
 
-func TestApprovalProjectionUsesBoundedStartedItemContext(t *testing.T) {
+func TestExecutionProjectionUsesBoundedStartedItemContext(t *testing.T) {
 	state, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -337,11 +337,40 @@ func TestApprovalProjectionUsesBoundedStartedItemContext(t *testing.T) {
 		t.Fatalf("completed turn items remained cached: %#v", fileAfterTurn)
 	}
 
-	for index := 0; index <= maxApprovalItemProjections; index++ {
-		adapter.rememberApprovalItem(fmt.Sprintf("item-%03d", index), "turn-bounded", map[string]any{"type": "commandExecution", "command": "pwd"})
+	for index := 0; index <= maxExecutionItemProjections; index++ {
+		adapter.rememberExecutionItem(fmt.Sprintf("item-%03d", index), "turn-bounded", map[string]any{"type": "commandExecution", "command": "pwd"})
 	}
-	if len(adapter.approvalItems) != maxApprovalItemProjections || adapter.approvalItem("item-000").Command != "" {
-		t.Fatalf("approval item cache is not bounded: size=%d", len(adapter.approvalItems))
+	if len(adapter.executionItems) != maxExecutionItemProjections || adapter.executionItem("item-000").Command != "" {
+		t.Fatalf("execution item cache is not bounded: size=%d", len(adapter.executionItems))
+	}
+}
+
+func TestExecutionProjectionPreservesVisibleAgentFields(t *testing.T) {
+	adapter := &CodexAdapter{}
+	adapter.rememberExecutionItem("commentary-provider-item", "turn-provider", map[string]any{
+		"type": "agentMessage", "phase": "commentary",
+	})
+	delta := adapter.projectNotification("item/agentMessage/delta", map[string]any{
+		"itemId": "commentary-provider-item", "delta": "Checking the repository",
+	}, "item-ref").(map[string]any)
+	if delta["phase"] != "commentary" || delta["delta"] != "Checking the repository" {
+		t.Fatalf("commentary delta projection = %#v", delta)
+	}
+
+	command := adapter.projectExecutionItem(map[string]any{
+		"type": "commandExecution", "command": "go test ./...", "cwd": `C:\source\project`,
+		"durationMs": float64(1250), "exitCode": float64(0),
+		"commandActions": []any{map[string]any{"type": "read", "path": "go.mod"}},
+	}, "command-ref")
+	if command["cwd"] != `C:\source\project` || command["durationMs"] != float64(1250) || command["exitCode"] != float64(0) {
+		t.Fatalf("command projection = %#v", command)
+	}
+
+	reasoning := adapter.projectExecutionItem(map[string]any{
+		"type": "reasoning", "summary": []any{"Reviewed the existing components"}, "content": []any{"raw reasoning"},
+	}, "reasoning-ref")
+	if fmt.Sprint(reasoning["summary"]) != "[Reviewed the existing components]" || fmt.Sprint(reasoning["content"]) != "[raw reasoning]" {
+		t.Fatalf("reasoning projection = %#v", reasoning)
 	}
 }
 

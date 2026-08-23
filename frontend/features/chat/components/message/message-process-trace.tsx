@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { ChevronDown } from "@/components/animate-ui/icons/chevron-down";
 import {
@@ -11,6 +12,14 @@ import {
 } from "@/components/ui/accordion";
 import { Marker, MarkerContent } from "@/components/ui/marker";
 import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
+import {
+  formatAgentRunDuration,
+  MessageAgentActivity,
+} from "@/features/chat/components/message/message-agent-activity";
+import {
+  hasAgentRunActivity,
+  type AgentRunSnapshot,
+} from "@/features/chat/model/agent-run-store";
 import { useProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
 import { cn } from "@/lib/utils";
 import {
@@ -40,26 +49,59 @@ function buildProcessSummary(trace: ChatMessageProcessTrace): string {
 
 export function MessageProcessTrace({
   trace,
+  agentRun,
   active,
   autoCollapseReady,
 }: {
   trace?: ChatMessageProcessTrace;
+  agentRun?: AgentRunSnapshot;
   active?: boolean;
   autoCollapseReady?: boolean;
 }) {
   const labels = useProcessTraceLabels();
+  const agentT = useTranslations("chat.agent");
+  const hasAgentActivity = Boolean(agentRun && hasAgentRunActivity(agentRun));
+  const agentActive = agentRun?.status === "running" || agentRun?.status === "waiting_interaction";
   const processStreaming = Boolean(active && trace?.process?.status === "streaming");
-  const [accordionValue, setAccordionValue] = React.useState(() => (processStreaming ? "message-process-trace" : ""));
+  const workStreaming = hasAgentActivity ? agentActive : processStreaming;
+  const [accordionValue, setAccordionValue] = React.useState(() => (workStreaming ? "message-process-trace" : ""));
 
   React.useEffect(() => {
-    if (processStreaming) {
+    if (workStreaming) {
       setAccordionValue("message-process-trace");
       return;
     }
     if (autoCollapseReady) {
       setAccordionValue("");
     }
-  }, [autoCollapseReady, processStreaming]);
+  }, [autoCollapseReady, workStreaming]);
+
+  if (hasAgentActivity && agentRun) {
+    const duration = formatAgentRunDuration(agentRun.durationMS);
+    const title = agentActive
+      ? agentT("activity.title.running")
+      : duration
+        ? agentT("activity.elapsed", { duration })
+        : agentT(`activity.title.${agentRun.status === "idle" || agentRun.status === "waiting_interaction" ? "completed" : agentRun.status}`);
+    const open = accordionValue === "message-process-trace";
+    return (
+      <div className={TRACE_ROOT_CLASS}>
+        <Accordion type="single" collapsible value={accordionValue} onValueChange={(value) => setAccordionValue(value || "")} className="w-full">
+          <AccordionItem value="message-process-trace" className="border-b-0">
+            <AccordionTrigger iconPosition="none" className="group/trace min-h-0 justify-between gap-1.5 py-0.5 text-left no-underline hover:no-underline">
+              <Marker render={<span />} className={cn("inline-flex min-h-0 w-auto text-[13px] font-medium transition-colors", !agentActive && "text-muted-foreground group-hover/trace:text-foreground")}>
+                <MarkerContent className={cn("min-w-0", agentActive && "shimmer")}>{title}</MarkerContent>
+              </Marker>
+              <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-hover/trace:text-foreground", open && "rotate-180")} />
+            </AccordionTrigger>
+            <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
+              <MessageAgentActivity run={agentRun} />
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </div>
+    );
+  }
 
   if (!trace?.enabled || !trace.process) {
     return null;

@@ -17,13 +17,14 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageAgentActivity } from "@/features/chat/components/message/message-agent-activity";
-import { MessageAgentInteraction } from "@/features/chat/components/message/message-agent-interaction";
+import { MessageAgentFileSummary } from "@/features/chat/components/message/message-agent-activity";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
 import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
+import type { OpenAgentDiffInput } from "@/features/chat/model/chat-artifacts";
+import { hasAgentRunActivity, useAgentRunSnapshot } from "@/features/chat/model/agent-run-store";
 import {
   clearLiveUpstreamThinkTrace,
   mergeLiveUpstreamThinkTrace,
@@ -142,6 +143,7 @@ type ChatMessageBotProps = {
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   artifactActions?: MarkdownArtifactActions;
+  onOpenAgentDiff?: (input: OpenAgentDiffInput) => void;
   showBranchNavigator?: boolean;
   contentWidthClassName?: string;
   screenshotMeta?: React.ReactNode;
@@ -166,6 +168,7 @@ export function ChatMessageBot({
   attachmentContentLoader,
   onEditImageAttachment,
   artifactActions,
+  onOpenAgentDiff,
   showBranchNavigator = true,
   contentWidthClassName = "max-w-[1080px]",
   screenshotMeta,
@@ -199,6 +202,8 @@ export function ChatMessageBot({
     }
   }, [isEditing, item.content]);
   const liveProcessTrace = useLiveUpstreamThinkTrace(item.runID);
+  const agentRun = useAgentRunSnapshot(item.runID);
+  const hasAgentActivity = hasAgentRunActivity(agentRun);
   const processTrace =
     liveProcessTrace && (item.isStreaming || !item.processTrace)
       ? mergeLiveUpstreamThinkTrace(item.processTrace, liveProcessTrace)
@@ -325,18 +330,19 @@ export function ChatMessageBot({
     <div className="group/assistant-message flex w-full flex-col items-start">
       <MessageProcessTrace
         trace={processTrace}
+        agentRun={agentRun}
         active={messageStreaming}
         autoCollapseReady={processAutoCollapseReady}
       />
-      <MessageTraceEventBlocks
-        events={postProcessEvents}
-        activeToolBlock={toolTrace}
-        activeThinkBlock={upstreamThink}
-        messageStreaming={messageStreaming}
-        autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
-      />
-      <MessageAgentActivity runID={item.runID} />
-      <MessageAgentInteraction runID={item.runID} />
+      {!hasAgentActivity ? (
+        <MessageTraceEventBlocks
+          events={postProcessEvents}
+          activeToolBlock={toolTrace}
+          activeThinkBlock={upstreamThink}
+          messageStreaming={messageStreaming}
+          autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
+        />
+      ) : null}
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"
@@ -375,6 +381,8 @@ export function ChatMessageBot({
           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.content}</p>
         ) : null}
       </div>
+
+      <MessageAgentFileSummary run={agentRun} onOpenDiff={onOpenAgentDiff} />
 
       {inlineVideoAttachment ? (
         <MessageInlineVideoPreview attachment={inlineVideoAttachment} loadContent={attachmentContentLoader} />

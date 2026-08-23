@@ -41,7 +41,7 @@ Codex notifications/server requests
 - `GET /api/v1/conversations/:id/interactions?status=`：交互列表。
 - `POST /api/v1/conversation-interactions/:id/respond`：交互响应。
 - Agent profile resource API：`models` 来自设备上的 `model/list`。
-- `MessageProcessTrace`、`MessageThinkingTrace`、`MessageToolTrace`：消息轨迹视觉。
+- `MessageProcessTrace` 和现有 Markdown renderer：统一工作日志与最终回答视觉。
 - `ChatModelPicker`、`ChatModelConfig`、`InputGroup` 和现有 shadcn/ui primitives。
 
 直接修改 Gateway 提交、事件流和消息渲染旧路径，不保留“Gateway 清空 model/options”等兼容分支。
@@ -117,7 +117,13 @@ pending -- turn terminal/serverRequest resolved -> resolved
 - 步骤只来自 `turn/plan/updated.plan[]`；`item/plan/delta` 只改善实时文字。
 - 命令来自 `item/started|completed` 与 `item/commandExecution/outputDelta`。
 - 文件来自 fileChange item、`item/fileChange/patchUpdated` 和 `turn/diff/updated`。
-- 思考继续走现有 reasoning trace，不能跨 run 合并。
+- `agentMessage.phase=commentary` 与 reasoning summary 进入同一个 `MessageProcessTrace`
+  工作日志；原始 reasoning content 不展示，也不能跨 run 合并。
+- 缺少 phase 的 `agentMessage` 按 `final_answer` 处理；只有 final answer delta 进入普通
+  Assistant Markdown 正文，不能与 commentary 重复展示。
+- 命令行默认只展示状态、耗时和命令摘要，悬停展示完整命令与工作目录，点击展开输出。
+- Pending approval 放在匹配的命令或文件事件后；无法匹配时仍放在同一工作日志末尾。
+- Turn 结束后在回答下方展示变更文件摘要；点击后复用右侧工作区的 Monaco Diff，移动端全屏展示。
 - `thread/tokenUsage/updated` 明确按 thread 累计展示，不能冒充本轮用量。
 - `model/rerouted` 更新当前 Turn 实际模型，不修改下一轮 draft。
 - 只有 `turn/completed` 能结束 Turn。

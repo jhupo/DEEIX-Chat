@@ -38,7 +38,7 @@ var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", 
 const maxSessionMessageRunes = 64 * 1024
 const maxExecutionTextBytes = 1 << 20
 const maxInteractionPreviewBytes = 8 << 10
-const maxApprovalItemProjections = 256
+const maxExecutionItemProjections = 256
 
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
@@ -86,8 +86,10 @@ type pendingInteraction struct {
 	Response   chan any
 }
 
-type approvalItemProjection struct {
+type executionItemProjection struct {
 	TurnID  string
+	Kind    string
+	Phase   string
 	Command string
 	Files   []any
 }
@@ -108,12 +110,12 @@ type CodexAdapter struct {
 	onEvent     func(json.RawMessage) error
 	done        chan struct{}
 
-	mu            sync.Mutex
-	pending       map[string]*pendingInteraction
-	active        map[string]bool
-	approvalItems map[string]approvalItemProjection
-	approvalOrder []string
-	closed        bool
+	mu             sync.Mutex
+	pending        map[string]*pendingInteraction
+	active         map[string]bool
+	executionItems map[string]executionItemProjection
+	executionOrder []string
+	closed         bool
 }
 
 func ResolveCodex(ctx context.Context, executable string) (string, string, error) {
@@ -187,8 +189,8 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	adapter := &CodexAdapter{
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
-		approvalItems: make(map[string]approvalItemProjection),
-		workspaces:    make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
+		executionItems: make(map[string]executionItemProjection),
+		workspaces:     make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -1098,13 +1100,13 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 	itemID := identityValue(params, "itemId", "item")
 	if notification.Method == "item/started" {
 		item, _ := params["item"].(map[string]any)
-		adapter.rememberApprovalItem(itemID, turnID, item)
+		adapter.rememberExecutionItem(itemID, turnID, item)
 	}
 	if notification.Method == "item/completed" && itemID != "" {
-		defer adapter.forgetApprovalItem(itemID)
+		defer adapter.forgetExecutionItem(itemID)
 	}
 	if notification.Method == "turn/completed" && turnID != "" {
-		defer adapter.forgetTurnApprovalItems(turnID)
+		defer adapter.forgetTurnExecutionItems(turnID)
 	}
 	if notification.Method == "thread/started" && threadID != "" {
 		adapter.setActive(threadID, true)
@@ -1230,8 +1232,8 @@ func (adapter *CodexAdapter) Close() error {
 	}
 	adapter.closed = true
 	adapter.pending = make(map[string]*pendingInteraction)
-	adapter.approvalItems = make(map[string]approvalItemProjection)
-	adapter.approvalOrder = nil
+	adapter.executionItems = make(map[string]executionItemProjection)
+	adapter.executionOrder = nil
 	adapter.mu.Unlock()
 	_ = adapter.rpc.Close()
 	if adapter.command.Process != nil {
@@ -1281,7 +1283,7 @@ func (adapter *CodexAdapter) isActive(threadID string) bool {
 	return adapter.active[threadID]
 }
 
-func (adapter *CodexAdapter) rememberApprovalItem(itemID, turnID string, item map[string]any) {
+func (adapter *CodexAdapter) rememberExecutionItem(itemID, turnID string, item map[string]any) {
 	if itemID == "" || len(itemID) > 4096 || len(turnID) > 4096 || item == nil {
 		return
 	}
@@ -1289,68 +1291,72 @@ func (adapter *CodexAdapter) rememberApprovalItem(itemID, turnID string, item ma
 	if kind == "" {
 		kind = stringField(item, "kind")
 	}
-	projection := approvalItemProjection{TurnID: turnID}
+	projection := executionItemProjection{TurnID: turnID, Kind: kind}
 	switch kind {
 	case "commandExecution":
 		projection.Command = interactionText(item["command"])
 	case "fileChange":
 		projection.Files = adapter.projectInteractionChanges(item["changes"])
+	case "agentMessage":
+		if _, exists := item["phase"].(string); exists {
+			projection.Phase = agentMessagePhase(item["phase"])
+		}
 	default:
 		return
 	}
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
-	if adapter.approvalItems == nil {
-		adapter.approvalItems = make(map[string]approvalItemProjection)
+	if adapter.executionItems == nil {
+		adapter.executionItems = make(map[string]executionItemProjection)
 	}
-	if _, exists := adapter.approvalItems[itemID]; exists {
-		adapter.approvalItems[itemID] = projection
+	if _, exists := adapter.executionItems[itemID]; exists {
+		adapter.executionItems[itemID] = projection
 		return
 	}
-	if len(adapter.approvalItems) == maxApprovalItemProjections {
-		oldest := adapter.approvalOrder[0]
-		adapter.approvalOrder = adapter.approvalOrder[1:]
-		delete(adapter.approvalItems, oldest)
+	if len(adapter.executionItems) == maxExecutionItemProjections {
+		oldest := adapter.executionOrder[0]
+		adapter.executionOrder = adapter.executionOrder[1:]
+		delete(adapter.executionItems, oldest)
 	}
-	adapter.approvalItems[itemID] = projection
-	adapter.approvalOrder = append(adapter.approvalOrder, itemID)
+	adapter.executionItems[itemID] = projection
+	adapter.executionOrder = append(adapter.executionOrder, itemID)
 }
 
-func (adapter *CodexAdapter) approvalItem(itemID string) approvalItemProjection {
+func (adapter *CodexAdapter) executionItem(itemID string) executionItemProjection {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
-	projection := adapter.approvalItems[itemID]
+	projection := adapter.executionItems[itemID]
 	projection.Files = append([]any(nil), projection.Files...)
 	return projection
 }
 
-func (adapter *CodexAdapter) forgetApprovalItem(itemID string) {
+func (adapter *CodexAdapter) forgetExecutionItem(itemID string) {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
-	if _, exists := adapter.approvalItems[itemID]; !exists {
+	if _, exists := adapter.executionItems[itemID]; !exists {
 		return
 	}
-	delete(adapter.approvalItems, itemID)
-	for index, cachedItemID := range adapter.approvalOrder {
+	delete(adapter.executionItems, itemID)
+	for index, cachedItemID := range adapter.executionOrder {
 		if cachedItemID == itemID {
-			adapter.approvalOrder = slices.Delete(adapter.approvalOrder, index, index+1)
+			adapter.executionOrder = slices.Delete(adapter.executionOrder, index, index+1)
 			return
 		}
 	}
 }
 
-func (adapter *CodexAdapter) forgetTurnApprovalItems(turnID string) {
+func (adapter *CodexAdapter) forgetTurnExecutionItems(turnID string) {
 	adapter.mu.Lock()
 	defer adapter.mu.Unlock()
-	kept := adapter.approvalOrder[:0]
-	for _, itemID := range adapter.approvalOrder {
-		if adapter.approvalItems[itemID].TurnID == turnID {
-			delete(adapter.approvalItems, itemID)
+	kept := adapter.executionOrder[:0]
+	for _, itemID := range adapter.executionOrder {
+		if adapter.executionItems[itemID].TurnID == turnID {
+			delete(adapter.executionItems, itemID)
 			continue
 		}
 		kept = append(kept, itemID)
 	}
-	adapter.approvalOrder = kept
+	adapter.executionOrder = kept
 }
 
 func applyThreadSettings(params map[string]any, settings Settings) {
@@ -1568,7 +1574,18 @@ func (adapter *CodexAdapter) projectNotification(method string, params map[strin
 	case "item/started", "item/completed":
 		item, _ := params["item"].(map[string]any)
 		return map[string]any{"itemID": sourceItemRef, "item": adapter.projectExecutionItem(item, sourceItemRef)}
-	case "item/agentMessage/delta", "item/plan/delta":
+	case "item/agentMessage/delta":
+		delta, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
+		phase := agentMessagePhase(params["phase"])
+		if _, explicitPhase := params["phase"].(string); !explicitPhase {
+			if itemID := identityValue(params, "itemId", "item"); itemID != "" {
+				if cached := adapter.executionItem(itemID).Phase; cached != "" {
+					phase = cached
+				}
+			}
+		}
+		return map[string]any{"itemID": sourceItemRef, "delta": delta, "phase": phase, "truncated": truncated}
+	case "item/plan/delta":
 		delta, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
 		return map[string]any{"itemID": sourceItemRef, "delta": delta, "truncated": truncated}
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
@@ -1650,8 +1667,27 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 	if status := stringField(item, "status"); status != "" {
 		result["status"] = status
 	}
+	switch kind {
+	case "agentMessage":
+		result["phase"] = agentMessagePhase(item["phase"])
+		if text, ok := item["text"].(string); ok {
+			result["text"], result["truncated"] = boundedText(text, maxExecutionTextBytes)
+		}
+	case "reasoning":
+		result["summary"] = projectExecutionTextParts(item["summary"])
+		result["content"] = projectExecutionTextParts(item["content"])
+	}
 	if command, ok := item["command"].(string); ok {
-		result["command"] = command
+		result["command"], _ = boundedText(command, maxExecutionTextBytes)
+	}
+	if cwd, ok := item["cwd"].(string); ok {
+		result["cwd"], _ = boundedText(cwd, maxInteractionPreviewBytes)
+	}
+	if duration, ok := finiteNumber(item["durationMs"]); ok {
+		result["durationMs"] = duration
+	}
+	if actions, ok := item["commandActions"].([]any); ok {
+		result["commandActions"] = sanitizeCommandActions(actions)
 	}
 	if output, ok := item["aggregatedOutput"].(string); ok {
 		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
@@ -1669,6 +1705,52 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 		result["diff"] = projected
 		if truncated {
 			result["truncated"] = true
+		}
+	}
+	return result
+}
+
+func agentMessagePhase(value any) string {
+	if phase, _ := value.(string); phase == "commentary" {
+		return phase
+	}
+	return "final_answer"
+}
+
+func projectExecutionTextParts(value any) []any {
+	parts, _ := value.([]any)
+	result := make([]any, 0, min(len(parts), 64))
+	remaining := maxExecutionTextBytes
+	for _, part := range parts {
+		if len(result) == 64 || remaining == 0 {
+			break
+		}
+		text, ok := part.(string)
+		if !ok || text == "" {
+			continue
+		}
+		projected, _ := boundedText(text, remaining)
+		result = append(result, projected)
+		remaining -= len(projected)
+	}
+	return result
+}
+
+func sanitizeCommandActions(actions []any) []any {
+	if len(actions) > 128 {
+		actions = actions[:128]
+	}
+	result := make([]any, 0, len(actions))
+	for _, value := range actions {
+		action, _ := value.(map[string]any)
+		projected := make(map[string]any)
+		for _, key := range []string{"type", "command", "path", "name", "query"} {
+			if text, ok := action[key].(string); ok {
+				projected[key], _ = boundedText(text, maxInteractionPreviewBytes)
+			}
+		}
+		if len(projected) > 0 {
+			result = append(result, projected)
 		}
 	}
 	return result
@@ -1917,7 +1999,7 @@ func (adapter *CodexAdapter) projectServerRequest(method string, params map[stri
 		request := make(map[string]any)
 		command := interactionText(params["command"])
 		if command == "" {
-			command = adapter.approvalItem(identityValue(params, "itemId", "item")).Command
+			command = adapter.executionItem(identityValue(params, "itemId", "item")).Command
 		}
 		if command != "" {
 			request["command"] = command
@@ -1931,7 +2013,7 @@ func (adapter *CodexAdapter) projectServerRequest(method string, params map[stri
 		if reason := interactionText(params["reason"]); reason != "" {
 			request["reason"] = reason
 		}
-		files := adapter.approvalItem(identityValue(params, "itemId", "item")).Files
+		files := adapter.executionItem(identityValue(params, "itemId", "item")).Files
 		if root, ok := params["grantRoot"].(string); ok && strings.TrimSpace(root) != "" {
 			if path := adapter.projectWorkspacePath(root); path != "" {
 				files = append(files, map[string]any{"path": path, "change": "write"})

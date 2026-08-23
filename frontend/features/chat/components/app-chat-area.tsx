@@ -285,8 +285,12 @@ export function AppChatArea() {
   const [loadedConversation, setLoadedConversation] = React.useState<ConversationDTO | null>(null);
   React.useEffect(() => {
     const normalizedConversationID = conversationID?.trim() || "";
-    if (!normalizedConversationID || activeConversation?.publicID === normalizedConversationID) {
+    if (!normalizedConversationID) {
       setLoadedConversation(null);
+      return;
+    }
+
+    if (loading) {
       return;
     }
 
@@ -311,9 +315,9 @@ export function AppChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [activeConversation?.publicID, conversationID]);
+  }, [conversationID, loading]);
   const currentConversation =
-    activeConversation ?? (loadedConversation?.publicID === conversationID ? loadedConversation : null);
+    loadedConversation?.publicID === conversationID ? loadedConversation : activeConversation;
   useAgentRunHydration({
     conversationID,
     deviceID: currentConversation?.executionDeviceID,
@@ -545,11 +549,12 @@ export function AppChatArea() {
         return;
       }
       const workspace = workspaces.find((item) => item.workspaceId === inputResourceWorkspaceID);
-      const profileID = currentConversation?.executionType === "gateway"
+      const persistedGatewayTarget = currentConversation?.executionType === "gateway";
+      const profileID = persistedGatewayTarget
         ? currentConversation.executionProfileID
         : workspace?.profileId ?? "";
       const profile = profiles.find((item) => item.profileId === profileID && item.status === "ready");
-      if (!workspace || !profile || profile.provider !== "codex" || !profile.manifest.threadSettings.model) {
+      if ((!persistedGatewayTarget && !workspace) || !profile || profile.provider !== "codex" || !profile.manifest.threadSettings.model) {
         throw new Error(t("agent.settings.errors.profileUnavailable"));
       }
       if (
@@ -1343,7 +1348,7 @@ export function AppChatArea() {
   const workspaceRef = React.useRef<HTMLDivElement | null>(null);
   const artifactResizeCleanupRef = React.useRef<(() => void) | null>(null);
   const [artifactResizing, setArtifactResizing] = React.useState(false);
-  const hasInlineArtifact = Boolean(artifactWorkspace.activeArtifact && artifactWorkspace.isInlineViewport);
+  const hasInlineArtifact = Boolean((artifactWorkspace.activeArtifact || artifactWorkspace.activeDiff) && artifactWorkspace.isInlineViewport);
   const workspaceGridColumns = hasInlineArtifact
     ? `minmax(0, ${1 - artifactWorkspace.artifactRatio}fr) minmax(0, ${artifactWorkspace.artifactRatio}fr)`
     : "minmax(0, 1fr) minmax(0, 0fr)";
@@ -1624,6 +1629,7 @@ export function AppChatArea() {
                   onModelCatalogRefresh={refreshModelCatalogForComposer}
                   onEditImageAttachment={onEditGeneratedImageAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
+                  onOpenAgentDiff={artifactWorkspace.openDiff}
                   onCycleMessageBranch={onCycleMessageBranch}
                   onToggleStar={onToggleActiveConversationStar}
                   onRename={onRenameActiveConversation}
@@ -1676,6 +1682,7 @@ export function AppChatArea() {
 
           <ChatArtifactWorkspace
             artifact={artifactWorkspace.activeArtifact}
+            diff={artifactWorkspace.activeDiff}
             artifacts={artifactWorkspace.artifacts}
             isInlineViewport={artifactWorkspace.isInlineViewport}
             onArtifactChange={artifactWorkspace.selectArtifact}

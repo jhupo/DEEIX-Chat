@@ -20,7 +20,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   setAgentInteractionStatus,
   updateAgentInteraction,
-  useAgentRunSnapshot,
 } from "@/features/chat/model/agent-run-store";
 import { cn } from "@/lib/utils";
 import {
@@ -270,7 +269,7 @@ function DynamicToolControl({ interaction, disabled, onSubmit }: {
   );
 }
 
-function InteractionControl({ interaction }: { interaction: ConversationInteractionDTO }) {
+export function MessageAgentInteractionControl({ interaction }: { interaction: ConversationInteractionDTO }) {
   const t = useTranslations("chat.agent");
   const [error, setError] = React.useState(false);
   const disabled = interaction.status !== "pending";
@@ -318,11 +317,4 @@ function InteractionControl({ interaction }: { interaction: ConversationInteract
       {error ? <p className="mt-2 text-[11px] text-destructive">{t("interaction.responseFailed")}</p> : null}
     </section>
   );
-}
-
-export function MessageAgentInteraction({ runID }: { runID: string | undefined }) {
-  const run = useAgentRunSnapshot(runID);
-  const interactions = run.interactions.filter((item) => item.status !== "resolved");
-  if (interactions.length === 0) return null;
-  return <div className="chat-screenshot-omit mb-3 w-full min-w-0 border-y border-border/45">{interactions.map((interaction) => <InteractionControl key={interaction.interactionID} interaction={interaction} />)}</div>;
 }

@@ -243,9 +243,16 @@ export type AgentExecutionItemDTO = {
   kind?: string;
   status?: string;
   command?: string;
+  cwd?: string;
+  durationMs?: number;
+  commandActions?: Array<Record<string, unknown>>;
   output?: string;
   aggregatedOutput?: string;
   exitCode?: number;
+  text?: string;
+  phase?: "commentary" | "final_answer" | string;
+  summary?: string[];
+  content?: string[];
   changes?: AgentFileChangeDTO[];
   files?: AgentFileChangeDTO[];
   diff?: string;
@@ -264,12 +271,15 @@ export type AgentTokenUsageDTO = {
 export type AgentExecutionEventPayloadDTO = {
   status?: string;
   error?: { code?: string; message?: string } | string;
-  turn?: { status?: string; error?: { code?: string; message?: string } | string };
+  turn?: { status?: string; durationMs?: number; error?: { code?: string; message?: string } | string };
   explanation?: string;
   plan?: AgentPlanStepDTO[];
   itemID?: string;
   item?: AgentExecutionItemDTO;
   delta?: string;
+  phase?: "commentary" | "final_answer" | string;
+  summaryIndex?: number;
+  contentIndex?: number;
   outputDelta?: string;
   patch?: string;
   diff?: string;

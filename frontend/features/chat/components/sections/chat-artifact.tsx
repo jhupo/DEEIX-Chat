@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   buildArtifactPreviewDocument,
   type ChatArtifact,
+  type ChatDiffArtifact,
   downloadArtifactHTML,
   resolveArtifactDownloadName,
 } from "@/features/chat/model/chat-artifacts";
@@ -28,6 +29,7 @@ import {
 import { useFontSizePreference } from "@/features/settings/utils/font-size";
 import { cn } from "@/lib/utils";
 import { CopyActionButton } from "@/shared/components/copy-action";
+import { MonacoDiffViewer } from "@/shared/components/json-code-editor";
 import { useTheme } from "@/shared/components/theme-provider";
 import {
   captureHTMLVisualThemeSnapshot,
@@ -36,6 +38,7 @@ import {
 
 type ChatArtifactWorkspaceProps = {
   artifact: ChatArtifact | null;
+  diff: ChatDiffArtifact | null;
   artifacts: ChatArtifact[];
   isInlineViewport: boolean;
   onArtifactChange: (artifactID: string) => void;
@@ -141,6 +144,84 @@ function ArtifactPreviewFrame({ documentHTML, title }: ArtifactPreviewFrameProps
       srcDoc={documentHTML}
       className="h-full min-h-[320px] w-full bg-background"
     />
+  );
+}
+
+function diffLanguage(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase();
+  return ({
+    css: "css", go: "go", html: "html", js: "javascript", jsx: "javascript",
+    json: "json", md: "markdown", py: "python", rs: "rust", ts: "typescript",
+    tsx: "typescript", yaml: "yaml", yml: "yaml",
+  } as Record<string, string>)[extension ?? ""] ?? "plaintext";
+}
+
+function splitUnifiedDiff(value: string): { original: string; modified: string } {
+  const original: string[] = [];
+  const modified: string[] = [];
+  let sawHunk = false;
+  for (const line of value.split(/\r?\n/)) {
+    if (line.startsWith("@@")) {
+      sawHunk = true;
+      continue;
+    }
+    if (!sawHunk && (line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ "))) continue;
+    if (line === "\\ No newline at end of file") continue;
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      modified.push(line.slice(1));
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      original.push(line.slice(1));
+    } else {
+      const content = line.startsWith(" ") ? line.slice(1) : line;
+      original.push(content);
+      modified.push(content);
+    }
+  }
+  return { original: original.join("\n"), modified: modified.join("\n") };
+}
+
+function ChatDiffPanel({ diff, className, onClose }: { diff: ChatDiffArtifact; className?: string; onClose: () => void }) {
+  const t = useTranslations("chat.artifacts");
+  const agentT = useTranslations("chat.agent");
+  const [selectedPath, setSelectedPath] = React.useState(diff.files[0]?.path ?? "");
+  React.useEffect(() => setSelectedPath(diff.files[0]?.path ?? ""), [diff.id, diff.files]);
+  const selectedFile = diff.files.find((file) => file.path === selectedPath) ?? diff.files[0];
+  const source = selectedFile?.diff || diff.diff;
+  const contents = React.useMemo(() => splitUnifiedDiff(source), [source]);
+
+  return (
+    <aside className={cn("flex h-full min-h-0 w-full flex-col border-l border-border/55 bg-background", className)} aria-label={agentT("activity.diff")}>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="shrink-0 text-sm font-semibold tracking-tight">{agentT("activity.diff")}</h2>
+          {diff.files.length > 1 ? (
+            <Select value={selectedFile?.path ?? ""} onValueChange={setSelectedPath}>
+              <SelectTrigger className="h-7 w-[min(18rem,42vw)] min-w-0 rounded-md px-2 font-mono text-[11px]">
+                <SelectValue aria-label={agentT("activity.selectFile")} />
+              </SelectTrigger>
+              <SelectContent align="start">
+                {diff.files.map((file) => <SelectItem key={file.fileID} value={file.path} className="font-mono text-xs">{file.path}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          ) : selectedFile ? <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selectedFile.path}</span> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <CopyActionButton type="button" variant="ghost" size="icon" className="size-7 rounded-md" value={source} messages={{ copied: t("sourceCopied"), failed: t("copyFailed") }} iconClassName="size-3" aria-label={t("copySource")} />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("copySource")}</TooltipContent>
+          </Tooltip>
+          <ArtifactActionButton label={t("close")} onClick={onClose}><X className="size-3" /></ArtifactActionButton>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1">
+        {source ? <MonacoDiffViewer original={contents.original} modified={contents.modified} language={diffLanguage(selectedFile?.path ?? "")} /> : (
+          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">{t("empty")}</div>
+        )}
+      </div>
+      {diff.truncated ? <div className="border-t border-border/40 px-3 py-1.5 text-[11px] text-muted-foreground">{agentT("activity.truncated")}</div> : null}
+    </aside>
   );
 }
 
@@ -267,6 +348,7 @@ function ChatArtifactPanel({
 
 export function ChatArtifactWorkspace({
   artifact,
+  diff,
   artifacts,
   isInlineViewport,
   onArtifactChange,
@@ -275,7 +357,8 @@ export function ChatArtifactWorkspace({
   onResizeStart,
 }: ChatArtifactWorkspaceProps) {
   const t = useTranslations("chat.artifacts");
-  const isDesktopOpen = Boolean(artifact && isInlineViewport);
+  const panelOpen = Boolean(artifact || diff);
+  const isDesktopOpen = Boolean(panelOpen && isInlineViewport);
   const desktopBleedWidth = `calc(100% + ${DESKTOP_SHELL_GUTTER_PX}px)`;
 
   return (
@@ -295,7 +378,7 @@ export function ChatArtifactWorkspace({
         }}
       >
         <AnimatePresence initial={false}>
-          {artifact ? (
+          {panelOpen ? (
             <motion.div
               key="artifact-panel-desktop"
               className="relative h-full min-h-0 overflow-hidden"
@@ -315,20 +398,16 @@ export function ChatArtifactWorkspace({
               >
                 <span className="h-9 w-1 translate-x-2 rounded-full bg-foreground/20 opacity-0 transition-[background-color,opacity] group-hover:bg-foreground/32 group-hover:opacity-100 group-focus-visible:bg-foreground/32 group-focus-visible:opacity-100" />
               </button>
-              <ChatArtifactPanel
-                artifact={artifact}
-                artifacts={artifacts}
-                className="h-full"
-                onArtifactChange={onArtifactChange}
-                onClose={onClose}
-              />
+              {diff ? <ChatDiffPanel diff={diff} className="h-full" onClose={onClose} /> : artifact ? (
+                <ChatArtifactPanel artifact={artifact} artifacts={artifacts} className="h-full" onArtifactChange={onArtifactChange} onClose={onClose} />
+              ) : null}
             </motion.div>
           ) : null}
         </AnimatePresence>
       </motion.div>
 
       <AnimatePresence initial={false}>
-        {artifact ? (
+        {panelOpen ? (
           <motion.div
             key="artifact-panel-mobile"
             className="absolute inset-0 z-30 min-h-0 overflow-hidden md:hidden"
@@ -338,13 +417,9 @@ export function ChatArtifactWorkspace({
             transition={workspaceTransition}
             style={{ willChange: "transform, opacity" }}
           >
-            <ChatArtifactPanel
-              artifact={artifact}
-              artifacts={artifacts}
-              className="h-full"
-              onArtifactChange={onArtifactChange}
-              onClose={onClose}
-            />
+            {diff ? <ChatDiffPanel diff={diff} className="h-full" onClose={onClose} /> : artifact ? (
+              <ChatArtifactPanel artifact={artifact} artifacts={artifacts} className="h-full" onArtifactChange={onArtifactChange} onClose={onClose} />
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>

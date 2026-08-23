@@ -20,6 +20,13 @@ export type JsonCodeEditorProps = {
   onChange: (value: string) => void;
 };
 
+export type MonacoDiffViewerProps = {
+  original: string;
+  modified: string;
+  language?: string;
+  className?: string;
+};
+
 type MonacoModule = typeof Monaco;
 type JsonDiagnosticsDefaults = {
   setDiagnosticsOptions: (options: {
@@ -378,6 +385,101 @@ export function JsonCodeEditor({
         <div className="absolute inset-x-0 bottom-0 top-8 flex items-center px-3 font-mono text-xs text-muted-foreground">
           {t("loading")}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function MonacoDiffViewer({
+  original,
+  modified,
+  language = "plaintext",
+  className,
+}: MonacoDiffViewerProps) {
+  const t = useTranslations("common.jsonEditor");
+  const { resolvedTheme } = useTheme();
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const editorRef = React.useRef<Monaco.editor.IStandaloneDiffEditor | null>(null);
+  const monacoRef = React.useRef<MonacoModule | null>(null);
+  const originalModelRef = React.useRef<Monaco.editor.ITextModel | null>(null);
+  const modifiedModelRef = React.useRef<Monaco.editor.ITextModel | null>(null);
+  const initialRef = React.useRef({ original, modified, language, resolvedTheme });
+  initialRef.current = { original, modified, language, resolvedTheme };
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let disposed = false;
+
+    async function mountEditor() {
+      const monaco = await loadMonaco();
+      if (disposed || !containerRef.current) return;
+      monacoRef.current = monaco;
+      const initial = initialRef.current;
+      const originalModel = monaco.editor.createModel(initial.original, initial.language);
+      const modifiedModel = monaco.editor.createModel(initial.modified, initial.language);
+      const editor = monaco.editor.createDiffEditor(containerRef.current, {
+        automaticLayout: true,
+        contextmenu: true,
+        editContext: false,
+        enableSplitViewResizing: true,
+        fontFamily: "var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+        fontSize: getEditorFontSize(),
+        minimap: { enabled: false },
+        originalEditable: false,
+        readOnly: true,
+        renderOverviewRuler: false,
+        renderSideBySide: true,
+        scrollBeyondLastLine: false,
+        theme: initial.resolvedTheme === "dark" ? "vs-dark" : "vs",
+        useInlineViewWhenSpaceIsLimited: true,
+        wordWrap: "on",
+      });
+      editor.setModel({ original: originalModel, modified: modifiedModel });
+      originalModelRef.current = originalModel;
+      modifiedModelRef.current = modifiedModel;
+      editorRef.current = editor;
+      setLoading(false);
+    }
+
+    void mountEditor();
+    return () => {
+      disposed = true;
+      disposeMonacoResource(editorRef.current);
+      disposeMonacoResource(originalModelRef.current);
+      disposeMonacoResource(modifiedModelRef.current);
+      editorRef.current = null;
+      originalModelRef.current = null;
+      modifiedModelRef.current = null;
+      monacoRef.current = null;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (originalModelRef.current?.getValue() !== original) originalModelRef.current?.setValue(original);
+    if (modifiedModelRef.current?.getValue() !== modified) modifiedModelRef.current?.setValue(modified);
+    if (monacoRef.current) {
+      monacoRef.current.editor.setModelLanguage(originalModelRef.current!, language);
+      monacoRef.current.editor.setModelLanguage(modifiedModelRef.current!, language);
+    }
+  }, [language, modified, original]);
+
+  React.useEffect(() => {
+    monacoRef.current?.editor.setTheme(resolvedTheme === "dark" ? "vs-dark" : "vs");
+  }, [resolvedTheme]);
+
+  React.useEffect(() => {
+    const updateEditorFontSize = () => editorRef.current?.updateOptions({ fontSize: getEditorFontSize() });
+    const observer = new MutationObserver(updateEditorFontSize);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-font-size"] });
+    updateEditorFontSize();
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className={cn("relative h-full min-h-[320px] w-full overflow-hidden bg-background", className)}>
+      <div ref={containerRef} className="h-full w-full" />
+      {loading ? (
+        <div className="absolute inset-0 flex items-center px-3 font-mono text-xs text-muted-foreground">{t("loading")}</div>
       ) : null}
     </div>
   );

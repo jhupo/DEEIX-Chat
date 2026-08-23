@@ -90,6 +90,13 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 	if err != nil || delta.TextDelta != "hello" || delta.TerminalStatus != "" {
 		t.Fatalf("delta projection = %#v, %v", delta, err)
 	}
+	commentary, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
+		SourceKey: "agent:agev_commentary", UserID: 7, ConversationID: 11, RunID: "run_1",
+		Kind: "item/agentMessage/delta", Payload: []byte(`{"delta":"checking files","phase":"commentary"}`), OccurredAt: now,
+	})
+	if err != nil || commentary.TextDelta != "" || gatewayStreamPayload(commentary)["type"] != "execution_event" {
+		t.Fatalf("commentary projection = %#v, %v", commentary, err)
+	}
 
 	terminal, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
 		SourceKey: "agent:agev_2", UserID: 7, ConversationID: 11, RunID: "run_1",
@@ -100,18 +107,25 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 	}
 }
 
-func TestGatewayReasoningStreamPayloadPreservesEventKindAndIndex(t *testing.T) {
-	event, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
+func TestGatewayReasoningSummaryUsesExecutionTimeline(t *testing.T) {
+	summary, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
 		SourceKey: "agent:reasoning_1", UserID: 7, ConversationID: 11, RunID: "run_1",
-		Kind:    "item/reasoning/textDelta",
-		Payload: []byte(`{"delta":"raw thought","contentIndex":2}`), OccurredAt: time.Now().UTC(),
+		Kind:    "item/reasoning/summaryTextDelta",
+		Payload: []byte(`{"delta":"Reviewed the repository","summaryIndex":2}`), OccurredAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("reasoning event normalization failed: %v", err)
 	}
-	payload := gatewayStreamPayload(event)
-	if payload["kind"] != "content_text" || payload["delta"] != "raw thought" || payload["contentIndex"] != float64(2) {
+	payload := gatewayStreamPayload(summary)
+	if summary.ReasoningDelta != "Reviewed the repository" || payload["type"] != "execution_event" || payload["kind"] != "item/reasoning/summaryTextDelta" {
 		t.Fatalf("reasoning stream payload = %#v", payload)
+	}
+	raw, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
+		SourceKey: "agent:reasoning_raw", UserID: 7, ConversationID: 11, RunID: "run_1",
+		Kind: "item/reasoning/textDelta", Payload: []byte(`{"delta":"raw thought","contentIndex":2}`), OccurredAt: time.Now().UTC(),
+	})
+	if err != nil || raw.ReasoningDelta != "" || gatewayStreamPayload(raw)["type"] != "execution_event" {
+		t.Fatalf("raw reasoning projection = %#v, %v", raw, err)
 	}
 
 	boundary, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
@@ -123,8 +137,8 @@ func TestGatewayReasoningStreamPayloadPreservesEventKindAndIndex(t *testing.T) {
 		t.Fatalf("reasoning boundary normalization failed: %v", err)
 	}
 	boundaryPayload := gatewayStreamPayload(boundary)
-	if boundary.ReasoningDelta != "\n\n" || boundaryPayload["kind"] != "summary_part_added" ||
-		boundaryPayload["summaryIndex"] != float64(1) || boundaryPayload["delta"] != nil {
+	if boundary.ReasoningDelta != "\n\n" || boundaryPayload["type"] != "execution_event" ||
+		boundaryPayload["kind"] != "item/reasoning/summaryPartAdded" {
 		t.Fatalf("reasoning boundary payload = %#v", boundaryPayload)
 	}
 }

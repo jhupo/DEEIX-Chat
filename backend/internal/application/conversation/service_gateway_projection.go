@@ -62,8 +62,11 @@ func normalizeGatewayExecutionEvent(input GatewayExecutionEvent) (*model.Executi
 	}
 	switch event.Kind {
 	case "item/agentMessage/delta":
-		event.TextDelta, _ = payload["delta"].(string)
-	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+		phase, _ := payload["phase"].(string)
+		if strings.TrimSpace(phase) != "commentary" {
+			event.TextDelta, _ = payload["delta"].(string)
+		}
+	case "item/reasoning/summaryTextDelta":
 		event.ReasoningDelta, _ = payload["delta"].(string)
 	case "item/reasoning/summaryPartAdded":
 		if index, ok := payload["summaryIndex"].(float64); ok && index > 0 {
@@ -104,8 +107,6 @@ func gatewayStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
 	switch {
 	case event.TextDelta != "":
 		return map[string]interface{}{"type": "delta", "delta": event.TextDelta}
-	case event.ReasoningDelta != "" || strings.HasPrefix(event.Kind, "item/reasoning/"):
-		return gatewayReasoningStreamPayload(event)
 	default:
 		var payload interface{}
 		if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil {
@@ -115,39 +116,5 @@ func gatewayStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
 			"type": "execution_event", "executionSeq": event.Seq, "runID": event.RunID,
 			"kind": event.Kind, "payload": payload, "occurredAt": event.OccurredAt.UTC().Format(time.RFC3339Nano),
 		}
-	}
-}
-
-func gatewayReasoningStreamPayload(event *model.ExecutionEvent) map[string]interface{} {
-	payload := map[string]interface{}{
-		"type":   "upstream_think_delta",
-		"status": "streaming",
-		"kind":   gatewayReasoningKind(event.Kind),
-	}
-	if event.ReasoningDelta != "" && event.Kind != "item/reasoning/summaryPartAdded" {
-		payload["delta"] = event.ReasoningDelta
-	}
-
-	var raw map[string]interface{}
-	if json.Unmarshal([]byte(event.PayloadJSON), &raw) == nil {
-		for _, key := range []string{"summaryIndex", "contentIndex"} {
-			if value, ok := raw[key]; ok {
-				payload[key] = value
-			}
-		}
-	}
-	return payload
-}
-
-func gatewayReasoningKind(eventKind string) string {
-	switch eventKind {
-	case "item/reasoning/summaryTextDelta":
-		return "summary_text"
-	case "item/reasoning/textDelta":
-		return "content_text"
-	case "item/reasoning/summaryPartAdded":
-		return "summary_part_added"
-	default:
-		return eventKind
 	}
 }

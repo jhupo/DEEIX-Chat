@@ -53,6 +53,7 @@
         "failed": "Failed",
         "interrupted": "Interrupted"
       },
+      "elapsed": "Took {duration}",
       "status": {
         "running": "Running",
         "completed": "Completed",
@@ -67,6 +68,7 @@
       "fileChanges": "{count} files changed",
       "plan": "{count} steps",
       "diff": "File changes",
+      "selectFile": "Select file",
       "modelRerouted": "Switched to {model}",
       "tokenUsage": "Thread usage",
       "tokenSummary": "Input {input} · output {output} · total {total}"

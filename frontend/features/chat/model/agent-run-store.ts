@@ -26,9 +26,20 @@ export type AgentCommandActivity = {
   kind: "command";
   status: AgentActivityStatus;
   command: string;
+  cwd: string;
+  durationMS: number | null;
+  commandActions: Array<Record<string, unknown>>;
   output: string;
   outputTruncated: boolean;
   exitCode: number | null;
+};
+
+export type AgentTextActivity = {
+  itemID: string;
+  kind: "commentary" | "reasoning";
+  status: AgentActivityStatus;
+  text: string;
+  truncated: boolean;
 };
 
 export type AgentFileChange = {
@@ -53,11 +64,12 @@ export type AgentFileActivity = {
 };
 
 export type AgentUsage = Required<AgentTokenUsageDTO> & { scope: "thread" };
-export type AgentActivityItem = AgentCommandActivity | AgentFileActivity;
+export type AgentActivityItem = AgentCommandActivity | AgentFileActivity | AgentTextActivity;
 
 export type AgentRunSnapshot = {
   runID: string;
   status: AgentRunStatus;
+  durationMS: number | null;
   planExplanation: string;
   plan: AgentPlanStep[];
   items: AgentActivityItem[];
@@ -81,6 +93,7 @@ export type AgentExecutionRecoverySnapshot = {
 const EMPTY_RUN: AgentRunSnapshot = Object.freeze({
   runID: "",
   status: "idle",
+  durationMS: null,
   planExplanation: "",
   plan: [],
   items: [],
@@ -127,6 +140,12 @@ function stringValue(value: unknown): string {
 
 function rawString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function textParts(value: unknown): string {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).join("\n\n")
+    : "";
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -200,9 +219,28 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   if (!item) return null;
   const fileItem = isFileItem(item);
   const kind = stringValue(item.type ?? item.kind).toLowerCase();
+  const status = activityStatus(item.status ?? payload.status, terminal ? "completed" : "running");
+  if (kind === "agentmessage") {
+    if (stringValue(item.phase) !== "commentary") return null;
+    return {
+      itemID: itemID(payload, seq, "commentary"),
+      kind: "commentary",
+      status,
+      text: rawString(item.text),
+      truncated: item.truncated === true,
+    };
+  }
+  if (kind === "reasoning") {
+    return {
+      itemID: itemID(payload, seq, "reasoning"),
+      kind: "reasoning",
+      status,
+      text: textParts(item.summary),
+      truncated: item.truncated === true,
+    };
+  }
   if (!fileItem && !kind.includes("command")) return null;
   const id = itemID(payload, seq, fileItem ? "file" : "command");
-  const status = activityStatus(item.status ?? payload.status, terminal ? "completed" : "running");
   if (fileItem) {
     return {
       itemID: id,
@@ -218,6 +256,9 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
     kind: "command",
     status,
     command: stringValue(item.command),
+    cwd: rawString(item.cwd),
+    durationMS: finiteNumber(item.durationMs),
+    commandActions: Array.isArray(item.commandActions) ? item.commandActions : [],
     output: rawString(item.aggregatedOutput ?? item.output),
     outputTruncated: item.truncated === true,
     exitCode: finiteNumber(item.exitCode),
@@ -259,6 +300,7 @@ function reduceAgentExecutionEvent(
       break;
     case "turn/completed":
       next.status = turnStatus(payload);
+      next.durationMS = finiteNumber(payload.turn?.durationMs);
       break;
     case "turn/plan/updated":
       next.plan = normalizePlan(payload);
@@ -281,10 +323,52 @@ function reduceAgentExecutionEvent(
         kind: "command",
         status: currentItem?.status ?? "running",
         command: currentItem?.command ?? "",
+        cwd: currentItem?.cwd ?? "",
+        durationMS: currentItem?.durationMS ?? null,
+        commandActions: currentItem?.commandActions ?? [],
         output: `${currentItem?.output ?? ""}${delta}`,
         outputTruncated: currentItem?.outputTruncated ?? false,
         exitCode: currentItem?.exitCode ?? null,
       });
+      break;
+    }
+    case "item/agentMessage/delta": {
+      if (stringValue(payload.phase) !== "commentary") break;
+      const id = itemID(payload, event.seq, "commentary");
+      const currentItem = next.items.find(
+        (item) => item.itemID === id && item.kind === "commentary",
+      ) as AgentTextActivity | undefined;
+      next.items = upsertItem(next.items, {
+        itemID: id,
+        kind: "commentary",
+        status: currentItem?.status ?? "running",
+        text: `${currentItem?.text ?? ""}${rawString(payload.delta)}`,
+        truncated: currentItem?.truncated ?? payload.truncated === true,
+      });
+      break;
+    }
+    case "item/reasoning/summaryTextDelta": {
+      const id = itemID(payload, event.seq, "reasoning");
+      const currentItem = next.items.find(
+        (item) => item.itemID === id && item.kind === "reasoning",
+      ) as AgentTextActivity | undefined;
+      next.items = upsertItem(next.items, {
+        itemID: id,
+        kind: "reasoning",
+        status: currentItem?.status ?? "running",
+        text: `${currentItem?.text ?? ""}${rawString(payload.delta)}`,
+        truncated: currentItem?.truncated ?? payload.truncated === true,
+      });
+      break;
+    }
+    case "item/reasoning/summaryPartAdded": {
+      const id = itemID(payload, event.seq, "reasoning");
+      const currentItem = next.items.find(
+        (item) => item.itemID === id && item.kind === "reasoning",
+      ) as AgentTextActivity | undefined;
+      if (currentItem?.text && !currentItem.text.endsWith("\n\n")) {
+        next.items = upsertItem(next.items, { ...currentItem, text: `${currentItem.text}\n\n` });
+      }
       break;
     }
     case "item/fileChange/patchUpdated": {
@@ -318,6 +402,11 @@ function reduceAgentExecutionEvent(
       break;
   }
   return next;
+}
+
+export function hasAgentRunActivity(run: AgentRunSnapshot): boolean {
+  return run.status !== "idle" || run.plan.length > 0 || run.items.length > 0 ||
+    Boolean(run.diff || run.actualModel || run.usage || run.interactions.length > 0);
 }
 
 function isTerminalStatus(status: AgentRunStatus): boolean {

@@ -816,7 +816,15 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		importedConversation.UpdatedAt.Unix() != 1786615360 {
 		t.Fatalf("imported settings or recency mismatch: %#v %v", importedConversation, err)
 	}
-	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"historyLoaded":false}]}}}`
+	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}`
+	if err := syncThreadHistory(database, &storedHistoryCommand, json.RawMessage(blankSettingsHistory), now.Add(11*time.Second)); err != nil {
+		t.Fatalf("refresh thread history without settings: %v", err)
+	}
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil ||
+		importedConversation.Model != "gpt-test" || importedConversation.ReasoningEffort != "high" {
+		t.Fatalf("blank history settings replaced known values: %#v %v", importedConversation, err)
+	}
+	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"recencyAt":1786615360,"historyLoaded":false}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,
@@ -826,7 +834,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil || len(importedMessages) != 2 {
 		t.Fatalf("updated imported messages mismatch: %#v %v", importedMessages, err)
 	}
-	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 2 || importedConversation.Status != "active" {
+	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil || importedConversation.Title != "Renamed imported session" || importedConversation.MessageCount != 2 || importedConversation.Status != "active" || importedConversation.UpdatedAt.Unix() != 1786615360 {
 		t.Fatalf("updated imported conversation mismatch: %#v %v", importedConversation, err)
 	}
 	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" || importedThread.HistoryStatus != "loaded" || importedThread.HistoryVersion != historyProjectionVersion {

@@ -6,6 +6,8 @@ import {
   extractArtifactsFromContent,
   extractArtifactsFromMessages,
   type ChatArtifact,
+  type ChatDiffArtifact,
+  type OpenAgentDiffInput,
   type OpenCodeArtifactInput,
 } from "@/features/chat/model/chat-artifacts";
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
@@ -119,6 +121,7 @@ export function useChatArtifacts({ conversationID, messages }: UseChatArtifactsP
   const artifacts = React.useMemo(() => extractArtifactsFromMessages(messages), [messages]);
   const latestArtifact = artifacts.at(-1) ?? null;
   const [activeArtifactID, setActiveArtifactID] = React.useState<string | null>(null);
+  const [activeDiff, setActiveDiff] = React.useState<ChatDiffArtifact | null>(null);
   const [dismissedArtifactID, setDismissedArtifactID] = React.useState<string | null>(null);
   const [lastActiveArtifact, setLastActiveArtifact] = React.useState<ChatArtifact | null>(null);
   const [customArtifactRatio, setCustomArtifactRatio] = React.useState<number | null>(null);
@@ -146,6 +149,7 @@ export function useChatArtifacts({ conversationID, messages }: UseChatArtifactsP
     setLastActiveArtifact(null);
     dismissedArtifactRef.current = null;
     setActiveArtifactID(null);
+    setActiveDiff(null);
     setDismissedArtifactID(null);
   }, [activeArtifact?.streaming, conversationID, lastActiveArtifact?.streaming, latestArtifact?.streaming]);
 
@@ -193,15 +197,35 @@ export function useChatArtifacts({ conversationID, messages }: UseChatArtifactsP
 
     dismissedArtifactRef.current = null;
     setDismissedArtifactID(null);
+    setActiveDiff(null);
     setActiveArtifactID(selected.id);
   }, []);
 
+  const openDiff = React.useCallback((message: ChatAreaMessage, input: OpenAgentDiffInput) => {
+    const diff = input.diff || input.files.map((file) => file.diff).filter(Boolean).join("\n\n");
+    if (!diff && input.files.length === 0) return;
+    setActiveArtifactID(null);
+    setActiveDiff({
+      id: `${message.runID?.trim() || message.publicID}:diff`,
+      messageID: message.publicID,
+      messageKey: message.key,
+      runID: message.runID?.trim() || undefined,
+      diff,
+      files: input.files,
+      truncated: input.truncated,
+    });
+  }, []);
+
   const closeArtifact = React.useCallback(() => {
+    if (activeDiff) {
+      setActiveDiff(null);
+      return;
+    }
     const dismissedArtifact = activeArtifact ?? latestArtifact;
     dismissedArtifactRef.current = dismissedArtifact ?? null;
     setDismissedArtifactID(dismissedArtifact?.id ?? null);
     setActiveArtifactID(null);
-  }, [activeArtifact, latestArtifact]);
+  }, [activeArtifact, activeDiff, latestArtifact]);
 
   const selectArtifact = React.useCallback((artifactID: string) => {
     setActiveArtifactID(artifactID);
@@ -217,11 +241,13 @@ export function useChatArtifacts({ conversationID, messages }: UseChatArtifactsP
 
   return {
     activeArtifact,
+    activeDiff,
     artifactRatio,
     artifacts,
     closeArtifact,
     isInlineViewport: isInline,
     openArtifact,
+    openDiff,
     resetArtifactRatio,
     selectArtifact,
     setArtifactRatio,

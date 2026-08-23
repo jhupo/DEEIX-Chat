@@ -1116,15 +1116,19 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if title := strings.TrimSpace(session.Name); title != "" {
 		conversationUpdates["title"] = truncateRunes(title, 255)
 	}
-	if updatedAt := workspaceSessionActivityTime(session, conversation.UpdatedAt); updatedAt.After(conversation.UpdatedAt) {
+	if updatedAt := workspaceSessionActivityTime(session, conversation.UpdatedAt); session.RecencyAt > 0 || updatedAt.After(conversation.UpdatedAt) {
 		conversationUpdates["updated_at"] = updatedAt
 	}
 	if session.HistoryLoaded {
-		conversationUpdates["model"] = strings.TrimSpace(session.Model)
-		conversationUpdates["reasoning_effort"] = strings.TrimSpace(session.ReasoningEffort)
+		if modelName := strings.TrimSpace(session.Model); modelName != "" {
+			conversationUpdates["model"] = modelName
+		}
+		if reasoningEffort := strings.TrimSpace(session.ReasoningEffort); reasoningEffort != "" {
+			conversationUpdates["reasoning_effort"] = reasoningEffort
+		}
 	}
 	if len(conversationUpdates) > 0 {
-		if err := tx.Model(&conversation).Updates(conversationUpdates).Error; err != nil {
+		if err := tx.Model(&conversation).UpdateColumns(conversationUpdates).Error; err != nil {
 			return err
 		}
 	}
@@ -1205,7 +1209,12 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	}
 	updates := map[string]any{
 		"message_count": len(session.Messages), "updated_at": workspaceSessionActivityTime(session, conversation.UpdatedAt),
-		"model": strings.TrimSpace(session.Model), "reasoning_effort": strings.TrimSpace(session.ReasoningEffort),
+	}
+	if modelName := strings.TrimSpace(session.Model); modelName != "" {
+		updates["model"] = modelName
+	}
+	if reasoningEffort := strings.TrimSpace(session.ReasoningEffort); reasoningEffort != "" {
+		updates["reasoning_effort"] = reasoningEffort
 	}
 	if title := strings.TrimSpace(session.Name); title != "" {
 		updates["title"] = truncateRunes(title, 255)
