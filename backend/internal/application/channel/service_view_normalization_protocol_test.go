@@ -1,6 +1,9 @@
 package channel
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestResolveModelProtocolsJSONFallsBackToVendorWithoutRoutes(t *testing.T) {
 	tests := []struct {
@@ -21,5 +24,38 @@ func TestResolveModelProtocolsJSONFallsBackToVendorWithoutRoutes(t *testing.T) {
 				t.Fatalf("expected %s, got %s", test.expected, actual)
 			}
 		})
+	}
+}
+
+func TestResolveModelDisplayCapabilitiesAddsAdapterReasoningControls(t *testing.T) {
+	raw := `{"nativeTools":[{"key":"openai.image_generation"}]}`
+	resolved := resolveModelDisplayCapabilitiesJSON(
+		"gpt-5.6-sol",
+		`["openai_responses"]`,
+		raw,
+	)
+
+	var capabilities map[string]interface{}
+	if err := json.Unmarshal([]byte(resolved), &capabilities); err != nil {
+		t.Fatalf("unmarshal capabilities: %v", err)
+	}
+	defaults := capabilities["defaultOptions"].(map[string]interface{})
+	reasoning := defaults["reasoning"].(map[string]interface{})
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("expected adapter reasoning default, got %#v", defaults)
+	}
+	controls := capabilities["optionControls"].([]interface{})
+	if len(controls) != 1 || controls[0].(map[string]interface{})["path"] != "reasoning.effort" {
+		t.Fatalf("expected Responses reasoning control, got %#v", controls)
+	}
+	if len(capabilities["nativeTools"].([]interface{})) != 1 {
+		t.Fatalf("expected stored capabilities to be preserved, got %#v", capabilities)
+	}
+}
+
+func TestResolveModelDisplayCapabilitiesLeavesUnknownModelsUntouched(t *testing.T) {
+	raw := `{"nativeTools":[{"key":"openai.web_search"}]}`
+	if resolved := resolveModelDisplayCapabilitiesJSON("gpt-4o", `["openai_responses"]`, raw); resolved != raw {
+		t.Fatalf("expected unknown reasoning support to remain unmodified, got %s", resolved)
 	}
 }

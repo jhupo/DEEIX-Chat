@@ -44,6 +44,7 @@ import {
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
+import { modelSupportsChatImageTool } from "@/features/chat/model/chat-task";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useDevices } from "@/features/devices";
@@ -54,6 +55,7 @@ import {
   type AgentProviderManifestDTO,
   type AgentTurnSettings,
   getAgentProfileResource,
+  includeCurrentAgentModel,
   listAgentRuntimeProfiles,
   listAgentWorkspaces,
   parseAgentModelsResource,
@@ -586,8 +588,16 @@ export function AppChatArea() {
         throw new Error(t("agent.settings.errors.modelsUnavailable"));
       }
 
-      const models = parseAgentModelsResource(
-        snapshot.data,
+      const conversationModel = currentConversation?.executionType === "gateway"
+        ? currentConversation.model.trim()
+        : "";
+      const conversationReasoningEffort = currentConversation?.executionType === "gateway"
+        ? currentConversation.reasoningEffort
+        : "";
+      const models = includeCurrentAgentModel(
+        parseAgentModelsResource(snapshot.data, profile.manifest.threadSettings.reasoningEffort),
+        conversationModel,
+        conversationReasoningEffort,
         profile.manifest.threadSettings.reasoningEffort,
       );
       if (models.length === 0) {
@@ -605,16 +615,13 @@ export function AppChatArea() {
           )
         : "";
       const persisted = storageScope ? readAgentSettings(storageScope) : null;
-      const conversationModel = currentConversation?.executionType === "gateway"
-        ? currentConversation.model.trim()
-        : "";
       const selectedModel = conversationModel
         ? models.find((item) => item.id === conversationModel)
         : persisted
           ? models.find((item) => item.id === persisted.model)
           : models.find((item) => item.isDefault) ?? models[0];
       if (!selectedModel) {
-        throw new Error(t("agent.settings.errors.currentModelUnavailable"));
+        throw new Error(t("agent.settings.errors.modelsUnavailable"));
       }
       const autoReviewEnabled = manifestSupportsAutoReview(profile.manifest);
       const persistedModeValid = Boolean(
@@ -624,9 +631,6 @@ export function AppChatArea() {
           persisted.approvalPolicy === "never" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "danger-full-access"
         ),
       );
-      const conversationReasoningEffort = currentConversation?.executionType === "gateway"
-        ? currentConversation.reasoningEffort
-        : "";
       const storedConversationReasoningEffort = selectedModel.supportedReasoningEfforts.find(
         (effort) => effort === conversationReasoningEffort,
       );
@@ -1054,13 +1058,15 @@ export function AppChatArea() {
         return [...previous, pendingAttachment];
       });
 
-      const selectedSupportsImageEdit = selectedModel?.kinds.includes("image_edit") ?? false;
+      const supportsImageEdit = (model: (typeof modelOptions)[number]) =>
+        model.kinds.includes("image_edit") || modelSupportsChatImageTool(model);
+      const selectedSupportsImageEdit = selectedModel ? supportsImageEdit(selectedModel) : false;
       if (!selectedSupportsImageEdit) {
         const normalizedSourceModelName = sourceModelName?.trim() || "";
         const sourceModel = modelOptions.find(
-          (item) => item.platformModelName === normalizedSourceModelName && item.kinds.includes("image_edit"),
+          (item) => item.platformModelName === normalizedSourceModelName && supportsImageEdit(item),
         );
-        const fallbackModel = sourceModel ?? modelOptions.find((item) => item.kinds.includes("image_edit"));
+        const fallbackModel = sourceModel ?? modelOptions.find(supportsImageEdit);
         if (fallbackModel) {
           setSelectedPlatformModelName(fallbackModel.platformModelName);
         }

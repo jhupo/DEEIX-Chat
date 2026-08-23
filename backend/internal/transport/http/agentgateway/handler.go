@@ -1,6 +1,7 @@
 package agentgateway
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -479,6 +480,26 @@ func (h *Handler) GetArtifactContent(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Status(http.StatusOK)
 	_, _ = io.Copy(c.Writer, content.Reader)
+}
+
+func (h *Handler) UploadHistoryAttachment(c *gin.Context) {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	token := strings.TrimPrefix(authorization, "Bearer ")
+	encodedName := strings.TrimSpace(c.GetHeader("X-DEEIX-File-Name"))
+	fileName, decodeErr := base64.RawURLEncoding.DecodeString(encodedName)
+	if token == authorization || decodeErr != nil {
+		writeError(c, appagent.ErrCredential, "upload history attachment failed")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 20<<20)
+	item, err := h.service.UploadHistoryAttachment(c.Request.Context(), token, appagent.HistoryAttachmentUpload{
+		FileName: string(fileName), MimeType: c.GetHeader("Content-Type"), SizeBytes: c.Request.ContentLength, Reader: c.Request.Body,
+	})
+	if err != nil {
+		writeError(c, err, "upload history attachment failed")
+		return
+	}
+	response.Success(c, gin.H{"fileId": item.FileID})
 }
 
 func (h *Handler) CreateChallenge(c *gin.Context) {

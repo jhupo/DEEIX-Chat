@@ -752,7 +752,13 @@ func (s *Service) sendMessageInternal(
 	attributionReferer, attributionTitle := s.llmAttribution()
 	routeConfig := messageRouteConfig(route, attributionReferer, attributionTitle)
 	responsesBackgroundRouteConfig = routeConfig
-	filteredOptions = filterModelOptions(input.Options, route.Protocol, modelOptionPolicyConfig{
+	semanticOptions := withSelectedSkillCapabilities(
+		input.Options,
+		skillPrompts,
+		route.Protocol,
+		route.ModelCapabilitiesJSON,
+	)
+	filteredOptions = filterModelOptions(semanticOptions, route.Protocol, modelOptionPolicyConfig{
 		Mode:                  cfg.ModelOptionPolicyMode,
 		AllowedPathsJSON:      cfg.ModelOptionAllowedPaths,
 		DeniedPathsJSON:       cfg.ModelOptionDeniedPaths,
@@ -766,7 +772,7 @@ func (s *Service) sendMessageInternal(
 		filteredOptions = withReasoningPassbackRequestOptions(
 			filteredOptions,
 			route.ReasoningPassbackRequestOptions,
-			input.Options,
+			semanticOptions,
 			route.ModelCapabilitiesJSON,
 		)
 	}

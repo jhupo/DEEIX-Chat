@@ -24,7 +24,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 2
+	historyProjectionVersion     = 3
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -955,10 +955,15 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 }
 
 type workspaceSessionMessage struct {
-	Role             string `json:"role"`
-	Content          string `json:"content"`
-	ReasoningContent string `json:"reasoningContent"`
-	CreatedAt        int64  `json:"createdAt"`
+	Role             string                       `json:"role"`
+	Content          string                       `json:"content"`
+	ReasoningContent string                       `json:"reasoningContent"`
+	CreatedAt        int64                        `json:"createdAt"`
+	Attachments      []workspaceSessionAttachment `json:"attachments"`
+}
+
+type workspaceSessionAttachment struct {
+	FileID string `json:"fileID"`
 }
 
 type workspaceSession struct {
@@ -1080,6 +1085,19 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 		if message.Role != "user" && message.Role != "assistant" {
 			return false
 		}
+		if len(message.Attachments) > 32 {
+			return false
+		}
+		seenAttachments := make(map[string]struct{}, len(message.Attachments))
+		for _, attachment := range message.Attachments {
+			if !strings.HasPrefix(attachment.FileID, "file_") || !validRepoRef(attachment.FileID) {
+				return false
+			}
+			if _, exists := seenAttachments[attachment.FileID]; exists {
+				return false
+			}
+			seenAttachments[attachment.FileID] = struct{}{}
+		}
 		total += len(message.Content) + len(message.ReasoningContent)
 		if strings.TrimSpace(message.Content) == "" || total > maxWorkspaceSessionBytes {
 			return false
@@ -1162,6 +1180,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			}
 		}
 		if storedStart < 0 {
+			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Attachment{}).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Message{}).Error; err != nil {
 				return err
 			}
@@ -1189,6 +1210,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 					return err
 				}
 			}
+			if err := syncWorkspaceMessageAttachments(tx, storedMessage, source, now); err != nil {
+				return err
+			}
 			parentID = &storedMessage.ID
 			continue
 		}
@@ -1200,6 +1224,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: createdAt},
 		}
 		if err := tx.Create(&message).Error; err != nil {
+			return err
+		}
+		if err := syncWorkspaceMessageAttachments(tx, &message, source, now); err != nil {
 			return err
 		}
 		parentID = &message.ID
@@ -1220,6 +1247,67 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		updates["title"] = truncateRunes(title, 255)
 	}
 	return tx.Model(&conversation).Updates(updates).Error
+}
+
+func syncWorkspaceMessageAttachments(tx *gorm.DB, message *model.Message, source workspaceSessionMessage, now time.Time) error {
+	if message == nil || len(source.Attachments) == 0 {
+		return nil
+	}
+	fileIDs := make([]string, 0, len(source.Attachments))
+	for _, attachment := range source.Attachments {
+		fileIDs = append(fileIDs, attachment.FileID)
+	}
+	var existing []string
+	if err := tx.Model(&model.Attachment{}).
+		Where("message_id = ? AND user_id = ? AND status <> ? AND file_id IN ?", message.ID, message.UserID, "deleted", fileIDs).
+		Pluck("file_id", &existing).Error; err != nil {
+		return err
+	}
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, fileID := range existing {
+		existingSet[fileID] = struct{}{}
+	}
+	missing := make([]string, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		if _, exists := existingSet[fileID]; !exists {
+			missing = append(missing, fileID)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	var files []model.FileObject
+	if err := tx.Where("user_id = ? AND status = ? AND file_id IN ?", message.UserID, "active", missing).Find(&files).Error; err != nil {
+		return err
+	}
+	if len(files) != len(missing) {
+		return repository.ErrConflict
+	}
+	byID := make(map[string]model.FileObject, len(files))
+	for _, file := range files {
+		byID[file.FileID] = file
+	}
+	rows := make([]model.Attachment, 0, len(missing))
+	for _, fileID := range missing {
+		file, exists := byID[fileID]
+		if !exists {
+			return repository.ErrConflict
+		}
+		detectedMIME := strings.ToLower(strings.TrimSpace(file.DetectedMIME))
+		if detectedMIME == "" {
+			detectedMIME = strings.ToLower(strings.TrimSpace(file.MimeType))
+		}
+		if !strings.HasPrefix(detectedMIME, "image/") || detectedMIME == "image/svg+xml" {
+			return repository.ErrConflict
+		}
+		rows = append(rows, model.Attachment{
+			ConversationID: message.ConversationID, MessageID: message.ID, UserID: message.UserID,
+			FileID: file.FileID, Kind: "image", FileName: file.FileName, MimeType: file.MimeType,
+			FileSize: file.SizeBytes, SHA256: file.SHA256, StoragePath: file.StoragePath,
+			Status: "active", MetaJSON: "{}", UploadedAt: now,
+		})
+	}
+	return tx.Create(&rows).Error
 }
 
 const legacySessionMessageRunes = 16 * 1024

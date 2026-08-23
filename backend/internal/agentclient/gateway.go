@@ -670,6 +670,9 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 			result, err = gateway.mutateWorkspace(command)
 		} else {
 			result, err = gateway.adapter.Execute(ctx, command, artifacts)
+			if err == nil && command.Kind == "thread.read" {
+				err = gateway.uploadHistoryImages(ctx, result)
+			}
 		}
 	}
 	var outcome json.RawMessage
@@ -706,6 +709,67 @@ func (gateway *Gateway) downloadCommandArtifacts(ctx context.Context, commandID 
 		return downloadErr
 	})
 	return artifacts, err
+}
+
+func (gateway *Gateway) uploadHistoryImages(ctx context.Context, result map[string]any) error {
+	session, _ := result["session"].(map[string]any)
+	messages, _ := session["messages"].([]any)
+	for _, rawMessage := range messages {
+		message, _ := rawMessage.(map[string]any)
+		localImages, _ := message["localAttachments"].([]any)
+		if len(localImages) == 0 {
+			continue
+		}
+		delete(message, "localAttachments")
+		attachments := make([]any, 0, len(localImages))
+		unavailable := 0
+		for _, rawImage := range localImages {
+			image, _ := rawImage.(map[string]any)
+			path, _ := image["path"].(string)
+			var fileID string
+			err := runAsConfiguredUser(func() error {
+				var uploadErr error
+				fileID, uploadErr = gateway.cloud.UploadHistoryImage(ctx, gateway.config, gateway.identity, path)
+				return uploadErr
+			})
+			if err != nil {
+				if !errors.Is(err, errHistoryImageUnavailable) {
+					return err
+				}
+				unavailable++
+				gateway.logger.Printf("history image unavailable: %s", publicMessage(err))
+				continue
+			}
+			attachments = append(attachments, map[string]any{"fileID": fileID})
+		}
+		if len(attachments) > 0 {
+			message["attachments"] = attachments
+		}
+		content := stripSyntheticFileMentions(fmt.Sprint(message["content"]))
+		if unavailable > 0 {
+			content = strings.TrimSpace(content + "\n\n[One or more attached images are unavailable on this device.]")
+		}
+		if content == "" {
+			content = "[Attached image]"
+		}
+		message["content"] = content
+	}
+	return nil
+}
+
+func stripSyntheticFileMentions(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	start := strings.Index(content, "# Files mentioned by the user:")
+	if start < 0 {
+		return strings.TrimSpace(content)
+	}
+	requestMarker := "## My request:"
+	requestStart := strings.Index(content[start:], requestMarker)
+	if requestStart < 0 {
+		return strings.TrimSpace(content[:start])
+	}
+	requestStart += start + len(requestMarker)
+	return strings.TrimSpace(content[:start] + content[requestStart:])
 }
 
 func (gateway *Gateway) registerWorkspace(command AgentCommand) (map[string]any, error) {

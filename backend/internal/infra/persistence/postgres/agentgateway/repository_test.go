@@ -802,7 +802,16 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Where("public_id = ?", historyCommand.PublicID).First(&storedHistoryCommand).Error; err != nil {
 		t.Fatal(err)
 	}
-	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
+	historyFile := model.FileObject{
+		FileID: "file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 7, Purpose: "conversation_history",
+		FileName: "screenshot.png", MimeType: "image/png", DetectedMIME: "image/png", FileCategory: "image",
+		SizeBytes: 16, SHA256: strings.Repeat("a", 64), StoragePath: "uploads/history.png", Status: "active",
+		ProcessingStatus: "uploaded", ProcessingReady: true,
+	}
+	if err := database.Create(&historyFile).Error; err != nil {
+		t.Fatal(err)
+	}
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
@@ -810,6 +819,11 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
 		importedMessages[1].ParentMessageID == nil || *importedMessages[1].ParentMessageID != importedMessages[0].ID {
 		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
+	}
+	var historyAttachment model.Attachment
+	if err := database.Where("message_id = ?", importedMessages[0].ID).First(&historyAttachment).Error; err != nil ||
+		historyAttachment.FileID != historyFile.FileID || historyAttachment.Kind != "image" || historyAttachment.StoragePath != historyFile.StoragePath {
+		t.Fatalf("imported history attachment mismatch: %#v %v", historyAttachment, err)
 	}
 	if err := database.First(&importedConversation, importedConversation.ID).Error; err != nil ||
 		importedConversation.Model != "gpt-test" || importedConversation.ReasoningEffort != "high" ||

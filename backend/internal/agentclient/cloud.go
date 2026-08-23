@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,10 @@ type CloudClient struct {
 	baseURL string
 	http    *http.Client
 }
+
+const maxHistoryImageBytes = int64(20 << 20)
+
+var errHistoryImageUnavailable = errors.New("history image is unavailable")
 
 func NewCloudClient(baseURL string) *CloudClient {
 	return &CloudClient{baseURL: strings.TrimRight(baseURL, "/"), http: newAgentHTTPClient()}
@@ -162,7 +167,7 @@ func (client *CloudClient) DownloadArtifacts(ctx context.Context, commandID stri
 			if matchErr == nil && !matches {
 				matchErr = client.downloadArtifact(ctx, commandID, grant, target)
 			}
-			results <- downloadResult{ref: ref, artifact: LocalArtifact{Path: target, MimeType: grant.MimeType}, err: matchErr}
+			results <- downloadResult{ref: ref, artifact: LocalArtifact{Path: target, FileName: grant.FileName, MimeType: grant.MimeType}, err: matchErr}
 		})
 	}
 	downloads.Wait()
@@ -174,6 +179,86 @@ func (client *CloudClient) DownloadArtifacts(ctx context.Context, commandID stri
 		result[item.ref] = item.artifact
 	}
 	return result, nil
+}
+
+func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config, identity *DeviceIdentity, path string) (string, error) {
+	file, fileName, mimeType, sizeBytes, err := openHistoryImage(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	token, err := client.ConnectionToken(ctx, config, identity)
+	if err != nil {
+		return "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/history-attachments", file)
+	if err != nil {
+		return "", err
+	}
+	request.ContentLength = sizeBytes
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", mimeType)
+	request.Header.Set("X-DEEIX-File-Name", base64.RawURLEncoding.EncodeToString([]byte(fileName)))
+	response, err := client.http.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var envelope struct {
+		ErrorMsg string `json:"errorMsg"`
+		Data     struct {
+			FileID string `json:"fileId"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return "", fmt.Errorf("history attachment server response is invalid (%d)", response.StatusCode)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.ErrorMsg != "" {
+		message := strings.TrimSpace(envelope.ErrorMsg)
+		if message == "" {
+			message = response.Status
+		}
+		return "", fmt.Errorf("history attachment upload failed: %s", message)
+	}
+	if !validPublicID(envelope.Data.FileID, "file") {
+		return "", errors.New("history attachment server response is invalid")
+	}
+	return envelope.Data.FileID, nil
+}
+
+func openHistoryImage(path string) (*os.File, string, string, int64, error) {
+	path = strings.TrimSpace(path)
+	if path == "" || len(path) > 4096 || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) {
+		return nil, "", "", 0, fmt.Errorf("%w: path is invalid", errHistoryImageUnavailable)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxHistoryImageBytes {
+		return nil, "", "", 0, errHistoryImageUnavailable
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, "", "", 0, errHistoryImageUnavailable
+	}
+	header := make([]byte, 512)
+	read, readErr := io.ReadFull(file, header)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		file.Close()
+		return nil, "", "", 0, errHistoryImageUnavailable
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(header[:read])))
+	if !strings.HasPrefix(mimeType, "image/") || mimeType == "image/svg+xml" {
+		file.Close()
+		return nil, "", "", 0, fmt.Errorf("%w: attachment is not a supported image", errHistoryImageUnavailable)
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, "", "", 0, errHistoryImageUnavailable
+	}
+	return file, filepath.Base(path), mimeType, info.Size(), nil
 }
 
 func artifactFileMatches(path string, grant ArtifactGrant) (bool, error) {

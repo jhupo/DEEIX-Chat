@@ -271,7 +271,7 @@ var workspaceResources = []string{"sessions", "skills", "hooks"}
 
 var (
 	base64URL43Pattern       = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
-	mimeTypePattern          = regexp.MustCompile(`^(?:image|audio)/[A-Za-z0-9.+-]{1,100}$`)
+	mimeTypePattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,100}$`)
 	artifactExtensionPattern = regexp.MustCompile(`^\.[A-Za-z0-9]{1,15}$`)
 )
 

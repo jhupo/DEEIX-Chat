@@ -35,6 +35,7 @@ import (
 	appsub2commerce "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2commerce"
 	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	appsystemevent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/systemevent"
+	appupload "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/upload"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
@@ -108,6 +109,10 @@ type avatarContentOpener struct {
 }
 
 type agentArtifactStore struct {
+	conversationService *conversation.Service
+}
+
+type agentHistoryAttachmentStore struct {
 	conversationService *conversation.Service
 }
 
@@ -336,6 +341,17 @@ func (s agentArtifactStore) OpenAgentArtifact(ctx context.Context, userID uint, 
 	return &appagentgateway.ArtifactContent{Reader: content.Reader, ContentType: content.ContentType, SizeBytes: content.SizeBytes}, nil
 }
 
+func (s agentHistoryAttachmentStore) UploadAgentHistoryAttachment(ctx context.Context, userID uint, input appagentgateway.HistoryAttachmentUpload) (*appagentgateway.HistoryAttachment, error) {
+	result, err := s.conversationService.UploadFile(ctx, appupload.UploadFileInput{
+		UserID: userID, Purpose: "conversation_history", FileName: input.FileName,
+		MimeType: input.MimeType, DeclaredSize: input.SizeBytes, Reader: input.Reader,
+	})
+	if err != nil {
+		return nil, errors.Join(appagentgateway.ErrStateConflict, err)
+	}
+	return &appagentgateway.HistoryAttachment{FileID: result.File.FileID}, nil
+}
+
 func (o avatarContentOpener) OpenAvatarFileContent(ctx context.Context, userID uint, fileID string) (*user.AvatarFileContent, error) {
 	content, err := o.conversationService.OpenFileContent(ctx, userID, fileID)
 	if err != nil {
@@ -507,6 +523,7 @@ func NewApp() (*App, error) {
 	conversationService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetMCPRepository(mcpRepo)
 	agentGatewayService.SetArtifactContentStore(agentArtifactStore{conversationService: conversationService})
+	agentGatewayService.SetHistoryAttachmentStore(agentHistoryAttachmentStore{conversationService: conversationService})
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
 	authService.SetAvatarFileValidator(conversationService)
 	memoryService.SetCacheInvalidator(conversationService.InvalidateMemoryCache)

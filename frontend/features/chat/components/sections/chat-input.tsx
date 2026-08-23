@@ -566,32 +566,22 @@ function ChatInputComponent({
     sections: mentionSections,
     select: selectMentionItem,
   } = useChatMentionMenu({
-    availableTools,
     inputResources,
     disabled: loading || uploading || modelLoading || modelDisabled,
     draft,
-    maxSelectedTools,
     maxSelectedSkills,
     selectedSkills,
     selectedInputResources,
-    selectedToolIDs,
     anchorRef: inputGroupRef,
     textareaRef,
-    toolsDisabled: isMediaMode,
     onDraftChange,
     onSelectedSkillsChange,
     onSelectedInputResourcesChange,
     placementAnchor: "container",
     placementPreference: isConversationMode ? "top" : "bottom",
-    onSelectedToolsChange,
     onSkillLimitReached: () => {
       toast.error(tComposer("skillLimitTitle"), {
         description: tComposer("skillLimitDescription", { limit: maxSelectedSkills }),
-      });
-    },
-    onToolLimitReached: () => {
-      toast.error(tComposer("mcpToolLimitTitle"), {
-        description: tComposer("mcpToolLimitDescription", { limit: maxSelectedTools }),
       });
     },
   });

@@ -67,6 +67,23 @@ function requestedResponseType(options?: ConversationOptions): "image" | "video"
   return responseFormatType(options.response_format ?? options.responseFormat);
 }
 
+export function modelSupportsChatImageTool(model: ChatModelOption | null): boolean {
+  if (!model || !model.kinds.includes("chat")) {
+    return false;
+  }
+  return model.nativeTools.some((tool) => {
+    const payloadType = typeof tool.payload.type === "string" ? tool.payload.type.trim() : "";
+    const imageTool =
+      tool.type === "image_generation" ||
+      payloadType === "image_generation" ||
+      tool.key.endsWith(".image_generation");
+    if (!imageTool) {
+      return false;
+    }
+    return tool.protocols.length === 0 || tool.protocols.some((protocol) => model.protocols.includes(protocol));
+  });
+}
+
 export function resolveChatSubmitDecision(
   model: ChatModelOption | null,
   attachments: PendingAttachment[],
@@ -78,7 +95,9 @@ export function resolveChatSubmitDecision(
   const nonImageAttachmentCount = attachmentCount - imageAttachmentCount;
   const supportsChat = kinds.size === 0 || kinds.has("chat") || kinds.has("audio");
   const supportsImageGeneration = kinds.has("image_gen");
-  const supportsImageEdit = kinds.has("image_edit");
+  const supportsDirectImageEdit = kinds.has("image_edit");
+  const supportsChatImageTool = modelSupportsChatImageTool(model);
+  const supportsImageEdit = supportsDirectImageEdit || supportsChatImageTool;
   const supportsVideoGeneration = kinds.has("video_gen");
   const baseDecision = {
     attachmentCount,
@@ -96,7 +115,10 @@ export function resolveChatSubmitDecision(
     (supportsImageGeneration || supportsImageEdit || supportsVideoGeneration) &&
     (imageAttachmentCount > 0 || !supportsChat)
   ) {
-    if (imageAttachmentCount > 0 && supportsImageEdit) {
+    if (imageAttachmentCount > 0 && supportsChatImageTool && supportsChat) {
+      return buildDecision("chat", null, baseDecision);
+    }
+    if (imageAttachmentCount > 0 && supportsDirectImageEdit) {
       return buildDecision("image_edit", "image_task_rejects_non_image_attachments", baseDecision);
     }
     if (supportsVideoGeneration) {
@@ -115,7 +137,10 @@ export function resolveChatSubmitDecision(
       }
       return buildDecision("video_generation", null, baseDecision);
     }
-    if (supportsImageEdit) {
+    if (supportsChatImageTool && supportsChat) {
+      return buildDecision("chat", null, baseDecision);
+    }
+    if (supportsDirectImageEdit) {
       return buildDecision("image_edit", null, baseDecision);
     }
     if (supportsVideoGeneration) {
@@ -158,7 +183,7 @@ export function resolveChatSubmitDecision(
   if (supportsVideoGeneration) {
     return buildDecision("video_generation", null, baseDecision);
   }
-  if (supportsImageEdit && !supportsChat) {
+  if (supportsDirectImageEdit && !supportsChat) {
     return buildDecision("image_edit", "image_edit_input_required", baseDecision);
   }
   if (!supportsChat) {

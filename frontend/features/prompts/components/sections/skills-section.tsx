@@ -343,7 +343,7 @@ export const SkillsSection = React.forwardRef<SkillsSectionHandle, { query: stri
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">{t("name")}</p>
               <InputGroup>
-                <InputGroupAddon>/</InputGroupAddon>
+                <InputGroupAddon>@</InputGroupAddon>
                 <InputGroupInput
                   value={form.name}
                   maxLength={SKILL_LIMITS.name}

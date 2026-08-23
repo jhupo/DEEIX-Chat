@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, ScrollText, Search, Trash2 } from "lucide-react";
+import { Plug, Plus, ScrollText, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -40,12 +40,15 @@ import {
   SkillsSection,
   type SkillsSectionHandle,
 } from "@/features/prompts/components/sections/skills-section";
+import { useDevices } from "@/features/devices";
 import {
   promptPresetKey,
   useSkillsPromptPage,
 } from "@/features/prompts/hooks/use-skills-prompt-page";
 import { cn } from "@/lib/utils";
 import type { PromptPresetDTO } from "@/shared/api/prompt-presets.types";
+import { getAgentProfileResource, listAgentRuntimeProfiles } from "@/shared/api/agent-gateway";
+import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
 import { PROMPT_PRESET_LIMITS } from "@/shared/model/prompt-presets";
 
@@ -143,6 +146,164 @@ function PromptPresetListSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+type PluginInventoryItem = {
+  id: string;
+  name: string;
+  description: string;
+  profile: string;
+  source: "system" | "user";
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function pluginInventoryRows(value: unknown, profile: string): PluginInventoryItem[] {
+  const root = isRecord(value) ? value : null;
+  const rows = Array.isArray(value)
+    ? value
+    : Array.isArray(root?.data)
+      ? root.data
+      : Array.isArray(root?.plugins)
+        ? root.plugins
+        : Array.isArray(root?.items)
+          ? root.items
+          : [];
+  return rows.flatMap((value, index): PluginInventoryItem[] => {
+    if (!isRecord(value)) {
+      return [];
+    }
+    const name = [value.displayName, value.name, value.id]
+      .find((item): item is string => typeof item === "string" && item.trim().length > 0)
+      ?.trim() ?? "";
+    if (!name) {
+      return [];
+    }
+    const rawSource = [value.source, value.scope, value.origin]
+      .find((item): item is string => typeof item === "string")
+      ?.trim().toLowerCase() ?? "";
+    const source = value.system === true || value.builtin === true || /system|builtin|bundled/.test(rawSource)
+      ? "system"
+      : "user";
+    return [{
+      id: `${profile}:${typeof value.id === "string" ? value.id : name}:${index}`,
+      name,
+      description: typeof value.description === "string" ? value.description.trim() : "",
+      profile,
+      source,
+    }];
+  });
+}
+
+function PluginsSection({ query }: { query: string }) {
+  const t = useTranslations("prompts");
+  const { defaultDevice, loading: devicesLoading } = useDevices();
+  const [items, setItems] = React.useState<PluginInventoryItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (devicesLoading) {
+      setLoading(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!defaultDevice) {
+      setItems([]);
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLoading(true);
+    void (async () => {
+      const token = await resolveAccessToken();
+      if (!token) {
+        return [];
+      }
+      const profiles = await listAgentRuntimeProfiles(token, defaultDevice.deviceId);
+      const snapshots = await Promise.allSettled(
+        profiles
+          .filter((profile) => profile.status === "ready" && profile.manifest.resources.profile.includes("plugins"))
+          .map(async (profile) => ({
+            profile: profile.provider || profile.profileId,
+            snapshot: await getAgentProfileResource(token, defaultDevice.deviceId, profile.profileId, "plugins"),
+          })),
+      );
+      return snapshots.flatMap((result) =>
+        result.status === "fulfilled"
+          ? pluginInventoryRows(result.value.snapshot.data, result.value.profile)
+          : [],
+      );
+    })()
+      .then((rows) => {
+        if (!cancelled) {
+          setItems(rows);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setItems([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [defaultDevice, devicesLoading]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredItems = normalizedQuery
+    ? items.filter((item) => [item.name, item.description, item.profile].join(" ").toLowerCase().includes(normalizedQuery))
+    : items;
+
+  return (
+    <section className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden">
+      {loading ? (
+        <div className="h-full min-h-0 flex-1 overflow-y-auto pr-2">
+          <PromptPresetListSkeleton />
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="flex h-full min-h-0 w-full items-center justify-center">
+          <CenteredEmptyState
+            title={items.length === 0 ? t("pluginsEmpty") : t("pluginsNoResults")}
+            description={items.length === 0 ? t("pluginsEmptyDescription") : t("noResultsDescription")}
+          />
+        </div>
+      ) : (
+        <div className="h-full min-h-0 flex-1 overflow-y-auto pr-2" data-sidebar-scroll-root="true">
+          <div className="grid gap-4 md:ml-13 md:w-[calc(100%-3.25rem)] md:grid-cols-2">
+            {filteredItems.map((item) => (
+              <div key={item.id} className="flex min-h-16 min-w-0 items-center gap-2.5 rounded-lg bg-muted/35 px-3 py-2.5 text-left">
+                <div className="flex size-7 shrink-0 items-center justify-center text-muted-foreground">
+                  <Plug className="size-4.5" strokeWidth={1.8} />
+                </div>
+                <div className="grid min-w-0 flex-1 gap-0.5">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <h3 className="min-w-0 truncate text-sm font-medium text-foreground">{item.name}</h3>
+                    <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px] font-normal">
+                      {t(item.source === "system" ? "pluginSystem" : "pluginUser")}
+                    </Badge>
+                  </div>
+                  <p className="min-w-0 truncate text-xs leading-5 text-muted-foreground">
+                    {item.description || item.profile}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -247,18 +408,19 @@ export function SkillsPromptPage() {
                 <Plus className="size-4" />
                 {t("add")}
               </Button>
-            ) : (
+            ) : activeTab === "prompts" ? (
               <Button size="sm" variant="default" className="shrink-0" disabled={loading} onClick={openCreate}>
                 <Plus className="size-4" />
                 {t("add")}
               </Button>
-            )}
+            ) : null}
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-5">
             <TabsList>
               <TabsTrigger value="skills">{t("skillsTab")}</TabsTrigger>
               <TabsTrigger value="prompts">{t("promptsTab")}</TabsTrigger>
+              <TabsTrigger value="plugins">{t("pluginsTab")}</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -267,7 +429,9 @@ export function SkillsPromptPage() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={activeTab === "skills" ? t("skillsSearchPlaceholder") : t("searchPlaceholder")}
+              placeholder={activeTab === "skills"
+                ? t("skillsSearchPlaceholder")
+                : activeTab === "plugins" ? t("pluginsSearchPlaceholder") : t("searchPlaceholder")}
               className="rounded-xl bg-background pl-9"
             />
           </div>
@@ -287,6 +451,9 @@ export function SkillsPromptPage() {
                 listContent
               )}
             </section>
+          </TabsContent>
+          <TabsContent value="plugins" className="flex h-full min-h-0">
+            <PluginsSection query={query} />
           </TabsContent>
         </Tabs>
       </div>

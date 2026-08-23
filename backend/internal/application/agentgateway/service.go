@@ -59,12 +59,26 @@ type ArtifactContentStore interface {
 	OpenAgentArtifact(context.Context, uint, string) (*ArtifactContent, error)
 }
 
+type HistoryAttachmentStore interface {
+	UploadAgentHistoryAttachment(context.Context, uint, HistoryAttachmentUpload) (*HistoryAttachment, error)
+}
+
 type ConversationEventProjector func(context.Context, domainagent.AppliedEventFrame) error
 
 type ArtifactContent struct {
 	Reader      io.ReadCloser
 	ContentType string
 	SizeBytes   int64
+}
+
+type HistoryAttachmentUpload struct {
+	FileName, MimeType string
+	SizeBytes          int64
+	Reader             io.Reader
+}
+
+type HistoryAttachment struct {
+	FileID string
 }
 
 type Service struct {
@@ -74,6 +88,7 @@ type Service struct {
 	users     RuntimeUserResolver
 	proofs    RuntimeProofVerifier
 	artifacts ArtifactContentStore
+	history   HistoryAttachmentStore
 	projector ConversationEventProjector
 	notify    func(uint)
 }
@@ -318,6 +333,8 @@ func (s *Service) SetRuntimeAuth(users RuntimeUserResolver, proofs RuntimeProofV
 
 func (s *Service) SetArtifactContentStore(store ArtifactContentStore) { s.artifacts = store }
 
+func (s *Service) SetHistoryAttachmentStore(store HistoryAttachmentStore) { s.history = store }
+
 func (s *Service) SetConversationEventProjector(projector ConversationEventProjector) {
 	s.projector = projector
 }
@@ -364,6 +381,28 @@ func (s *Service) OpenArtifact(ctx context.Context, artifactID, commandID, expir
 		return nil, ErrStateConflict
 	}
 	return content, nil
+}
+
+func (s *Service) UploadHistoryAttachment(ctx context.Context, token string, input HistoryAttachmentUpload) (*HistoryAttachment, error) {
+	input.FileName = strings.TrimSpace(input.FileName)
+	input.MimeType = strings.ToLower(strings.TrimSpace(input.MimeType))
+	if s.history == nil || input.Reader == nil || input.FileName == "" || !utf8.ValidString(input.FileName) || utf8.RuneCountInString(input.FileName) > 255 ||
+		strings.ContainsRune(input.FileName, 0) || !strings.HasPrefix(input.MimeType, "image/") || input.MimeType == "image/svg+xml" ||
+		input.SizeBytes <= 0 || input.SizeBytes > 20<<20 {
+		return nil, ErrInvalidInput
+	}
+	identity, err := s.AuthenticateConnection(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.history.UploadAgentHistoryAttachment(ctx, identity.UserID, input)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil || !validPublicID(item.FileID, "file") {
+		return nil, ErrStateConflict
+	}
+	return item, nil
 }
 
 func (s *Service) BeginRuntimeProof(ctx context.Context, identity *ConnectionIdentity, profilePublicID string) (*RuntimeChallengeResult, error) {

@@ -159,6 +159,38 @@ export function parseAgentModelsResource(
   return models;
 }
 
+export function includeCurrentAgentModel(
+  models: AgentModelDTO[],
+  currentModel: string,
+  currentReasoningEffort: string,
+  allowedReasoningEfforts: readonly string[],
+): AgentModelDTO[] {
+  const id = currentModel.trim();
+  if (!id || models.some((item) => item.id === id)) {
+    return models;
+  }
+  const supportedReasoningEfforts = allowedReasoningEfforts
+    .map(parseReasoningEffort)
+    .filter((item): item is AgentReasoningEffort => item !== null);
+  if (supportedReasoningEfforts.length === 0) {
+    return models;
+  }
+  const requestedEffort = parseReasoningEffort(currentReasoningEffort);
+  return [
+    {
+      id,
+      displayName: id,
+      description: "",
+      isDefault: false,
+      defaultReasoningEffort: requestedEffort && supportedReasoningEfforts.includes(requestedEffort)
+        ? requestedEffort
+        : supportedReasoningEfforts[0],
+      supportedReasoningEfforts,
+    },
+    ...models,
+  ];
+}
+
 export async function listAgentRuntimeProfiles(
   accessToken: string,
   deviceId: string,

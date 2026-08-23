@@ -506,8 +506,8 @@
     "tool": "Tool {id}",
     "mention": {
       "sections": {
-        "plugin": "Plugins",
-        "skill": "Skills"
+        "skill": "Skills",
+        "prompt": "Prompts"
       }
     },
     "mediaMode": {

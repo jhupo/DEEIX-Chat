@@ -76,6 +76,7 @@ var dispatchedClientRequests = map[string]bool{
 
 type LocalArtifact struct {
 	Path     string
+	FileName string
 	MimeType string
 }
 
@@ -1476,11 +1477,19 @@ func (adapter *CodexAdapter) codexInput(inputs []AgentInput, artifacts map[strin
 			result = append(result, map[string]any{"type": "text", "text": input.Text, "text_elements": []any{}})
 		case "artifact":
 			artifact := artifacts[input.ArtifactRef]
-			kind := "localImage"
-			if strings.HasPrefix(artifact.MimeType, "audio/") {
-				kind = "localAudio"
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(artifact.MimeType)), "image/") {
+				result = append(result, map[string]any{"type": "localImage", "path": artifact.Path})
+				continue
 			}
-			result = append(result, map[string]any{"type": kind, "path": artifact.Path})
+			name := strings.TrimSpace(artifact.FileName)
+			if name == "" {
+				name = filepath.Base(artifact.Path)
+			}
+			result = append(result, map[string]any{
+				"type":          "text",
+				"text":          fmt.Sprintf("Attached file %q is available on this device.\nLocal path: %s\nUse the available file tools to inspect it.", name, artifact.Path),
+				"text_elements": []any{},
+			})
 		case "skill", "app-mention":
 			sourceKind := "skill"
 			if input.Kind == "app-mention" {
@@ -2416,14 +2425,31 @@ func projectSessionMessages(detail map[string]any) []any {
 			case "userMessage":
 				parts, _ := item["content"].([]any)
 				textParts := make([]string, 0)
+				localAttachments := make([]any, 0)
 				for _, rawPart := range parts {
 					part, _ := rawPart.(map[string]any)
-					if part["type"] == "text" && strings.TrimSpace(fmt.Sprint(part["text"])) != "" {
+					switch part["type"] {
+					case "text":
+						if strings.TrimSpace(fmt.Sprint(part["text"])) == "" {
+							continue
+						}
 						textParts = append(textParts, strings.TrimSpace(fmt.Sprint(part["text"])))
+					case "localImage":
+						path := strings.TrimSpace(fmt.Sprint(part["path"]))
+						if path != "" {
+							localAttachments = append(localAttachments, map[string]any{"path": path})
+						}
 					}
 				}
-				if len(textParts) > 0 {
-					messages = append(messages, map[string]any{"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), maxSessionMessageRunes), "createdAt": turn["startedAt"]})
+				if len(textParts) > 0 || len(localAttachments) > 0 {
+					message := map[string]any{
+						"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), maxSessionMessageRunes),
+						"createdAt": turn["startedAt"],
+					}
+					if len(localAttachments) > 0 {
+						message["localAttachments"] = localAttachments
+					}
+					messages = append(messages, message)
 				}
 			case "reasoning":
 				parts := append(stringSlice(item["summary"]), stringSlice(item["content"])...)

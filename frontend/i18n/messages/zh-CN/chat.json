@@ -498,8 +498,8 @@
     "tool": "工具 {id}",
     "mention": {
       "sections": {
-        "plugin": "插件",
-        "skill": "技能"
+        "skill": "技能",
+        "prompt": "提示词"
       }
     },
     "mediaMode": {

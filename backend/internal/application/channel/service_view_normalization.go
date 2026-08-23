@@ -69,6 +69,7 @@ func displayProtocolDefaultsJSON(raw string) string {
 }
 
 func toModelView(item repository.ChannelModelListRow) ModelView {
+	protocolsJSON := resolveModelProtocolsJSON(item.ProtocolsJSON, item.Vendor)
 	return ModelView{
 		ID:                 item.ID,
 		PlatformModelName:  item.PlatformModelName,
@@ -80,7 +81,7 @@ func toModelView(item repository.ChannelModelListRow) ModelView {
 		DisplayGroupIcon:   item.DisplayGroupIcon,
 		KindsJSON:          item.KindsJSON,
 		Icon:               item.Icon,
-		CapabilitiesJSON:   item.CapabilitiesJSON,
+		CapabilitiesJSON:   resolveModelDisplayCapabilitiesJSON(item.PlatformModelName, protocolsJSON, item.CapabilitiesJSON),
 		SystemPrompt:       item.SystemPrompt,
 		AccessScope:        normalizeModelAccessScopeValue(item.AccessScope),
 		Status:             item.Status,
@@ -92,11 +93,98 @@ func toModelView(item repository.ChannelModelListRow) ModelView {
 		SortOrder:          item.SortOrder,
 		SourceCount:        item.SourceCount,
 		ActiveSourceCount:  item.ActiveSourceCount,
-		ProtocolsJSON:      resolveModelProtocolsJSON(item.ProtocolsJSON, item.Vendor),
+		ProtocolsJSON:      protocolsJSON,
 		UpstreamNamesJSON:  item.UpstreamNamesJSON,
 		CreatedAt:          item.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:          item.UpdatedAt.Format(time.RFC3339),
 	}
+}
+
+var defaultReasoningEffortOptions = []string{"low", "medium", "high", "xhigh"}
+
+// resolveModelDisplayCapabilitiesJSON fills presentation controls that are part of a known
+// protocol adapter. Stored model capabilities remain authoritative and are never overwritten.
+func resolveModelDisplayCapabilitiesJSON(modelName string, protocolsJSON string, raw string) string {
+	if !knownReasoningModelName(modelName) {
+		return raw
+	}
+
+	capabilities := make(map[string]interface{})
+	if value := strings.TrimSpace(raw); value != "" {
+		if err := json.Unmarshal([]byte(value), &capabilities); err != nil {
+			return raw
+		}
+	}
+	var protocols []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(protocolsJSON)), &protocols); err != nil {
+		return raw
+	}
+
+	defaults, _ := capabilities["defaultOptions"].(map[string]interface{})
+	if defaults == nil {
+		defaults = make(map[string]interface{})
+		capabilities["defaultOptions"] = defaults
+	}
+	controls, _ := capabilities["optionControls"].([]interface{})
+	controlPaths := make(map[string]struct{}, len(controls))
+	for _, item := range controls {
+		control, _ := item.(map[string]interface{})
+		if path, _ := control["path"].(string); strings.TrimSpace(path) != "" {
+			controlPaths[strings.TrimSpace(path)] = struct{}{}
+		}
+	}
+
+	addControl := func(path string) {
+		if _, exists := controlPaths[path]; exists {
+			return
+		}
+		controls = append(controls, map[string]interface{}{
+			"path":    path,
+			"type":    "select",
+			"label":   "Reasoning Effort",
+			"options": defaultReasoningEffortOptions,
+		})
+		controlPaths[path] = struct{}{}
+	}
+	for _, protocol := range protocols {
+		switch strings.TrimSpace(protocol) {
+		case llm.AdapterOpenAIResponses, llm.AdapterOpenRouterResponses:
+			reasoning, _ := defaults["reasoning"].(map[string]interface{})
+			if reasoning == nil {
+				reasoning = make(map[string]interface{})
+				defaults["reasoning"] = reasoning
+			}
+			if _, exists := reasoning["effort"]; !exists {
+				reasoning["effort"] = "medium"
+			}
+			addControl("reasoning.effort")
+		case llm.AdapterOpenAIChatCompletions, llm.AdapterOpenRouterChat:
+			if _, exists := defaults["reasoning_effort"]; !exists {
+				defaults["reasoning_effort"] = "medium"
+			}
+			addControl("reasoning_effort")
+		}
+	}
+	if len(controls) > 0 {
+		capabilities["optionControls"] = controls
+	}
+	encoded, err := json.Marshal(capabilities)
+	if err != nil {
+		return raw
+	}
+	return string(encoded)
+}
+
+func knownReasoningModelName(value string) bool {
+	name := strings.ToLower(strings.TrimSpace(value))
+	if slash := strings.LastIndex(name, "/"); slash >= 0 {
+		name = name[slash+1:]
+	}
+	return strings.HasPrefix(name, "gpt-5") ||
+		strings.HasPrefix(name, "o1") ||
+		strings.HasPrefix(name, "o3") ||
+		strings.HasPrefix(name, "o4") ||
+		strings.Contains(name, "codex")
 }
 
 func resolveModelProtocolsJSON(routeProtocolsJSON string, vendor string) string {
