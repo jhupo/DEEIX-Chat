@@ -565,7 +565,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	profile := model.AgentRuntimeProfile{
 		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex",
 		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &leaseExpiresAt, PresenceExpiresAt: &leaseExpiresAt,
-		ManifestJSON: `{"commands":["thread.read"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user"],"sandboxPolicy":["workspace-write"]}}`,
+		ManifestJSON: `{"commands":["thread.read"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write"]}}`,
 	}
 	if err := database.Create(&profile).Error; err != nil {
 		t.Fatalf("create runtime profile: %v", err)
@@ -618,16 +618,20 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	threadInput := &domainagent.Thread{PublicID: "agth_0123456789abcdef0123456789abcdef", UserID: 7, ConversationID: 41, Title: "Agent work", Status: "queued"}
 	turnInput := &domainagent.Turn{
 		PublicID: "agturn_0123456789abcdef0123456789abcdef", UserID: 7,
-		RunID: "run_0123456789abcdef0123456789abcdef", Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":"workspace-write"}`,
+		RunID: "run_0123456789abcdef0123456789abcdef", Status: "awaiting_thread", InputJSON: `[{"kind":"text","text":"run tests"},{"kind":"artifact","artifactRef":"agart_0123456789abcdef0123456789abcdef"}]`, SettingsJSON: `{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"auto_review","sandboxPolicy":"workspace-write"}`,
 	}
 	createCommand := &domainagent.Command{
 		PublicID: "agcmd_0123456789abcdef0123456789abcdef", Kind: "thread.create",
-		PayloadJSON: `{"kind":"thread.create","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","settings":{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":"workspace-write"}}`,
+		PayloadJSON: `{"kind":"thread.create","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-main","settings":{"model":"gpt-5.6-codex","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"auto_review","sandboxPolicy":"workspace-write"}}`,
 	}
 	idempotencyKey, requestHash := "01234567-89ab-4def-8123-456789abcdef", strings.Repeat("1", 64)
 	thread, turn, err := repo.StartThread(context.Background(), idempotencyKey, requestHash, threadInput, turnInput, createCommand, now)
 	if err != nil || thread == nil || turn == nil {
 		t.Fatalf("start thread: thread=%#v turn=%#v err=%v", thread, turn, err)
+	}
+	if err := database.First(&conversation, conversation.ID).Error; err != nil ||
+		conversation.ApprovalPolicy != "on-request" || conversation.ApprovalsReviewer != "auto_review" || conversation.SandboxPolicy != "workspace-write" {
+		t.Fatalf("conversation approval settings were not persisted: %#v %v", conversation, err)
 	}
 	replayedThread, replayedTurn, err := repo.StartThread(context.Background(), idempotencyKey, requestHash,
 		&domainagent.Thread{PublicID: "agth_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 7},

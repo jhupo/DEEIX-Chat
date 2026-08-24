@@ -12930,6 +12930,8 @@ const docTemplate = `{
         "ConversationResponse": {
             "type": "object",
             "required": [
+                "approvalPolicy",
+                "approvalsReviewer",
                 "contextPolicyJSON",
                 "createdAt",
                 "executionDeviceID",
@@ -12949,6 +12951,7 @@ const docTemplate = `{
                 "provider",
                 "publicID",
                 "reasoningEffort",
+                "sandboxPolicy",
                 "sessionKey",
                 "shareID",
                 "shareStatus",
@@ -12960,6 +12963,12 @@ const docTemplate = `{
                 "userID"
             ],
             "properties": {
+                "approvalPolicy": {
+                    "type": "string"
+                },
+                "approvalsReviewer": {
+                    "type": "string"
+                },
                 "contextPolicyJSON": {
                     "type": "string"
                 },
@@ -13023,6 +13032,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reasoningEffort": {
+                    "type": "string"
+                },
+                "sandboxPolicy": {
                     "type": "string"
                 },
                 "sessionKey": {

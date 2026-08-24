@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"encoding/json"
+
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"gorm.io/gorm"
@@ -123,10 +125,64 @@ func Migrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(Models()...); err != nil {
 		return err
 	}
+	if err := backfillGatewayConversationSettings(db); err != nil {
+		return err
+	}
 	if err := backfillContextArtifactMessageIDs(db); err != nil {
 		return err
 	}
 	return nil
+}
+
+// backfillGatewayConversationSettings restores the latest valid turn approval mode for pre-migration conversations.
+func backfillGatewayConversationSettings(db *gorm.DB) error {
+	type candidate struct {
+		ConversationID uint
+		SettingsJSON   string
+	}
+	var candidates []candidate
+	if err := db.Table("agent_turns AS turns").
+		Select("threads.conversation_id, turns.settings_json").
+		Joins("JOIN agent_threads AS threads ON threads.id = turns.thread_id").
+		Joins("JOIN chat_conversations AS conversations ON conversations.id = threads.conversation_id AND conversations.deleted_at IS NULL").
+		Where("conversations.execution_type = ?", "gateway").
+		Where("conversations.approval_policy = ? OR conversations.approvals_reviewer = ? OR conversations.sandbox_policy = ?", "", "", "").
+		Order("turns.id DESC").
+		Scan(&candidates).Error; err != nil {
+		return err
+	}
+
+	updated := make(map[uint]bool, len(candidates))
+	for _, item := range candidates {
+		if updated[item.ConversationID] {
+			continue
+		}
+		var settings struct {
+			ApprovalPolicy    string `json:"approvalPolicy"`
+			ApprovalsReviewer string `json:"approvalsReviewer"`
+			SandboxPolicy     string `json:"sandboxPolicy"`
+		}
+		if json.Unmarshal([]byte(item.SettingsJSON), &settings) != nil ||
+			!validGatewayApprovalMode(settings.ApprovalPolicy, settings.ApprovalsReviewer, settings.SandboxPolicy) {
+			continue
+		}
+		if err := db.Model(&model.Conversation{}).
+			Where("id = ? AND (approval_policy = ? OR approvals_reviewer = ? OR sandbox_policy = ?)", item.ConversationID, "", "", "").
+			Updates(map[string]any{
+				"approval_policy": settings.ApprovalPolicy, "approvals_reviewer": settings.ApprovalsReviewer,
+				"sandbox_policy": settings.SandboxPolicy,
+			}).Error; err != nil {
+			return err
+		}
+		updated[item.ConversationID] = true
+	}
+	return nil
+}
+
+func validGatewayApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy string) bool {
+	return approvalPolicy == "on-request" && approvalsReviewer == "user" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "on-request" && approvalsReviewer == "auto_review" && sandboxPolicy == "workspace-write" ||
+		approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access"
 }
 
 // backfillContextArtifactMessageIDs 将旧证据统一迁移到产生该证据的助手运行节点。

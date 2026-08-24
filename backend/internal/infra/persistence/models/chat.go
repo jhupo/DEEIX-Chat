@@ -13,6 +13,9 @@ type Conversation struct {
 	LabelsManuallyManaged bool       `gorm:"not null;default:false;comment:会话标签是否已由用户手动管理"`
 	Model                 string     `gorm:"size:128;not null;default:'';comment:模型名称"`
 	ReasoningEffort       string     `gorm:"size:32;not null;default:''"`
+	ApprovalPolicy        string     `gorm:"size:32;not null;default:''"`
+	ApprovalsReviewer     string     `gorm:"size:32;not null;default:''"`
+	SandboxPolicy         string     `gorm:"size:32;not null;default:''"`
 	Provider              string     `gorm:"size:32;not null;default:'';index:idx_chat_conversations_provider;comment:模型提供商"`
 	ExecutionType         string     `gorm:"size:16;not null;index:idx_chat_conversations_execution_type"`
 	ExecutionDeviceID     string     `gorm:"size:64;not null;default:''"`

@@ -3012,16 +3012,21 @@ func (r *Repo) QueueThreadLifecycle(
 
 func updateGatewayConversationSettings(tx *gorm.DB, userID, conversationID uint, provider string, raw json.RawMessage) error {
 	var settings struct {
-		Model           string `json:"model"`
-		ReasoningEffort string `json:"reasoningEffort"`
+		Model             string `json:"model"`
+		ReasoningEffort   string `json:"reasoningEffort"`
+		ApprovalPolicy    string `json:"approvalPolicy"`
+		ApprovalsReviewer string `json:"approvalsReviewer"`
+		SandboxPolicy     string `json:"sandboxPolicy"`
 	}
-	if json.Unmarshal(raw, &settings) != nil || len(settings.Model) > 128 || len(settings.ReasoningEffort) > 32 {
+	if json.Unmarshal(raw, &settings) != nil || len(settings.Model) > 128 || len(settings.ReasoningEffort) > 32 ||
+		!validRepoApprovalMode(settings.ApprovalPolicy, settings.ApprovalsReviewer, settings.SandboxPolicy) {
 		return repository.ErrInvalidInput
 	}
 	result := tx.Model(&model.Conversation{}).
 		Where("id = ? AND user_id = ? AND execution_type = ?", conversationID, userID, "gateway").
 		Updates(map[string]any{
 			"model": strings.TrimSpace(settings.Model), "reasoning_effort": strings.TrimSpace(settings.ReasoningEffort),
+			"approval_policy": settings.ApprovalPolicy, "approvals_reviewer": settings.ApprovalsReviewer, "sandbox_policy": settings.SandboxPolicy,
 			"provider": strings.TrimSpace(provider),
 		})
 	if result.Error != nil {

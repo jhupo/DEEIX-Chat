@@ -1476,6 +1476,10 @@ definitions:
     type: object
   ConversationResponse:
     properties:
+      approvalPolicy:
+        type: string
+      approvalsReviewer:
+        type: string
       contextPolicyJSON:
         type: string
       createdAt:
@@ -1521,6 +1525,8 @@ definitions:
         type: string
       reasoningEffort:
         type: string
+      sandboxPolicy:
+        type: string
       sessionKey:
         type: string
       shareID:
@@ -1544,6 +1550,8 @@ definitions:
       userID:
         type: integer
     required:
+    - approvalPolicy
+    - approvalsReviewer
     - contextPolicyJSON
     - createdAt
     - executionDeviceID
@@ -1563,6 +1571,7 @@ definitions:
     - provider
     - publicID
     - reasoningEffort
+    - sandboxPolicy
     - sessionKey
     - shareID
     - shareStatus

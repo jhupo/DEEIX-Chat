@@ -140,6 +140,40 @@ function manifestSupportsAutoReview(manifest: AgentProviderManifestDTO): boolean
   return manifest.threadSettings.approvalsReviewer?.includes("auto_review") === true;
 }
 
+type AgentApprovalSettings = Pick<
+  AgentTurnSettings,
+  "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy"
+>;
+
+function parseAgentApprovalSettings(value: {
+  approvalPolicy?: string;
+  approvalsReviewer?: string;
+  sandboxPolicy?: string;
+} | null | undefined): AgentApprovalSettings | null {
+  if (
+    value?.approvalPolicy === "on-request" &&
+    value.approvalsReviewer === "user" &&
+    value.sandboxPolicy === "workspace-write"
+  ) {
+    return { approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: "workspace-write" };
+  }
+  if (
+    value?.approvalPolicy === "on-request" &&
+    value.approvalsReviewer === "auto_review" &&
+    value.sandboxPolicy === "workspace-write"
+  ) {
+    return { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: "workspace-write" };
+  }
+  if (
+    value?.approvalPolicy === "never" &&
+    value.approvalsReviewer === "user" &&
+    value.sandboxPolicy === "danger-full-access"
+  ) {
+    return { approvalPolicy: "never", approvalsReviewer: "user", sandboxPolicy: "danger-full-access" };
+  }
+  return null;
+}
+
 function parseDefaultMCPToolIDs(raw: string | null | undefined): number[] {
   const value = raw?.trim();
   if (!value) {
@@ -632,13 +666,17 @@ export function AppChatArea() {
         throw new Error(t("agent.settings.errors.modelsUnavailable"));
       }
       const autoReviewEnabled = manifestSupportsAutoReview(profile.manifest);
-      const persistedModeValid = Boolean(
-        persisted && (
-          persisted.approvalPolicy === "on-request" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "workspace-write" ||
-          persisted.approvalPolicy === "on-request" && persisted.approvalsReviewer === "auto_review" && persisted.sandboxPolicy === "workspace-write" ||
-          persisted.approvalPolicy === "never" && persisted.approvalsReviewer === "user" && persisted.sandboxPolicy === "danger-full-access"
-        ),
-      );
+      const approvalSettings = parseAgentApprovalSettings(
+        currentConversation?.executionType === "gateway" ? {
+          approvalPolicy: currentConversation.approvalPolicy,
+          approvalsReviewer: currentConversation.approvalsReviewer,
+          sandboxPolicy: currentConversation.sandboxPolicy,
+        } : null,
+      ) ?? parseAgentApprovalSettings(persisted) ?? {
+        approvalPolicy: "on-request",
+        approvalsReviewer: "user",
+        sandboxPolicy: "workspace-write",
+      } satisfies AgentApprovalSettings;
       const storedConversationReasoningEffort = selectedModel.supportedReasoningEfforts.find(
         (effort) => effort === conversationReasoningEffort,
       );
@@ -650,9 +688,7 @@ export function AppChatArea() {
       const nextSettings: AgentTurnSettings = {
         model: selectedModel.id,
         reasoningEffort,
-        approvalPolicy: persistedModeValid ? persisted!.approvalPolicy : "on-request",
-        approvalsReviewer: persistedModeValid ? persisted!.approvalsReviewer : "user",
-        sandboxPolicy: persistedModeValid ? persisted!.sandboxPolicy : "workspace-write",
+        ...approvalSettings,
       };
       if (cancelled) {
         return;
@@ -699,6 +735,9 @@ export function AppChatArea() {
     currentConversation?.executionType,
     currentConversation?.model,
     currentConversation?.reasoningEffort,
+    currentConversation?.approvalPolicy,
+    currentConversation?.approvalsReviewer,
+    currentConversation?.sandboxPolicy,
     executionMode,
     inputResourceDeviceID,
     inputResourceDeviceOnline,

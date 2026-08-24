@@ -12923,6 +12923,8 @@
         "ConversationResponse": {
             "type": "object",
             "required": [
+                "approvalPolicy",
+                "approvalsReviewer",
                 "contextPolicyJSON",
                 "createdAt",
                 "executionDeviceID",
@@ -12942,6 +12944,7 @@
                 "provider",
                 "publicID",
                 "reasoningEffort",
+                "sandboxPolicy",
                 "sessionKey",
                 "shareID",
                 "shareStatus",
@@ -12953,6 +12956,12 @@
                 "userID"
             ],
             "properties": {
+                "approvalPolicy": {
+                    "type": "string"
+                },
+                "approvalsReviewer": {
+                    "type": "string"
+                },
                 "contextPolicyJSON": {
                     "type": "string"
                 },
@@ -13016,6 +13025,9 @@
                     "type": "string"
                 },
                 "reasoningEffort": {
+                    "type": "string"
+                },
+                "sandboxPolicy": {
                     "type": "string"
                 },
                 "sessionKey": {

@@ -640,6 +640,8 @@ export interface ConversationProjectResponseDoc {
 }
 
 export interface ConversationResponse {
+  approvalPolicy: string;
+  approvalsReviewer: string;
   contextPolicyJSON: string;
   createdAt: string;
   executionDeviceID: string;
@@ -659,6 +661,7 @@ export interface ConversationResponse {
   provider: string;
   publicID: string;
   reasoningEffort: string;
+  sandboxPolicy: string;
   sessionKey: string;
   shareID: string;
   shareStatus: string;

@@ -23,6 +23,9 @@ type ConversationResponse struct {
 	LabelsJSON           string     `json:"labelsJSON"`
 	Model                string     `json:"model"`
 	ReasoningEffort      string     `json:"reasoningEffort"`
+	ApprovalPolicy       string     `json:"approvalPolicy"`
+	ApprovalsReviewer    string     `json:"approvalsReviewer"`
+	SandboxPolicy        string     `json:"sandboxPolicy"`
 	Provider             string     `json:"provider"`
 	ExecutionType        string     `json:"executionType" enums:"cloud,gateway"`
 	ExecutionDeviceID    string     `json:"executionDeviceID"`
@@ -138,6 +141,9 @@ func toConversationResponse(item *model.Conversation) ConversationResponse {
 		LabelsJSON:           labelsJSON,
 		Model:                item.Model,
 		ReasoningEffort:      item.ReasoningEffort,
+		ApprovalPolicy:       item.ApprovalPolicy,
+		ApprovalsReviewer:    item.ApprovalsReviewer,
+		SandboxPolicy:        item.SandboxPolicy,
 		Provider:             item.Provider,
 		ExecutionType:        item.ExecutionType,
 		ExecutionDeviceID:    item.ExecutionDeviceID,

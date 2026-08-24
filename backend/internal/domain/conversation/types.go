@@ -23,6 +23,9 @@ type Conversation struct {
 	LabelsManuallyManaged bool
 	Model                 string
 	ReasoningEffort       string
+	ApprovalPolicy        string
+	ApprovalsReviewer     string
+	SandboxPolicy         string
 	Provider              string
 	ExecutionType         string
 	ExecutionDeviceID     string
