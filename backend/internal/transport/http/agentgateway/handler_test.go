@@ -1,16 +1,58 @@
 package agentgateway
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
+
+func TestStreamBrowserEventsPushesHubChanges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler := &Handler{hub: newBridgeHub()}
+	router := gin.New()
+	router.GET("/events", func(c *gin.Context) {
+		c.Set(middleware.ContextKeyUserID, uint(7))
+		handler.StreamBrowserEvents(c)
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := server.Client()
+	client.Timeout = 2 * time.Second
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if contentType := response.Header.Get("Content-Type"); !strings.Contains(contentType, "application/x-ndjson") {
+		t.Fatalf("event stream content type = %q", contentType)
+	}
+
+	reader := bufio.NewReader(response.Body)
+	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "{\"type\":\"ready\"}\n" {
+		t.Fatalf("ready event = %q, %v", line, readErr)
+	}
+	handler.hub.notifyUser(7)
+	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "{\"type\":\"change\"}\n" {
+		t.Fatalf("change event = %q, %v", line, readErr)
+	}
+}
 
 func TestRuntimeProfileProjectionPreservesApprovalReviewerCapability(t *testing.T) {
 	items := toRuntimeProfileDocs([]appagent.RuntimeProfileView{{

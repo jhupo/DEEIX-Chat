@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -189,51 +188,14 @@ export function RAGCitationList({
   );
 }
 
-function StreamingTraceText({
-  text,
-  active,
-  className,
-}: {
-  text: string;
-  active: boolean;
-  className?: string;
-}) {
-  const chars = React.useMemo(() => Array.from(text), [text]);
-  const [visibleCount, setVisibleCount] = React.useState(() => (active ? 0 : chars.length));
-
-  React.useEffect(() => {
-    if (!active) {
-      setVisibleCount(chars.length);
-      return;
-    }
-
-    setVisibleCount(0);
-    const timer = window.setInterval(() => {
-      setVisibleCount((current) => {
-        if (current >= chars.length) {
-          window.clearInterval(timer);
-          return chars.length;
-        }
-        return Math.min(chars.length, current + 2);
-      });
-    }, 18);
-
-    return () => window.clearInterval(timer);
-  }, [active, chars.length, text]);
-
-  return <span className={className}>{chars.slice(0, visibleCount).join("")}</span>;
-}
-
 function TraceStageRows({
   stages,
-  streaming,
   citations,
   fileBadges,
   payloadJson,
   labels,
 }: {
   stages: TraceStage[];
-  streaming: boolean;
   citations: RAGCitation[];
   fileBadges: FileContextBadge[];
   payloadJson?: string;
@@ -243,7 +205,6 @@ function TraceStageRows({
     <ol className="space-y-0.5">
       {stages.map((stage, index) => {
         const isError = isTraceStageError(stage);
-        const activeStreamingStage = streaming && index === stages.length - 1;
         const detailItems = stage.details.length > 0 ? stage.details : stage.detail ? [stage.detail] : [];
         const displayDetailItems = localizeTraceDetailItems(stage, detailItems, payloadJson, labels);
         const showCitations = isRAGTraceStage(stage) && citations.length > 0;
@@ -289,16 +250,14 @@ function TraceStageRows({
                     className={cn("flex min-w-0 gap-1.5 text-muted-foreground/84", isError && "text-destructive/80")}
                   >
                     <span className="mt-[0.45rem] size-1 shrink-0 rounded-full bg-current opacity-45" />
-                    <p className="min-w-0 whitespace-normal break-words">
-                      <StreamingTraceText text={normalizeTraceListItem(detailText)} active={activeStreamingStage} />
-                    </p>
+                    <p className="min-w-0 whitespace-normal break-words">{normalizeTraceListItem(detailText)}</p>
                   </div>
                 ) : (
                   <p
                     key={`${stage.label}-${index}-detail-${detailIndex}`}
                     className={cn("min-w-0 whitespace-normal break-words text-muted-foreground/84", isError && "text-destructive/80")}
                   >
-                    <StreamingTraceText text={detailText} active={activeStreamingStage} />
+                    {detailText}
                   </p>
                 )
               ))}
@@ -334,7 +293,6 @@ export function TraceContent({
     return (
       <TraceStageRows
         stages={stages}
-        streaming={streaming}
         citations={citations}
         fileBadges={fileBadges}
         payloadJson={block.payloadJson}

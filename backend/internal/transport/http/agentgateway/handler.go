@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -25,6 +26,46 @@ func NewHandler(service *appagent.Service) *Handler {
 	hub := newBridgeHub()
 	service.SetNotifier(hub.notifyUser)
 	return &Handler{service: service, hub: hub}
+}
+
+func (h *Handler) StreamBrowserEvents(c *gin.Context) {
+	events, unsubscribe := h.hub.subscribeUser(middleware.MustUserID(c))
+	defer unsubscribe()
+
+	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	encoder := json.NewEncoder(c.Writer)
+	writeEvent := func(eventType string) bool {
+		if err := encoder.Encode(map[string]string{"type": eventType}); err != nil {
+			return false
+		}
+		c.Writer.Flush()
+		return true
+	}
+	if !writeEvent("ready") {
+		return
+	}
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-events:
+			if !writeEvent("change") {
+				return
+			}
+		case <-heartbeat.C:
+			if !writeEvent("heartbeat") {
+				return
+			}
+		}
+	}
 }
 
 type enrollmentChallengeRequest struct {

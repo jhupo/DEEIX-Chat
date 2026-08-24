@@ -374,18 +374,11 @@ function useLiveElapsedMS(enabled: boolean, createdAt?: string): number {
       return;
     }
 
-    let frameID: number | null = null;
     let timerID: number | null = null;
 
     const tick = () => {
       const nextElapsedMS = Math.max(0, Date.now() - startedAt);
       setElapsedMS(nextElapsedMS);
-
-      if (nextElapsedMS < 9999) {
-        frameID = window.requestAnimationFrame(tick);
-        return;
-      }
-
       const delayToNextSecond = Math.max(1, 1000 - (nextElapsedMS % 1000));
       timerID = window.setTimeout(tick, delayToNextSecond);
     };
@@ -393,9 +386,6 @@ function useLiveElapsedMS(enabled: boolean, createdAt?: string): number {
     tick();
 
     return () => {
-      if (frameID !== null) {
-        window.cancelAnimationFrame(frameID);
-      }
       if (timerID !== null) {
         window.clearTimeout(timerID);
       }

@@ -7,6 +7,7 @@ type Module struct{ Handler *Handler }
 func NewModule(handler *Handler) *Module { return &Module{Handler: handler} }
 
 func (m *Module) RegisterRoutes(group *gin.RouterGroup) {
+	group.GET("/agent/events/stream", m.Handler.StreamBrowserEvents)
 	group.GET("/agent/devices", m.Handler.ListDevices)
 	group.GET("/agent/devices/:device_id", m.Handler.GetDevice)
 	group.PATCH("/agent/devices/:device_id", m.Handler.RenameDevice)

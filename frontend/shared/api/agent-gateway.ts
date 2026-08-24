@@ -6,7 +6,42 @@ import type {
   WorkspaceDoc,
 } from "@deeix/api-contract";
 
-import { authedRequest } from "@/shared/api/authed-client";
+import { authedFetch, authedRequest } from "@/shared/api/authed-client";
+
+export async function streamAgentEvents(
+  accessToken: string,
+  signal: AbortSignal,
+  onEvent: (type: "ready" | "change") => void,
+): Promise<void> {
+  const response = await authedFetch(
+    "/api/v1/agent/events/stream",
+    { accessToken, signal },
+    true,
+  );
+  if (!response.body) {
+    throw new Error("agent event stream body is empty");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const raw = line.trim();
+      if (!raw) continue;
+      const event: unknown = JSON.parse(raw);
+      if (event !== null && typeof event === "object") {
+        const type = Reflect.get(event, "type");
+        if (type === "ready" || type === "change") onEvent(type);
+      }
+    }
+    if (done) return;
+  }
+}
 
 export type AgentDeviceDTO = Omit<DeviceResponseDocData, "lastSeenAt" | "platform" | "status"> & {
   platform: "windows" | "darwin" | "linux";
