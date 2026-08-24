@@ -109,6 +109,62 @@ function CommandRow({ item }: { item: AgentCommandActivity }) {
   );
 }
 
+type ActivityGroup =
+  | { key: string; kind: "commands"; items: AgentCommandActivity[] }
+  | { key: string; kind: "item"; item: AgentActivityItem };
+
+function groupActivityItems(items: AgentActivityItem[]): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  for (const item of items) {
+    const previous = groups.at(-1);
+    if (item.kind === "command") {
+      if (previous?.kind === "commands") {
+        previous.items.push(item);
+      } else {
+        groups.push({ key: `commands:${item.itemID}`, kind: "commands", items: [item] });
+      }
+      continue;
+    }
+    groups.push({ key: item.itemID, kind: "item", item });
+  }
+  return groups;
+}
+
+function CommandGroup({ items }: { items: AgentCommandActivity[] }) {
+  const t = useTranslations("chat.agent");
+  const [open, setOpen] = React.useState(false);
+  const running = items.some((item) => item.status === "running");
+
+  return (
+    <section className="border-t border-border/25 py-1.5 first:border-t-0">
+      <button
+        type="button"
+        className="group/commands flex w-full min-w-0 items-center gap-1.5 rounded-sm py-0.5 text-left text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/35"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <TerminalSquare className="size-3.5 shrink-0" />
+        <span className={cn("min-w-0 truncate", running && "shimmer")}>
+          {t(running ? "activity.commandsRunning" : "activity.commandsRan", { count: items.length })}
+        </span>
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="ml-5 mt-1">
+          {items.map((item) => (
+            <CommandRow key={item.itemID} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function interactionMatchesItem(interaction: ConversationInteractionDTO, item: AgentActivityItem): boolean {
   if (interaction.kind === "command_approval" && item.kind === "command") {
     const requestCommand = interaction.request.command?.trim();
@@ -187,6 +243,7 @@ export function MessageAgentActivity({
 }) {
   const t = useTranslations("chat.agent");
   const interactions = run.interactions.filter((item) => item.status === "resolved");
+  const activityGroups = React.useMemo(() => groupActivityItems(run.items), [run.items]);
   const matched = new Set<string>();
 
   return (
@@ -201,15 +258,20 @@ export function MessageAgentActivity({
           <AgentPlanSteps run={run} />
         </section>
       ) : null}
-      {run.items.map((item) => {
+      {activityGroups.map((group) => {
+        const items = group.kind === "commands" ? group.items : [group.item];
         const inlineInteractions = interactions.filter((interaction) => {
-          if (!interactionMatchesItem(interaction, item)) return false;
+          if (!items.some((item) => interactionMatchesItem(interaction, item))) return false;
           matched.add(interaction.interactionID);
           return true;
         });
         return (
-          <React.Fragment key={item.itemID}>
-            <ActivityItemRow item={item} />
+          <React.Fragment key={group.key}>
+            {group.kind === "commands" ? (
+              <CommandGroup items={group.items} />
+            ) : (
+              <ActivityItemRow item={group.item} />
+            )}
             {inlineInteractions.map((interaction) => <MessageAgentInteractionControl key={interaction.interactionID} interaction={interaction} />)}
           </React.Fragment>
         );

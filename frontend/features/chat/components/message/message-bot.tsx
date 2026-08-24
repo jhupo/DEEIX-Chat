@@ -204,6 +204,27 @@ export function ChatMessageBot({
   const liveProcessTrace = useLiveUpstreamThinkTrace(item.runID);
   const agentRun = useAgentRunSnapshot(item.runID);
   const hasAgentActivity = hasAgentRunActivity(agentRun);
+  const metaItem = React.useMemo(
+    () => ({
+      ...item,
+      platformModelName: agentRun.actualModel || item.platformModelName,
+      inputTokens:
+        item.inputTokens && item.inputTokens > 0 ? item.inputTokens : agentRun.usage?.inputTokens,
+      outputTokens:
+        item.outputTokens && item.outputTokens > 0 ? item.outputTokens : agentRun.usage?.outputTokens,
+      cacheReadTokens:
+        item.cacheReadTokens && item.cacheReadTokens > 0
+          ? item.cacheReadTokens
+          : agentRun.usage?.cacheReadTokens,
+      reasoningTokens:
+        item.reasoningTokens && item.reasoningTokens > 0
+          ? item.reasoningTokens
+          : agentRun.usage?.reasoningTokens,
+      latencyMS:
+        item.latencyMS && item.latencyMS > 0 ? item.latencyMS : agentRun.durationMS ?? undefined,
+    }),
+    [agentRun.actualModel, agentRun.durationMS, agentRun.usage, item],
+  );
   const processTrace =
     liveProcessTrace && (item.isStreaming || !item.processTrace)
       ? mergeLiveUpstreamThinkTrace(item.processTrace, liveProcessTrace)
@@ -406,7 +427,7 @@ export function ChatMessageBot({
       {screenshotMeta}
 
       <AssistantMessageMeta
-        item={item}
+        item={metaItem}
         busy={busy}
         reaction={reaction}
         onCycleBranch={onCycleMessageBranch}

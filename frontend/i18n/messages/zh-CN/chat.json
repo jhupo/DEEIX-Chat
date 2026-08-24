@@ -63,6 +63,8 @@
         "inProgress": "进行中"
       },
       "commandFallback": "命令",
+      "commandsRunning": "正在运行 {count} 条命令",
+      "commandsRan": "运行了 {count} 条命令",
       "truncated": "内容已截断",
       "exitCode": "退出码 {code}",
       "fileChanges": "已更改 {count} 个文件",

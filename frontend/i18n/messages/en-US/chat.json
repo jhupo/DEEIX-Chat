@@ -63,6 +63,8 @@
         "inProgress": "In progress"
       },
       "commandFallback": "Command",
+      "commandsRunning": "Running {count} commands",
+      "commandsRan": "Ran {count} commands",
       "truncated": "Content truncated",
       "exitCode": "Exit code {code}",
       "fileChanges": "{count} files changed",
