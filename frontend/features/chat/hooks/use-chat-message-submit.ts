@@ -12,6 +12,7 @@ import {
   parseAttachments,
   toBranchKey,
 } from "@/features/chat/model/chat-thread";
+import { isConversationStreamDisconnect } from "@/features/chat/model/conversation-load-policy";
 import { sanitizeConversationOptions } from "@/features/chat/model/conversation-options";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import {
@@ -686,7 +687,7 @@ export function useChatMessageSubmit({
         completedKeys.push(exchangeKey);
         continue;
       }
-      if (exchange.assistantPending || !exchange.runID?.trim()) {
+      if (!exchange.runID?.trim()) {
         continue;
       }
       const serverAssistant = combinedMessages.find(
@@ -1438,18 +1439,22 @@ export function useChatMessageSubmit({
         flushStreamTextNow(exchangeKey);
         flushUpstreamThinkNow(exchangeKey);
         resetStreamBuffer(exchangeKey);
-        if (streamAbortController.signal.aborted) {
+        const streamDisconnected = isConversationStreamDisconnect(error);
+        if (streamAbortController.signal.aborted || streamDisconnected) {
           shouldKeepConversationLayout = true;
           releaseAttachments(effectiveAttachments);
           updatePendingExchange(exchangeKey, (current) => ({
             ...current,
-            assistantPending: false,
-            assistantStreaming: false,
+            assistantPending: streamDisconnected,
+            assistantStreaming: streamDisconnected,
             assistantFileProc: false,
             assistantActivityLabel: undefined,
             assistantProcessTrace: readLiveUpstreamThinkTrace(clientRunID) ?? current.assistantProcessTrace,
             assistantInlineAlert: undefined,
           }));
+          if (streamDisconnected && targetConversationID && conversationScopeKeyRef.current === targetConversationScopeKey) {
+            window.setTimeout(reload, 0);
+          }
           return false;
         }
         const errorMessage = resolveErrorMessage(error, t("retryLater"));

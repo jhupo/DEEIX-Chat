@@ -270,7 +270,26 @@ function upsertItem(items: AgentActivityItem[], item: AgentActivityItem): AgentA
   if (index < 0) return [...items, item];
   const next = items.slice();
   const current = next[index];
-  next[index] = current.kind === item.kind ? { ...current, ...item } as AgentActivityItem : item;
+  if (current.kind === "file" && item.kind === "file") {
+    const currentFiles = new Map(current.files.map((file) => [file.path, file]));
+    for (const file of item.files) {
+      const previous = currentFiles.get(file.path);
+      currentFiles.set(file.path, previous && !file.diff ? {
+        ...file,
+        diff: previous.diff,
+        truncated: previous.truncated || file.truncated,
+      } : file);
+    }
+    next[index] = {
+      ...current,
+      ...item,
+      diff: item.diff || current.diff,
+      truncated: current.truncated || item.truncated,
+      files: [...currentFiles.values()],
+    };
+  } else {
+    next[index] = current.kind === item.kind ? { ...current, ...item } as AgentActivityItem : item;
+  }
   return next;
 }
 
@@ -383,7 +402,7 @@ function reduceAgentExecutionEvent(
         status: currentItem?.status ?? "running",
         files: files.length > 0 ? files : currentItem?.files ?? [],
         diff: rawString(payload.patch ?? payload.diff) || currentItem?.diff || "",
-        truncated: currentItem?.truncated ?? false,
+        truncated: currentItem?.truncated === true || payload.truncated === true,
       });
       break;
     }

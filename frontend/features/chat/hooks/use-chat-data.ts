@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import * as React from "react";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import {
+  shouldRetryConversationStream,
   shouldRefreshMessagesAfterHistory,
   shouldSurfaceConversationLoadError,
 } from "@/features/chat/model/conversation-load-policy";
@@ -19,10 +20,12 @@ import {
 import type { MessageDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
-const MESSAGE_PAGE_SIZE = 100;
+const MESSAGE_PAGE_SIZE = 30;
 const HISTORY_POLL_INTERVAL_MS = 500;
 const HISTORY_POLL_ATTEMPTS = 250;
 const RESUME_TEXT_FLUSH_INTERVAL_MS = 100;
+const RESUME_RETRY_INITIAL_DELAY_MS = 500;
+const RESUME_RETRY_MAX_DELAY_MS = 5_000;
 
 type ChatDataState = {
   loading: boolean;
@@ -468,9 +471,34 @@ export function useChatData(
     };
     setResumingRunID(pendingRunID);
 
-    async function resume() {
+    const reconcileTerminalRun = async (token: string) => {
       try {
-        const token = await resolveAccessToken();
+        const latest = await listMessagesPage(token, conversationID, {
+          page: 1,
+          pageSize: MESSAGE_PAGE_SIZE,
+          tail: true,
+        });
+        const assistant = latest.results.find(
+          (message) => message.role === "assistant" && message.runID === pendingRunID,
+        );
+        if (!assistant || assistant.status.trim().toLowerCase() === "pending") {
+          return false;
+        }
+        refreshedPendingRunsRef.current.add(pendingRunID);
+        clearResumeCheckpoint(pendingRunID);
+        reload();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let resumeRetryDelay = RESUME_RETRY_INITIAL_DELAY_MS;
+
+    async function resume() {
+      let retry = false;
+      let token = "";
+      try {
+        token = (await resolveAccessToken()) ?? "";
         if (!token || controller.signal.aborted) {
           return;
         }
@@ -479,7 +507,10 @@ export function useChatData(
         }
         const completed = await resumeMessageGenerationStream(token, pendingRunID, {
           signal: controller.signal,
-          afterSeq,
+          afterSeq: Math.max(
+            resumeSeqByRunRef.current[pendingRunID] ?? afterSeq,
+            generationSeqByRunRef?.current[pendingRunID] ?? afterSeq,
+          ),
           onExecutionEvent: (event) => applyAgentExecutionEvent(event, conversationID),
           onEventSeq: (seq) => {
             if (isResumeInactive()) {
@@ -581,23 +612,43 @@ export function useChatData(
           },
         });
         flushPendingText();
-        if (!controller.signal.aborted && completed) {
+        if (!isResumeInactive() && completed) {
           refreshedPendingRunsRef.current.add(pendingRunID);
           clearResumeCheckpoint(pendingRunID);
           reload();
+          return;
         }
+        if (await reconcileTerminalRun(token)) {
+          return;
+        }
+        retry = true;
       } catch (error) {
-        if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
+        if (isResumeInactive() || (error instanceof Error && error.name === "AbortError")) {
+          return;
+        }
+        if (!shouldRetryConversationStream(error)) {
           clearResumeCheckpoint(pendingRunID);
-          setResumingRunID("");
+          return;
         }
+        if (token && (await reconcileTerminalRun(token))) {
+          return;
+        }
+        retry = true;
       } finally {
-        if (activeResumeStreamRef.current?.controller === controller) {
-          activeResumeStreamRef.current = null;
+        if (!retry) {
+          if (activeResumeStreamRef.current?.controller === controller) {
+            activeResumeStreamRef.current = null;
+          }
+          if (!controller.signal.aborted && !closed) {
+            setResumingRunID("");
+          }
         }
-        if (!controller.signal.aborted && !closed) {
-          setResumingRunID("");
-        }
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, resumeRetryDelay));
+      resumeRetryDelay = Math.min(resumeRetryDelay * 2, RESUME_RETRY_MAX_DELAY_MS);
+      if (!isResumeInactive()) {
+        void resume();
       }
     }
 

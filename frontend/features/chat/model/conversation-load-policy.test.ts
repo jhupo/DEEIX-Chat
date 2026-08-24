@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error Node's TypeScript runner requires an explicit extension.
-import { shouldRefreshMessagesAfterHistory, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
+import { isConversationStreamDisconnect, shouldRefreshMessagesAfterHistory, shouldRetryConversationStream, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
 
 test("keeps persisted messages visible when gateway history synchronization fails", () => {
   assert.equal(shouldSurfaceConversationLoadError(12), false);
@@ -13,4 +13,22 @@ test("refreshes messages only when history could add the initial page", () => {
   assert.equal(shouldRefreshMessagesAfterHistory(12, true), false);
   assert.equal(shouldRefreshMessagesAfterHistory(12, false), true);
   assert.equal(shouldRefreshMessagesAfterHistory(0, true), true);
+});
+
+test("reconnects recoverable conversation stream failures without surfacing an interruption", () => {
+  assert.equal(isConversationStreamDisconnect({ name: "ConversationStreamDisconnectError" }), true);
+  assert.equal(isConversationStreamDisconnect({ name: "ApiNetworkError" }), false);
+  assert.equal(isConversationStreamDisconnect(new TypeError("render failed")), false);
+  assert.equal(shouldRetryConversationStream({ name: "ApiNetworkError" }), true);
+  assert.equal(shouldRetryConversationStream({ name: "ApiError", status: 404 }), true);
+  assert.equal(
+    shouldRetryConversationStream({
+      name: "ApiError",
+      status: 200,
+      errorCode: "conversation_run.stream_interrupted",
+    }),
+    true,
+  );
+  assert.equal(shouldRetryConversationStream({ name: "ApiError", status: 400 }), false);
+  assert.equal(shouldRetryConversationStream(new Error("invalid stream event")), false);
 });

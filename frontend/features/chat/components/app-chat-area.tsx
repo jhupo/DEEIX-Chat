@@ -1690,7 +1690,6 @@ export function AppChatArea() {
                   onModelCatalogRefresh={refreshModelCatalogForComposer}
                   onEditImageAttachment={onEditGeneratedImageAttachment}
                   onOpenCodeArtifact={artifactWorkspace.openArtifact}
-                  onOpenAgentDiff={artifactWorkspace.openDiff}
                   onCycleMessageBranch={onCycleMessageBranch}
                   onToggleStar={onToggleActiveConversationStar}
                   onRename={onRenameActiveConversation}

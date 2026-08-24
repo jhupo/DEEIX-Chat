@@ -16,7 +16,7 @@ import { type AssistantReaction } from "@/features/chat/components/message/messa
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { ChatMessageUser } from "@/features/chat/components/message/message-user";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
-import type { OpenAgentDiffInput, OpenCodeArtifactInput } from "@/features/chat/model/chat-artifacts";
+import type { OpenCodeArtifactInput } from "@/features/chat/model/chat-artifacts";
 import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConversationShareExportIconDropdown } from "@/shared/components/conversation-share-export-menu";
@@ -87,7 +87,6 @@ type ChatAreaProps = {
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
-  onOpenAgentDiff?: (message: ChatAreaMessage, diff: OpenAgentDiffInput) => void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onToggleStar?: () => void | Promise<void>;
   onRename?: (title: string) => void | Promise<void>;
@@ -250,7 +249,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onCycleMessageBranch,
   onReactAssistantMessage,
   onOpenCodeArtifact,
-  onOpenAgentDiff,
   markdownRender,
   showModelInfo,
   showLatency,
@@ -277,7 +275,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onReactAssistantMessage: (publicID: string, reaction: AssistantReaction) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
-  onOpenAgentDiff?: (message: ChatAreaMessage, diff: OpenAgentDiffInput) => void;
   markdownRender: boolean;
   showModelInfo: boolean;
   showLatency: boolean;
@@ -351,7 +348,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         attachmentContentLoader={attachmentContentLoader}
         onEditImageAttachment={onEditImageAttachment}
         artifactActions={artifactActions}
-        onOpenAgentDiff={onOpenAgentDiff ? (diff) => onOpenAgentDiff(item, diff) : undefined}
         markdownRender={markdownRender}
         showModelInfo={showModelInfo}
         showLatency={showLatency}
@@ -393,7 +389,6 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   previous.attachmentContentLoader === next.attachmentContentLoader &&
   previous.onEditImageAttachment === next.onEditImageAttachment &&
   previous.onOpenCodeArtifact === next.onOpenCodeArtifact &&
-  previous.onOpenAgentDiff === next.onOpenAgentDiff &&
   areChatAreaMessagesRenderEqual(previous.item, next.item)
 ));
 
@@ -417,7 +412,6 @@ export function ChatArea({
   attachmentContentLoader,
   onEditImageAttachment,
   onOpenCodeArtifact,
-  onOpenAgentDiff,
   onCycleMessageBranch,
   onToggleStar,
   onRename,
@@ -604,7 +598,6 @@ export function ChatArea({
                       onCycleMessageBranch={stableOnCycleMessageBranch}
                       onReactAssistantMessage={stableOnReactAssistantMessage}
                       onOpenCodeArtifact={onOpenCodeArtifact}
-                      onOpenAgentDiff={onOpenAgentDiff}
                       markdownRender={markdownRender}
                       showModelInfo={showModelInfo}
                       showLatency={showLatency}

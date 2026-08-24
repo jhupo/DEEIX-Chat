@@ -14,7 +14,6 @@ import {
 import { useTranslations } from "next-intl";
 import * as React from "react";
 
-import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageAgentInteractionControl } from "@/features/chat/components/message/message-agent-interaction";
 import { MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
@@ -356,39 +355,88 @@ function collectChangedFiles(run: AgentRunSnapshot): AgentFileChange[] {
   for (const file of run.files) byPath.set(file.path, file);
   for (const item of run.items) {
     if (item.kind !== "file") continue;
-    for (const file of item.files) byPath.set(file.path, file);
+    for (const file of item.files) {
+      byPath.set(file.path, file.diff || !item.diff ? file : {
+        ...file,
+        diff: item.diff,
+        truncated: file.truncated || item.truncated,
+      });
+    }
   }
   return [...byPath.values()];
 }
 
-export function MessageAgentFileSummary({
-  run,
-  onOpenDiff,
+function fileName(path: string): string {
+  return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) || path;
+}
+
+function diffLineClassName(line: string): string {
+  if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) return "text-sky-700 dark:text-sky-300";
+  if (line.startsWith("+")) return "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300";
+  if (line.startsWith("-")) return "bg-red-500/10 text-red-800 dark:text-red-300";
+  return "text-muted-foreground";
+}
+
+function FileDiffTooltip({
+  file,
+  fallbackDiff,
+  fallbackTruncated,
 }: {
-  run: AgentRunSnapshot;
-  onOpenDiff?: (input: { diff: string; files: AgentFileChange[]; truncated: boolean }) => void;
+  file: AgentFileChange;
+  fallbackDiff: string;
+  fallbackTruncated: boolean;
 }) {
+  const t = useTranslations("chat.agent");
+  const diffLines = (file.diff || fallbackDiff).trimEnd().split(/\r?\n/);
+  const previewLines = diffLines.slice(0, 80);
+  const truncated = file.truncated || !file.diff && fallbackTruncated || diffLines.length > previewLines.length;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="min-w-0 flex-1 truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/35">
+          {fileName(file.path)}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        className="max-h-[min(28rem,70dvh)] w-[min(46rem,calc(100vw-1.5rem))] overflow-auto border border-border bg-popover p-0 text-popover-foreground shadow-lg"
+      >
+        <div className="sticky top-0 z-10 border-b border-border/60 bg-popover px-3 py-2 font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">
+          {file.path}
+        </div>
+        {previewLines.some(Boolean) ? (
+          <pre className="min-w-max py-2 font-mono text-[11px] leading-5">
+            {previewLines.map((line, index) => (
+              <span key={`${index}:${line}`} className={cn("block min-h-5 px-3 whitespace-pre", diffLineClassName(line))}>{line || " "}</span>
+            ))}
+          </pre>
+        ) : null}
+        {truncated ? <div className="border-t border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">{t("activity.truncated")}</div> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function MessageAgentFileSummary({ run }: { run: AgentRunSnapshot }) {
   const t = useTranslations("chat.agent");
   const files = collectChangedFiles(run);
   if (run.status === "running" || run.status === "waiting_interaction" || files.length === 0 && !run.diff) return null;
 
   return (
     <div className="mt-5 w-full border-t border-border/35 pt-3">
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-auto max-w-full justify-start gap-2 px-0 py-1 text-[12px] font-medium text-muted-foreground hover:bg-transparent hover:text-foreground"
-        disabled={!onOpenDiff}
-        onClick={() => onOpenDiff?.({ diff: run.diff, files, truncated: run.diffTruncated })}
-      >
+      <div className="flex max-w-full items-center gap-2 py-1 text-[12px] font-medium text-muted-foreground">
         <GitCompareArrows className="size-3.5 shrink-0" />
         <span className="truncate">{t("activity.fileChanges", { count: files.length })}</span>
-      </Button>
+      </div>
       {files.length > 0 ? (
         <ul className="mt-1 space-y-0.5 pl-5 font-mono text-[11px] text-muted-foreground/72">
           {files.map((file) => (
             <li key={file.fileID} className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
+              <FileDiffTooltip file={file} fallbackDiff={run.diff} fallbackTruncated={run.diffTruncated} />
               {file.additions !== null ? <span className="text-foreground/65">+{file.additions}</span> : null}
               {file.deletions !== null ? <span className="text-destructive/70">-{file.deletions}</span> : null}
             </li>

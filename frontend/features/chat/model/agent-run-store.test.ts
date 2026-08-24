@@ -65,3 +65,55 @@ test("shows composer activity only for active plans or unresolved interactions",
     interactions: [{ status: "pending" }],
   }), true);
 });
+
+test("preserves a file patch when the completed item omits it", () => {
+  setAgentRunContext("file-test-context", "conversation-files");
+
+  applyAgentExecutionEvents([
+    {
+      runID: "run-files",
+      seq: 1,
+      kind: "item/started",
+      payload: {
+        item: {
+          itemID: "file-item",
+          type: "fileChange",
+          changes: [{ path: "src/a.ts", change: "update" }, { path: "src/b.ts", change: "update" }],
+        },
+      },
+      occurredAt: "2026-08-25T00:00:01Z",
+    },
+    {
+      runID: "run-files",
+      seq: 2,
+      kind: "item/fileChange/patchUpdated",
+      payload: {
+        itemID: "file-item",
+        patch: "diff --git a/src/a.ts b/src/a.ts\n-old\n+new",
+        truncated: true,
+      },
+      occurredAt: "2026-08-25T00:00:02Z",
+    },
+    {
+      runID: "run-files",
+      seq: 3,
+      kind: "item/completed",
+      payload: {
+        item: {
+          itemID: "file-item",
+          type: "fileChange",
+          status: "completed",
+          changes: [{ path: "src/a.ts", change: "update" }, { path: "src/b.ts", change: "update" }],
+        },
+      },
+      occurredAt: "2026-08-25T00:00:03Z",
+    },
+  ], "conversation-files");
+
+  const item = getAgentRunSnapshot("run-files").items[0];
+  assert.equal(item?.kind, "file");
+  if (item?.kind !== "file") return;
+  assert.equal(item.diff, "diff --git a/src/a.ts b/src/a.ts\n-old\n+new");
+  assert.equal(item.truncated, true);
+  assert.deepEqual(item.files.map((file) => file.path), ["src/a.ts", "src/b.ts"]);
+});

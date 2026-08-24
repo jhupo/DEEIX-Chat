@@ -52,9 +52,16 @@ import type {
   UpdateConversationProjectRequest,
   UpdateMessageRequest,
 } from "@/shared/api/conversation.types";
-import { ApiError, apiRequest, pathParam } from "@/shared/api/http-client";
+import { ApiError, ApiNetworkError, apiRequest, pathParam } from "@/shared/api/http-client";
 
 type RawTraceBlock = MessageTraceBlockResponse;
+
+class ConversationStreamDisconnectError extends ApiNetworkError {
+  constructor(cause?: unknown) {
+    super(cause);
+    this.name = "ConversationStreamDisconnectError";
+  }
+}
 
 type RawProcessTrace = Omit<
   MessageProcessTraceResponse,
@@ -1119,7 +1126,7 @@ async function readConversationStream(
       if (options.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
       }
-      throw error;
+      throw new ConversationStreamDisconnectError(error);
     }
 
     const { done, value } = readResult;
@@ -1143,7 +1150,12 @@ async function readConversationStream(
 
   const tail = buffer.trim();
   if (tail) {
-    const event = normalizeStreamEvent(JSON.parse(tail));
+    let event: StreamMessageEvent;
+    try {
+      event = normalizeStreamEvent(JSON.parse(tail));
+    } catch (error) {
+      throw new ConversationStreamDisconnectError(error);
+    }
     const nextCompleted = handleStreamEvent(event, options, response.status);
     if (nextCompleted) {
       completed = nextCompleted;
@@ -1175,12 +1187,12 @@ async function postConversationStream<TPayload>(
   );
 
   if (!response.body) {
-    throw new ApiError("stream body is empty", response.status);
+    throw new ConversationStreamDisconnectError(new Error("stream body is empty"));
   }
 
   const completed = await readConversationStream(response, options);
   if (!completed) {
-    throw new ApiError("stream completed without final payload", response.status);
+    throw new ConversationStreamDisconnectError(new Error("stream completed without final payload"));
   }
   return completed;
 }

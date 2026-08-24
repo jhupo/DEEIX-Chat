@@ -23,7 +23,6 @@ import type { AssistantReaction } from "@/features/chat/components/message/messa
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
 import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
-import type { OpenAgentDiffInput } from "@/features/chat/model/chat-artifacts";
 import { hasAgentRunActivity, useAgentRunSnapshot } from "@/features/chat/model/agent-run-store";
 import {
   clearLiveUpstreamThinkTrace,
@@ -143,7 +142,6 @@ type ChatMessageBotProps = {
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   artifactActions?: MarkdownArtifactActions;
-  onOpenAgentDiff?: (input: OpenAgentDiffInput) => void;
   showBranchNavigator?: boolean;
   contentWidthClassName?: string;
   screenshotMeta?: React.ReactNode;
@@ -168,7 +166,6 @@ export function ChatMessageBot({
   attachmentContentLoader,
   onEditImageAttachment,
   artifactActions,
-  onOpenAgentDiff,
   showBranchNavigator = true,
   contentWidthClassName = "max-w-[1080px]",
   screenshotMeta,
@@ -403,7 +400,7 @@ export function ChatMessageBot({
         ) : null}
       </div>
 
-      <MessageAgentFileSummary run={agentRun} onOpenDiff={onOpenAgentDiff} />
+      <MessageAgentFileSummary run={agentRun} />
 
       {inlineVideoAttachment ? (
         <MessageInlineVideoPreview attachment={inlineVideoAttachment} loadContent={attachmentContentLoader} />
