@@ -17,6 +17,7 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageAgentInteractionControl } from "@/features/chat/components/message/message-agent-interaction";
+import { MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
 import type {
   AgentActivityItem,
   AgentCommandActivity,
@@ -135,8 +136,27 @@ function ActivityItemRow({ item }: { item: AgentActivityItem }) {
     );
   }
   if (!item.text.trim()) return null;
+  if (item.kind === "reasoning") {
+    return (
+      <div className="border-t border-border/25 py-1.5 first:border-t-0">
+        <MessageUpstreamThink
+          block={{
+            title: "",
+            summary: "",
+            contentMarkdown: item.text,
+            status: item.status === "running" ? "streaming" : item.status,
+            stage: "think",
+          }}
+          streaming={item.status === "running"}
+          autoCollapseReady={item.status !== "running"}
+          embedded
+        />
+        {item.truncated ? <p className="mt-1 text-[11px] text-muted-foreground/60">{t("activity.truncated")}</p> : null}
+      </div>
+    );
+  }
   return (
-    <div className={cn("py-2 text-[13px] leading-6 text-foreground/88", item.kind === "reasoning" && "text-muted-foreground/88")}>
+    <div className="py-2 text-[13px] leading-6 text-foreground/88">
       <StreamdownRender content={item.text} streaming={item.status === "running"} />
       {item.truncated ? <p className="mt-1 text-[11px] text-muted-foreground/60">{t("activity.truncated")}</p> : null}
     </div>

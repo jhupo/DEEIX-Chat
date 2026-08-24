@@ -6,8 +6,8 @@ import { clearLiveUpstreamThinkTrace, upsertLiveUpstreamThinkTrace } from "@/fea
 import type { PendingExchangeMap } from "@/features/chat/types/chat-runtime";
 import type { StreamMessageEvent } from "@/shared/api/conversation.types";
 
-const STREAM_TEXT_FLUSH_INTERVAL_MS = 50;
-const STREAM_THINK_FLUSH_INTERVAL_MS = 40;
+const STREAM_TEXT_FLUSH_INTERVAL_MS = 100;
+const STREAM_THINK_FLUSH_INTERVAL_MS = 120;
 
 type UpstreamThinkDeltaEvent = Extract<StreamMessageEvent, { type: "upstream_think_delta" }>;
 

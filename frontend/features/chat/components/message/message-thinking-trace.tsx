@@ -62,6 +62,22 @@ function traceBlockDisplayText(block: Pick<ChatTraceBlock, "contentMarkdown" | "
   return block.contentMarkdown?.trim() || block.summary?.trim() || "";
 }
 
+export function getReasoningPreview(
+  block: Pick<ChatTraceBlock, "contentMarkdown" | "contentSegments" | "summary">,
+): string {
+  const candidates = [block.summary, ...(block.contentSegments ?? []), block.contentMarkdown];
+  for (const candidate of candidates) {
+    const firstLine = candidate
+      ?.split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (firstLine) {
+      return firstLine;
+    }
+  }
+  return "";
+}
+
 type OrderedThinkBlock = ChatTraceBlock & {
   seq: number;
 };
@@ -198,12 +214,14 @@ export function MessageUpstreamThink({
   autoCollapseReady,
   title,
   subtitle,
+  embedded,
 }: {
   block?: ChatTraceBlock;
   streaming?: boolean;
   autoCollapseReady?: boolean;
   title?: string;
   subtitle?: string;
+  embedded?: boolean;
 }) {
   const labels = useProcessTraceLabels();
   const [accordionValue, setAccordionValue] = React.useState(() => (streaming ? "upstream-think" : ""));
@@ -230,11 +248,12 @@ export function MessageUpstreamThink({
 
   const open = accordionValue === "upstream-think";
   const resolvedTitle = title ?? (streaming ? labels.think.titleActive : labels.think.titleDone);
-  const resolvedSubtitle = subtitle ?? (streaming ? labels.think.subtitleActive : labels.think.subtitleDone);
+  const resolvedSubtitle =
+    subtitle ?? (getReasoningPreview(block) || (streaming ? labels.think.subtitleActive : labels.think.subtitleDone));
   const contentSegments = block.contentSegments?.filter((item) => item.trim()) ?? [];
 
   return (
-    <div className={TRACE_ROOT_CLASS}>
+    <div className={cn(embedded ? "chat-screenshot-omit w-full" : TRACE_ROOT_CLASS)}>
       <Accordion
         type="single"
         collapsible

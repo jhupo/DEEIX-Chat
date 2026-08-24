@@ -16,6 +16,7 @@ import {
   formatAgentRunDuration,
   MessageAgentActivity,
 } from "@/features/chat/components/message/message-agent-activity";
+import { getReasoningPreview } from "@/features/chat/components/message/message-thinking-trace";
 import {
   hasAgentRunActivity,
   type AgentRunSnapshot,
@@ -43,6 +44,16 @@ export { MessageTraceEventBlocks, MessageUpstreamThink } from "@/features/chat/c
 function buildProcessSummary(trace: ChatMessageProcessTrace): string {
   if (trace.process?.summary) {
     return trace.process.summary;
+  }
+  return "";
+}
+
+function buildAgentRunSummary(run: AgentRunSnapshot): string {
+  for (let index = run.items.length - 1; index >= 0; index -= 1) {
+    const item = run.items[index];
+    if (item.kind === "reasoning") {
+      return getReasoningPreview({ contentMarkdown: item.text, summary: "" });
+    }
   }
   return "";
 }
@@ -78,6 +89,7 @@ export function MessageProcessTrace({
 
   if (hasAgentActivity && agentRun) {
     const duration = formatAgentRunDuration(agentRun.durationMS);
+    const summary = buildAgentRunSummary(agentRun);
     const title = agentActive
       ? agentT("activity.title.running")
       : duration
@@ -89,9 +101,12 @@ export function MessageProcessTrace({
         <Accordion type="single" collapsible value={accordionValue} onValueChange={(value) => setAccordionValue(value || "")} className="w-full">
           <AccordionItem value="message-process-trace" className="border-b-0">
             <AccordionTrigger iconPosition="none" className="group/trace min-h-0 justify-between gap-1.5 py-0.5 text-left no-underline hover:no-underline">
-              <Marker render={<span />} className={cn("inline-flex min-h-0 w-auto text-[13px] font-medium transition-colors", !agentActive && "text-muted-foreground group-hover/trace:text-foreground")}>
-                <MarkerContent className={cn("min-w-0", agentActive && "shimmer")}>{title}</MarkerContent>
-              </Marker>
+              <div className="min-w-0 flex-1">
+                <Marker render={<span />} className={cn("inline-flex min-h-0 w-auto text-[13px] font-medium transition-colors", !agentActive && "text-muted-foreground group-hover/trace:text-foreground")}>
+                  <MarkerContent className={cn("min-w-0", agentActive && "shimmer")}>{title}</MarkerContent>
+                </Marker>
+                {!agentActive && summary ? <div className="mt-0.5 truncate text-[11px] font-normal leading-4 text-muted-foreground/62">{summary}</div> : null}
+              </div>
               <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-hover/trace:text-foreground", open && "rotate-180")} />
             </AccordionTrigger>
             <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">

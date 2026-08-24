@@ -3,6 +3,10 @@
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
+import {
+  shouldRefreshMessagesAfterHistory,
+  shouldSurfaceConversationLoadError,
+} from "@/features/chat/model/conversation-load-policy";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
 import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import {
@@ -18,6 +22,7 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 const MESSAGE_PAGE_SIZE = 100;
 const HISTORY_POLL_INTERVAL_MS = 500;
 const HISTORY_POLL_ATTEMPTS = 250;
+const RESUME_TEXT_FLUSH_INTERVAL_MS = 100;
 
 type ChatDataState = {
   loading: boolean;
@@ -109,6 +114,7 @@ export function useChatData(
   const pendingAssistantContentRef = React.useRef("");
   const resumeTextReplayByRunRef = React.useRef<Record<string, ResumeTextReplayState>>({});
   const activeResumeStreamRef = React.useRef<ActiveResumeStream | null>(null);
+  const refreshedPendingRunsRef = React.useRef(new Set<string>());
   // 恢复游标只在对应的可见内容仍被保留时有效，两者必须同步清理。
   const clearResumeCheckpoint = React.useCallback((runID: string) => {
     const normalizedRunID = runID.trim();
@@ -162,7 +168,33 @@ export function useChatData(
           return;
         }
 
+        const initialData = await listMessagesPage(token, conversationID, {
+          page: 1,
+          pageSize: MESSAGE_PAGE_SIZE,
+          tail: true,
+        });
+        if (cancelled) {
+          return;
+        }
+        setState((prev) => {
+          const firstTailMessageID = initialData.results[0]?.id ?? 0;
+          const loadedOlderMessages =
+            isConversationSwitch || firstTailMessageID <= 0 || prev.messages.length <= MESSAGE_PAGE_SIZE
+              ? []
+              : prev.messages.filter((message) => message.id < firstTailMessageID);
+          const messages = [...loadedOlderMessages, ...initialData.results];
+          return {
+            loading: initialData.results.length === 0,
+            loadingOlder: false,
+            errorMsg: "",
+            messages,
+            total: initialData.total,
+            hasOlder: messages.length < initialData.total,
+          };
+        });
+
         let history = await ensureConversationHistory(token, conversationID);
+        const historyWasLoaded = history.status === "loaded";
         for (let attempt = 0; history.status !== "loaded" && attempt < HISTORY_POLL_ATTEMPTS; attempt += 1) {
           if (history.status === "error") {
             throw new Error(history.error || t("loadFailed"));
@@ -175,6 +207,9 @@ export function useChatData(
           throw new Error(history.error || t("loadFailed"));
         }
 
+        if (!shouldRefreshMessagesAfterHistory(initialData.results.length, historyWasLoaded)) {
+          return;
+        }
         const data = await listMessagesPage(token, conversationID, {
           page: 1,
           pageSize: MESSAGE_PAGE_SIZE,
@@ -209,7 +244,11 @@ export function useChatData(
             ...prev,
             loading: false,
             loadingOlder: false,
-            errorMsg: error instanceof Error && error.message ? error.message : t("loadFailed"),
+            errorMsg: shouldSurfaceConversationLoadError(prev.messages.length)
+              ? error instanceof Error && error.message
+                ? error.message
+                : t("loadFailed")
+              : "",
           }));
         }
       }
@@ -322,6 +361,18 @@ export function useChatData(
     active.controller.abort();
     clearResumeCheckpoint(active.runID);
     setResumingRunID("");
+    setState((prev) => {
+      const next = {
+        ...prev,
+        messages: prev.messages.map((message) =>
+          message.runID === active.runID && message.role === "assistant" && message.status === "pending"
+            ? { ...message, status: "interrupted", activityLabel: "" }
+            : message,
+        ),
+      };
+      stateRef.current = next;
+      return next;
+    });
 
     const token = active.accessToken ?? (await resolveAccessToken());
     if (!token) {
@@ -362,6 +413,8 @@ export function useChatData(
 
     const controller = new AbortController();
     let closed = false;
+    let pendingTextDelta = "";
+    let textFlushTimer: number | null = null;
     const afterSeq = Math.max(
       resumeSeqByRunRef.current[pendingRunID] ?? 0,
       generationSeqByRunRef?.current[pendingRunID] ?? 0,
@@ -374,6 +427,34 @@ export function useChatData(
     const isResumeInactive = () => closed || controller.signal.aborted;
     const updateResumeState = (update: (current: ChatDataState) => ChatDataState) => {
       setState((current) => isResumeInactive() ? current : update(current));
+    };
+    const flushPendingText = () => {
+      textFlushTimer = null;
+      const delta = pendingTextDelta;
+      pendingTextDelta = "";
+      if (!delta || isResumeInactive()) return;
+      let replayState = resumeTextReplayByRun[pendingRunID];
+      if (!replayState) {
+        replayState = {
+          baseContent: "",
+          replayedContent: "",
+          visibleContent: "",
+        };
+        resumeTextReplayByRun[pendingRunID] = replayState;
+      }
+      const nextContent = appendResumedTextDelta(replayState, delta);
+      updateResumeState((prev) => ({
+        ...prev,
+        messages: prev.messages.map((message) =>
+          message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
+            ? { ...message, content: nextContent }
+            : message,
+        ),
+      }));
+    };
+    const scheduleTextFlush = () => {
+      if (textFlushTimer !== null) return;
+      textFlushTimer = window.setTimeout(flushPendingText, RESUME_TEXT_FLUSH_INTERVAL_MS);
     };
     resumeTextReplayByRun[pendingRunID] = {
       baseContent,
@@ -437,6 +518,11 @@ export function useChatData(
               return;
             }
             clearResumeTextReplay();
+            pendingTextDelta = "";
+            if (textFlushTimer !== null) {
+              window.clearTimeout(textFlushTimer);
+              textFlushTimer = null;
+            }
             const previewMarkdown = buildMediaImagePreviewMarkdown(event, tSubmit("imagePreviewAlt"));
             if (!previewMarkdown) {
               return;
@@ -454,24 +540,8 @@ export function useChatData(
             if (isResumeInactive()) {
               return;
             }
-            let replayState = resumeTextReplayByRun[pendingRunID];
-            if (!replayState) {
-              replayState = {
-                baseContent: "",
-                replayedContent: "",
-                visibleContent: "",
-              };
-              resumeTextReplayByRun[pendingRunID] = replayState;
-            }
-            const nextContent = appendResumedTextDelta(replayState, delta);
-            updateResumeState((prev) => ({
-              ...prev,
-              messages: prev.messages.map((message) =>
-                message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
-                  ? { ...message, content: nextContent }
-                  : message,
-              ),
-            }));
+            pendingTextDelta += delta;
+            scheduleTextFlush();
           },
           onProcessUpdate: (event) => {
             updateResumeState((prev) => ({
@@ -510,11 +580,9 @@ export function useChatData(
             }));
           },
         });
-        if (!controller.signal.aborted && completed === null) {
-          clearResumeCheckpoint(pendingRunID);
-          reload();
-        }
+        flushPendingText();
         if (!controller.signal.aborted && completed) {
+          refreshedPendingRunsRef.current.add(pendingRunID);
           clearResumeCheckpoint(pendingRunID);
           reload();
         }
@@ -522,7 +590,6 @@ export function useChatData(
         if (!controller.signal.aborted && error instanceof Error && error.name !== "AbortError") {
           clearResumeCheckpoint(pendingRunID);
           setResumingRunID("");
-          reload();
         }
       } finally {
         if (activeResumeStreamRef.current?.controller === controller) {
@@ -537,6 +604,9 @@ export function useChatData(
     void resume();
     return () => {
       closed = true;
+      if (textFlushTimer !== null) {
+        window.clearTimeout(textFlushTimer);
+      }
       controller.abort();
       clearResumeCheckpoint(pendingRunID);
       if (activeResumeStreamRef.current?.controller === controller) {
@@ -564,7 +634,12 @@ export function useChatData(
     ) {
       return;
     }
+    const pendingKey = pendingRunID || pendingAssistant.publicID;
+    if (refreshedPendingRunsRef.current.has(pendingKey)) {
+      return;
+    }
     const timer = window.setTimeout(() => {
+      refreshedPendingRunsRef.current.add(pendingKey);
       reload();
     }, 1500);
     return () => {

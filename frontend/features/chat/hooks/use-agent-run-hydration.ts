@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  applyAgentExecutionEvent,
+  applyAgentExecutionEvents,
   getAgentExecutionRecoverySnapshot,
   replaceActiveAgentInteractions,
   setAgentRunContext,
@@ -65,8 +65,9 @@ export function useAgentRunHydration({
           );
           if (cancelled || events.length === 0) return;
           let nextCursor = cursor;
-          for (const event of events.slice().sort((left, right) => left.seq - right.seq)) {
-            applyAgentExecutionEvent(event, normalizedConversationID);
+          const sortedEvents = events.slice().sort((left, right) => left.seq - right.seq);
+          applyAgentExecutionEvents(sortedEvents, normalizedConversationID);
+          for (const event of sortedEvents) {
             nextCursor = Math.max(nextCursor, event.seq);
           }
           if (nextCursor <= cursor) return;

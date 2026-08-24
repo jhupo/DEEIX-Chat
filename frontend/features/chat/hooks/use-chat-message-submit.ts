@@ -69,7 +69,7 @@ const CONVERSATION_METADATA_REFRESH_INITIAL_DELAY_MS = 800;
 const CONVERSATION_METADATA_REFRESH_MAX_DELAY_MS = 5_000;
 const CONVERSATION_METADATA_REFRESH_BACKOFF = 1.5;
 const MAX_CONCURRENT_RUNS = 5;
-const GENERATION_CANCEL_SETTLEMENT_TIMEOUT_MS = 25_000;
+const GENERATION_CANCEL_SETTLEMENT_TIMEOUT_MS = 10_000;
 
 function resolveSubmitBlockDescription(
   reason: ChatSubmitBlockReason,
@@ -140,6 +140,7 @@ type BranchScope = {
 
 type ActiveStream = BranchScope & {
   controller: AbortController;
+  exchangeKey: string;
   runID: string;
   accessToken: string | null;
   cancelRequested: boolean;
@@ -909,6 +910,7 @@ export function useChatMessageSubmit({
       }
       activeStreamsRef.current.set(clientRunID, {
         controller: streamAbortController,
+        exchangeKey,
         runID: clientRunID,
         ...targetBranchScope,
         accessToken: null,
@@ -1100,9 +1102,15 @@ export function useChatMessageSubmit({
           branchReason: requestExecutionMode === "cloud" ? resolvedBranchReason : "default",
         };
         let terminalStreamError: Extract<StreamMessageEvent, { type: "error" }> | null = null;
+        const acceptsIncrementalUpdate = () =>
+          !activeStreamsRef.current.get(clientRunID)?.cancelRequested;
         const streamOptions: ConversationStreamOptions = {
           signal: streamAbortController.signal,
-          onExecutionEvent: (event) => applyAgentExecutionEvent(event, targetConversationID ?? ""),
+          onExecutionEvent: (event) => {
+            if (acceptsIncrementalUpdate()) {
+              applyAgentExecutionEvent(event, targetConversationID ?? "");
+            }
+          },
           onEventSeq: (seq) => {
             if (generationSeqByRunRef) {
               generationSeqByRunRef.current[clientRunID] = Math.max(
@@ -1115,6 +1123,7 @@ export function useChatMessageSubmit({
             terminalStreamError = event;
           },
           onFileProc: (message) => {
+            if (!acceptsIncrementalUpdate()) return;
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
               assistantFileProc: true,
@@ -1122,6 +1131,7 @@ export function useChatMessageSubmit({
             }));
           },
           onRagSearch: (message) => {
+            if (!acceptsIncrementalUpdate()) return;
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
               assistantFileProc: true,
@@ -1129,6 +1139,7 @@ export function useChatMessageSubmit({
             }));
           },
           onMediaStatus: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             const activityLabel = resolveMediaStatusLabel(event.status, event.message, event.content_type, t);
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
@@ -1137,6 +1148,7 @@ export function useChatMessageSubmit({
             }));
           },
           onMediaImageDelta: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             const previewMarkdown = buildMediaImagePreviewMarkdown(event, t("imagePreviewAlt"));
             if (!previewMarkdown) {
               return;
@@ -1151,12 +1163,14 @@ export function useChatMessageSubmit({
             }));
           },
           onCompactDone: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
               compactDone: { method: event.method, freed_tokens: event.freed_tokens, summary_preview: event.summary_preview },
             }));
           },
           onProcessUpdate: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
               assistantFileProc: false,
@@ -1165,9 +1179,11 @@ export function useChatMessageSubmit({
             }));
           },
           onUpstreamThinkDelta: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             enqueueUpstreamThinkDelta(exchangeKey, event);
           },
           onDelta: (delta) => {
+            if (!acceptsIncrementalUpdate()) return;
             // Always clear assistantFileProc so batched React updates cannot keep the file_proc spinner alive.
             updatePendingExchange(exchangeKey, (current) =>
               current.assistantFileProc
@@ -1177,6 +1193,7 @@ export function useChatMessageSubmit({
             enqueueStreamText(exchangeKey, delta);
           },
           onUsage: (event) => {
+            if (!acceptsIncrementalUpdate()) return;
             updatePendingExchange(exchangeKey, (current) => ({
               ...current,
               assistantInputTokens: event.input_tokens > 0 ? event.input_tokens : current.assistantInputTokens,
@@ -1229,6 +1246,7 @@ export function useChatMessageSubmit({
         resetStreamBuffer(exchangeKey);
         const assistantMessageStatus = completed.assistantMessage.status || "success";
         const assistantMessageSucceeded = assistantMessageStatus === "success";
+        const canceledByUser = activeStreamsRef.current.get(clientRunID)?.cancelRequested === true;
         updatePendingExchange(exchangeKey, (current) => {
           const streamedText = current.assistantText;
           const terminalErrorMessage = terminalStreamError
@@ -1294,7 +1312,8 @@ export function useChatMessageSubmit({
             assistantErrorCode: completed.assistantMessage.errorCode,
             assistantErrorMessage: completed.assistantMessage.errorMessage,
             assistantInlineAlert:
-              completed.assistantMessage.status === "error" || completed.assistantMessage.status === "interrupted"
+              completed.assistantMessage.status === "error" ||
+              (completed.assistantMessage.status === "interrupted" && !canceledByUser)
                 ? {
                     title: t("generationInterrupted"),
                     message: terminalErrorMessage || completedErrorMessage || t("retryLater"),
@@ -1713,12 +1732,26 @@ export function useChatMessageSubmit({
     if (active.cancelRequested) {
       return true;
     }
+
+    active.cancelRequested = true;
+    flushStreamTextNow(active.exchangeKey);
+    flushUpstreamThinkNow(active.exchangeKey);
+    resetStreamBuffer(active.exchangeKey);
+    updatePendingExchange(active.exchangeKey, (current) => ({
+      ...current,
+      assistantPending: false,
+      assistantStreaming: false,
+      assistantFileProc: false,
+      assistantActivityLabel: undefined,
+      assistantProcessTrace: readLiveUpstreamThinkTrace(active.runID) ?? current.assistantProcessTrace,
+      assistantStatus: "interrupted",
+      assistantInlineAlert: undefined,
+    }));
     if (!active.accessToken) {
       active.controller.abort();
       return true;
     }
 
-    active.cancelRequested = true;
     active.cancelSettlementTimer = window.setTimeout(() => {
       if (activeStreamsRef.current.get(active.runID) !== active) {
         return;
@@ -1763,7 +1796,11 @@ export function useChatMessageSubmit({
     currentLeafMessage?.isStreaming,
     currentLeafMessage?.runID,
     currentLeafMessage?.status,
+    flushStreamTextNow,
+    flushUpstreamThinkNow,
     reload,
+    resetStreamBuffer,
+    updatePendingExchange,
   ]);
 
   const onDeleteQueuedMessage = React.useCallback((id: string) => {

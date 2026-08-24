@@ -415,39 +415,75 @@ function isTerminalStatus(status: AgentRunStatus): boolean {
 
 function rebuildRun(runID: string, interactions = runs.get(runID)?.interactions ?? []): AgentRunSnapshot {
   const journal = eventJournals.get(runID);
-  let rebuilt = [...(journal?.values() ?? [])]
+  const rebuilt = [...(journal?.values() ?? [])]
     .sort((left, right) => left.seq - right.seq)
     .reduce(reduceAgentExecutionEvent, emptyRun(runID));
+  return applyInteractionStatus(rebuilt, interactions);
+}
+
+function applyInteractionStatus(
+  run: AgentRunSnapshot,
+  interactions: ConversationInteractionDTO[],
+): AgentRunSnapshot {
   const waiting = interactions.some((item) => item.status === "pending" || item.status === "responding");
-  if (waiting && !isTerminalStatus(rebuilt.status)) {
-    rebuilt = { ...rebuilt, status: "waiting_interaction" };
+  if (waiting && !isTerminalStatus(run.status)) {
+    return { ...run, status: "waiting_interaction", interactions };
   }
-  return { ...rebuilt, interactions };
+  return { ...run, interactions };
 }
 
 export function applyAgentExecutionEvent(
   event: ConversationExecutionEventDTO,
   sourceConversationID = "",
 ): boolean {
-  const runID = event.runID.trim();
-  if (sourceConversationID.trim() && sourceConversationID.trim() !== activeConversationID) return false;
-  if (!runID || !Number.isSafeInteger(event.seq) || event.seq <= 0) return false;
-  if (executionEvents.has(event.seq)) return false;
-  const journal = eventJournals.get(runID) ?? new Map<number, ConversationExecutionEventDTO>();
-  executionEvents.set(event.seq, event);
-  journal.set(event.seq, event);
-  eventJournals.set(runID, journal);
+  return applyAgentExecutionEvents([event], sourceConversationID) === 1;
+}
+
+export function applyAgentExecutionEvents(
+  events: ConversationExecutionEventDTO[],
+  sourceConversationID = "",
+): number {
+  const normalizedSourceConversationID = sourceConversationID.trim();
+  if (normalizedSourceConversationID && normalizedSourceConversationID !== activeConversationID) return 0;
+
+  const acceptedByRun = new Map<string, ConversationExecutionEventDTO[]>();
+  let highestSeq = recoverySnapshot.highestSeq;
+  let acceptedCount = 0;
+  for (const event of events) {
+    const runID = event.runID.trim();
+    if (!runID || !Number.isSafeInteger(event.seq) || event.seq <= 0 || executionEvents.has(event.seq)) {
+      continue;
+    }
+    const journal = eventJournals.get(runID) ?? new Map<number, ConversationExecutionEventDTO>();
+    executionEvents.set(event.seq, event);
+    journal.set(event.seq, event);
+    eventJournals.set(runID, journal);
+    const accepted = acceptedByRun.get(runID) ?? [];
+    accepted.push(event);
+    acceptedByRun.set(runID, accepted);
+    highestSeq = Math.max(highestSeq, event.seq);
+    acceptedCount += 1;
+  }
+  if (acceptedCount === 0) return 0;
+
   let contiguousSeq = recoverySnapshot.contiguousSeq;
   while (executionEvents.has(contiguousSeq + 1)) contiguousSeq += 1;
-  const highestSeq = Math.max(recoverySnapshot.highestSeq, event.seq);
   recoverySnapshot = {
     contiguousSeq,
     highestSeq,
     hasGap: highestSeq > contiguousSeq,
   };
-  runs.set(runID, rebuildRun(runID));
+
+  for (const [runID, accepted] of acceptedByRun) {
+    const current = runs.get(runID);
+    const sorted = accepted.sort((left, right) => left.seq - right.seq);
+    const next = current && sorted[0].seq > current.lastExecutionSeq
+      ? sorted.reduce(reduceAgentExecutionEvent, current)
+      : rebuildRun(runID);
+    runs.set(runID, applyInteractionStatus(next, current?.interactions ?? []));
+  }
   emitChange();
-  return true;
+  return acceptedCount;
 }
 
 export function replaceActiveAgentInteractions(items: ConversationInteractionDTO[]) {
@@ -461,6 +497,7 @@ export function replaceActiveAgentInteractions(items: ConversationInteractionDTO
     else current.push(item);
     activeByRun.set(runID, current);
   }
+  let changed = false;
   for (const [runID, run] of runs) {
     const interactionsByID = new Map(
       run.interactions
@@ -469,12 +506,17 @@ export function replaceActiveAgentInteractions(items: ConversationInteractionDTO
     );
     for (const item of activeByRun.get(runID) ?? []) interactionsByID.set(item.interactionID, item);
     const interactions = [...interactionsByID.values()];
+    if (JSON.stringify(run.interactions) === JSON.stringify(interactions)) continue;
     runs.set(runID, rebuildRun(runID, interactions));
+    changed = true;
   }
   for (const [runID, interactions] of activeByRun) {
-    if (!runs.has(runID)) runs.set(runID, rebuildRun(runID, interactions));
+    if (!runs.has(runID)) {
+      runs.set(runID, rebuildRun(runID, interactions));
+      changed = true;
+    }
   }
-  emitChange();
+  if (changed) emitChange();
 }
 
 export function updateAgentInteraction(interaction: ConversationInteractionDTO) {
@@ -516,6 +558,10 @@ export function getAgentExecutionRecoverySnapshot(): AgentExecutionRecoverySnaps
   return recoverySnapshot;
 }
 
+export function getAgentRunSnapshot(runID: string | undefined): AgentRunSnapshot {
+  return runs.get(runID?.trim() || "") ?? EMPTY_RUN;
+}
+
 export function useAgentExecutionRecoverySnapshot(): AgentExecutionRecoverySnapshot {
   return React.useSyncExternalStore(
     subscribe,
@@ -528,7 +574,7 @@ export function useAgentRunSnapshot(runID: string | undefined): AgentRunSnapshot
   const normalizedRunID = runID?.trim() || "";
   return React.useSyncExternalStore(
     subscribe,
-    () => runs.get(normalizedRunID) ?? EMPTY_RUN,
+    () => getAgentRunSnapshot(normalizedRunID),
     () => EMPTY_RUN,
   );
 }
