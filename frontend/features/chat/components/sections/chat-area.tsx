@@ -575,8 +575,8 @@ export function ChatArea({
                     !previousItem
                       ? ""
                       : previousItem.role === "assistant" && item.role === "user"
-                        ? "mt-6 md:mt-12"
-                        : "mt-4";
+                        ? "mt-6 md:mt-8"
+                        : "mt-3 md:mt-4";
                   const publicID = item.publicID?.trim() ?? "";
                   const selectable = selectionMode && Boolean(publicID) && !item.isPending;
                   const isSelected = selectable && (screenshot?.selectedIDs.has(publicID) ?? false);
