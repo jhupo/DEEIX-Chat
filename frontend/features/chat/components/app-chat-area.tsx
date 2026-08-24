@@ -39,12 +39,12 @@ import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import { modelSupportsChatImageTool } from "@/features/chat/model/chat-task";
 import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { modelSupportsChatImageTool } from "@/features/chat/model/chat-task";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useDevices } from "@/features/devices";
@@ -1393,6 +1393,13 @@ export function AppChatArea() {
       },
     ];
   }, [conversationID, modelsErrorMsg, t, visibleMessages]);
+  const latestAgentRunID = React.useMemo(() => {
+    for (let index = messagesWithInlineError.length - 1; index >= 0; index -= 1) {
+      const runID = messagesWithInlineError[index].runID?.trim();
+      if (runID) return runID;
+    }
+    return undefined;
+  }, [messagesWithInlineError]);
 
   const artifactWorkspace = useChatArtifacts({
     conversationID,
@@ -1565,6 +1572,7 @@ export function AppChatArea() {
     gatewayStatus,
     loading,
     sending: generating,
+    agentRunID: latestAgentRunID,
     agentSettingsDisabled: executionMode === "gateway" && conversationRunActive,
     uploading,
     isConversationMode,

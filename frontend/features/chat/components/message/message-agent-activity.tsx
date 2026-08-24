@@ -18,11 +18,13 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageAgentInteractionControl } from "@/features/chat/components/message/message-agent-interaction";
 import { MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
-import type {
-  AgentActivityItem,
-  AgentCommandActivity,
-  AgentFileChange,
-  AgentRunSnapshot,
+import {
+  type AgentActivityItem,
+  type AgentCommandActivity,
+  type AgentFileChange,
+  type AgentRunSnapshot,
+  hasComposerAgentActivity,
+  useAgentRunSnapshot,
 } from "@/features/chat/model/agent-run-store";
 import { cn } from "@/lib/utils";
 import type { ConversationInteractionDTO } from "@/shared/api/conversation.types";
@@ -163,28 +165,40 @@ function ActivityItemRow({ item }: { item: AgentActivityItem }) {
   );
 }
 
-export function MessageAgentActivity({ run }: { run: AgentRunSnapshot }) {
+function AgentPlanSteps({ run }: { run: AgentRunSnapshot }) {
+  return (
+    <ol className="space-y-1 pl-5">
+      {run.plan.map((step) => (
+        <li key={step.key} className="flex min-w-0 items-start gap-2 text-[12px] leading-5 text-muted-foreground/82">
+          <ActivityStatus status={step.status} />
+          <span className="min-w-0 break-words">{step.text}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function MessageAgentActivity({
+  run,
+  showPlan = true,
+}: {
+  run: AgentRunSnapshot;
+  showPlan?: boolean;
+}) {
   const t = useTranslations("chat.agent");
-  const interactions = run.interactions.filter((item) => item.status !== "resolved");
+  const interactions = run.interactions.filter((item) => item.status === "resolved");
   const matched = new Set<string>();
 
   return (
     <div className="space-y-1">
-      {run.plan.length > 0 ? (
+      {showPlan && run.plan.length > 0 ? (
         <section className="pb-2">
           <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted-foreground/80">
             <ListChecks className="size-3.5" />
             {t("activity.plan", { count: run.plan.length })}
           </div>
           {run.planExplanation ? <p className="mb-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground/72">{run.planExplanation}</p> : null}
-          <ol className="space-y-1 pl-5">
-            {run.plan.map((step) => (
-              <li key={step.key} className="flex min-w-0 items-start gap-2 text-[12px] leading-5 text-muted-foreground/82">
-                <ActivityStatus status={step.status} />
-                <span className="min-w-0 break-words">{step.text}</span>
-              </li>
-            ))}
-          </ol>
+          <AgentPlanSteps run={run} />
         </section>
       ) : null}
       {run.items.map((item) => {
@@ -212,6 +226,67 @@ export function MessageAgentActivity({ run }: { run: AgentRunSnapshot }) {
       ) : null}
     </div>
   );
+}
+
+function ComposerAgentActivityContent({ run }: { run: AgentRunSnapshot }) {
+  const t = useTranslations("chat.agent");
+  const [planOpen, setPlanOpen] = React.useState(true);
+  const interactions = run.interactions.filter((item) => item.status !== "resolved");
+  const completedSteps = run.plan.filter((step) => step.status === "completed").length;
+  const currentStep = run.plan.find((step) => step.status === "inProgress")
+    ?? run.plan.find((step) => step.status === "pending")
+    ?? run.plan.at(-1);
+
+  return (
+    <section
+      className="relative z-[5] mx-3 mb-[-10px] max-h-[40dvh] overflow-y-auto overscroll-contain rounded-t-2xl rounded-b-xl border border-border/45 bg-pure/95 px-3 pb-4 pt-2 shadow-xs backdrop-blur-xl scroll-fade-12"
+      aria-live="polite"
+    >
+      {interactions.length > 0 ? (
+        <div>
+          {interactions.map((interaction) => (
+            <MessageAgentInteractionControl key={interaction.interactionID} interaction={interaction} />
+          ))}
+        </div>
+      ) : null}
+      {run.plan.length > 0 ? (
+        <div className={cn(interactions.length > 0 && "mt-2 border-t border-border/35 pt-2")}>
+          <button
+            type="button"
+            className="flex w-full min-w-0 items-center gap-2 rounded-md py-1 text-left text-[12px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+            aria-expanded={planOpen}
+            onClick={() => setPlanOpen((open) => !open)}
+          >
+            <ListChecks className="size-3.5 shrink-0" />
+            <span className="shrink-0 font-medium text-foreground/88">{t("activity.title.running")}</span>
+            <span className="shrink-0 tabular-nums text-muted-foreground/70">
+              {completedSteps}/{run.plan.length}
+            </span>
+            {currentStep ? <span className="min-w-0 flex-1 truncate">{currentStep.text}</span> : null}
+            <ChevronDown className={cn("size-3.5 shrink-0 transition-transform", planOpen && "rotate-180")} />
+          </button>
+          {planOpen ? (
+            <div className="pb-1 pt-1">
+              {run.planExplanation ? (
+                <p className="mb-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground/72">
+                  {run.planExplanation}
+                </p>
+              ) : null}
+              <AgentPlanSteps run={run} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function MessageAgentComposerActivity({ runID }: { runID?: string }) {
+  const run = useAgentRunSnapshot(runID);
+  if (!hasComposerAgentActivity(run)) {
+    return null;
+  }
+  return <ComposerAgentActivityContent key={run.runID} run={run} />;
 }
 
 function collectChangedFiles(run: AgentRunSnapshot): AgentFileChange[] {

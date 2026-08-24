@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
+import * as React from "react";
 
 import { ChevronDown } from "@/components/animate-ui/icons/chevron-down";
 import {
@@ -11,23 +11,21 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Marker, MarkerContent } from "@/components/ui/marker";
-import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
 import {
   formatAgentRunDuration,
   MessageAgentActivity,
 } from "@/features/chat/components/message/message-agent-activity";
 import { getReasoningPreview } from "@/features/chat/components/message/message-thinking-trace";
 import {
-  hasAgentRunActivity,
-  type AgentRunSnapshot,
-} from "@/features/chat/model/agent-run-store";
-import { useProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
-import { cn } from "@/lib/utils";
-import {
   RAGCitationList,
   TRACE_ROOT_CLASS,
   TraceContent,
 } from "@/features/chat/components/shared/message-process-trace-shared";
+import { useProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
+import {
+  type AgentRunSnapshot,
+  hasAgentRunActivity,
+} from "@/features/chat/model/agent-run-store";
 import {
   filterProcessTraceStages,
   isRAGTraceStage,
@@ -38,6 +36,8 @@ import {
   parseStructuredTraceStages,
   parseTraceStages,
 } from "@/features/chat/model/message-process-trace";
+import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
+import { cn } from "@/lib/utils";
 
 export { MessageTraceEventBlocks, MessageUpstreamThink } from "@/features/chat/components/message/message-thinking-trace";
 
@@ -110,7 +110,7 @@ export function MessageProcessTrace({
               <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 group-hover/trace:text-foreground", open && "rotate-180")} />
             </AccordionTrigger>
             <AccordionContent className="px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
-              <MessageAgentActivity run={agentRun} />
+              <MessageAgentActivity run={agentRun} showPlan={!agentActive} />
             </AccordionContent>
           </AccordionItem>
         </Accordion>

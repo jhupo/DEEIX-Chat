@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/input-group";
 import { PlusIcon } from "@/components/ui/plus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { MessageAgentComposerActivity } from "@/features/chat/components/message/message-agent-activity";
 import { ChatAgentSettings } from "@/features/chat/components/sections/chat-agent-settings";
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
@@ -104,6 +105,7 @@ type ChatInputProps = {
   gatewayStatus?: string;
   loading: boolean;
   sending: boolean;
+  agentRunID?: string;
   agentSettingsDisabled: boolean;
   uploading: boolean;
   isConversationMode: boolean;
@@ -256,6 +258,7 @@ function ChatInputComponent({
   gatewayStatus,
   loading,
   sending,
+  agentRunID,
   agentSettingsDisabled,
   uploading,
   isConversationMode,
@@ -759,6 +762,8 @@ function ChatInputComponent({
           </div>
         </div>
       ) : null}
+
+      <MessageAgentComposerActivity runID={agentRunID} />
 
       <AnimatePresence initial={false}>
         {showMarkdownPreview && inputGroupHeight !== null ? (

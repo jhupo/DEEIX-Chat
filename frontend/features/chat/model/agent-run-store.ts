@@ -409,6 +409,16 @@ export function hasAgentRunActivity(run: AgentRunSnapshot): boolean {
     Boolean(run.diff || run.actualModel || run.usage || run.interactions.length > 0);
 }
 
+export function hasComposerAgentActivity(
+  run: Pick<AgentRunSnapshot, "status" | "plan"> & {
+    interactions: Array<Pick<ConversationInteractionDTO, "status">>;
+  },
+): boolean {
+  const hasUnresolvedInteraction = run.interactions.some((item) => item.status !== "resolved");
+  const active = run.status === "running" || run.status === "waiting_interaction" || hasUnresolvedInteraction;
+  return active && (run.plan.length > 0 || hasUnresolvedInteraction);
+}
+
 function isTerminalStatus(status: AgentRunStatus): boolean {
   return status === "completed" || status === "interrupted" || status === "failed";
 }

@@ -272,7 +272,7 @@ function DynamicToolControl({ interaction, disabled, onSubmit }: {
 export function MessageAgentInteractionControl({ interaction }: { interaction: ConversationInteractionDTO }) {
   const t = useTranslations("chat.agent");
   const [error, setError] = React.useState(false);
-  const disabled = interaction.status !== "pending";
+  const disabled = interaction.status === "responding" || interaction.status === "resolved";
   const submit = React.useCallback<SubmitInteraction>(async (response) => {
     setError(false);
     setAgentInteractionStatus(interaction.interactionID, "responding");
