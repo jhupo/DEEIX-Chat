@@ -202,8 +202,8 @@ func TestReconcileOrphanGatewayTurnsRepairsTerminalAndUndispatchedRuns(t *testin
 	if err := db.First(&orphan, orphan.ID).Error; err != nil || orphan.Status != "error" || orphan.ErrorCode != "gateway_dispatch_interrupted" || orphan.EndedAt == nil {
 		t.Fatalf("orphan run = %#v, %v", orphan, err)
 	}
-	for _, message := range messages {
-		if err := db.First(&message, message.ID).Error; err != nil {
+	for index := range messages {
+		if err := db.First(&messages[index], messages[index].ID).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
