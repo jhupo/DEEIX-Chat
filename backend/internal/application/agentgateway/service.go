@@ -1771,7 +1771,9 @@ func validCodexRuntimeVersion(value string) bool {
 		return false
 	}
 	version := "v" + value
-	return semver.IsValid(version) && semver.Compare(version, "v"+agentprotocol.CodexMinimumRuntimeVersion) >= 0
+	return semver.IsValid(version) &&
+		semver.Compare(version, "v"+agentprotocol.CodexMinimumRuntimeVersion) >= 0 &&
+		semver.Compare(semver.MajorMinor(version), "v"+agentprotocol.CodexMaximumRuntimeMinor) <= 0
 }
 
 func validManifestValues(values, allowed []string) bool {

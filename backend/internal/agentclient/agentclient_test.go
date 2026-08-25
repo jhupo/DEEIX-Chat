@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestResolveCodexEnforcesMinimumVersionBeforeAppServer(t *testing.T) {
+func TestResolveCodexEnforcesSupportedVersionRangeBeforeAppServer(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -59,18 +59,21 @@ func TestResolveCodexEnforcesMinimumVersionBeforeAppServer(t *testing.T) {
 		{
 			name: "immediately older version", version: "0.146.0",
 			wantError: []string{
-				"Codex CLI is too old", "detected 0.146.0", "requires 0.147.0 or newer",
+				"Codex CLI is too old", "detected 0.146.0", "supports 0.147.0 through 0.149.x",
 				"powershell -ExecutionPolicy ByPass", "https://chatgpt.com/codex/install.ps1",
 				"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
 			},
 		},
 		{
 			name: "minimum prerelease", version: "0.147.0-rc.1",
-			wantError: []string{"Codex CLI is too old", "detected 0.147.0-rc.1", "requires 0.147.0 or newer"},
+			wantError: []string{"Codex CLI is too old", "detected 0.147.0-rc.1", "supports 0.147.0 through 0.149.x"},
 		},
 		{name: "newer patch", version: "0.147.1", wantAccept: true},
 		{name: "newer prerelease", version: "0.148.0-alpha.1", wantAccept: true},
 		{name: "newer minor", version: "0.148.0", wantAccept: true},
+		{name: "maximum minor", version: "0.149.1", wantAccept: true},
+		{name: "next minor prerelease", version: "0.150.0-alpha.1", wantError: []string{"Codex CLI is too new", "detected 0.150.0-alpha.1", "supports 0.147.0 through 0.149.x"}},
+		{name: "next minor", version: "0.150.0", wantError: []string{"Codex CLI is too new", "detected 0.150.0", "supports 0.147.0 through 0.149.x"}},
 		{name: "invalid semver", version: "0.147.0-alpha..1", wantError: []string{"version \"0.147.0-alpha..1\" is invalid"}},
 	}
 	for _, test := range tests {
@@ -239,8 +242,8 @@ func TestInstallRejectsIncompatibleProjectSessionAPIBeforeEnrollment(t *testing.
 	}
 	for _, value := range []string{
 		"project session API is incompatible", "detected " + minimumCodexVersion,
-		"invalid type: sequence, expected a string", "https://chatgpt.com/codex/install.ps1",
-		"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
+		"invalid type: sequence, expected a string", "supports " + codexSupportedVersionRange,
+		"update DEEIX Agent", "rerun the installer",
 	} {
 		if !strings.Contains(err.Error(), value) {
 			t.Fatalf("Install error %q does not contain %q", err, value)
@@ -1106,6 +1109,24 @@ func TestRPCServerRequestDoesNotBlockResponses(t *testing.T) {
 		t.Fatal("server request handler did not start")
 	}
 	close(releaseRequest)
+}
+
+func TestRPCClientAcceptsKnownNotificationMetadata(t *testing.T) {
+	client := &RPCClient{}
+	seen := false
+	client.onNotification = func(notification RPCNotification) error {
+		seen = notification.Method == "configWarning"
+		return nil
+	}
+	if err := client.handleLine([]byte(`{"method":"configWarning","params":{},"emittedAtMs":1787679895502}`)); err != nil {
+		t.Fatalf("notification metadata was rejected: %v", err)
+	}
+	if !seen {
+		t.Fatal("notification was not dispatched")
+	}
+	if err := client.handleLine([]byte(`{"method":"configWarning","params":{},"unexpected":true}`)); err == nil {
+		t.Fatal("unknown app-server frame field was accepted")
+	}
 }
 
 func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {

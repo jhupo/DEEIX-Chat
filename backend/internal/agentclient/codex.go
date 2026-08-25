@@ -27,10 +27,12 @@ import (
 )
 
 const minimumCodexVersion = agentprotocol.CodexMinimumRuntimeVersion
+const maximumCodexMinor = agentprotocol.CodexMaximumRuntimeMinor
 const maxCodexDesktopStateBytes = 4 << 20
 
 const codexUpgradeInstructions = "Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
 const codexInstallInstructions = "Install the official standalone Codex CLI, reopen the terminal, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh. If Codex is installed elsewhere, pass its absolute path with --codex or -Codex."
+const codexSupportedVersionRange = minimumCodexVersion + " through " + maximumCodexMinor + ".x"
 
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
@@ -161,8 +163,14 @@ func ResolveCodex(ctx context.Context, executable string) (string, string, error
 	}
 	if semver.Compare(version, "v"+minimumCodexVersion) < 0 {
 		return "", "", fmt.Errorf(
-			"Codex CLI is too old: detected %s; DEEIX requires %s or newer. %s",
-			match[1], minimumCodexVersion, codexUpgradeInstructions,
+			"Codex CLI is too old: detected %s; DEEIX supports %s. %s",
+			match[1], codexSupportedVersionRange, codexUpgradeInstructions,
+		)
+	}
+	if semver.Compare(semver.MajorMinor(version), "v"+maximumCodexMinor) > 0 {
+		return "", "", fmt.Errorf(
+			"Codex CLI is too new: detected %s; DEEIX supports %s. Update DEEIX Agent or pass a supported Codex CLI with --codex or -Codex",
+			match[1], codexSupportedVersionRange,
 		)
 	}
 	return path, match[1], nil
@@ -339,8 +347,8 @@ func (adapter *CodexAdapter) verifyProjectSessionProtocol(ctx context.Context) e
 		return nil
 	}
 	return fmt.Errorf(
-		"Codex CLI project session API is incompatible with DEEIX: detected %s; %v. DEEIX requires %s or newer. %s",
-		adapter.version, err, minimumCodexVersion, codexUpgradeInstructions,
+		"Codex CLI project session API is incompatible with DEEIX: detected %s; %v. DEEIX supports %s. Reinstall a supported official Codex CLI or update DEEIX Agent, then rerun the installer",
+		adapter.version, err, codexSupportedVersionRange,
 	)
 }
 

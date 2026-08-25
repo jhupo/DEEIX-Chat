@@ -54,11 +54,12 @@ type rpcResponse struct {
 }
 
 type rpcEnvelope struct {
-	ID     json.RawMessage `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
+	ID          json.RawMessage `json:"id"`
+	Method      string          `json:"method"`
+	Params      json.RawMessage `json:"params"`
+	Result      json.RawMessage `json:"result"`
+	EmittedAtMS int64           `json:"emittedAtMs"`
+	Error       *struct {
 		Code    int             `json:"code"`
 		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data,omitempty"`

@@ -187,6 +187,19 @@ func TestProviderManifestValidation(t *testing.T) {
 	}
 }
 
+func TestCodexRuntimeVersionRange(t *testing.T) {
+	for _, version := range []string{"0.147.0", "0.148.0-alpha.1", "0.149.1", "0.149.99"} {
+		if !validCodexRuntimeVersion(version) {
+			t.Fatalf("supported Codex runtime version rejected: %s", version)
+		}
+	}
+	for _, version := range []string{"0.146.99", "0.147.0-rc.1", "0.150.0-alpha.1", "0.150.0", "invalid"} {
+		if validCodexRuntimeVersion(version) {
+			t.Fatalf("unsupported Codex runtime version accepted: %s", version)
+		}
+	}
+}
+
 func TestAgentVersionComparison(t *testing.T) {
 	for _, test := range []struct {
 		left, right string
