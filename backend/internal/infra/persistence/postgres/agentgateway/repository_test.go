@@ -597,7 +597,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		t.Fatalf("create artifact file: %v", err)
 	}
 	videoFile := model.FileObject{
-		FileID: "file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 7, Purpose: "agent_input",
+		FileID: "file_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", UserID: 7, Purpose: "agent_input",
 		FileName: "fixture.mp4", MimeType: "video/mp4", DetectedMIME: "video/mp4",
 		FileCategory: "video", SizeBytes: 12, SHA256: strings.Repeat("e", 64),
 		StoragePath: "fixture.mp4", Status: "active",
