@@ -303,6 +303,32 @@ func TestMCPElicitationResponsePreservesSchemaScalars(t *testing.T) {
 	}
 }
 
+func TestMCPElicitationTimeoutDeclinesAndClearsPendingRequest(t *testing.T) {
+	state, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{
+		profileID: "codex-default", state: state, pending: make(map[string]*pendingInteraction),
+		mcpElicitationTimeout: 5 * time.Millisecond,
+		onEvent:               func(json.RawMessage) error { return nil },
+	}
+	result, err := adapter.serverRequest(context.Background(), RPCServerRequest{
+		ID: json.RawMessage(`1`), Method: "mcpServer/elicitation/request",
+		Params: json.RawMessage(`{"threadId":"thread-provider","turnId":"turn-provider","serverName":"node_repl","message":"Allow access?"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapped, ok := result.(map[string]any)
+	if !ok || mapped["action"] != "decline" || mapped["content"] != nil {
+		t.Fatalf("timeout response = %#v", result)
+	}
+	if len(adapter.pending) != 0 {
+		t.Fatalf("timed out interaction remained pending: %#v", adapter.pending)
+	}
+}
+
 func TestElicitationSchemaProjectionUsesStableAllowlist(t *testing.T) {
 	adapter := &CodexAdapter{}
 	projected, _, err := adapter.projectServerRequest("mcpServer/elicitation/request", map[string]any{

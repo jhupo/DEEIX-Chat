@@ -1137,12 +1137,56 @@ func (r *Repo) ReconcileOrphanGatewayTurns(ctx context.Context, createdBefore ti
 	)
 	runIDs := make([]string, 0, limit)
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var terminalRows []models.ConversationRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("endpoint = ? AND status IN ? AND EXISTS (SELECT 1 FROM agent_turns WHERE agent_turns.user_id = chat_runs.user_id AND agent_turns.run_id = chat_runs.run_id AND agent_turns.status IN ? AND agent_turns.updated_at < ?)",
+				"local_gateway", []string{"queued", "running"}, []string{"completed", "interrupted", "failed"}, createdBefore).
+			Order("id ASC").Limit(limit).Find(&terminalRows).Error; err != nil {
+			return err
+		}
+		for _, row := range terminalRows {
+			var turn models.AgentTurn
+			if err := tx.Where("user_id = ? AND run_id = ? AND status IN ?", row.UserID, row.RunID, []string{"completed", "interrupted", "failed"}).
+				Order("id DESC").First(&turn).Error; err != nil {
+				return err
+			}
+			terminalStatus := turn.Status
+			errorCode, errorMessage := turn.ErrorCode, turn.ErrorMessage
+			if terminalStatus == "completed" {
+				errorCode, errorMessage = "", ""
+			} else if terminalStatus == "interrupted" {
+				if errorCode == "" {
+					errorCode = "gateway_interrupted"
+				}
+				if errorMessage == "" {
+					errorMessage = "local execution was interrupted"
+				}
+			} else if terminalStatus == "failed" {
+				if errorCode == "" {
+					errorCode = "gateway_failed"
+				}
+				if errorMessage == "" {
+					errorMessage = "local execution failed"
+				}
+			}
+			if err := completeGatewayTurn(tx, &domainconversation.ExecutionEvent{
+				ConversationID: row.ConversationID, UserID: row.UserID, RunID: row.RunID,
+				TerminalStatus: terminalStatus, ErrorCode: errorCode, ErrorMessage: errorMessage, OccurredAt: turn.UpdatedAt,
+			}); err != nil {
+				return err
+			}
+			runIDs = append(runIDs, row.RunID)
+		}
+		remaining := limit - len(runIDs)
+		if remaining == 0 {
+			return nil
+		}
 		var rows []models.ConversationRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
 			Select("id", "user_id", "run_id").
 			Where("endpoint = ? AND status = ? AND created_at < ?", "local_gateway", "queued", createdBefore).
 			Where("NOT EXISTS (SELECT 1 FROM agent_turns WHERE agent_turns.user_id = chat_runs.user_id AND agent_turns.run_id = chat_runs.run_id)").
-			Order("id ASC").Limit(limit).Find(&rows).Error; err != nil {
+			Order("id ASC").Limit(remaining).Find(&rows).Error; err != nil {
 			return err
 		}
 		now := time.Now().UTC()

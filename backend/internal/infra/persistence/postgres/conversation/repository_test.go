@@ -137,7 +137,7 @@ func TestGatewayProjectionTruncatesLongTerminalError(t *testing.T) {
 	}
 }
 
-func TestReconcileOrphanGatewayTurnsOnlyFailsUndispatchedRuns(t *testing.T) {
+func TestReconcileOrphanGatewayTurnsRepairsTerminalAndUndispatchedRuns(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	if err := db.AutoMigrate(&model.AgentTurn{}); err != nil {
 		t.Fatal(err)
@@ -166,9 +166,15 @@ func TestReconcileOrphanGatewayTurnsOnlyFailsUndispatchedRuns(t *testing.T) {
 	dispatched := createRun("run_gateway_dispatched", "local_gateway", old)
 	young := createRun("run_gateway_young", "local_gateway", now)
 	cloud := createRun("run_cloud_queued", "responses", old)
+	terminal := createRun("run_gateway_terminal", "local_gateway", old)
+	if err := db.Model(&terminal).Update("status", "running").Error; err != nil {
+		t.Fatal(err)
+	}
 	messages := []model.Message{
 		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_orphan_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "pending", RunID: orphan.RunID},
 		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_orphan_assistant", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending", RunID: orphan.RunID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_terminal_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "success", RunID: terminal.RunID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_terminal_assistant", Role: "assistant", ContentType: "text", Content: "partial", BranchReason: "default", Status: "error", ErrorCode: "stream_interrupted", ErrorMessage: "stream closed", RunID: terminal.RunID},
 	}
 	if err := db.Create(&messages).Error; err != nil {
 		t.Fatal(err)
@@ -180,18 +186,36 @@ func TestReconcileOrphanGatewayTurnsOnlyFailsUndispatchedRuns(t *testing.T) {
 	if err := db.Create(&turn).Error; err != nil {
 		t.Fatal(err)
 	}
+	failedTurn := model.AgentTurn{
+		PublicID: "agturn_terminal_0123456789abcdef", UserID: 1, ThreadID: 1, RunID: terminal.RunID,
+		Status: "failed", ErrorCode: "device_revoked", ErrorMessage: "device revoked",
+		InputJSON: `[]`, SettingsJSON: `{}`, ControlPlaneModel: model.ControlPlaneModel{CreatedAt: old, UpdatedAt: old},
+	}
+	if err := db.Create(&failedTurn).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	runIDs, err := repo.ReconcileOrphanGatewayTurns(context.Background(), now.Add(-time.Minute), 10)
-	if err != nil || !reflect.DeepEqual(runIDs, []string{orphan.RunID}) {
+	if err != nil || !reflect.DeepEqual(runIDs, []string{terminal.RunID, orphan.RunID}) {
 		t.Fatalf("ReconcileOrphanGatewayTurns() = %v, %v", runIDs, err)
 	}
 	if err := db.First(&orphan, orphan.ID).Error; err != nil || orphan.Status != "error" || orphan.ErrorCode != "gateway_dispatch_interrupted" || orphan.EndedAt == nil {
 		t.Fatalf("orphan run = %#v, %v", orphan, err)
 	}
 	for _, message := range messages {
-		if err := db.First(&message, message.ID).Error; err != nil || message.Status != "error" || message.ErrorCode != "gateway_dispatch_interrupted" {
-			t.Fatalf("orphan message = %#v, %v", message, err)
+		if err := db.First(&message, message.ID).Error; err != nil {
+			t.Fatal(err)
 		}
+	}
+	if messages[0].Status != "error" || messages[0].ErrorCode != "gateway_dispatch_interrupted" ||
+		messages[1].Status != "error" || messages[1].ErrorCode != "gateway_dispatch_interrupted" {
+		t.Fatalf("orphan messages = %#v", messages[:2])
+	}
+	if messages[2].Status != "success" || messages[3].Status != "error" || messages[3].ErrorCode != "device_revoked" || messages[3].ErrorMessage != "device revoked" {
+		t.Fatalf("terminal messages = %#v", messages[2:])
+	}
+	if err := db.First(&terminal, terminal.ID).Error; err != nil || terminal.Status != "error" || terminal.ErrorCode != "device_revoked" || terminal.EndedAt == nil {
+		t.Fatalf("terminal run = %#v, %v", terminal, err)
 	}
 	for _, run := range []*model.ConversationRun{&dispatched, &young, &cloud} {
 		if err := db.First(run, run.ID).Error; err != nil || run.Status != "queued" {

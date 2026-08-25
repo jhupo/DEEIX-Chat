@@ -41,6 +41,9 @@ const maxExecutionTextBytes = 1 << 20
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
 
+// Decline before app-server's five-minute MCP timeout so it can finish the turn normally.
+const defaultMCPElicitationTimeout = 4*time.Minute + 30*time.Second
+
 var mappedServerRequests = map[string]bool{
 	"item/commandExecution/requestApproval": true,
 	"item/fileChange/requestApproval":       true,
@@ -112,12 +115,13 @@ type CodexAdapter struct {
 	onEvent     func(json.RawMessage) error
 	done        chan struct{}
 
-	mu             sync.Mutex
-	pending        map[string]*pendingInteraction
-	active         map[string]bool
-	executionItems map[string]executionItemProjection
-	executionOrder []string
-	closed         bool
+	mu                    sync.Mutex
+	pending               map[string]*pendingInteraction
+	active                map[string]bool
+	executionItems        map[string]executionItemProjection
+	executionOrder        []string
+	mcpElicitationTimeout time.Duration
+	closed                bool
 }
 
 func ResolveCodex(ctx context.Context, executable string) (string, string, error) {
@@ -1280,11 +1284,33 @@ func (adapter *CodexAdapter) serverRequest(ctx context.Context, request RPCServe
 		adapter.mu.Unlock()
 		return nil, err
 	}
+	var timeout <-chan time.Time
+	var timer *time.Timer
+	if request.Method == "mcpServer/elicitation/request" {
+		duration := adapter.mcpElicitationTimeout
+		if duration <= 0 {
+			duration = defaultMCPElicitationTimeout
+		}
+		timer = time.NewTimer(duration)
+		timeout = timer.C
+		defer timer.Stop()
+	}
+	removePending := func() {
+		adapter.mu.Lock()
+		if adapter.pending[providerRequestID] == interaction {
+			delete(adapter.pending, providerRequestID)
+		}
+		adapter.mu.Unlock()
+	}
 	select {
 	case response := <-interaction.Response:
 		return response, nil
 	case <-ctx.Done():
+		removePending()
 		return nil, ctx.Err()
+	case <-timeout:
+		removePending()
+		return map[string]any{"action": "decline", "content": nil, "_meta": nil}, nil
 	}
 }
 
