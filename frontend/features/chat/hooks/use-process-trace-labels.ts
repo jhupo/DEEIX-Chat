@@ -135,8 +135,6 @@ export type ProcessTraceLabels = {
     fileContext: string;
     contextCompaction: string;
     skillContext: string;
-    requestResult: string;
-    upstreamRequestTriggered: string;
   };
   process: {
     titleActive: string;
@@ -288,8 +286,6 @@ export function useProcessTraceLabels(): ProcessTraceLabels {
         fileContext: t("stages.fileContext"),
         contextCompaction: t("stages.contextCompaction"),
         skillContext: t("stages.skillContext"),
-        requestResult: t("stages.requestResult"),
-        upstreamRequestTriggered: t("stages.upstreamRequestTriggered"),
       },
       process: {
         titleActive: t("process.titleActive"),

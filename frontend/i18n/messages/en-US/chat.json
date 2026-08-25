@@ -534,13 +534,6 @@
         "video_task_rejects_non_image_attachments": "Video generation only supports text prompts and image attachments. Remove non-image files.",
         "model_task_unsupported": "The selected model cannot process this input. Switch models and try again."
       }
-    },
-    "nativeTools": {
-      "official": "Official native tools",
-      "grok": "Grok native tools",
-      "openai": "OpenAI native tools",
-      "claude": "Claude native tools",
-      "google": "Google native tools"
     }
   },
   "modelPicker": {
@@ -688,9 +681,7 @@
       "contentRetrieval": "Content retrieval",
       "fileContext": "File context",
       "contextCompaction": "Context compaction",
-      "skillContext": "Skill context",
-      "requestResult": "Request result",
-      "upstreamRequestTriggered": "Upstream model request triggered"
+      "skillContext": "Skill context"
     },
     "process": {
       "titleActive": "Processing",

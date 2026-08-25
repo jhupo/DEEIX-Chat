@@ -22,11 +22,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 	"golang.org/x/mod/semver"
 )
 
-const codexSchemaHash = "f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74"
-const minimumCodexVersion = "0.142.0"
+const minimumCodexVersion = agentprotocol.CodexMinimumRuntimeVersion
 const maxCodexDesktopStateBytes = 4 << 20
 
 const codexUpgradeInstructions = "Update the official Codex CLI, then rerun the DEEIX Agent installer. Windows (PowerShell): powershell -ExecutionPolicy ByPass -c \"irm https://chatgpt.com/codex/install.ps1 | iex\"; macOS/Linux: curl -fsSL https://chatgpt.com/codex/install.sh | sh"
@@ -346,7 +346,7 @@ func (adapter *CodexAdapter) verifyProjectSessionProtocol(ctx context.Context) e
 
 func (adapter *CodexAdapter) Manifest() ProviderManifest {
 	manifest := ProviderManifest{
-		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: adapter.version + "/stable", SchemaHash: codexSchemaHash,
+		Provider: "codex", RuntimeVersion: adapter.version, ProtocolVersion: agentprotocol.CodexProtocolVersion, SchemaHash: agentprotocol.CodexSchemaHash,
 		Commands:         []string{"agent.update", "workspace.register", "workspace.rename", "workspace.unregister", "thread.create", "thread.lifecycle", "thread.rename", "thread.metadata.update", "thread.compact", "thread.read", "review.start", "turn.start", "turn.steer", "turn.interrupt", "interaction.respond", "resource.refresh"},
 		InputKinds:       []string{"text", "artifact", "skill", "app-mention"},
 		InteractionKinds: []string{"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool"},

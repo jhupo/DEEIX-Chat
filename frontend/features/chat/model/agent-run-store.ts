@@ -23,6 +23,7 @@ export type AgentPlanStep = {
 
 export type AgentCommandActivity = {
   itemID: string;
+  seq: number;
   kind: "command";
   status: AgentActivityStatus;
   command: string;
@@ -36,6 +37,7 @@ export type AgentCommandActivity = {
 
 export type AgentTextActivity = {
   itemID: string;
+  seq: number;
   kind: "commentary" | "reasoning";
   status: AgentActivityStatus;
   text: string;
@@ -56,6 +58,7 @@ export type AgentFileChange = {
 
 export type AgentFileActivity = {
   itemID: string;
+  seq: number;
   kind: "file";
   status: AgentActivityStatus;
   files: AgentFileChange[];
@@ -72,14 +75,17 @@ export type AgentRunSnapshot = {
   durationMS: number | null;
   planExplanation: string;
   plan: AgentPlanStep[];
+  planSeq: number;
   items: AgentActivityItem[];
   diff: string;
   diffTruncated: boolean;
+  diffSeq: number;
   files: AgentFileChange[];
   usage: AgentUsage | null;
   actualModel: string;
   previousModel: string;
   rerouteReason: string;
+  rerouteSeq: number;
   interactions: ConversationInteractionDTO[];
   lastExecutionSeq: number;
 };
@@ -96,14 +102,17 @@ const EMPTY_RUN: AgentRunSnapshot = Object.freeze({
   durationMS: null,
   planExplanation: "",
   plan: [],
+  planSeq: 0,
   items: [],
   diff: "",
   diffTruncated: false,
+  diffSeq: 0,
   files: [],
   usage: null,
   actualModel: "",
   previousModel: "",
   rerouteReason: "",
+  rerouteSeq: 0,
   interactions: [],
   lastExecutionSeq: 0,
 });
@@ -224,6 +233,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
     if (stringValue(item.phase) !== "commentary") return null;
     return {
       itemID: itemID(payload, seq, "commentary"),
+      seq,
       kind: "commentary",
       status,
       text: rawString(item.text),
@@ -233,6 +243,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   if (kind === "reasoning") {
     return {
       itemID: itemID(payload, seq, "reasoning"),
+      seq,
       kind: "reasoning",
       status,
       text: textParts(item.summary),
@@ -244,6 +255,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   if (fileItem) {
     return {
       itemID: id,
+      seq,
       kind: "file",
       status,
       files: normalizeFiles(item.files ?? item.changes ?? payload.files ?? payload.changes),
@@ -253,6 +265,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   }
   return {
     itemID: id,
+    seq,
     kind: "command",
     status,
     command: stringValue(item.command),
@@ -283,12 +296,15 @@ function upsertItem(items: AgentActivityItem[], item: AgentActivityItem): AgentA
     next[index] = {
       ...current,
       ...item,
+      seq: current.seq,
       diff: item.diff || current.diff,
       truncated: current.truncated || item.truncated,
       files: [...currentFiles.values()],
     };
   } else {
-    next[index] = current.kind === item.kind ? { ...current, ...item } as AgentActivityItem : item;
+    next[index] = current.kind === item.kind
+      ? { ...current, ...item, seq: current.seq } as AgentActivityItem
+      : item;
   }
   return next;
 }
@@ -324,6 +340,7 @@ function reduceAgentExecutionEvent(
     case "turn/plan/updated":
       next.plan = normalizePlan(payload);
       next.planExplanation = stringValue(payload.explanation);
+      if (next.planSeq === 0) next.planSeq = event.seq;
       break;
     case "item/started":
     case "item/completed": {
@@ -339,6 +356,7 @@ function reduceAgentExecutionEvent(
       ) as AgentCommandActivity | undefined;
       next.items = upsertItem(next.items, {
         itemID: id,
+        seq: currentItem?.seq ?? event.seq,
         kind: "command",
         status: currentItem?.status ?? "running",
         command: currentItem?.command ?? "",
@@ -359,6 +377,7 @@ function reduceAgentExecutionEvent(
       ) as AgentTextActivity | undefined;
       next.items = upsertItem(next.items, {
         itemID: id,
+        seq: currentItem?.seq ?? event.seq,
         kind: "commentary",
         status: currentItem?.status ?? "running",
         text: `${currentItem?.text ?? ""}${rawString(payload.delta)}`,
@@ -373,6 +392,7 @@ function reduceAgentExecutionEvent(
       ) as AgentTextActivity | undefined;
       next.items = upsertItem(next.items, {
         itemID: id,
+        seq: currentItem?.seq ?? event.seq,
         kind: "reasoning",
         status: currentItem?.status ?? "running",
         text: `${currentItem?.text ?? ""}${rawString(payload.delta)}`,
@@ -398,6 +418,7 @@ function reduceAgentExecutionEvent(
       const files = normalizeFiles(payload.files ?? payload.changes);
       next.items = upsertItem(next.items, {
         itemID: id,
+        seq: currentItem?.seq ?? event.seq,
         kind: "file",
         status: currentItem?.status ?? "running",
         files: files.length > 0 ? files : currentItem?.files ?? [],
@@ -409,6 +430,7 @@ function reduceAgentExecutionEvent(
     case "turn/diff/updated":
       next.diff = rawString(payload.diff ?? payload.patch);
       next.diffTruncated = payload.truncated === true;
+      if (next.diffSeq === 0) next.diffSeq = event.seq;
       next.files = normalizeFiles(payload.files ?? payload.changes);
       break;
     case "thread/tokenUsage/updated":
@@ -418,6 +440,7 @@ function reduceAgentExecutionEvent(
       next.actualModel = stringValue(payload.toModel ?? payload.model);
       next.previousModel = stringValue(payload.fromModel);
       next.rerouteReason = stringValue(payload.reason);
+      if (next.rerouteSeq === 0) next.rerouteSeq = event.seq;
       break;
   }
   return next;

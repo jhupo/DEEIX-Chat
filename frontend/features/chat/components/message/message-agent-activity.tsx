@@ -108,62 +108,6 @@ function CommandRow({ item }: { item: AgentCommandActivity }) {
   );
 }
 
-type ActivityGroup =
-  | { key: string; kind: "commands"; items: AgentCommandActivity[] }
-  | { key: string; kind: "item"; item: AgentActivityItem };
-
-function groupActivityItems(items: AgentActivityItem[]): ActivityGroup[] {
-  const groups: ActivityGroup[] = [];
-  for (const item of items) {
-    const previous = groups.at(-1);
-    if (item.kind === "command") {
-      if (previous?.kind === "commands") {
-        previous.items.push(item);
-      } else {
-        groups.push({ key: `commands:${item.itemID}`, kind: "commands", items: [item] });
-      }
-      continue;
-    }
-    groups.push({ key: item.itemID, kind: "item", item });
-  }
-  return groups;
-}
-
-function CommandGroup({ items }: { items: AgentCommandActivity[] }) {
-  const t = useTranslations("chat.agent");
-  const [open, setOpen] = React.useState(false);
-  const running = items.some((item) => item.status === "running");
-
-  return (
-    <section className="border-t border-border/25 py-1.5 first:border-t-0">
-      <button
-        type="button"
-        className="group/commands flex w-full min-w-0 items-center gap-1.5 rounded-sm py-0.5 text-left text-[12px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/35"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <TerminalSquare className="size-3.5 shrink-0" />
-        <span className={cn("min-w-0 truncate", running && "shimmer")}>
-          {t(running ? "activity.commandsRunning" : "activity.commandsRan", { count: items.length })}
-        </span>
-        <ChevronDown
-          className={cn(
-            "size-3.5 shrink-0 transition-transform duration-200",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open ? (
-        <div className="ml-5 mt-1">
-          {items.map((item) => (
-            <CommandRow key={item.itemID} item={item} />
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function interactionMatchesItem(interaction: ConversationInteractionDTO, item: AgentActivityItem): boolean {
   if (interaction.kind === "command_approval" && item.kind === "command") {
     const requestCommand = interaction.request.command?.trim();
@@ -180,17 +124,7 @@ function ActivityItemRow({ item }: { item: AgentActivityItem }) {
   const t = useTranslations("chat.agent");
   if (item.kind === "command") return <CommandRow item={item} />;
   if (item.kind === "file") {
-    const firstPath = item.files[0]?.path;
-    return (
-      <div className="flex min-w-0 items-center gap-2 border-t border-border/25 py-2 first:border-t-0">
-        <FileCode2 className="size-3.5 shrink-0 text-muted-foreground/62" />
-        <ActivityStatus status={item.status} />
-        <code className="min-w-0 flex-1 truncate text-[12px] text-foreground/82" title={firstPath}>
-          {firstPath || t("activity.fileChanges", { count: item.files.length })}
-        </code>
-        {item.files.length > 1 ? <span className="shrink-0 text-[11px] text-muted-foreground/60">+{item.files.length - 1}</span> : null}
-      </div>
-    );
+    return <FileChangesRow files={item.files} fallbackDiff={item.diff} fallbackTruncated={item.truncated} status={item.status} />;
   }
   if (!item.text.trim()) return null;
   if (item.kind === "reasoning") {
@@ -242,35 +176,46 @@ export function MessageAgentActivity({
 }) {
   const t = useTranslations("chat.agent");
   const interactions = run.interactions.filter((item) => item.status === "resolved");
-  const activityGroups = React.useMemo(() => groupActivityItems(run.items), [run.items]);
+  const timeline = React.useMemo(() => buildActivityTimeline(run, showPlan), [run, showPlan]);
   const matched = new Set<string>();
 
   return (
-    <div className="space-y-1">
-      {showPlan && run.plan.length > 0 ? (
-        <section className="pb-2">
-          <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted-foreground/80">
-            <ListChecks className="size-3.5" />
-            {t("activity.plan", { count: run.plan.length })}
-          </div>
-          {run.planExplanation ? <p className="mb-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground/72">{run.planExplanation}</p> : null}
-          <AgentPlanSteps run={run} />
-        </section>
-      ) : null}
-      {activityGroups.map((group) => {
-        const items = group.kind === "commands" ? group.items : [group.item];
+    <div className="space-y-0">
+      {timeline.map((entry) => {
+        if (entry.kind === "plan") {
+          return (
+            <section key="plan" className="border-t border-border/25 py-2 first:border-t-0">
+              <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-muted-foreground/80">
+                <ListChecks className="size-3.5" />
+                {t("activity.plan", { count: run.plan.length })}
+              </div>
+              {run.planExplanation ? <p className="mb-1.5 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground/72">{run.planExplanation}</p> : null}
+              <AgentPlanSteps run={run} />
+            </section>
+          );
+        }
+        if (entry.kind === "diff") {
+          return <FileChangesRow key="diff" run={run} />;
+        }
+        if (entry.kind === "reroute") {
+          return (
+            <div key="reroute" className="flex items-center gap-2 border-t border-border/25 py-2 text-[12px] text-muted-foreground/72">
+              <Route className="size-3.5" />
+              <span>{t("activity.modelRerouted", { model: run.actualModel })}</span>
+              {run.rerouteReason ? <span className="truncate">{run.rerouteReason}</span> : null}
+            </div>
+          );
+        }
+        const item = entry.item;
+        if (!item) return null;
         const inlineInteractions = interactions.filter((interaction) => {
-          if (!items.some((item) => interactionMatchesItem(interaction, item))) return false;
+          if (!interactionMatchesItem(interaction, item)) return false;
           matched.add(interaction.interactionID);
           return true;
         });
         return (
-          <React.Fragment key={group.key}>
-            {group.kind === "commands" ? (
-              <CommandGroup items={group.items} />
-            ) : (
-              <ActivityItemRow item={group.item} />
-            )}
+          <React.Fragment key={item.itemID}>
+            <ActivityItemRow item={item} />
             {inlineInteractions.map((interaction) => <MessageAgentInteractionControl key={interaction.interactionID} interaction={interaction} />)}
           </React.Fragment>
         );
@@ -278,13 +223,6 @@ export function MessageAgentActivity({
       {interactions.filter((interaction) => !matched.has(interaction.interactionID)).map((interaction) => (
         <MessageAgentInteractionControl key={interaction.interactionID} interaction={interaction} />
       ))}
-      {run.actualModel ? (
-        <div className="flex items-center gap-2 border-t border-border/25 py-2 text-[12px] text-muted-foreground/72">
-          <Route className="size-3.5" />
-          <span>{t("activity.modelRerouted", { model: run.actualModel })}</span>
-          {run.rerouteReason ? <span className="truncate">{run.rerouteReason}</span> : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -366,6 +304,40 @@ function collectChangedFiles(run: AgentRunSnapshot): AgentFileChange[] {
   return [...byPath.values()];
 }
 
+type ActivityTimelineEntry =
+  | { kind: "plan"; seq: number }
+  | { kind: "item"; seq: number; item: AgentActivityItem }
+  | { kind: "diff"; seq: number }
+  | { kind: "reroute"; seq: number };
+
+function activityTimelineRank(kind: ActivityTimelineEntry["kind"]): number {
+  switch (kind) {
+    case "plan":
+      return 0;
+    case "item":
+      return 1;
+    case "diff":
+      return 2;
+    case "reroute":
+      return 3;
+  }
+}
+
+function buildActivityTimeline(run: AgentRunSnapshot, showPlan: boolean): ActivityTimelineEntry[] {
+  const entries: ActivityTimelineEntry[] = run.items.map((item) => ({ kind: "item", seq: item.seq, item }));
+  if (showPlan && run.plan.length > 0) {
+    entries.push({ kind: "plan", seq: run.planSeq });
+  }
+  const hasFileItem = run.items.some((item) => item.kind === "file");
+  if (!hasFileItem && (run.files.length > 0 || run.diff)) {
+    entries.push({ kind: "diff", seq: run.diffSeq || Number.MAX_SAFE_INTEGER });
+  }
+  if (run.actualModel) {
+    entries.push({ kind: "reroute", seq: run.rerouteSeq || Number.MAX_SAFE_INTEGER });
+  }
+  return entries.sort((left, right) => left.seq - right.seq || activityTimelineRank(left.kind) - activityTimelineRank(right.kind));
+}
+
 function fileName(path: string): string {
   return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) || path;
 }
@@ -421,22 +393,38 @@ function FileDiffTooltip({
   );
 }
 
-export function MessageAgentFileSummary({ run }: { run: AgentRunSnapshot }) {
+function FileChangesRow({
+  run,
+  files,
+  fallbackDiff,
+  fallbackTruncated = false,
+  status = "completed",
+}: {
+  run?: AgentRunSnapshot;
+  files?: AgentFileChange[];
+  fallbackDiff?: string;
+  fallbackTruncated?: boolean;
+  status?: string;
+}) {
   const t = useTranslations("chat.agent");
-  const files = collectChangedFiles(run);
-  if (run.status === "running" || run.status === "waiting_interaction" || files.length === 0 && !run.diff) return null;
+  const changedFiles = files ?? (run ? collectChangedFiles(run) : []);
+  const diff = fallbackDiff ?? run?.diff ?? "";
+  const truncated = fallbackTruncated || Boolean(run?.diffTruncated);
+  if (changedFiles.length === 0 && !diff) return null;
 
   return (
-    <div className="mt-5 w-full border-t border-border/35 pt-3">
+    <div className="border-t border-border/25 py-2">
       <div className="flex max-w-full items-center gap-2 py-1 text-[12px] font-medium text-muted-foreground">
         <GitCompareArrows className="size-3.5 shrink-0" />
-        <span className="truncate">{t("activity.fileChanges", { count: files.length })}</span>
+        <ActivityStatus status={status} />
+        <span className="truncate">{t("activity.fileChanges", { count: changedFiles.length })}</span>
       </div>
-      {files.length > 0 ? (
+      {changedFiles.length > 0 ? (
         <ul className="mt-1 space-y-0.5 pl-5 font-mono text-[11px] text-muted-foreground/72">
-          {files.map((file) => (
+          {changedFiles.map((file) => (
             <li key={file.fileID} className="flex min-w-0 items-center gap-2">
-              <FileDiffTooltip file={file} fallbackDiff={run.diff} fallbackTruncated={run.diffTruncated} />
+              <FileCode2 className="size-3.5 shrink-0 text-muted-foreground/62" />
+              <FileDiffTooltip file={file} fallbackDiff={diff} fallbackTruncated={truncated} />
               {file.additions !== null ? <span className="text-foreground/65">+{file.additions}</span> : null}
               {file.deletions !== null ? <span className="text-destructive/70">-{file.deletions}</span> : null}
             </li>

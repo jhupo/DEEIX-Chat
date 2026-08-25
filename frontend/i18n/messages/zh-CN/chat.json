@@ -526,13 +526,6 @@
         "video_task_rejects_non_image_attachments": "视频生成仅支持文字提示和图片附件，请移除非图片文件。",
         "model_task_unsupported": "当前模型不支持此输入，请切换模型后重试。"
       }
-    },
-    "nativeTools": {
-      "official": "官方原生工具",
-      "grok": "Grok 原生工具",
-      "openai": "OpenAI 原生工具",
-      "claude": "Claude 原生工具",
-      "google": "Google 原生工具"
     }
   },
   "modelPicker": {
@@ -680,9 +673,7 @@
       "contentRetrieval": "内容检索",
       "fileContext": "文件上下文",
       "contextCompaction": "上下文压缩",
-      "skillContext": "Skill 上下文",
-      "requestResult": "请求结果",
-      "upstreamRequestTriggered": "上游模型请求触发"
+      "skillContext": "Skill 上下文"
     },
     "process": {
       "titleActive": "处理中",

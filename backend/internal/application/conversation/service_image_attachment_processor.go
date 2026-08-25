@@ -181,9 +181,11 @@ func (s *Service) processImageAttachments(
 				"tool_name":  processor.toolName,
 				"file_names": fileNames,
 				processTracePayloadStage: map[string]interface{}{
-					"kind":       "mcp_attachment_processor",
+					"kind":       processTraceKindMCPAttachment,
+					"label":      processor.displayName,
 					"status":     messageTraceStatusCompleted,
 					"file_count": len(result.Analyses),
+					"file_names": fileNames,
 				},
 			},
 			messageTraceStatusCompleted,

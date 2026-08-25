@@ -22,7 +22,7 @@ import { listPublicModels } from "@/shared/api/model";
 import { getMCPPolicy, getModelOptionPolicy } from "@/shared/api/settings";
 import { getUserSettings } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
-import type { ModelNativeToolConfig, ModelOptionPolicy } from "@/shared/lib/model-option-policy";
+import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import { parseKindsJSON } from "@/shared/model/llm-schema";
 import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
@@ -53,92 +53,6 @@ function parseJSONObject(raw: string): Record<string, unknown> | null {
 
 function resolveChatContentWidth(settings: Record<string, string>): ChatContentWidth {
   return parseChatContentWidth(settings["chat.content_width"]);
-}
-
-function normalizeNativeToolPayload(value: unknown): Record<string, unknown> {
-  if (value === null || Array.isArray(value) || typeof value !== "object") {
-    return {};
-  }
-  return value as Record<string, unknown>;
-}
-
-function normalizeNativeToolString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeNativeToolStrings(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return Array.from(
-    new Set(
-      value
-        .map((item) => normalizeNativeToolString(item))
-        .filter(Boolean),
-    ),
-  );
-}
-
-function nativeToolID({
-  key,
-  protocol,
-  type,
-  index,
-}: {
-  key: string;
-  protocol: string;
-  type: string;
-  index: number;
-}): string {
-  return [key, protocol, type].map((item) => item.trim()).filter(Boolean).join(":") || `native-tool-${index}`;
-}
-
-function resolveNativeTools(raw: string): ModelNativeToolConfig[] {
-  const parsed = parseJSONObject(raw);
-  if (!parsed) {
-    return [];
-  }
-  const rawTools = parsed.nativeTools;
-  if (Array.isArray(rawTools)) {
-    return rawTools.flatMap((item, index): ModelNativeToolConfig[] => {
-      if (item === null || Array.isArray(item) || typeof item !== "object") {
-        return [];
-      }
-      const source = item as Record<string, unknown>;
-      const key = normalizeNativeToolString(source.key ?? source.toolKey);
-      const payload = normalizeNativeToolPayload(source.payload);
-      const type = normalizeNativeToolString(source.type) || normalizeNativeToolString(payload.type);
-      const protocol = normalizeNativeToolString(source.protocol);
-      const protocols = normalizeNativeToolStrings(source.protocols);
-      if (!key && !type && Object.keys(payload).length === 0) {
-        return [];
-      }
-      return [{
-        id: normalizeNativeToolString(source.id) || nativeToolID({ key, protocol, type, index }),
-        key,
-        protocol,
-        protocols: protocols.length > 0 ? protocols : (protocol ? [protocol] : []),
-        provider: normalizeNativeToolString(source.provider) || undefined,
-        type,
-        label: normalizeNativeToolString(source.label) || type || key,
-        description: normalizeNativeToolString(source.description) || undefined,
-        enabled: source.enabled !== false,
-        defaultEnabled: source.defaultEnabled === true,
-        payload,
-      }];
-    }).filter((item) => item.enabled);
-  }
-  return resolveNativeToolKeys(raw).map((key, index) => ({
-    id: nativeToolID({ key, protocol: "", type: "", index }),
-    key,
-    protocol: "",
-    protocols: [],
-    type: "",
-    label: key,
-    enabled: true,
-    defaultEnabled: false,
-    payload: {},
-  }));
 }
 
 function resolveDefaultOptions(raw: string): ConversationOptions {
@@ -261,21 +175,6 @@ function resolveOptionControls(raw: string): ModelOptionControl[] {
   return controls.filter((item, index) => controls.findIndex((candidate) => candidate.path === item.path) === index);
 }
 
-function resolveNativeToolKeys(raw: string): string[] {
-  const parsed = parseJSONObject(raw);
-  const rawKeys = parsed?.nativeToolKeys;
-  if (!Array.isArray(rawKeys)) {
-    return [];
-  }
-  return Array.from(
-    new Set(
-      rawKeys
-        .map((item) => (typeof item === "string" ? item.trim() : ""))
-        .filter(Boolean),
-    ),
-  );
-}
-
 function resolveMCPMaxSelectedTools(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -299,8 +198,6 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),
-    nativeToolKeys: resolveNativeToolKeys(item.capabilitiesJSON),
-    nativeTools: resolveNativeTools(item.capabilitiesJSON),
   };
 }
 

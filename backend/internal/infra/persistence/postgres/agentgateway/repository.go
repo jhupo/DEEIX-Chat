@@ -1158,28 +1158,15 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		return err
 	}
 
-	// A previous Agent version only forwarded the tail of thread/read. If that
-	// partial snapshot is present, locate it inside the new authoritative
-	// snapshot so the missing prefix can be restored without changing existing
-	// message IDs. A genuinely unrelated projection is rebuilt from the local
-	// app-server snapshot rather than silently keeping stale history.
-	storedStart := 0
+	projectionMatches := len(stored) <= len(session.Messages)
 	if len(stored) > 0 {
-		storedStart = -1
-		for candidate := 0; candidate+len(stored) <= len(session.Messages); candidate++ {
-			matched := true
-			for index := range stored {
-				if !historyMessageMatches(stored[index], session.Messages[candidate+index]) {
-					matched = false
-					break
-				}
-			}
-			if matched {
-				storedStart = candidate
+		for index := range stored {
+			if !projectionMatches || !historyMessageMatches(stored[index], session.Messages[index]) {
+				projectionMatches = false
 				break
 			}
 		}
-		if storedStart < 0 {
+		if !projectionMatches {
 			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Attachment{}).Error; err != nil {
 				return err
 			}
@@ -1187,13 +1174,12 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 				return err
 			}
 			stored = nil
-			storedStart = 0
 		}
 	}
 	var parentID *uint
 	for index, source := range session.Messages {
-		if index >= storedStart && index < storedStart+len(stored) {
-			storedMessage := &stored[index-storedStart]
+		if index < len(stored) {
+			storedMessage := &stored[index]
 			updates := map[string]any{}
 			if storedMessage.Content != source.Content {
 				updates["content"] = source.Content
@@ -1310,17 +1296,8 @@ func syncWorkspaceMessageAttachments(tx *gorm.DB, message *model.Message, source
 	return tx.Create(&rows).Error
 }
 
-const legacySessionMessageRunes = 16 * 1024
-
 func historyMessageMatches(stored model.Message, source workspaceSessionMessage) bool {
-	return stored.Role == source.Role && historyTextMatches(stored.Content, source.Content) && historyTextMatches(stored.ReasoningContent, source.ReasoningContent)
-}
-
-func historyTextMatches(stored, source string) bool {
-	if stored == source {
-		return true
-	}
-	return utf8.RuneCountInString(stored) == legacySessionMessageRunes && strings.HasPrefix(source, stored)
+	return stored.Role == source.Role && stored.Content == source.Content && stored.ReasoningContent == source.ReasoningContent
 }
 
 func syncThreadHistory(tx *gorm.DB, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {

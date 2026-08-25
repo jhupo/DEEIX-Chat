@@ -58,6 +58,7 @@ func filterModelOptions(options map[string]interface{}, protocol string, cfg mod
 		options,
 		modelCapabilityLockedOptionPaths(cfg.ModelCapabilitiesJSON),
 	)
+	policyOptions = normalizeReasoningEffortForProtocol(policyOptions, protocolKey)
 	if len(policyOptions) == 0 {
 		return nil
 	}
@@ -91,6 +92,37 @@ func filterModelOptions(options map[string]interface{}, protocol string, cfg mod
 		return nil
 	}
 	return filtered
+}
+
+func normalizeReasoningEffortForProtocol(options map[string]interface{}, protocol string) map[string]interface{} {
+	if len(options) == 0 {
+		return options
+	}
+	result := cloneModelOptionMap(options)
+	reasoning, _ := result["reasoning"].(map[string]interface{})
+	switch protocol {
+	case "openai_responses", "openrouter_responses", "xai_responses":
+		if reasoning == nil {
+			reasoning = make(map[string]interface{})
+		}
+		if _, exists := reasoning["effort"]; !exists {
+			if effort := modelOptionStringValue(result["reasoning_effort"]); effort != "" {
+				reasoning["effort"] = effort
+			}
+		}
+		delete(result, "reasoning_effort")
+		if len(reasoning) > 0 {
+			result["reasoning"] = reasoning
+		}
+	case "openai_chat_completions", "openrouter_chat_completions":
+		if _, exists := result["reasoning_effort"]; !exists && reasoning != nil {
+			if effort := modelOptionStringValue(reasoning["effort"]); effort != "" {
+				result["reasoning_effort"] = effort
+			}
+		}
+		delete(result, "reasoning")
+	}
+	return result
 }
 
 // modelCapabilitiesWithoutNativeTools keeps model preferences while removing the legacy

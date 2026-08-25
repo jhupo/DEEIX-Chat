@@ -33,6 +33,8 @@ const (
 	processTraceKindFileContext     = "file_context"
 	processTraceKindRetrieval       = "content_retrieval"
 	processTraceKindCompaction      = "context_compaction"
+	processTraceKindSkillContext    = "skill_context"
+	processTraceKindMCPAttachment   = "mcp_attachment_processor"
 	processTraceStatusReady         = "ready"
 	processTraceStatusCompleted     = "completed"
 	processTraceStatusIncomplete    = "incomplete"

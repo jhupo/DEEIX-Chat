@@ -113,7 +113,73 @@ test("preserves a file patch when the completed item omits it", () => {
   const item = getAgentRunSnapshot("run-files").items[0];
   assert.equal(item?.kind, "file");
   if (item?.kind !== "file") return;
+  assert.equal(item.seq, 1);
   assert.equal(item.diff, "diff --git a/src/a.ts b/src/a.ts\n-old\n+new");
   assert.equal(item.truncated, true);
   assert.deepEqual(item.files.map((file) => file.path), ["src/a.ts", "src/b.ts"]);
+});
+
+test("keeps activity items in their first event order while applying later updates", () => {
+  setAgentRunContext("timeline-test-context", "conversation-timeline");
+
+  applyAgentExecutionEvents([
+    {
+      runID: "run-timeline",
+      seq: 1,
+      kind: "turn/plan/updated",
+      payload: { plan: [{ step: "Inspect", status: "inProgress" }] },
+      occurredAt: "2026-08-25T00:00:01Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 2,
+      kind: "item/started",
+      payload: { item: { itemID: "reasoning-1", type: "reasoning", summary: ["Think"] } },
+      occurredAt: "2026-08-25T00:00:02Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 3,
+      kind: "item/started",
+      payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test" } },
+      occurredAt: "2026-08-25T00:00:03Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 4,
+      kind: "item/fileChange/patchUpdated",
+      payload: { itemID: "file-1", changes: [{ path: "src/app.ts", change: "update" }], patch: "+new" },
+      occurredAt: "2026-08-25T00:00:04Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 5,
+      kind: "item/started",
+      payload: { item: { itemID: "reasoning-2", type: "reasoning", summary: ["Reconsider"] } },
+      occurredAt: "2026-08-25T00:00:05Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 6,
+      kind: "item/completed",
+      payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test", status: "completed" } },
+      occurredAt: "2026-08-25T00:00:06Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 7,
+      kind: "turn/plan/updated",
+      payload: { plan: [{ step: "Inspect", status: "completed" }] },
+      occurredAt: "2026-08-25T00:00:07Z",
+    },
+  ], "conversation-timeline");
+
+  const run = getAgentRunSnapshot("run-timeline");
+  assert.deepEqual(run.items.map((item) => `${item.kind}:${item.itemID}:${item.seq}`), [
+    "reasoning:reasoning-1:2",
+    "command:command-1:3",
+    "file:file-1:4",
+    "reasoning:reasoning-2:5",
+  ]);
+  assert.equal(run.planSeq, 1);
 });

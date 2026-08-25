@@ -7,20 +7,15 @@ import type { ChatPromptTrace, ChatTraceBlock, RAGCitation } from "@/features/ch
 import type { ProcessTraceLabels } from "@/features/chat/hooks/use-process-trace-labels";
 import {
   displayTraceStageLabel,
-  displayTraceTrigger,
-  filterProcessTraceStages,
   isFileContextTraceStage,
   isRAGTraceStage,
   isTraceStageError,
-  localizeTraceDetailItems,
   mergePromptTraceStage,
   normalizeTraceListItem,
   parseStructuredTraceStages,
-  parseTraceStages,
   type FileContextBadge,
   type TraceStage,
 } from "@/features/chat/model/message-process-trace";
-import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { cn } from "@/lib/utils";
 
 export const TRACE_ROOT_CLASS = "chat-screenshot-omit mb-2 w-full pr-4 sm:pr-6";
@@ -192,13 +187,11 @@ function TraceStageRows({
   stages,
   citations,
   fileBadges,
-  payloadJson,
   labels,
 }: {
   stages: TraceStage[];
   citations: RAGCitation[];
   fileBadges: FileContextBadge[];
-  payloadJson?: string;
   labels: ProcessTraceLabels;
 }) {
   return (
@@ -206,7 +199,6 @@ function TraceStageRows({
       {stages.map((stage, index) => {
         const isError = isTraceStageError(stage);
         const detailItems = stage.details.length > 0 ? stage.details : stage.detail ? [stage.detail] : [];
-        const displayDetailItems = localizeTraceDetailItems(stage, detailItems, payloadJson, labels);
         const showCitations = isRAGTraceStage(stage) && citations.length > 0;
         const showFileBadges = isFileContextTraceStage(stage) && fileBadges.length > 0;
         return (
@@ -240,10 +232,10 @@ function TraceStageRows({
             <div className="min-w-0 space-y-0.5 pb-2 max-sm:col-start-2">
               {stage.trigger ? (
                 <div className={cn("break-words text-[12px] leading-5 text-muted-foreground/58", isError && "text-destructive/65")}>
-                  {displayTraceTrigger(stage.trigger, labels)}
+                  {stage.trigger}
                 </div>
               ) : null}
-              {displayDetailItems.map((detailText, detailIndex) => (
+              {detailItems.map((detailText, detailIndex) => (
                 /^[-*]\s+/.test(detailText) ? (
                   <div
                     key={`${stage.label}-${index}-detail-${detailIndex}`}
@@ -273,48 +265,28 @@ function TraceStageRows({
 
 export function TraceContent({
   block,
-  streaming,
   citations = [],
   fileBadges = [],
   promptTrace,
   labels,
 }: {
   block: ChatTraceBlock;
-  streaming: boolean;
   citations?: RAGCitation[];
   fileBadges?: FileContextBadge[];
   promptTrace?: ChatPromptTrace;
   labels: ProcessTraceLabels;
 }) {
   const structuredStages = parseStructuredTraceStages(block.payloadJson, labels);
-  const parsedStages = structuredStages.length > 0 ? [] : parseTraceStages(block.contentMarkdown);
-  const stages = filterProcessTraceStages(mergePromptTraceStage(structuredStages.length > 0 ? structuredStages : parsedStages, promptTrace, labels));
+  const stages = mergePromptTraceStage(structuredStages, promptTrace, labels);
   if (stages.length > 0) {
     return (
       <TraceStageRows
         stages={stages}
         citations={citations}
         fileBadges={fileBadges}
-        payloadJson={block.payloadJson}
         labels={labels}
       />
     );
   }
-  if (parsedStages.length > 0) {
-    return null;
-  }
-  if (!block.contentMarkdown.trim()) {
-    return null;
-  }
-
-  return (
-    <section className="text-[12px] leading-5 text-muted-foreground/84">
-      <StreamdownRender
-        content={block.contentMarkdown}
-        streaming={streaming}
-        variant="thinking"
-        className="[&_ul]:my-0 [&_ul]:space-y-0.5 [&_li]:pl-0 [&_li]:leading-5"
-      />
-    </section>
-  );
+  return null;
 }

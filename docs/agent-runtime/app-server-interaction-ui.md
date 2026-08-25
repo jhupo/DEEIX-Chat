@@ -22,7 +22,7 @@ Frontend
   -> Backend 严格校验、持久化、设备路由
   -> authenticated Agent Bridge
   -> deeix-agent 映射 app-server JSON-RPC
-  -> Codex app-server >= 0.142.0 (0.147.0 schema baseline)
+  -> Codex app-server >= 0.147.0 (0.147.0 stable schema contract)
 
 Codex notifications/server requests
   -> deeix-agent typed projection + opaque refs

@@ -10,7 +10,7 @@ The native `deeix-agent` launches the user-installed `codex app-server` with std
 
 The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-07). Its reproducible authority is [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions.
 
-The runtime accepts official Codex CLI `0.142.0` or newer. The lower bound is based on generated stable schemas and a real-process probe for the mapped methods, including `thread/list` with `sortKey: "recency_at"`; the reviewed protocol schema remains pinned to `0.147.0`.
+The runtime accepts official Codex CLI `0.147.0` or newer. The Agent always advertises the reviewed `0.147.0/stable` protocol and exact locked schema hash; Cloud rejects any other protocol/hash pair. Startup also probes `thread/list` with `sortKey: "recency_at"` before enrollment.
 
 Adapter startup follows this procedure:
 

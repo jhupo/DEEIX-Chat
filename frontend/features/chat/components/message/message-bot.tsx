@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { MessageAgentFileSummary } from "@/features/chat/components/message/message-agent-activity";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
@@ -399,8 +398,6 @@ export function ChatMessageBot({
           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.content}</p>
         ) : null}
       </div>
-
-      <MessageAgentFileSummary run={agentRun} />
 
       {inlineVideoAttachment ? (
         <MessageInlineVideoPreview attachment={inlineVideoAttachment} loadContent={attachmentContentLoader} />

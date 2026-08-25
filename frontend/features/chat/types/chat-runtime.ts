@@ -5,7 +5,6 @@ import type {
   MessageAttachment,
 } from "@/features/chat/types/messages";
 import type { ConversationOptions } from "@/shared/api/conversation.types";
-import type { ModelNativeToolConfig } from "@/shared/lib/model-option-policy";
 
 export type ViewerProfile = {
   name: string;
@@ -28,8 +27,6 @@ export type ChatModelOption = {
   defaultOptions: ConversationOptions;
   optionControls: ModelOptionControl[];
   lockedOptionPaths: string[];
-  nativeToolKeys: string[];
-  nativeTools: ModelNativeToolConfig[];
 };
 
 export type ModelOptionControlType = "boolean" | "number" | "select" | "text";

@@ -42,6 +42,8 @@ import { AppLogo, DeeixLogo } from "@/shared/components/app-logo";
 import { useBranding } from "@/shared/config/branding-provider";
 import { PoweredByDeeix } from "@/shared/components/powered-by-deeix";
 
+const MESSAGE_SCROLL_EDGE_THRESHOLD_PX = 16;
+
 function CompactDivider({ summaryPreview }: { summaryPreview: string }) {
   const t = useTranslations("chat.messages");
   const [expanded, setExpanded] = React.useState(false);
@@ -471,6 +473,8 @@ export function ChatArea({
     pruneScreenshotSelection?.(selectableMessagePublicIDs);
   }, [pruneScreenshotSelection, selectableMessagePublicIDs, selectionMode]);
   const messageViewportBoundaryRef = React.useRef<HTMLDivElement | null>(null);
+  const previousScrollTopRef = React.useRef<number | null>(null);
+  const [autoScroll, setAutoScroll] = React.useState(true);
   const latestUserMessageKey = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const item = messages[index];
@@ -480,6 +484,30 @@ export function ChatArea({
     }
     return "";
   }, [messages]);
+  const handleViewportScroll = React.useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const viewport = event.currentTarget;
+      const previousScrollTop = previousScrollTopRef.current;
+      const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+      const movingTowardHistory = previousScrollTop !== null && viewport.scrollTop < previousScrollTop - 1;
+      previousScrollTopRef.current = viewport.scrollTop;
+
+      if (movingTowardHistory || (previousScrollTop === null && distanceFromBottom > MESSAGE_SCROLL_EDGE_THRESHOLD_PX)) {
+        setAutoScroll(false);
+      } else if (distanceFromBottom <= MESSAGE_SCROLL_EDGE_THRESHOLD_PX) {
+        setAutoScroll(true);
+      }
+      onScroll(event);
+    },
+    [onScroll],
+  );
+
+  React.useEffect(() => {
+    if (messages.length === 0) {
+      previousScrollTopRef.current = null;
+      setAutoScroll(true);
+    }
+  }, [messages.length]);
 
   return (
     <>
@@ -537,12 +565,16 @@ export function ChatArea({
       ) : null}
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={16}>
+        <MessageScrollerProvider
+          autoScroll={autoScroll}
+          defaultScrollPosition="end"
+          scrollEdgeThreshold={MESSAGE_SCROLL_EDGE_THRESHOLD_PX}
+        >
           <MessageScroller>
             <MessageScrollerViewport
               ref={messageViewportBoundaryRef}
               className="px-3 pb-8 pt-2 [overflow-anchor:none] md:px-6"
-              onScroll={onScroll}
+              onScroll={handleViewportScroll}
               preserveScrollOnPrepend
             >
               <MessageScrollerContent

@@ -21,8 +21,10 @@ import (
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	"github.com/google/uuid"
+	"golang.org/x/mod/semver"
 )
 
 var (
@@ -1741,13 +1743,11 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 	decoder := json.NewDecoder(bytes.NewReader(value))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&manifest) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
-		manifest.Provider != provider || manifest.ThreadSettings.Model == nil ||
+		provider != "codex" || manifest.Provider != provider || manifest.ThreadSettings.Model == nil ||
 		(manifest.AgentVersion != "" && !validAgentVersion(manifest.AgentVersion)) ||
-		!validManifestText(manifest.RuntimeVersion, 64) ||
-		!validManifestText(manifest.ProtocolVersion, 64) || len(manifest.SchemaHash) != 64 {
-		return false
-	}
-	if _, err := hex.DecodeString(manifest.SchemaHash); err != nil {
+		!validCodexRuntimeVersion(manifest.RuntimeVersion) ||
+		manifest.ProtocolVersion != agentprotocol.CodexProtocolVersion ||
+		manifest.SchemaHash != agentprotocol.CodexSchemaHash {
 		return false
 	}
 	return validManifestValues(manifest.Commands, []string{
@@ -1764,6 +1764,14 @@ func validProviderManifest(value json.RawMessage, provider string) bool {
 		validManifestValues(manifest.InteractionKinds, []string{
 			"command_approval", "file_approval", "user_input", "permission", "mcp_elicitation", "dynamic_tool",
 		})
+}
+
+func validCodexRuntimeVersion(value string) bool {
+	if !validManifestText(value, 64) {
+		return false
+	}
+	version := "v" + value
+	return semver.IsValid(version) && semver.Compare(version, "v"+agentprotocol.CodexMinimumRuntimeVersion) >= 0
 }
 
 func validManifestValues(values, allowed []string) bool {

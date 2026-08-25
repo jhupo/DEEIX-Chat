@@ -4,7 +4,6 @@ import * as React from "react";
 
 import { useChatBranchState } from "@/features/chat/hooks/use-chat-branch-state";
 import { useChatSubmitStream } from "@/features/chat/hooks/use-chat-submit-stream";
-import { mergeGatewayAssistantTurns } from "@/features/chat/model/chat-thread";
 import type { ChatModelOption, PendingAttachment, PendingExchangeMap } from "@/features/chat/types/chat-runtime";
 import type {
   ConversationDTO,
@@ -164,22 +163,18 @@ export function useChatRuntime({
     const normalized = resumingRunID.trim();
     return normalized ? new Set([normalized]) : undefined;
   }, [resumingRunID]);
-  const executionMessages = React.useMemo(
-    () => executionMode === "gateway" ? mergeGatewayAssistantTurns(messages) : messages,
-    [executionMode, messages],
-  );
   const persistedRunActive = React.useMemo(
-    () => executionMessages.some(
+    () => messages.some(
       (message) => message.role === "assistant" && message.status === "pending",
     ),
-    [executionMessages],
+    [messages],
   );
 
   const branchState = useChatBranchState({
     conversationID,
     conversationScopeKey,
     resetToken,
-    messages: executionMessages,
+    messages,
     pendingExchanges,
     liveRunIDs: liveServerRunIDs,
   });

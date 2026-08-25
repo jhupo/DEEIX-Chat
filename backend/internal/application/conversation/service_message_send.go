@@ -709,13 +709,13 @@ func (s *Service) sendMessageInternal(
 			formatTraceStep("Skill", fmt.Sprintf("本轮已加载 Skill：%s。包含 SKILL.md 内容，相关时使用。", strings.Join(skillTitles, "、"))),
 			map[string]interface{}{
 				processTracePayloadStage: map[string]interface{}{
-					"kind":   "skill_context",
-					"status": messageTraceStatusStreaming,
+					"kind":           processTraceKindSkillContext,
+					"status":         messageTraceStatusCompleted,
+					"skill_count":    len(skillPrompts.Skills),
+					"skill_ids":      skillPromptIDs(skillPrompts.Skills),
+					"skill_titles":   skillTitles,
+					"skill_triggers": skillPromptTriggers(skillPrompts.Skills),
 				},
-				"skill_count":    len(skillPrompts.Skills),
-				"skill_ids":      skillPromptIDs(skillPrompts.Skills),
-				"skill_titles":   skillTitles,
-				"skill_triggers": skillPromptTriggers(skillPrompts.Skills),
 			},
 			messageTraceStatusStreaming,
 		)

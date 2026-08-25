@@ -26,18 +26,6 @@ function model(overrides = {}) {
     defaultOptions: {},
     optionControls: [],
     lockedOptionPaths: [],
-    nativeToolKeys: ["openai.image_generation"],
-    nativeTools: [{
-      id: "openai.image_generation",
-      key: "openai.image_generation",
-      protocol: "openai_responses",
-      protocols: ["openai_responses"],
-      type: "image_generation",
-      label: "Image Generation",
-      enabled: true,
-      defaultEnabled: true,
-      payload: { type: "image_generation" },
-    }],
     ...overrides,
   };
 }

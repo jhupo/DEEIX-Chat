@@ -279,6 +279,42 @@ func TestFilterModelOptionsKeepsOpenRouterChatServiceTierOutOfDefaultAllowlist(t
 	}
 }
 
+func TestFilterModelOptionsNormalizesReasoningEffortForActualProtocol(t *testing.T) {
+	tests := []struct {
+		name       string
+		protocol   string
+		options    map[string]interface{}
+		allowed    string
+		wantPath   string
+		unwantPath string
+	}{
+		{
+			name: "responses control routed through chat completions", protocol: llm.AdapterOpenAIChatCompletions,
+			options: map[string]interface{}{"reasoning": map[string]interface{}{"effort": "high", "summary": "auto"}},
+			allowed: `{"openai_chat_completions":["reasoning_effort"]}`, wantPath: "reasoning_effort", unwantPath: "reasoning",
+		},
+		{
+			name: "chat completions control routed through responses", protocol: llm.AdapterOpenAIResponses,
+			options: map[string]interface{}{"reasoning_effort": "high"},
+			allowed: `{"openai_responses":["reasoning.effort"]}`, wantPath: "reasoning", unwantPath: "reasoning_effort",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			filtered := filterModelOptions(test.options, test.protocol, modelOptionPolicyConfig{
+				Mode:             modelOptionPolicyAllowlist,
+				AllowedPathsJSON: test.allowed,
+			})
+			if _, ok := filtered[test.wantPath]; !ok {
+				t.Fatalf("expected normalized %s, got %#v", test.wantPath, filtered)
+			}
+			if _, ok := filtered[test.unwantPath]; ok {
+				t.Fatalf("unexpected incompatible %s in %#v", test.unwantPath, filtered)
+			}
+		})
+	}
+}
+
 func TestFilterModelOptionsDenylistAllowsUnlistedAndRemovesDenied(t *testing.T) {
 	filtered := filterModelOptions(map[string]interface{}{
 		"temperature":          0.2,

@@ -29,13 +29,13 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 	}
 }
 
-func TestHistoryMessageMatchesLegacyTailProjection(t *testing.T) {
-	legacy := strings.Repeat("x", legacySessionMessageRunes)
-	if !historyMessageMatches(model.Message{Role: "assistant", Content: legacy}, workspaceSessionMessage{Role: "assistant", Content: legacy + "restored"}) {
-		t.Fatal("legacy truncated message was not matched to the restored snapshot")
+func TestHistoryMessageMatchesExactProjection(t *testing.T) {
+	content := strings.Repeat("x", 16*1024)
+	if !historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content}) {
+		t.Fatal("identical history messages did not match")
 	}
-	if historyMessageMatches(model.Message{Role: "assistant", Content: "different"}, workspaceSessionMessage{Role: "assistant", Content: "restored"}) {
-		t.Fatal("unrelated history messages were treated as the same")
+	if historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content + "suffix"}) {
+		t.Fatal("a message prefix was treated as an exact history match")
 	}
 }
 

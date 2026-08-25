@@ -450,8 +450,6 @@ function ChatInputComponent({
       defaultOptions: {},
       optionControls: [],
       lockedOptionPaths: [],
-      nativeToolKeys: [],
-      nativeTools: [],
     })),
     [agentModels],
   );

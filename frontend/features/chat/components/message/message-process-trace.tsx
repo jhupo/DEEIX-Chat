@@ -27,14 +27,12 @@ import {
   hasAgentRunActivity,
 } from "@/features/chat/model/agent-run-store";
 import {
-  filterProcessTraceStages,
   isRAGTraceStage,
   localizeProcessSummary,
   mergePromptTraceStage,
   parseFileContextBadges,
   parseRAGCitations,
   parseStructuredTraceStages,
-  parseTraceStages,
 } from "@/features/chat/model/message-process-trace";
 import type { ChatMessageProcessTrace } from "@/features/chat/types/messages";
 import { cn } from "@/lib/utils";
@@ -126,10 +124,9 @@ export function MessageProcessTrace({
   const citations = parseRAGCitations(trace.process.payloadJson);
   const fileBadges = parseFileContextBadges(trace.process.payloadJson, labels);
   const structuredStages = parseStructuredTraceStages(trace.process.payloadJson, labels);
-  const parsedStages = structuredStages.length > 0 ? [] : parseTraceStages(trace.process.contentMarkdown);
-  const stages = filterProcessTraceStages(mergePromptTraceStage(structuredStages.length > 0 ? structuredStages : parsedStages, trace.promptTrace, labels));
+  const stages = mergePromptTraceStage(structuredStages, trace.promptTrace, labels);
   const hasRAGStage = stages.some(isRAGTraceStage);
-  const hasRenderableProcessContent = stages.length > 0 || (trace.process.contentMarkdown.trim() && parsedStages.length === 0);
+  const hasRenderableProcessContent = stages.length > 0;
   if (!hasRenderableProcessContent && citations.length === 0 && !trace.promptTrace) {
     return null;
   }
@@ -177,7 +174,6 @@ export function MessageProcessTrace({
           <AccordionContent className="space-y-2.5 px-0 pb-0 pt-1.5 duration-[350ms] ease-in-out">
             <TraceContent
               block={trace.process}
-              streaming={processStreaming}
               citations={citations}
               fileBadges={fileBadges}
               promptTrace={trace.promptTrace}
