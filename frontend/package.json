@@ -1,6 +1,6 @@
 {
   "name": "@deeix/web",
-  "version": "0.4.94",
+  "version": "0.4.95",
   "private": true,
   "scripts": {
     "postinstall": "pnpm sync:icons && pnpm sync:pwa-assets",
