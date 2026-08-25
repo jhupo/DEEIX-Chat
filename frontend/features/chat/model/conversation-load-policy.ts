@@ -6,6 +6,20 @@ export function shouldRefreshMessagesAfterHistory(messageCount: number, historyW
   return messageCount <= 0 || !historyWasLoaded;
 }
 
+export function shouldReloadMessagesForExecutionBoundary(
+  kind: string,
+  assistantStatus: string | null | undefined,
+): boolean {
+  const status = assistantStatus?.trim().toLowerCase();
+  if (kind === "turn/started") {
+    return status === undefined;
+  }
+  if (kind === "turn/completed") {
+    return status === "pending";
+  }
+  return false;
+}
+
 export function isConversationStreamDisconnect(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;

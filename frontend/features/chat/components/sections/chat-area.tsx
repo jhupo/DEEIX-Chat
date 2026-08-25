@@ -470,28 +470,16 @@ export function ChatArea({
     }
     pruneScreenshotSelection?.(selectableMessagePublicIDs);
   }, [pruneScreenshotSelection, selectableMessagePublicIDs, selectionMode]);
-  const hasLiveMessage = React.useMemo(
-    () => messages.some((item) => item.isPending || item.isStreaming),
-    [messages],
-  );
   const messageViewportBoundaryRef = React.useRef<HTMLDivElement | null>(null);
-  const liveAnchorMessageKey = React.useMemo(() => {
-    if (!hasLiveMessage) {
-      return "";
-    }
-    const liveMessageIndex = messages.findIndex((item) => item.isPending || item.isStreaming);
-    const liveMessage = messages[liveMessageIndex];
-    if (liveMessage?.role === "user") {
-      return liveMessage.key;
-    }
-    for (let index = liveMessageIndex - 1; index >= 0; index -= 1) {
+  const latestUserMessageKey = React.useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
       const item = messages[index];
       if (item?.role === "user") {
         return item.key;
       }
     }
     return "";
-  }, [hasLiveMessage, messages]);
+  }, [messages]);
 
   return (
     <>
@@ -664,7 +652,7 @@ export function ChatArea({
                     <MessageScrollerItem
                       key={item.key}
                       messageId={chatMessageScrollerID(item)}
-                      scrollAnchor={item.key === liveAnchorMessageKey}
+                      scrollAnchor={item.key === latestUserMessageKey}
                       className={spacingClass}
                       data-message-public-id={publicID || undefined}
                     >

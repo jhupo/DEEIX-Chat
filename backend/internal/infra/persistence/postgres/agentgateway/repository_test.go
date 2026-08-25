@@ -596,6 +596,15 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Create(&imageFile).Error; err != nil {
 		t.Fatalf("create artifact file: %v", err)
 	}
+	videoFile := model.FileObject{
+		FileID: "file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 7, Purpose: "agent_input",
+		FileName: "fixture.mp4", MimeType: "video/mp4", DetectedMIME: "video/mp4",
+		FileCategory: "video", SizeBytes: 12, SHA256: strings.Repeat("e", 64),
+		StoragePath: "fixture.mp4", Status: "active",
+	}
+	if err := database.Create(&videoFile).Error; err != nil {
+		t.Fatalf("create video artifact file: %v", err)
+	}
 
 	repo := NewRepo(database)
 	artifact, err := repo.CreateArtifact(context.Background(), 7, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_0123456789abcdef0123456789abcdef"})
@@ -605,6 +614,10 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	replayedArtifact, err := repo.CreateArtifact(context.Background(), 7, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 	if err != nil || replayedArtifact.PublicID != artifact.PublicID {
 		t.Fatalf("artifact replay changed identity: %#v %v", replayedArtifact, err)
+	}
+	videoArtifact, err := repo.CreateArtifact(context.Background(), 7, workspace.PublicID, videoFile.FileID, &domainagent.Artifact{PublicID: "agart_cccccccccccccccccccccccccccccccc"})
+	if err != nil || videoArtifact.FileID != videoFile.FileID || videoArtifact.MimeType != "video/mp4" {
+		t.Fatalf("create video artifact: %#v %v", videoArtifact, err)
 	}
 	if _, err := repo.CreateArtifact(context.Background(), 8, workspace.PublicID, imageFile.FileID, &domainagent.Artifact{PublicID: "agart_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}); err == nil {
 		t.Fatal("cross-user artifact creation succeeded")

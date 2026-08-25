@@ -45,6 +45,7 @@ import {
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
+import { shouldReloadMessagesForExecutionBoundary } from "@/features/chat/model/conversation-load-policy";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useDevices } from "@/features/devices";
@@ -354,11 +355,31 @@ export function AppChatArea() {
   }, [conversationID, loading]);
   const currentConversation =
     loadedConversation?.publicID === conversationID ? loadedConversation : activeConversation;
+  const assistantStatusByRunRef = React.useRef(new Map<string, string>());
+  assistantStatusByRunRef.current = new Map(
+    messages
+      .filter((message) => message.role === "assistant" && message.runID.trim())
+      .map((message) => [message.runID.trim(), message.status]),
+  );
+  const onExecutionBoundary = React.useCallback(
+    (event: { kind: string; runID: string }) => {
+      if (
+        shouldReloadMessagesForExecutionBoundary(
+          event.kind,
+          assistantStatusByRunRef.current.get(event.runID.trim()),
+        )
+      ) {
+        reload();
+      }
+    },
+    [reload],
+  );
   useAgentRunHydration({
     conversationID,
     deviceID: currentConversation?.executionDeviceID,
     profileID: currentConversation?.executionProfileID,
     workspaceID: currentConversation?.executionWorkspaceID,
+    onExecutionBoundary,
   });
   const executionModeConversationRef = React.useRef("");
   React.useEffect(() => {

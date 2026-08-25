@@ -2393,7 +2393,7 @@ func (r *Repo) CreateArtifact(ctx context.Context, userID uint, workspacePublicI
 		if mimeType == "" {
 			mimeType = strings.TrimSpace(file.MimeType)
 		}
-		if !strings.HasPrefix(mimeType, "image/") && !strings.HasPrefix(mimeType, "audio/") {
+		if mimeType == "" || file.SizeBytes < 1 || file.SizeBytes > 100*1024*1024 {
 			return repository.ErrInvalidInput
 		}
 		created := model.AgentArtifact{

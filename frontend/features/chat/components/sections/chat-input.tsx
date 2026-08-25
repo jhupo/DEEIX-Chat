@@ -363,7 +363,9 @@ function ChatInputComponent({
   });
 
   // Only relevant in RAG mode: all document attachments opted out of RAG.
-  const docAttachments = attachments.filter((a) => a.fileCategory !== "image");
+  const docAttachments = attachments.filter(
+    (attachment) => attachment.fileCategory !== "image" && attachment.fileCategory !== "video",
+  );
   const allRagOptOut =
     fileMode === "rag" &&
     docAttachments.length > 0 &&

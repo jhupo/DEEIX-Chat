@@ -1,7 +1,7 @@
 import type { ChatFilePolicyDTO } from "@/shared/api/file.types";
 import { formatBytes } from "@/shared/lib/file-display";
 
-export type UploadCategory = "image" | "pdf" | "word" | "excel" | "text" | "unknown";
+export type UploadCategory = "image" | "video" | "pdf" | "word" | "excel" | "text" | "unknown";
 
 const TEXT_FILE_EXTENSIONS = [
   "txt",
@@ -132,6 +132,9 @@ export function inferUploadCategory(file: File): UploadCategory {
   if (mime.startsWith("image/")) {
     return "image";
   }
+  if (mime.startsWith("video/")) {
+    return "video";
+  }
   if (mime === "application/pdf" || ext === "pdf") {
     return "pdf";
   }
@@ -162,6 +165,9 @@ export function resolveEffectiveUploadLimit(policy: ChatFilePolicyDTO | null, ca
 
   if (category === "image") {
     return policy.effectiveImageMaxBytes || policy.imageMaxBytes || policy.maxUploadFileBytes;
+  }
+  if (category === "video") {
+    return policy.maxUploadFileBytes;
   }
 
   return policy.effectiveDocMaxBytes || policy.docMaxBytes || policy.maxUploadFileBytes;

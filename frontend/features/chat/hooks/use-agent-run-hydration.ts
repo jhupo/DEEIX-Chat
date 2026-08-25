@@ -12,6 +12,7 @@ import {
   listConversationExecutionEvents,
   listConversationInteractions,
 } from "@/shared/api/conversation";
+import type { ConversationExecutionEventDTO } from "@/shared/api/conversation.types";
 import { streamAgentEvents } from "@/shared/api/agent-gateway";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
@@ -25,6 +26,7 @@ type AgentRunHydrationScope = {
   deviceID?: string;
   profileID?: string;
   workspaceID?: string;
+  onExecutionBoundary?: (event: ConversationExecutionEventDTO) => void;
 };
 
 export function useAgentRunHydration({
@@ -32,6 +34,7 @@ export function useAgentRunHydration({
   deviceID = "",
   profileID = "",
   workspaceID = "",
+  onExecutionBoundary,
 }: AgentRunHydrationScope) {
   const recovery = useAgentExecutionRecoverySnapshot();
   const normalizedConversationID = conversationID?.trim() || "";
@@ -42,6 +45,10 @@ export function useAgentRunHydration({
     workspaceID.trim(),
   ]);
   const requestExecutionSyncRef = React.useRef<(() => void) | null>(null);
+  const onExecutionBoundaryRef = React.useRef(onExecutionBoundary);
+  React.useLayoutEffect(() => {
+    onExecutionBoundaryRef.current = onExecutionBoundary;
+  }, [onExecutionBoundary]);
 
   React.useEffect(() => {
     setAgentRunContext(contextKey, normalizedConversationID);
@@ -81,6 +88,9 @@ export function useAgentRunHydration({
             applyAgentExecutionEvents(sortedEvents, normalizedConversationID);
             for (const event of sortedEvents) {
               nextCursor = Math.max(nextCursor, event.seq);
+              if (event.kind === "turn/started" || event.kind === "turn/completed") {
+                onExecutionBoundaryRef.current?.(event);
+              }
             }
             if (nextCursor <= cursor) break;
             cursor = nextCursor;
