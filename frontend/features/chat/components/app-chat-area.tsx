@@ -39,13 +39,14 @@ import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
 import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import { resolveAgentComposerProfile } from "@/features/chat/model/agent-settings";
 import { modelSupportsChatImageTool } from "@/features/chat/model/chat-task";
+import { shouldReloadMessagesForExecutionBoundary } from "@/features/chat/model/conversation-load-policy";
 import {
   cloneConversationOptions,
   isConversationOptionsObject,
   sanitizeConversationOptions,
 } from "@/features/chat/model/conversation-options";
-import { shouldReloadMessagesForExecutionBoundary } from "@/features/chat/model/conversation-load-policy";
 import { toPendingAttachment } from "@/features/chat/model/message-submit";
 import type { ChatAreaMessage, MessageAttachment } from "@/features/chat/types/messages";
 import { useDevices } from "@/features/devices";
@@ -100,6 +101,10 @@ function agentSettingsStorageKey(
   conversationID: string,
 ): string {
   return `${AGENT_SETTINGS_STORAGE_PREFIX}${encodeURIComponent(deviceID)}:${encodeURIComponent(profileID)}:${encodeURIComponent(workspaceID)}:${encodeURIComponent(conversationID)}`;
+}
+
+function agentDraftSettingsStorageKey(deviceID: string, profileID: string): string {
+  return `${AGENT_SETTINGS_STORAGE_PREFIX}${encodeURIComponent(deviceID)}:${encodeURIComponent(profileID)}:draft`;
 }
 
 function readAgentSettings(storageKey: string): AgentTurnSettings | null {
@@ -580,7 +585,7 @@ export function AppChatArea() {
       setAgentSettingsLoading(false);
       return;
     }
-    if (!inputResourceDeviceID || !inputResourceWorkspaceID) {
+    if (!inputResourceDeviceID) {
       setAgentModels([]);
       setAgentSettings(null);
       setAgentSettingsError("");
@@ -608,18 +613,28 @@ export function AppChatArea() {
       }
       const [profiles, workspaces] = await Promise.all([
         listAgentRuntimeProfiles(token, inputResourceDeviceID),
-        listAgentWorkspaces(token, inputResourceDeviceID),
+        inputResourceWorkspaceID
+          ? listAgentWorkspaces(token, inputResourceDeviceID)
+          : Promise.resolve([]),
       ]);
       if (cancelled) {
         return;
       }
-      const workspace = workspaces.find((item) => item.workspaceId === inputResourceWorkspaceID);
+      const workspace = inputResourceWorkspaceID
+        ? workspaces.find((item) => item.workspaceId === inputResourceWorkspaceID)
+        : undefined;
       const persistedGatewayTarget = currentConversation?.executionType === "gateway";
-      const profileID = persistedGatewayTarget
+      const preferredProfileID = persistedGatewayTarget
         ? currentConversation.executionProfileID
-        : workspace?.profileId ?? "";
-      const profile = profiles.find((item) => item.profileId === profileID && item.status === "ready");
-      if ((!persistedGatewayTarget && !workspace) || !profile || profile.provider !== "codex" || !profile.manifest.threadSettings.model) {
+        : workspace?.profileId;
+      const requiresBoundProfile = persistedGatewayTarget || Boolean(inputResourceWorkspaceID);
+      const profile = requiresBoundProfile && !preferredProfileID?.trim()
+        ? undefined
+        : resolveAgentComposerProfile(profiles, preferredProfileID);
+      if (
+        (!persistedGatewayTarget && Boolean(inputResourceWorkspaceID) && !workspace) ||
+        !profile
+      ) {
         throw new Error(t("agent.settings.errors.profileUnavailable"));
       }
       if (
@@ -639,13 +654,17 @@ export function AppChatArea() {
       }
       const refreshedAt = snapshot ? Date.parse(snapshot.refreshedAt) : Number.NaN;
       const snapshotStale = !Number.isFinite(refreshedAt) || Date.now() - refreshedAt > AGENT_MODELS_STALE_MS;
-      if ((!snapshot || snapshotStale) && inputResourceDeviceOnline) {
+      if (!snapshot && inputResourceDeviceOnline) {
         const queued = await refreshAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
         const completed = await waitForAgentCommand(token, queued.commandId);
         if (!completed || completed.status !== "completed") {
           throw new Error(completed?.errorMessage || t("agent.settings.errors.modelsUnavailable"));
         }
         snapshot = await getAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
+      } else if (snapshotStale && inputResourceDeviceOnline) {
+        void refreshAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models")
+          .then((queued) => waitForAgentCommand(token, queued.commandId))
+          .catch(() => undefined);
       }
       if (!snapshot) {
         throw new Error(t("agent.settings.errors.modelsUnavailable"));
@@ -676,8 +695,8 @@ export function AppChatArea() {
             inputResourceWorkspaceID,
             gatewayConversationID,
           )
-        : "";
-      const persisted = storageScope ? readAgentSettings(storageScope) : null;
+        : agentDraftSettingsStorageKey(inputResourceDeviceID, profile.profileId);
+      const persisted = readAgentSettings(storageScope);
       const selectedModel = conversationModel
         ? models.find((item) => item.id === conversationModel)
         : persisted
