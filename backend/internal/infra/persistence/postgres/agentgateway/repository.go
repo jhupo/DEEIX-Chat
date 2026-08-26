@@ -3328,17 +3328,15 @@ func (r *Repo) QueueThreadHistory(ctx context.Context, userID, conversationID ui
 			thread.HistoryStatus = "loaded"
 			return nil
 		}
-		if thread.HistoryStatus == "loading" {
-			var pending model.AgentCommand
-			err := tx.Where("thread_id = ? AND kind = ? AND completed_at IS NULL", thread.ID, "thread.read").
-				Order("id DESC").First(&pending).Error
-			if err == nil {
-				queued = &pending
-				return nil
-			}
-			if !dberror.IsRecordNotFound(err) {
-				return err
-			}
+		var pending model.AgentCommand
+		err := tx.Where("thread_id = ? AND kind = ? AND completed_at IS NULL", thread.ID, "thread.read").
+			Order("id DESC").First(&pending).Error
+		if err == nil {
+			queued = &pending
+			return nil
+		}
+		if !dberror.IsRecordNotFound(err) {
+			return err
 		}
 		if thread.SourceThreadRef == nil || !validRepoRef(*thread.SourceThreadRef) ||
 			(thread.Status != "active" && thread.Status != "archived") {

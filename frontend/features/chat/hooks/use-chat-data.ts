@@ -114,6 +114,9 @@ export function useChatData(
   const [resumingRunID, setResumingRunID] = React.useState("");
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  const loadGenerationRef = React.useRef(0);
+  const loadInFlightRef = React.useRef(false);
+  const reloadRequestedRef = React.useRef(false);
   const previousConversationIDRef = React.useRef<string | null>(conversationID);
   const resumeSeqByRunRef = React.useRef<Record<string, number>>({});
   const pendingAssistantContentRef = React.useRef("");
@@ -135,6 +138,21 @@ export function useChatData(
 
   React.useEffect(() => {
     let cancelled = false;
+    const loadGeneration = loadGenerationRef.current + 1;
+    loadGenerationRef.current = loadGeneration;
+    loadInFlightRef.current = true;
+
+    const finishLoad = () => {
+      if (cancelled || loadGenerationRef.current !== loadGeneration) {
+        return;
+      }
+      if (reloadRequestedRef.current) {
+        reloadRequestedRef.current = false;
+        setReloadToken((prev) => prev + 1);
+        return;
+      }
+      loadInFlightRef.current = false;
+    };
 
     async function load() {
       if (!conversationID) {
@@ -146,6 +164,7 @@ export function useChatData(
           total: 0,
           hasOlder: false,
         });
+        finishLoad();
         return;
       }
 
@@ -259,6 +278,8 @@ export function useChatData(
               : "",
           }));
         }
+      } finally {
+        finishLoad();
       }
     }
 
@@ -269,6 +290,11 @@ export function useChatData(
   }, [conversationID, reloadToken, t]);
 
   const reload = React.useCallback(() => {
+    if (loadInFlightRef.current) {
+      reloadRequestedRef.current = true;
+      return;
+    }
+    loadInFlightRef.current = true;
     setReloadToken((prev) => prev + 1);
   }, []);
 

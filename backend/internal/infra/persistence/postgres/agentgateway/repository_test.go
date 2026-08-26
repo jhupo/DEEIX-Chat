@@ -907,6 +907,13 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err != nil || refreshedHistoryCommand == nil || refreshedHistoryThread.HistoryStatus != "loading" || refreshedHistoryCommand.ServerSeq != 6 {
 		t.Fatalf("queue refreshed thread history: %#v %#v %v", refreshedHistoryThread, refreshedHistoryCommand, err)
 	}
+	if err := database.Model(&importedThread).Update("history_status", "unloaded").Error; err != nil {
+		t.Fatalf("invalidate in-flight thread history: %v", err)
+	}
+	coalescedHistoryThread, coalescedHistoryCommand, err := repo.QueueThreadHistory(context.Background(), 7, importedConversation.ID, &domainagent.Command{PublicID: "agcmd_99999999999999999999999999999999", Kind: "thread.read"}, now.Add(14*time.Second))
+	if err != nil || coalescedHistoryCommand == nil || coalescedHistoryCommand.PublicID != refreshedHistoryCommand.PublicID || coalescedHistoryThread.HistoryStatus != "unloaded" {
+		t.Fatalf("coalesce invalidated in-flight thread history: %#v %#v %v", coalescedHistoryThread, coalescedHistoryCommand, err)
+	}
 	canonicalWorkspace := model.AgentWorkspace{
 		PublicID: "workspace-canonical", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
 		Name: "source-repository", Status: "available", LastSeenAt: now,
