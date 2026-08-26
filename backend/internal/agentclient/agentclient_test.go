@@ -1794,8 +1794,11 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if session["historyLoaded"] != true || len(messages) != 2 {
 		t.Fatalf("thread detail did not project messages: %#v", session)
 	}
-	if session["model"] != "gpt-test" || session["reasoningEffort"] != "high" {
-		t.Fatalf("thread detail did not preserve settings: %#v", session)
+	if _, exists := session["model"]; exists {
+		t.Fatalf("thread read projected undocumented settings: %#v", session)
+	}
+	if adapter.isActive("thread-1") {
+		t.Fatal("thread read incorrectly marked the thread active")
 	}
 }
 
@@ -1914,7 +1917,35 @@ func runFakeAppServer() {
 				}, "nextCursor": "next"}
 			}
 		case "thread/resume":
-			result = map[string]any{"model": "gpt-test", "reasoningEffort": "high", "thread": map[string]any{
+			var params struct {
+				ThreadID string `json:"threadId"`
+			}
+			_ = json.Unmarshal(request["params"], &params)
+			if params.ThreadID != "thread-1" {
+				result = map[string]any{"thread": map[string]any{"id": params.ThreadID}}
+				break
+			}
+			var id any
+			_ = json.Unmarshal(request["id"], &id)
+			_ = encoder.Encode(map[string]any{"id": id, "error": map[string]any{
+				"code": -32600, "message": "thread already has an active writer",
+			}})
+			continue
+		case "thread/read":
+			var params struct {
+				ThreadID     string `json:"threadId"`
+				IncludeTurns bool   `json:"includeTurns"`
+			}
+			_ = json.Unmarshal(request["params"], &params)
+			if params.ThreadID != "thread-1" || !params.IncludeTurns {
+				var id any
+				_ = json.Unmarshal(request["id"], &id)
+				_ = encoder.Encode(map[string]any{"id": id, "error": map[string]any{
+					"code": -32602, "message": "thread/read requires threadId and includeTurns",
+				}})
+				continue
+			}
+			result = map[string]any{"thread": map[string]any{
 				"id": "thread-1", "name": "First thread", "preview": "first",
 				"turns": []any{map[string]any{"startedAt": 1, "completedAt": 2, "items": []any{
 					map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}}},
