@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestResolveCodexEnforcesSupportedVersionRangeBeforeAppServer(t *testing.T) {
-	t.Setenv(WindowsUserSIDEnvironment, "")
+	t.Setenv("DEEIX_AGENT_WINDOWS_USER_SID", "")
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
