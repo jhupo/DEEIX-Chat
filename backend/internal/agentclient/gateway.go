@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 	"golang.org/x/net/websocket"
 )
 
@@ -139,6 +140,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	defer func() { _ = gateway.writeStatus("stopped", "") }()
 	go gateway.commandWorker(runtimeContext)
 	go gateway.refreshWorkspaceLoop(runtimeContext)
+	go gateway.sessionSnapshotLoop(runtimeContext)
 	if err = gateway.recoverCommands(); err != nil {
 		return err
 	}
@@ -221,6 +223,56 @@ func (gateway *Gateway) refreshWorkspaceLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			refresh()
+		}
+	}
+}
+
+func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
+	revisions := make(map[string]string)
+	syncSnapshots := func() {
+		scanContext, cancel := context.WithTimeout(ctx, 30*time.Second)
+		snapshots, err := gateway.adapter.SessionSnapshots(scanContext)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil {
+				gateway.logger.Printf("refresh Codex sessions: %s", publicMessage(err))
+			}
+			return
+		}
+		appended := false
+		for _, snapshot := range snapshots {
+			if revisions[snapshot.WorkspaceID] == snapshot.Revision {
+				continue
+			}
+			event, marshalErr := json.Marshal(map[string]any{
+				"kind":       agentprotocol.SessionSnapshotEventKind,
+				"occurredAt": time.Now().UTC().Format(time.RFC3339Nano),
+				"payload":    snapshot,
+			})
+			if marshalErr != nil || len(event) > agentprotocol.MaxProviderEventBytes {
+				gateway.logger.Printf("encode Codex session snapshot workspace=%s: event is invalid", snapshot.WorkspaceID)
+				continue
+			}
+			if _, appendErr := gateway.state.AppendEvent(event); appendErr != nil {
+				gateway.logger.Printf("persist Codex session snapshot workspace=%s: %s", snapshot.WorkspaceID, publicMessage(appendErr))
+				continue
+			}
+			revisions[snapshot.WorkspaceID] = snapshot.Revision
+			appended = true
+		}
+		if appended {
+			gateway.signalWake()
+		}
+	}
+	syncSnapshots()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			syncSnapshots()
 		}
 	}
 }

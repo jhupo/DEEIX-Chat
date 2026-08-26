@@ -92,10 +92,12 @@ export function useChatData(
     activeGenerationRunsRef,
     failedGenerationRunsRef,
     generationSeqByRunRef,
+    onHistoryLoaded,
   }: {
     activeGenerationRunsRef?: React.RefObject<Set<string>>;
     failedGenerationRunsRef?: React.RefObject<Set<string>>;
     generationSeqByRunRef?: React.MutableRefObject<Record<string, number>>;
+    onHistoryLoaded?: () => void;
   } = {},
 ) {
   const t = useTranslations("chat.data");
@@ -118,6 +120,8 @@ export function useChatData(
   const resumeTextReplayByRunRef = React.useRef<Record<string, ResumeTextReplayState>>({});
   const activeResumeStreamRef = React.useRef<ActiveResumeStream | null>(null);
   const refreshedPendingRunsRef = React.useRef(new Set<string>());
+  const onHistoryLoadedRef = React.useRef(onHistoryLoaded);
+  onHistoryLoadedRef.current = onHistoryLoaded;
   // 恢复游标只在对应的可见内容仍被保留时有效，两者必须同步清理。
   const clearResumeCheckpoint = React.useCallback((runID: string) => {
     const normalizedRunID = runID.trim();
@@ -209,6 +213,7 @@ export function useChatData(
         if (history.status !== "loaded") {
           throw new Error(history.error || t("loadFailed"));
         }
+        onHistoryLoadedRef.current?.();
 
         if (!shouldRefreshMessagesAfterHistory(initialData.results.length, historyWasLoaded)) {
           return;

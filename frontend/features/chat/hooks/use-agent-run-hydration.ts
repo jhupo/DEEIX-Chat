@@ -13,20 +13,21 @@ import {
   listConversationInteractions,
 } from "@/shared/api/conversation";
 import type { ConversationExecutionEventDTO } from "@/shared/api/conversation.types";
-import { streamAgentEvents } from "@/shared/api/agent-gateway";
+import type { AgentStreamEvent } from "@/shared/api/agent-gateway";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const EXECUTION_EVENT_RETRY_MAX_MS = 15_000;
 const INTERACTION_RETRY_MAX_MS = 15_000;
-const EVENT_STREAM_RECONNECT_MAX_MS = 15_000;
-const EVENT_SYNC_DEBOUNCE_MS = 250;
+const SESSION_SNAPSHOT_EVENT_KIND = "workspace/sessions/updated";
 
 type AgentRunHydrationScope = {
   conversationID: string | null;
   deviceID?: string;
   profileID?: string;
   workspaceID?: string;
+  agentEvent?: AgentStreamEvent | null;
   onExecutionBoundary?: (event: ConversationExecutionEventDTO) => void;
+  onConversationInvalidated?: () => void;
 };
 
 export function useAgentRunHydration({
@@ -34,7 +35,9 @@ export function useAgentRunHydration({
   deviceID = "",
   profileID = "",
   workspaceID = "",
+  agentEvent = null,
   onExecutionBoundary,
+  onConversationInvalidated,
 }: AgentRunHydrationScope) {
   const recovery = useAgentExecutionRecoverySnapshot();
   const normalizedConversationID = conversationID?.trim() || "";
@@ -45,10 +48,13 @@ export function useAgentRunHydration({
     workspaceID.trim(),
   ]);
   const requestExecutionSyncRef = React.useRef<(() => void) | null>(null);
+  const requestLatestSyncRef = React.useRef<(() => void) | null>(null);
   const onExecutionBoundaryRef = React.useRef(onExecutionBoundary);
+  const onConversationInvalidatedRef = React.useRef(onConversationInvalidated);
   React.useLayoutEffect(() => {
     onExecutionBoundaryRef.current = onExecutionBoundary;
-  }, [onExecutionBoundary]);
+    onConversationInvalidatedRef.current = onConversationInvalidated;
+  }, [onConversationInvalidated, onExecutionBoundary]);
 
   React.useEffect(() => {
     setAgentRunContext(contextKey, normalizedConversationID);
@@ -64,10 +70,6 @@ export function useAgentRunHydration({
     let eventRetryDelay = 1_000;
     let interactionRetryTimer: number | null = null;
     let interactionRetryDelay = 1_000;
-    let streamController: AbortController | null = null;
-    let streamReconnectTimer: number | null = null;
-    let streamReconnectDelay = 1_000;
-    let syncDebounceTimer: number | null = null;
 
     const syncEvents = () => {
       eventSyncRequested = true;
@@ -171,38 +173,7 @@ export function useAgentRunHydration({
       requestExecutionSync();
       requestInteractionSync();
     };
-
-    const scheduleLatestSync = () => {
-      if (cancelled || syncDebounceTimer !== null) return;
-      syncDebounceTimer = window.setTimeout(() => {
-        syncDebounceTimer = null;
-        syncLatest();
-      }, EVENT_SYNC_DEBOUNCE_MS);
-    };
-
-    function scheduleStreamReconnect() {
-      if (cancelled || streamReconnectTimer !== null) return;
-      streamReconnectTimer = window.setTimeout(() => {
-        streamReconnectTimer = null;
-        connectEventStream();
-      }, streamReconnectDelay);
-      streamReconnectDelay = Math.min(streamReconnectDelay * 2, EVENT_STREAM_RECONNECT_MAX_MS);
-    }
-
-    function connectEventStream() {
-      if (!accessToken || cancelled || streamController) return;
-      const controller = new AbortController();
-      streamController = controller;
-      void streamAgentEvents(accessToken, controller.signal, (type) => {
-        streamReconnectDelay = 1_000;
-        if (document.visibilityState === "hidden") return;
-        if (type === "ready") syncLatest();
-        else scheduleLatestSync();
-      }).catch(() => undefined).finally(() => {
-        if (streamController === controller) streamController = null;
-        scheduleStreamReconnect();
-      });
-    }
+    requestLatestSyncRef.current = syncLatest;
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") syncLatest();
@@ -211,7 +182,7 @@ export function useAgentRunHydration({
     async function start() {
       accessToken = (await resolveAccessToken()) ?? "";
       if (!accessToken || cancelled) return;
-      connectEventStream();
+      syncLatest();
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
 
@@ -219,14 +190,25 @@ export function useAgentRunHydration({
     return () => {
       cancelled = true;
       requestExecutionSyncRef.current = null;
+      requestLatestSyncRef.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      streamController?.abort();
-      if (streamReconnectTimer !== null) window.clearTimeout(streamReconnectTimer);
-      if (syncDebounceTimer !== null) window.clearTimeout(syncDebounceTimer);
       if (eventRetryTimer !== null) window.clearTimeout(eventRetryTimer);
       if (interactionRetryTimer !== null) window.clearTimeout(interactionRetryTimer);
     };
   }, [contextKey, normalizedConversationID]);
+
+  React.useEffect(() => {
+    if (!agentEvent || !normalizedConversationID) return;
+    requestLatestSyncRef.current?.();
+    if (
+      agentEvent.type === "change" &&
+      agentEvent.kind === SESSION_SNAPSHOT_EVENT_KIND &&
+      agentEvent.deviceID === deviceID.trim() &&
+      agentEvent.conversationIDs.includes(normalizedConversationID)
+    ) {
+      onConversationInvalidatedRef.current?.();
+    }
+  }, [agentEvent, deviceID, normalizedConversationID]);
 
   React.useEffect(() => {
     if (recovery.hasGap) requestExecutionSyncRef.current?.();

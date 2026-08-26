@@ -293,7 +293,7 @@ func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
 	browser, cleanup := hub.subscribeUser(7)
 	defer cleanup()
 
-	hub.notifyUser(7)
+	hub.notify(appagent.ChangeNotification{UserID: 7})
 	for _, deviceID := range []string{"device-a", "device-b"} {
 		select {
 		case <-hub.connections[deviceID].wake:
@@ -307,7 +307,10 @@ func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
 	default:
 	}
 	select {
-	case <-browser:
+	case event := <-browser:
+		if event.Type != "change" {
+			t.Fatalf("browser event = %#v", event)
+		}
 	default:
 		t.Fatal("browser subscriber did not receive the user wake")
 	}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,12 @@ type executionItemProjection struct {
 	Phase   string
 	Command string
 	Files   []any
+}
+
+type workspaceSessionSnapshot struct {
+	WorkspaceID string           `json:"workspaceId"`
+	Revision    string           `json:"revision"`
+	Data        []map[string]any `json:"data"`
 }
 
 type CodexAdapter struct {
@@ -1126,16 +1133,177 @@ func (adapter *CodexAdapter) projectSessions(data any, workspace Workspace) (any
 				continue
 			}
 		}
-		sourceRef, err := adapter.state.PublishSource(adapter.profileID, "thread", id)
+		session, err := adapter.projectSessionSummary(thread)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, map[string]any{
-			"sourceThreadRef": sourceRef, "preview": sessionText(thread["preview"], 512), "name": sessionText(thread["name"], 256), "modelProvider": sessionText(thread["modelProvider"], 128),
-			"createdAt": thread["createdAt"], "updatedAt": thread["updatedAt"], "recencyAt": thread["recencyAt"], "status": thread["status"], "historyLoaded": false,
-		})
+		result = append(result, session)
 	}
 	return map[string]any{"data": result}, nil
+}
+
+func (adapter *CodexAdapter) SessionSnapshots(ctx context.Context) ([]workspaceSessionSnapshot, error) {
+	data, err := adapter.listSessions(ctx, map[string]any{
+		"limit": 100, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
+	})
+	if err != nil {
+		return nil, err
+	}
+	adapter.workspaceMu.RLock()
+	workspaces := make([]Workspace, 0, len(adapter.workspaces))
+	for _, workspace := range adapter.workspaces {
+		if workspace.Excluded {
+			continue
+		}
+		workspace.SessionRoots = append([]string(nil), workspace.SessionRoots...)
+		workspace.ThreadIDs = cloneThreadIDs(workspace.ThreadIDs)
+		workspaces = append(workspaces, workspace)
+	}
+	adapter.workspaceMu.RUnlock()
+	return adapter.projectSessionSnapshots(data, workspaces)
+}
+
+func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Workspace) ([]workspaceSessionSnapshot, error) {
+	sort.Slice(workspaces, func(left, right int) bool {
+		return workspaces[left].WorkspaceID < workspaces[right].WorkspaceID
+	})
+	root, _ := data.(map[string]any)
+	items, _ := root["data"].([]any)
+	sessionsByWorkspace := make([][]map[string]any, len(workspaces))
+	for _, raw := range items {
+		thread, _ := raw.(map[string]any)
+		workspaceIndex := sessionWorkspaceIndex(thread, workspaces)
+		if workspaceIndex < 0 {
+			continue
+		}
+		session, err := adapter.projectSessionSummary(thread)
+		if err != nil {
+			return nil, err
+		}
+		if session != nil {
+			sessionsByWorkspace[workspaceIndex] = append(sessionsByWorkspace[workspaceIndex], session)
+		}
+	}
+	snapshots := make([]workspaceSessionSnapshot, 0, len(workspaces))
+	for index, workspace := range workspaces {
+		sessions := sessionsByWorkspace[index]
+		if sessions == nil {
+			sessions = make([]map[string]any, 0)
+		}
+		sort.Slice(sessions, func(left, right int) bool {
+			return sessions[left]["sourceThreadRef"].(string) < sessions[right]["sourceThreadRef"].(string)
+		})
+		canonical, err := json.Marshal(sessions)
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(canonical)
+		snapshots = append(snapshots, workspaceSessionSnapshot{
+			WorkspaceID: workspace.WorkspaceID,
+			Revision:    hex.EncodeToString(digest[:12]),
+			Data:        sessions,
+		})
+	}
+	return snapshots, nil
+}
+
+func (adapter *CodexAdapter) projectSessionSummary(thread map[string]any) (map[string]any, error) {
+	id, _ := thread["id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, nil
+	}
+	sourceRef, err := adapter.state.PublishSource(adapter.profileID, "thread", id)
+	if err != nil {
+		return nil, err
+	}
+	status := sessionText(thread["status"], 32)
+	if status != "active" && status != "archived" {
+		return nil, errors.New("Codex session status is invalid")
+	}
+	return map[string]any{
+		"sourceThreadRef": sourceRef,
+		"preview":         sessionText(thread["preview"], 512),
+		"name":            sessionText(thread["name"], 256),
+		"modelProvider":   sessionText(thread["modelProvider"], 128),
+		"status":          status,
+		"createdAt":       sessionUnixTime(thread["createdAt"]),
+		"updatedAt":       sessionUnixTime(thread["updatedAt"]),
+		"recencyAt":       sessionUnixTime(thread["recencyAt"]),
+		"historyLoaded":   false,
+	}, nil
+}
+
+func sessionUnixTime(value any) int64 {
+	switch timestamp := value.(type) {
+	case int:
+		if timestamp >= 0 {
+			return int64(timestamp)
+		}
+	case int64:
+		if timestamp >= 0 {
+			return timestamp
+		}
+	case uint64:
+		if timestamp <= 1<<63-1 {
+			return int64(timestamp)
+		}
+	case float64:
+		if timestamp >= 0 && timestamp < float64(1<<63-1) && math.Trunc(timestamp) == timestamp {
+			return int64(timestamp)
+		}
+	case json.Number:
+		if result, err := timestamp.Int64(); err == nil && result >= 0 {
+			return result
+		}
+	}
+	return 0
+}
+
+func sessionWorkspaceIndex(thread map[string]any, workspaces []Workspace) int {
+	id, _ := thread["id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1
+	}
+	for index, workspace := range workspaces {
+		if _, assigned := workspace.ThreadIDs[id]; assigned {
+			return index
+		}
+	}
+	cwd, _ := thread["cwd"].(string)
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" || len(cwd) > 4096 || !filepath.IsAbs(cwd) || strings.ContainsRune(cwd, 0) {
+		return -1
+	}
+	selected, selectedRootLength := -1, -1
+	for index, workspace := range workspaces {
+		if workspace.Hidden {
+			continue
+		}
+		roots := workspace.SessionRoots
+		if len(roots) == 0 {
+			roots = []string{workspace.Root}
+		}
+		for _, root := range roots {
+			root = filepath.Clean(strings.TrimSpace(root))
+			if root != "." && pathWithin(root, cwd) && len(root) > selectedRootLength {
+				selected, selectedRootLength = index, len(root)
+			}
+		}
+	}
+	return selected
+}
+
+func cloneThreadIDs(source map[string]struct{}) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]struct{}, len(source))
+	for id := range source {
+		result[id] = struct{}{}
+	}
+	return result
 }
 
 func sessionCWDWithinRoots(thread map[string]any, roots []string) bool {

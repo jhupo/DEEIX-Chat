@@ -282,6 +282,10 @@ export function AppChatArea() {
     autoGenerateLabels,
     deleteFilesByDefault,
   } = useSettingsChatPreferences();
+  const [conversationInvalidationSequence, setConversationInvalidationSequence] = React.useState(0);
+  const onConversationHistoryLoaded = React.useCallback(() => {
+    setConversationInvalidationSequence((current) => current + 1);
+  }, []);
   const {
     items,
     projects,
@@ -293,6 +297,7 @@ export function AppChatArea() {
     setStarByPublicID,
     setProjectByPublicID,
     deleteByPublicID,
+    lastAgentEvent,
   } = useSidebarConversations();
   const {
     cancelResumedGeneration,
@@ -310,6 +315,7 @@ export function AppChatArea() {
     activeGenerationRunsRef,
     failedGenerationRunsRef,
     generationSeqByRunRef,
+    onHistoryLoaded: onConversationHistoryLoaded,
   });
   const { greetingTitle } = useChatViewerProfile();
   const [manualConversationTitle, setManualConversationTitle] = React.useState("");
@@ -357,7 +363,7 @@ export function AppChatArea() {
     return () => {
       cancelled = true;
     };
-  }, [conversationID, loading]);
+  }, [conversationID, conversationInvalidationSequence, loading]);
   const currentConversation =
     loadedConversation?.publicID === conversationID ? loadedConversation : activeConversation;
   const assistantStatusByRunRef = React.useRef(new Map<string, string>());
@@ -379,12 +385,17 @@ export function AppChatArea() {
     },
     [reload],
   );
+  const onConversationInvalidated = React.useCallback(() => {
+    reload();
+  }, [reload]);
   useAgentRunHydration({
     conversationID,
     deviceID: currentConversation?.executionDeviceID,
     profileID: currentConversation?.executionProfileID,
     workspaceID: currentConversation?.executionWorkspaceID,
+    agentEvent: lastAgentEvent,
     onExecutionBoundary,
+    onConversationInvalidated,
   });
   const executionModeConversationRef = React.useRef("");
   React.useEffect(() => {

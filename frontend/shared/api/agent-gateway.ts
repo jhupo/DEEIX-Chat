@@ -8,10 +8,43 @@ import type {
 
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
 
+export type AgentStreamEvent =
+  | { type: "ready" }
+  | {
+      type: "change";
+      deviceID: string;
+      conversationIDs: string[];
+      kind: string;
+    };
+
+function parseAgentStreamEvent(value: unknown): AgentStreamEvent | null {
+  if (value === null || typeof value !== "object") return null;
+  const type = Reflect.get(value, "type");
+  if (type === "ready") return { type };
+  if (type !== "change") return null;
+  const rawDeviceID = Reflect.get(value, "deviceID");
+  const rawConversationIDs = Reflect.get(value, "conversationIDs");
+  const rawKind = Reflect.get(value, "kind");
+  if (rawDeviceID !== undefined && typeof rawDeviceID !== "string") return null;
+  if (rawKind !== undefined && typeof rawKind !== "string") return null;
+  if (
+    rawConversationIDs !== undefined &&
+    (!Array.isArray(rawConversationIDs) || rawConversationIDs.some((item) => typeof item !== "string"))
+  ) {
+    return null;
+  }
+  return {
+    type,
+    deviceID: rawDeviceID ?? "",
+    conversationIDs: rawConversationIDs ?? [],
+    kind: rawKind ?? "",
+  };
+}
+
 export async function streamAgentEvents(
   accessToken: string,
   signal: AbortSignal,
-  onEvent: (type: "ready" | "change") => void,
+  onEvent: (event: AgentStreamEvent) => void,
 ): Promise<void> {
   const response = await authedFetch(
     "/api/v1/agent/events/stream",
@@ -33,11 +66,8 @@ export async function streamAgentEvents(
     for (const line of lines) {
       const raw = line.trim();
       if (!raw) continue;
-      const event: unknown = JSON.parse(raw);
-      if (event !== null && typeof event === "object") {
-        const type = Reflect.get(event, "type");
-        if (type === "ready" || type === "change") onEvent(type);
-      }
+      const event = parseAgentStreamEvent(JSON.parse(raw));
+      if (event) onEvent(event);
     }
     if (done) return;
   }

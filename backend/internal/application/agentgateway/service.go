@@ -67,6 +67,13 @@ type HistoryAttachmentStore interface {
 
 type ConversationEventProjector func(context.Context, domainagent.AppliedEventFrame) error
 
+type ChangeNotification struct {
+	UserID                uint
+	DeviceID              string
+	ConversationPublicIDs []string
+	Kind                  string
+}
+
 type ArtifactContent struct {
 	Reader      io.ReadCloser
 	ContentType string
@@ -92,7 +99,7 @@ type Service struct {
 	artifacts ArtifactContentStore
 	history   HistoryAttachmentStore
 	projector ConversationEventProjector
-	notify    func(uint)
+	notify    func(ChangeNotification)
 }
 
 type DeviceView struct {
@@ -341,11 +348,11 @@ func (s *Service) SetConversationEventProjector(projector ConversationEventProje
 	s.projector = projector
 }
 
-func (s *Service) SetNotifier(notify func(uint)) { s.notify = notify }
+func (s *Service) SetNotifier(notify func(ChangeNotification)) { s.notify = notify }
 
 func (s *Service) notifyUser(userID uint) {
 	if s.notify != nil {
-		s.notify(userID)
+		s.notify(ChangeNotification{UserID: userID})
 	}
 }
 
@@ -1353,7 +1360,7 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 
 func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdentity, runtimeProfileID uint, bridgeSeq uint64, event json.RawMessage) (uint64, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || runtimeProfileID == 0 || bridgeSeq == 0 ||
-		len(event) == 0 || len(event) > 2*1024*1024 {
+		len(event) == 0 || len(event) > agentprotocol.MaxProviderEventBytes {
 		return 0, ErrInvalidInput
 	}
 	payloadHash := sha256.Sum256(event)
@@ -1371,6 +1378,9 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		Payload          json.RawMessage `json:"payload"`
 	}
 	if json.Unmarshal(normalized, &envelope) != nil || !json.Valid(envelope.Payload) {
+		return 0, ErrInvalidInput
+	}
+	if envelope.Kind == agentprotocol.SessionSnapshotEventKind && !validSessionSnapshotPayload(envelope.Payload) {
 		return 0, ErrInvalidInput
 	}
 	applied, err := s.repo.ApplyEventFrame(
@@ -1393,8 +1403,63 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 			return 0, err
 		}
 	}
-	s.notifyUser(identity.UserID)
+	if envelope.Kind == agentprotocol.SessionSnapshotEventKind {
+		if len(applied.ConversationPublicIDs) > 0 && s.notify != nil {
+			s.notify(ChangeNotification{
+				UserID:                identity.UserID,
+				DeviceID:              identity.DeviceID,
+				ConversationPublicIDs: append([]string(nil), applied.ConversationPublicIDs...),
+				Kind:                  envelope.Kind,
+			})
+		}
+	} else {
+		s.notifyUser(identity.UserID)
+	}
 	return applied.Acknowledged, nil
+}
+
+type sessionSnapshotPayload struct {
+	WorkspaceID string                       `json:"workspaceId"`
+	Revision    string                       `json:"revision"`
+	Data        []sessionSnapshotPayloadItem `json:"data"`
+}
+
+type sessionSnapshotPayloadItem struct {
+	SourceThreadRef string  `json:"sourceThreadRef"`
+	Preview         *string `json:"preview"`
+	Name            *string `json:"name"`
+	ModelProvider   *string `json:"modelProvider"`
+	Status          string  `json:"status"`
+	CreatedAt       *int64  `json:"createdAt"`
+	UpdatedAt       *int64  `json:"updatedAt"`
+	RecencyAt       *int64  `json:"recencyAt"`
+	HistoryLoaded   *bool   `json:"historyLoaded"`
+}
+
+func validSessionSnapshotPayload(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var payload sessionSnapshotPayload
+	if decoder.Decode(&payload) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
+		len(payload.WorkspaceID) > 64 || !validOpaqueRef(payload.WorkspaceID) ||
+		payload.Revision != strings.ToLower(payload.Revision) || !validHex(payload.Revision, 24) ||
+		payload.Data == nil || len(payload.Data) > 1000 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(payload.Data))
+	for _, session := range payload.Data {
+		if !validOpaqueRef(session.SourceThreadRef) || session.Preview == nil || session.Name == nil || session.ModelProvider == nil ||
+			session.CreatedAt == nil || session.UpdatedAt == nil || session.RecencyAt == nil || session.HistoryLoaded == nil || *session.HistoryLoaded ||
+			len(*session.Preview) > 4096 || len(*session.Name) > 1024 || len(*session.ModelProvider) > 128 ||
+			(session.Status != "active" && session.Status != "archived") || *session.CreatedAt < 0 || *session.UpdatedAt < 0 || *session.RecencyAt < 0 {
+			return false
+		}
+		if _, duplicate := seen[session.SourceThreadRef]; duplicate {
+			return false
+		}
+		seen[session.SourceThreadRef] = struct{}{}
+	}
+	return true
 }
 
 func normalizeBridgeJSON(raw json.RawMessage) (json.RawMessage, error) {

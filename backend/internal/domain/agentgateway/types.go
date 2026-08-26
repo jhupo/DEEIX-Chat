@@ -207,10 +207,11 @@ type Event struct {
 
 // AppliedEventFrame carries the durable provider event and its conversation binding.
 type AppliedEventFrame struct {
-	Acknowledged   uint64
-	Event          Event
-	ConversationID uint
-	RunID          string
+	Acknowledged          uint64
+	Event                 Event
+	ConversationID        uint
+	ConversationPublicIDs []string
+	RunID                 string
 }
 
 type Interaction struct {

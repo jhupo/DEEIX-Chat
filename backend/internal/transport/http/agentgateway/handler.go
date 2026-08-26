@@ -24,7 +24,7 @@ type Handler struct {
 
 func NewHandler(service *appagent.Service) *Handler {
 	hub := newBridgeHub()
-	service.SetNotifier(hub.notifyUser)
+	service.SetNotifier(hub.notify)
 	return &Handler{service: service, hub: hub}
 }
 
@@ -39,14 +39,14 @@ func (h *Handler) StreamBrowserEvents(c *gin.Context) {
 	c.Status(http.StatusOK)
 
 	encoder := json.NewEncoder(c.Writer)
-	writeEvent := func(eventType string) bool {
-		if err := encoder.Encode(map[string]string{"type": eventType}); err != nil {
+	writeEvent := func(event browserEvent) bool {
+		if err := encoder.Encode(event); err != nil {
 			return false
 		}
 		c.Writer.Flush()
 		return true
 	}
-	if !writeEvent("ready") {
+	if !writeEvent(browserEvent{Type: "ready"}) {
 		return
 	}
 
@@ -56,12 +56,12 @@ func (h *Handler) StreamBrowserEvents(c *gin.Context) {
 		select {
 		case <-c.Request.Context().Done():
 			return
-		case <-events:
-			if !writeEvent("change") {
+		case event := <-events:
+			if !writeEvent(event) {
 				return
 			}
 		case <-heartbeat.C:
-			if !writeEvent("heartbeat") {
+			if !writeEvent(browserEvent{Type: "heartbeat"}) {
 				return
 			}
 		}

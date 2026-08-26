@@ -4,6 +4,7 @@ import type {
   CreateConversationProjectRequest,
   UpdateConversationProjectRequest,
 } from "@/shared/api/conversation.types";
+import type { AgentStreamEvent } from "@/shared/api/agent-gateway";
 
 export type SidebarConversationChange = {
   sequence: number;
@@ -34,6 +35,7 @@ export type SidebarConversationsControllerValue = {
   loadMoreFailed: boolean;
   transferringStarPublicID: string | null;
   lastChange: SidebarConversationChange | null;
+  lastAgentEvent: AgentStreamEvent | null;
   loadMore: () => Promise<void>;
   reload: () => Promise<void>;
   retryLoadMore: () => Promise<void>;

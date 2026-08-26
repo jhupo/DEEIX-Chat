@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -871,6 +872,41 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.Status != "active" || importedThread.HistoryStatus != "loaded" || importedThread.HistoryVersion != historyProjectionVersion {
 		t.Fatalf("updated imported thread mismatch: %#v %v", importedThread, err)
 	}
+	snapshotEvent := &domainagent.Event{
+		PublicID: "agev_dddddddddddddddddddddddddddddddd", Kind: "workspace/sessions/updated",
+		PayloadJSON: `{"workspaceId":"workspace-main","revision":"0123456789abcdef01234567","data":[{"sourceThreadRef":"source-thread-2","preview":"","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"recencyAt":1786615420,"historyLoaded":false},{"sourceThreadRef":"source-thread-3","preview":"new desktop work","name":"Desktop session","modelProvider":"openai","status":"active","createdAt":1786615400,"updatedAt":1786615400,"recencyAt":1786615400,"historyLoaded":false}]}`,
+		OccurredAt:  now.Add(12 * time.Second),
+	}
+	appliedSnapshot, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 7, strings.Repeat("f", 64), snapshotEvent, now.Add(12*time.Second))
+	if err != nil || appliedSnapshot.Acknowledged != 7 || len(appliedSnapshot.ConversationPublicIDs) != 2 || !slices.Contains(appliedSnapshot.ConversationPublicIDs, importedConversation.PublicID) {
+		t.Fatalf("apply session snapshot: %#v %v", appliedSnapshot, err)
+	}
+	var desktopConversation model.Conversation
+	if err := database.Where("execution_type = ? AND title = ?", "gateway", "Desktop session").First(&desktopConversation).Error; err != nil ||
+		!slices.Contains(appliedSnapshot.ConversationPublicIDs, desktopConversation.PublicID) {
+		t.Fatalf("desktop session was not imported: %#v %v", desktopConversation, err)
+	}
+	var desktopThread model.AgentThread
+	if err := database.Where("conversation_id = ?", desktopConversation.ID).First(&desktopThread).Error; err != nil || desktopThread.HistoryStatus != "unloaded" ||
+		desktopThread.SourceThreadRef == nil || *desktopThread.SourceThreadRef != "source-thread-3" {
+		t.Fatalf("desktop session thread mismatch: %#v %v", desktopThread, err)
+	}
+	if err := database.First(&importedThread, importedThread.ID).Error; err != nil || importedThread.HistoryStatus != "unloaded" || importedThread.HistoryError != "" {
+		t.Fatalf("session snapshot did not invalidate imported history: %#v %v", importedThread, err)
+	}
+	olderSnapshot := &domainagent.Event{
+		PublicID: "agev_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "workspace/sessions/updated",
+		PayloadJSON: `{"workspaceId":"workspace-main","revision":"1123456789abcdef01234567","data":[{"sourceThreadRef":"source-thread-2","preview":"","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"recencyAt":1786615360,"historyLoaded":false},{"sourceThreadRef":"source-thread-3","preview":"new desktop work","name":"Desktop session","modelProvider":"openai","status":"active","createdAt":1786615400,"updatedAt":1786615400,"recencyAt":1786615400,"historyLoaded":false}]}`,
+		OccurredAt:  now.Add(13 * time.Second),
+	}
+	olderApplied, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 8, strings.Repeat("e", 64), olderSnapshot, now.Add(13*time.Second))
+	if err != nil || olderApplied.Acknowledged != 8 || len(olderApplied.ConversationPublicIDs) != 0 {
+		t.Fatalf("older session snapshot changed conversations: %#v %v", olderApplied, err)
+	}
+	refreshedHistoryThread, refreshedHistoryCommand, err := repo.QueueThreadHistory(context.Background(), 7, importedConversation.ID, &domainagent.Command{PublicID: "agcmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Kind: "thread.read"}, now.Add(13*time.Second))
+	if err != nil || refreshedHistoryCommand == nil || refreshedHistoryThread.HistoryStatus != "loading" || refreshedHistoryCommand.ServerSeq != 6 {
+		t.Fatalf("queue refreshed thread history: %#v %#v %v", refreshedHistoryThread, refreshedHistoryCommand, err)
+	}
 	canonicalWorkspace := model.AgentWorkspace{
 		PublicID: "workspace-canonical", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
 		Name: "source-repository", Status: "available", LastSeenAt: now,
@@ -897,7 +933,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
 		PayloadJSON: `{"item":{"type":"agentMessage","text":""},"startedAtMs":1}`, OccurredAt: now.Add(13 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 7, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack.Acknowledged != 7 {
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 9, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack.Acknowledged != 9 {
 		t.Fatalf("apply item start: ack=%v err=%v", ack, err)
 	}
 	itemCompleted := &domainagent.Event{
@@ -905,7 +941,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
 		PayloadJSON: `{"item":{"type":"agentMessage","text":"done"},"completedAtMs":2}`, OccurredAt: now.Add(14 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 8, strings.Repeat("1", 64), itemCompleted, now.Add(14*time.Second)); err != nil || ack.Acknowledged != 8 {
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 10, strings.Repeat("1", 64), itemCompleted, now.Add(14*time.Second)); err != nil || ack.Acknowledged != 10 {
 		t.Fatalf("apply item completion: ack=%v err=%v", ack, err)
 	}
 	var storedItem model.AgentItem
@@ -929,7 +965,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	replayed, err := repo.ApplyEventFrame(
 		context.Background(), device.ID, profile.ID, 1, strings.Repeat("2", 64), earlyCompleted, now.Add(16*time.Second),
 	)
-	if err != nil || replayed.Acknowledged != 8 || replayed.ConversationID != 0 || replayed.RunID != "" {
+	if err != nil || replayed.Acknowledged != 10 || replayed.ConversationID != 0 || replayed.RunID != "" {
 		t.Fatalf("projected bridge replay was republished: %#v %v", replayed, err)
 	}
 }

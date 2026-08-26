@@ -74,7 +74,14 @@ type bridgeArtifactGrant struct {
 type bridgeHub struct {
 	mu          sync.Mutex
 	connections map[string]*bridgeConnection
-	subscribers map[uint]map[chan struct{}]struct{}
+	subscribers map[uint]map[chan browserEvent]struct{}
+}
+
+type browserEvent struct {
+	Type            string   `json:"type"`
+	DeviceID        string   `json:"deviceID,omitempty"`
+	ConversationIDs []string `json:"conversationIDs,omitempty"`
+	Kind            string   `json:"kind,omitempty"`
 }
 
 type bridgeConnection struct {
@@ -86,7 +93,7 @@ type bridgeConnection struct {
 func newBridgeHub() *bridgeHub {
 	return &bridgeHub{
 		connections: make(map[string]*bridgeConnection),
-		subscribers: make(map[uint]map[chan struct{}]struct{}),
+		subscribers: make(map[uint]map[chan browserEvent]struct{}),
 	}
 }
 
@@ -108,11 +115,11 @@ func (h *bridgeHub) replace(userID uint, deviceID string, connection *websocket.
 	}
 }
 
-func (h *bridgeHub) notifyUser(userID uint) {
+func (h *bridgeHub) notify(change appagent.ChangeNotification) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, entry := range h.connections {
-		if entry.userID != userID {
+		if entry.userID != change.UserID {
 			continue
 		}
 		select {
@@ -120,9 +127,15 @@ func (h *bridgeHub) notifyUser(userID uint) {
 		default:
 		}
 	}
-	for subscriber := range h.subscribers[userID] {
+	event := browserEvent{
+		Type:            "change",
+		DeviceID:        change.DeviceID,
+		ConversationIDs: append([]string(nil), change.ConversationPublicIDs...),
+		Kind:            change.Kind,
+	}
+	for subscriber := range h.subscribers[change.UserID] {
 		select {
-		case subscriber <- struct{}{}:
+		case subscriber <- event:
 		default:
 		}
 	}
@@ -145,11 +158,11 @@ func (h *bridgeHub) disconnect(deviceID string) {
 	}
 }
 
-func (h *bridgeHub) subscribeUser(userID uint) (<-chan struct{}, func()) {
-	subscriber := make(chan struct{}, 1)
+func (h *bridgeHub) subscribeUser(userID uint) (<-chan browserEvent, func()) {
+	subscriber := make(chan browserEvent, 1)
 	h.mu.Lock()
 	if h.subscribers[userID] == nil {
-		h.subscribers[userID] = make(map[chan struct{}]struct{})
+		h.subscribers[userID] = make(map[chan browserEvent]struct{})
 	}
 	h.subscribers[userID][subscriber] = struct{}{}
 	h.mu.Unlock()

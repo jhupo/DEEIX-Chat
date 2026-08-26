@@ -1455,9 +1455,9 @@ func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {
 	}
 	adapter := &CodexAdapter{profileID: "codex-default", state: state}
 	data := map[string]any{"data": []any{
-		map[string]any{"id": "thread-assigned", "cwd": filepath.Join(root, "other")},
-		map[string]any{"id": "thread-rooted", "cwd": filepath.Join(root, "repo")},
-		map[string]any{"id": "thread-unrelated", "cwd": filepath.Join(filepath.Dir(root), "outside")},
+		map[string]any{"id": "thread-assigned", "cwd": filepath.Join(root, "other"), "status": "active"},
+		map[string]any{"id": "thread-rooted", "cwd": filepath.Join(root, "repo"), "status": "active"},
+		map[string]any{"id": "thread-unrelated", "cwd": filepath.Join(filepath.Dir(root), "outside"), "status": "active"},
 	}}
 	workspace := Workspace{Root: root, SessionRoots: []string{root}, ThreadIDs: map[string]struct{}{"thread-assigned": {}}}
 	projected, err := adapter.projectSessions(data, workspace)
@@ -1468,6 +1468,64 @@ func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {
 	items, _ := catalog["data"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("project session count = %d, want 2: %#v", len(items), items)
+	}
+}
+
+func TestSessionSnapshotsUseStableWorkspaceAssignmentAndRevision(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	if err := os.Mkdir(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state, err := OpenStateStore(filepath.Join(root, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{profileID: "codex-default", state: state}
+	workspaces := []Workspace{
+		{WorkspaceID: "workspace-root", Root: root, SessionRoots: []string{root}, ThreadIDs: map[string]struct{}{"thread-explicit": {}}},
+		{WorkspaceID: "workspace-nested", Root: nested, SessionRoots: []string{nested}},
+	}
+	thread := func(id, name, cwd string, recency int64) map[string]any {
+		return map[string]any{
+			"id": id, "name": name, "preview": name, "modelProvider": "openai", "status": "active", "cwd": cwd,
+			"createdAt": int64(1), "updatedAt": recency, "recencyAt": recency,
+		}
+	}
+	data := map[string]any{"data": []any{
+		thread("thread-nested", "nested", nested, 2),
+		thread("thread-explicit", "explicit", nested, 3),
+		thread("thread-unassigned", "outside", filepath.Dir(root), 4),
+	}}
+	first, err := adapter.projectSessionSnapshots(data, workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || len(first[0].Data) != 1 || first[0].Data[0]["name"] != "nested" ||
+		len(first[1].Data) != 1 || first[1].Data[0]["name"] != "explicit" {
+		t.Fatalf("session assignment = %#v", first)
+	}
+	reversed := map[string]any{"data": []any{
+		thread("thread-explicit", "explicit", nested, 3),
+		thread("thread-nested", "nested", nested, 2),
+	}}
+	second, err := adapter.projectSessionSnapshots(reversed, []Workspace{workspaces[1], workspaces[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].Revision != second[0].Revision || first[1].Revision != second[1].Revision {
+		t.Fatalf("stable snapshot revision changed: %#v %#v", first, second)
+	}
+	changed := map[string]any{"data": []any{
+		thread("thread-explicit", "explicit", nested, 3),
+		thread("thread-nested", "nested", nested, 5),
+	}}
+	third, err := adapter.projectSessionSnapshots(changed, workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].Revision == third[0].Revision || first[1].Revision != third[1].Revision {
+		t.Fatalf("snapshot revision did not isolate activity change: %#v %#v", first, third)
 	}
 }
 

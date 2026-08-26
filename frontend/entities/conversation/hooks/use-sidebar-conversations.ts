@@ -7,6 +7,8 @@ import { readAccessToken } from "@/shared/auth/session";
 import { dispatchFileLibraryInvalidated } from "@/shared/events/file-library-events";
 import { runBulkActionInChunks } from "@/shared/lib/bulk-action";
 import { resolveConversationDefaultModel } from "@/shared/model/conversation-default-model";
+import { streamAgentEvents } from "@/shared/api/agent-gateway";
+import type { AgentStreamEvent } from "@/shared/api/agent-gateway";
 import {
   batchSetConversationProject,
   createConversation,
@@ -51,6 +53,9 @@ const STARRED_VISIBLE_LIMIT = 5;
 const STARRED_BUFFER_SIZE = 3;
 const STARRED_WINDOW_SIZE = STARRED_VISIBLE_LIMIT + STARRED_BUFFER_SIZE;
 const STARRED_DIALOG_PAGE_SIZE = 100;
+const AGENT_EVENT_RECONNECT_MAX_MS = 15_000;
+const AGENT_EVENT_RELOAD_DEBOUNCE_MS = 250;
+const SESSION_SNAPSHOT_EVENT_KIND = "workspace/sessions/updated";
 
 type SidebarConversationsCache = {
   accessToken: string;
@@ -278,6 +283,7 @@ export function useSidebarConversationsController({
   const [loadMoreFailed, setLoadMoreFailed] = React.useState(false);
   const [transferringStarPublicID, setTransferringStarPublicID] = React.useState<string | null>(null);
   const [lastChange, setLastChange] = React.useState<SidebarConversationChange | null>(null);
+  const [lastAgentEvent, setLastAgentEvent] = React.useState<AgentStreamEvent | null>(null);
   const pageRef = React.useRef(initialCache?.page ?? 1);
   const changeSequenceRef = React.useRef(0);
   const initialRequestVersionRef = React.useRef(0);
@@ -465,6 +471,68 @@ export function useSidebarConversationsController({
   React.useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  React.useEffect(() => {
+    if (executionType !== "gateway" || !executionDeviceID) {
+      setLastAgentEvent(null);
+      return;
+    }
+    let cancelled = false;
+    let accessToken = "";
+    let streamController: AbortController | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectDelay = 1_000;
+    let reloadTimer: number | null = null;
+
+    const scheduleReload = () => {
+      if (cancelled || reloadTimer !== null) return;
+      reloadTimer = window.setTimeout(() => {
+        reloadTimer = null;
+        void loadInitial();
+      }, AGENT_EVENT_RELOAD_DEBOUNCE_MS);
+    };
+
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectTimer !== null) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, AGENT_EVENT_RECONNECT_MAX_MS);
+    };
+
+    const connect = () => {
+      if (!accessToken || cancelled || streamController) return;
+      const controller = new AbortController();
+      streamController = controller;
+      void streamAgentEvents(accessToken, controller.signal, (event) => {
+        if (cancelled) return;
+        reconnectDelay = 1_000;
+        setLastAgentEvent(event);
+        if (
+          event.type === "ready" ||
+          (event.kind === SESSION_SNAPSHOT_EVENT_KIND && event.deviceID === executionDeviceID)
+        ) {
+          scheduleReload();
+        }
+      }).catch(() => undefined).finally(() => {
+        if (streamController === controller) streamController = null;
+        scheduleReconnect();
+      });
+    };
+
+    void resolveAccessToken().then((token) => {
+      if (cancelled || !token) return;
+      accessToken = token;
+      connect();
+    });
+    return () => {
+      cancelled = true;
+      streamController?.abort();
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (reloadTimer !== null) window.clearTimeout(reloadTimer);
+    };
+  }, [executionDeviceID, executionType, loadInitial]);
 
   React.useEffect(() => {
     return () => {
@@ -913,6 +981,7 @@ export function useSidebarConversationsController({
       loadMoreFailed,
       transferringStarPublicID,
       lastChange,
+      lastAgentEvent,
       loadMore,
       reload: loadInitial,
       retryLoadMore,
@@ -941,6 +1010,7 @@ export function useSidebarConversationsController({
       hasMore,
       items,
       lastChange,
+      lastAgentEvent,
       loadAllStarred,
       loadInitial,
       loadMore,

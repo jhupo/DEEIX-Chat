@@ -235,3 +235,21 @@ func TestWorkspaceRevisionIsOptionalAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionSnapshotPayloadValidation(t *testing.T) {
+	valid := `{"workspaceId":"workspace-main","revision":"0123456789abcdef01234567","data":[{"sourceThreadRef":"thread_0123456789abcdef0123456789abcdef","preview":"preview","name":"session","modelProvider":"openai","status":"active","createdAt":1,"updatedAt":2,"recencyAt":3,"historyLoaded":false}]}`
+	if !validSessionSnapshotPayload(json.RawMessage(valid)) {
+		t.Fatal("valid session snapshot payload was rejected")
+	}
+	for _, invalid := range []string{
+		strings.Replace(valid, `"historyLoaded":false`, `"historyLoaded":false,"unknown":true`, 1),
+		strings.Replace(valid, "0123456789abcdef01234567", "0123456789ABCDEF01234567", 1),
+		strings.Replace(valid, `"historyLoaded":false`, `"historyLoaded":true`, 1),
+		strings.Replace(valid, `"data":[`, `"data":null,"ignored":[`, 1),
+		strings.Replace(valid, `}]}`, `},{"sourceThreadRef":"thread_0123456789abcdef0123456789abcdef","preview":"","name":"","modelProvider":"","status":"active","createdAt":1,"updatedAt":1,"recencyAt":1,"historyLoaded":false}]}`, 1),
+	} {
+		if validSessionSnapshotPayload(json.RawMessage(invalid)) {
+			t.Fatalf("invalid session snapshot payload was accepted: %s", invalid)
+		}
+	}
+}

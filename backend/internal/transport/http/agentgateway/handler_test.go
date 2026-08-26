@@ -48,9 +48,16 @@ func TestStreamBrowserEventsPushesHubChanges(t *testing.T) {
 	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "{\"type\":\"ready\"}\n" {
 		t.Fatalf("ready event = %q, %v", line, readErr)
 	}
-	handler.hub.notifyUser(7)
+	handler.hub.notify(appagent.ChangeNotification{UserID: 7})
 	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "{\"type\":\"change\"}\n" {
 		t.Fatalf("change event = %q, %v", line, readErr)
+	}
+	handler.hub.notify(appagent.ChangeNotification{
+		UserID: 7, DeviceID: "agd_device", Kind: "workspace/sessions/updated",
+		ConversationPublicIDs: []string{"conversation-a", "conversation-b"},
+	})
+	if line, readErr := reader.ReadString('\n'); readErr != nil || line != "{\"type\":\"change\",\"deviceID\":\"agd_device\",\"conversationIDs\":[\"conversation-a\",\"conversation-b\"],\"kind\":\"workspace/sessions/updated\"}\n" {
+		t.Fatalf("targeted change event = %q, %v", line, readErr)
 	}
 }
 
