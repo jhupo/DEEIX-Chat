@@ -308,7 +308,7 @@ export function MessageAgentInteractionControl({ interaction }: { interaction: C
       </div>
       {description ? <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground/72 [overflow-wrap:anywhere]">{description}</p> : null}
       {interaction.kind === "command_approval" && interaction.request.command ? <pre className="mt-2 overflow-auto whitespace-pre-wrap rounded-md bg-muted/25 px-2.5 py-2 font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">{interaction.request.command}</pre> : null}
-      {interaction.kind === "file_approval" ? <ul className="mt-2 space-y-0.5 font-mono text-[11px] text-muted-foreground/82">{(interaction.request.files ?? interaction.request.changes ?? []).map((file, index) => <li key={`${file.path ?? index}:${file.change ?? ""}`} className="break-all">{file.path}</li>)}</ul> : null}
+      {interaction.kind === "file_approval" ? <ul className="mt-2 space-y-0.5 font-mono text-[11px] text-muted-foreground/82">{(interaction.request.changes ?? []).map((file, index) => <li key={`${file.path ?? index}:${file.change ?? ""}`} className="break-all">{file.path}</li>)}</ul> : null}
       {interaction.kind === "command_approval" || interaction.kind === "file_approval" ? <ApprovalActions disabled={disabled} onSubmit={submit} /> : null}
       {interaction.kind === "user_input" ? <UserInputControl interaction={interaction} disabled={disabled} onSubmit={submit} /> : null}
       {interaction.kind === "permission" ? <PermissionControl interaction={interaction} disabled={disabled} onSubmit={submit} /> : null}

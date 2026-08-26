@@ -65,6 +65,13 @@
       "commandFallback": "Command",
       "commandsRunning": "Running {count} commands",
       "commandsRan": "Ran {count} commands",
+      "toolsRunning": "Using {count} tools",
+      "toolsRan": "Used {count} tools",
+      "operations": {
+        "readAndCommands": "Read {files} files and ran {commands} commands",
+        "editedAndCommands": "Edited {files} files and ran {commands} commands",
+        "commandsAndTools": "Ran {commands} commands and used {tools} tools"
+      },
       "truncated": "Content truncated",
       "exitCode": "Exit code {code}",
       "fileChanges": "{count} files changed",
@@ -548,150 +555,6 @@
       "high": "High",
       "xhigh": "Extra high",
       "max": "Maximum"
-    }
-  },
-  "processTrace": {
-    "fileBadges": {
-      "directRead": "Direct",
-      "budget": "Budget",
-      "retrieval": "Retrieval",
-      "fullContext": "Full text",
-      "skipped": "Skipped",
-      "file": "File",
-      "descriptions": {
-        "directRead": "Images and similar files are sent directly as visual context.",
-        "budget": "The file is within the full-context budget, so its extracted text was included in this turn.",
-        "retrieval": "The file used RAG retrieval, so only relevant chunks were included in this turn.",
-        "fullContext": "The file was included in this turn as full extracted text.",
-        "skipped": "The file was not included in this turn, usually because it exceeded the budget or had no usable extracted text.",
-        "file": "The file participated in context processing for this turn."
-      }
-    },
-    "rag": {
-      "sourceFallback": "Chunk source {fileID}",
-      "chunksShort": "{count} chunks · {scorePercent}%",
-      "retrievalSources": "Retrieval sources",
-      "matchedContents": "{count} matched chunks",
-      "matchSummary": "{count} matches · share {sharePercent}% · max relevance {scorePercent}%",
-      "summary": "{count, plural, one {# relevant chunk} other {# relevant chunks}} found",
-      "completed": "Retrieval complete; searched {fileCount, plural, one {# file} other {# files}} and matched {chunkCount, plural, one {# chunk} other {# chunks}}.",
-      "incompleteWithFullText": "Retrieval did not complete; switched to full text.",
-      "incompleteNoFullText": "Retrieval did not complete and no full text was available.",
-      "emptyWithFullText": "No relevant chunks were found; switched to full text.",
-      "emptyNoFullText": "No relevant chunks were found and no full text was available.",
-      "lowScoreWithFullText": "Retrieval results were below the similarity threshold; switched to full text.",
-      "lowScoreNoFullText": "Retrieval results were below the similarity threshold and no full text was available.",
-      "skippedFallback": "Some files were skipped because they exceeded the context budget or had no extracted text."
-    },
-    "fileContext": {
-      "includedSummary": "Included {count, plural, one {# file} other {# files}}",
-      "includedDetail": "included {count, plural, one {# file} other {# files}}",
-      "skipped": "skipped {count, plural, one {# file} other {# files}}",
-      "ready": "Files are ready; {counts}.",
-      "separator": ", "
-    },
-    "tool": {
-      "status": {
-        "calling": "Calling",
-        "completed": "Completed",
-        "reused": "Reused",
-        "failed": "Failed"
-      },
-      "names": {
-        "webSearch": "Web search",
-        "codeInterpreter": "Code interpreter",
-        "imageGeneration": "Image generation",
-        "shell": "Shell",
-        "generic": "Tool call",
-        "thinking": "Model thinking"
-      },
-      "detail": {
-        "request": "Request",
-        "response": "Response",
-        "error": "Error",
-        "expand": "Expand",
-        "collapse": "Collapse",
-        "sourceFallback": "Source {index}",
-        "generatedImageAlt": "Generated image {index}",
-        "query": "Query",
-        "action": "Action",
-        "source": "Source",
-        "code": "Code",
-        "output": "Output",
-        "resultFile": "Result file",
-        "prompt": "Prompt",
-        "command": "Command",
-        "latencySeparator": "; "
-      },
-      "nativeStatus": {
-        "webSearchActive": "Searching the web",
-        "webSearchDone": "Web search complete",
-        "webSearchFailed": "Web search failed",
-        "codeActive": "Running code",
-        "codeDone": "Code run complete",
-        "codeFailed": "Code run failed",
-        "imageActive": "Generating image",
-        "imageDone": "Image generation complete",
-        "imageFailed": "Image generation failed",
-        "shellActive": "Running shell command",
-        "shellDone": "Shell command complete",
-        "shellFailed": "Shell command failed",
-        "genericActive": "Calling tool",
-        "genericDone": "Tool call complete",
-        "genericFailed": "Tool call failed"
-      },
-      "chain": {
-        "titleActive": "Calling tools",
-        "titleDone": "Tool calls",
-        "summaryCount": "{count} tool calls",
-        "summaryFallback": "Tool calls"
-      }
-    },
-    "think": {
-      "titleActive": "Thinking",
-      "titleDone": "Thinking complete",
-      "subtitleActive": "Parsing the request and organizing key context",
-      "subtitleDone": "Reasoning and context integration complete"
-    },
-    "promptTrace": {
-      "modes": {
-        "stateful": "This turn used previous response continuation",
-        "fullRetry": "Continuation failed; retried with full context",
-        "full": "This turn used full context"
-      },
-      "reasons": {
-        "missingStoredFingerprint": "Missing previous fingerprint",
-        "missingCurrentFingerprint": "Missing current fingerprint",
-        "fingerprintMismatch": "Context fingerprint changed",
-        "previousRejected": "Upstream rejected continuation"
-      },
-      "sentSummary": "{mode}; sent {sent}/{full} messages, estimated {tokens} tokens.",
-      "savedHistory": "- Reduced {messages} history messages, about {tokens} tokens.",
-      "cacheableBlocks": "{count} stable cacheable blocks",
-      "historicalEvidence": "{count} historical evidence items recalled",
-      "dynamicSources": "{count} dynamic sources merged",
-      "listSeparator": ", ",
-      "extraSummary": "- {items}.",
-      "reasonLine": "- Reason: {reason}.",
-      "preparedSummary": "Prepared about {tokens} tokens of context",
-      "statefulSummary": "Continued with {messages, plural, one {# message} other {# messages}}"
-    },
-    "stages": {
-      "contextPlanning": "Context planning",
-      "contentRetrieval": "Content retrieval",
-      "fileContext": "File context",
-      "contextCompaction": "Context compaction",
-      "skillContext": "Skill context"
-    },
-    "process": {
-      "titleActive": "Processing",
-      "titleDone": "Processing complete"
-    },
-    "compaction": {
-      "summary": "Compacted turns {fromTurn}-{toTurn}",
-      "detail": "Conversation context was compacted into a rolling summary.",
-      "range": "Compacted range: turns {fromTurn}-{toTurn}.",
-      "tokens": "Token reduction: {sourceTokens} -> {summaryTokens}."
     }
   },
   "optionLabels": {

@@ -1441,12 +1441,12 @@ func (adapter *CodexAdapter) serverRequest(ctx context.Context, request RPCServe
 	adapter.pending[providerRequestID] = interaction
 	adapter.mu.Unlock()
 	event := map[string]any{"kind": "interaction.requested", "sourceRequestRef": sourceRequestRef, "occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "payload": map[string]any{"method": request.Method, "request": projected}}
-	if source, publishErr := adapter.publishOptional("thread", identityValue(params, "threadId", "thread")); publishErr != nil {
+	if source, publishErr := adapter.publishOptional("thread", stringField(params, "threadId")); publishErr != nil {
 		return nil, publishErr
 	} else if source != "" {
 		event["sourceThreadRef"] = source
 	}
-	if source, publishErr := adapter.publishOptional("turn", identityValue(params, "turnId", "turn")); publishErr != nil {
+	if source, publishErr := adapter.publishOptional("turn", stringField(params, "turnId")); publishErr != nil {
 		return nil, publishErr
 	} else if source != "" {
 		event["sourceTurnRef"] = source
@@ -1867,12 +1867,20 @@ func (adapter *CodexAdapter) projectNotification(method string, params map[strin
 		return projectExecutionTurn(params)
 	case "item/started", "item/completed":
 		item, _ := params["item"].(map[string]any)
-		return map[string]any{"itemID": sourceItemRef, "item": adapter.projectExecutionItem(item, sourceItemRef)}
+		projected := adapter.projectExecutionItem(item, sourceItemRef)
+		if stringField(projected, "status") == "" {
+			if method == "item/completed" {
+				projected["status"] = "completed"
+			} else {
+				projected["status"] = "inProgress"
+			}
+		}
+		return map[string]any{"itemID": sourceItemRef, "item": projected}
 	case "item/agentMessage/delta":
 		delta, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
 		phase := agentMessagePhase(params["phase"])
 		if _, explicitPhase := params["phase"].(string); !explicitPhase {
-			if itemID := identityValue(params, "itemId", "item"); itemID != "" {
+			if itemID := stringField(params, "itemId"); itemID != "" {
 				if cached := adapter.executionItem(itemID).Phase; cached != "" {
 					phase = cached
 				}
@@ -1952,9 +1960,6 @@ func projectExecutionTurn(params map[string]any) map[string]any {
 func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceItemRef string) map[string]any {
 	result := map[string]any{"itemID": sourceItemRef}
 	kind := stringField(item, "type")
-	if kind == "" {
-		kind = stringField(item, "kind")
-	}
 	if kind != "" {
 		result["kind"] = kind
 	}
@@ -1970,6 +1975,16 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 	case "reasoning":
 		result["summary"] = projectExecutionTextParts(item["summary"])
 		result["content"] = projectExecutionTextParts(item["content"])
+	case "mcpToolCall":
+		result["tool"] = stringField(item, "tool")
+		result["toolType"] = stringField(item, "server")
+		projectExecutionToolPayload(result, item)
+	case "dynamicToolCall", "collabToolCall":
+		result["tool"] = stringField(item, "tool")
+		projectExecutionToolPayload(result, item)
+	case "webSearch", "imageGeneration":
+		result["tool"] = kind
+		projectExecutionToolPayload(result, item)
 	}
 	if command, ok := item["command"].(string); ok {
 		result["command"], _ = boundedText(command, maxExecutionTextBytes)
@@ -1984,8 +1999,6 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 		result["commandActions"] = sanitizeCommandActions(actions)
 	}
 	if output, ok := item["aggregatedOutput"].(string); ok {
-		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
-	} else if output, ok := item["output"].(string); ok {
 		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
 	}
 	if exitCode, ok := finiteNumber(item["exitCode"]); ok {
@@ -2002,6 +2015,28 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 		}
 	}
 	return result
+}
+
+func projectExecutionToolPayload(result map[string]any, item map[string]any) {
+	for _, field := range []string{"arguments", "result", "error"} {
+		if text := executionPayloadText(item[field]); text != "" {
+			result[field], _ = boundedText(text, maxExecutionTextBytes)
+		}
+	}
+}
+
+func executionPayloadText(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func agentMessagePhase(value any) string {
@@ -2293,7 +2328,7 @@ func (adapter *CodexAdapter) projectServerRequest(method string, params map[stri
 		request := make(map[string]any)
 		command := interactionText(params["command"])
 		if command == "" {
-			command = adapter.executionItem(identityValue(params, "itemId", "item")).Command
+			command = adapter.executionItem(stringField(params, "itemId")).Command
 		}
 		if command != "" {
 			request["command"] = command
@@ -2307,13 +2342,13 @@ func (adapter *CodexAdapter) projectServerRequest(method string, params map[stri
 		if reason := interactionText(params["reason"]); reason != "" {
 			request["reason"] = reason
 		}
-		files := adapter.executionItem(identityValue(params, "itemId", "item")).Files
+		changes := adapter.executionItem(stringField(params, "itemId")).Files
 		if root, ok := params["grantRoot"].(string); ok && strings.TrimSpace(root) != "" {
 			if path := adapter.projectWorkspacePath(root); path != "" {
-				files = append(files, map[string]any{"path": path, "change": "write"})
+				changes = append(changes, map[string]any{"path": path, "change": "write"})
 			}
 		}
-		request["files"] = files
+		request["changes"] = changes
 		return request, answerKeys, nil
 	case "item/permissions/requestApproval":
 		request := map[string]any{
@@ -2326,30 +2361,28 @@ func (adapter *CodexAdapter) projectServerRequest(method string, params map[stri
 		return request, answerKeys, nil
 	case "mcpServer/elicitation/request":
 		request := make(map[string]any)
-		if server := interactionText(firstInteractionValue(params, "serverName", "server")); server != "" {
+		if server := interactionText(params["serverName"]); server != "" {
 			request["serverName"] = server
 		}
-		if message := interactionText(firstInteractionValue(params, "message", "prompt")); message != "" {
+		if message := interactionText(params["message"]); message != "" {
 			request["message"] = message
 		}
-		if schema := firstInteractionValue(params, "requestedSchema", "schema"); schema != nil {
+		if schema := params["requestedSchema"]; schema != nil {
 			if projected := projectElicitationSchema(schema); projected != nil {
 				request["requestedSchema"] = projected
 			}
 		}
 		return request, answerKeys, nil
 	case "item/tool/call":
-		tool := interactionText(firstInteractionValue(params, "tool", "name"))
-		name := tool
+		tool := interactionText(params["tool"])
 		if namespace := interactionText(params["namespace"]); namespace != "" && tool != "" {
-			name = namespace + "/" + tool
+			tool = namespace + "/" + tool
 		}
 		request := map[string]any{
 			"tool":                 tool,
-			"name":                 name,
 			"acceptedContentKinds": []any{"text", "image"},
 		}
-		if preview := interactionArgumentsPreview(firstInteractionValue(params, "arguments", "input")); preview != "" {
+		if preview := interactionArgumentsPreview(params["arguments"]); preview != "" {
 			request["argumentsPreview"] = preview
 		}
 		return request, answerKeys, nil
@@ -2478,15 +2511,6 @@ func projectElicitationSchema(value any) map[string]any {
 	return result
 }
 
-func firstInteractionValue(source map[string]any, keys ...string) any {
-	for _, key := range keys {
-		if value, exists := source[key]; exists && value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
 func interactionText(value any) string {
 	text, _ := value.(string)
 	text, _ = boundedText(text, maxInteractionPreviewBytes)
@@ -2520,7 +2544,7 @@ func (adapter *CodexAdapter) projectInteractionChanges(value any) []any {
 		if path == "" || len(path) > maxInteractionPreviewBytes {
 			continue
 		}
-		kind, _ := boundedText(changeKind(firstInteractionValue(change, "kind", "change")), maxInteractionPreviewBytes)
+		kind, _ := boundedText(changeKind(change["kind"]), maxInteractionPreviewBytes)
 		result = append(result, map[string]any{"path": path, "change": kind})
 	}
 	return result

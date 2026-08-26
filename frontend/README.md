@@ -97,11 +97,9 @@ pnpm api:generate
 pnpm api:check
 ```
 
-对话消息的处理轨迹来自后端 `processTrace`，前端按职责渲染为：
-
-- 处理链路：文件预处理、全文注入、RAG、上下文压缩等发送前准备。
-- 思考链路：模型 reasoning/think 内容，流式时展开，结束后按时机折叠。
-- 工具链路：MCP Tool 调用与模型读取工具结果的循环，支持流式更新和长结果展开。
+对话活动统一来自后端 execution event journal。前端按 `runID + seq` 消费
+`item/started`、增量事件、`item/completed` 与 `turn/completed`，实时流和刷新恢复使用同一套数据。
+reasoning 只展示 summary，命令、文件修改和工具调用按时间线分组并按需展开详情；最终回答独立渲染。
 
 Markdown 渲染统一使用聊天消息组件，支持基础 Markdown、代码块、表格、脚注、行内/块级公式、图片和链接外跳确认。
 

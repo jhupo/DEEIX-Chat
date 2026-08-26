@@ -20,14 +20,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
-import { MessageProcessTrace, MessageTraceEventBlocks } from "@/features/chat/components/message/message-process-trace";
+import { MessageAgentRun } from "@/features/chat/components/message/message-agent-run";
 import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
-import { hasAgentRunActivity, useAgentRunSnapshot } from "@/features/chat/model/agent-run-store";
-import {
-  clearLiveUpstreamThinkTrace,
-  mergeLiveUpstreamThinkTrace,
-  useLiveUpstreamThinkTrace,
-} from "@/features/chat/model/upstream-think-store";
+import { useAgentRunSnapshot } from "@/features/chat/model/agent-run-store";
 import type {
   ChatAreaMessage,
   ChatInlineAlert,
@@ -43,8 +38,6 @@ import { PreviewMedia } from "@/shared/components/file-preview/preview-media";
 import { type MarkdownArtifactActions, MarkdownImage } from "@/shared/components/markdown/streamdown-components";
 import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { useBranding } from "@/shared/config/branding-provider";
-
-const EMPTY_TRACE_EVENTS: NonNullable<ChatAreaMessage["processTrace"]>["events"] = [];
 
 function isEditableImageAttachment(attachment: MessageAttachment): boolean {
   const mimeType = attachment.mimeType.toLowerCase();
@@ -197,9 +190,7 @@ export function ChatMessageBot({
       setEditingValue(item.content);
     }
   }, [isEditing, item.content]);
-  const liveProcessTrace = useLiveUpstreamThinkTrace(item.runID);
   const agentRun = useAgentRunSnapshot(item.runID);
-  const hasAgentActivity = hasAgentRunActivity(agentRun);
   const metaItem = React.useMemo(
     () => ({
       ...item,
@@ -211,7 +202,7 @@ export function ChatMessageBot({
       cacheReadTokens:
         item.cacheReadTokens && item.cacheReadTokens > 0
           ? item.cacheReadTokens
-          : agentRun.usage?.cacheReadTokens,
+          : agentRun.usage?.cachedInputTokens,
       reasoningTokens:
         item.reasoningTokens && item.reasoningTokens > 0
           ? item.reasoningTokens
@@ -221,19 +212,6 @@ export function ChatMessageBot({
     }),
     [agentRun.actualModel, agentRun.durationMS, agentRun.usage, item],
   );
-  const processTrace =
-    liveProcessTrace && (item.isStreaming || !item.processTrace)
-      ? mergeLiveUpstreamThinkTrace(item.processTrace, liveProcessTrace)
-      : item.processTrace;
-  React.useEffect(() => {
-    if (!item.isStreaming && item.processTrace?.upstreamThink) {
-      clearLiveUpstreamThinkTrace(item.runID);
-    }
-  }, [item.isStreaming, item.processTrace?.upstreamThink, item.runID]);
-  const upstreamThink = processTrace?.upstreamThink;
-  const toolTrace = processTrace?.tools;
-  const traceEvents = processTrace?.events ?? EMPTY_TRACE_EVENTS;
-  const messageStreaming = Boolean(item.isStreaming);
   const inlineVideoAttachment = React.useMemo(
     () =>
       !item.isStreaming && item.contentType === "video"
@@ -262,19 +240,6 @@ export function ChatMessageBot({
   const leadingImagePending = Boolean(leadingImagePreview && item.isStreaming && !leadingImagePreview.complete);
   const streamdownContent = leadingImagePreview?.rest ?? renderableContent;
   const hasInlineContent = streamdownContent.trim().length > 0;
-  const postProcessEvents = React.useMemo(
-    () =>
-      traceEvents.filter(
-        (event) =>
-          event.phase === "tools" ||
-          event.phase === "upstream_think" ||
-          event.eventType === "tool" ||
-          event.eventType === "think",
-      ),
-    [traceEvents],
-  );
-  const hasTraceEvents = postProcessEvents.length > 0;
-  const hasTraceBlocks = hasTraceEvents || Boolean(upstreamThink) || Boolean(toolTrace);
   const isImageGenerationLoading = item.contentType === "image" && item.isStreaming && !hasStreamdownContent;
   const isVideoGenerationLoading = item.contentType === "video" && item.isStreaming && !hasStreamdownContent;
   const editableImageAttachments = React.useMemo(
@@ -305,7 +270,7 @@ export function ChatMessageBot({
     onEditImageAttachment,
     readOnly,
   ]);
-  const processAutoCollapseReady = Boolean(hasTraceBlocks || hasStreamdownContent || item.inlineAlert);
+  const processAutoCollapseReady = Boolean(hasStreamdownContent || item.inlineAlert);
 
   if (!readOnly && isEditing) {
     const nextContent = editingValue.trim();
@@ -345,21 +310,10 @@ export function ChatMessageBot({
 
   return (
     <div className="group/assistant-message flex w-full flex-col items-start">
-      <MessageProcessTrace
-        trace={processTrace}
+      <MessageAgentRun
         agentRun={agentRun}
-        active={messageStreaming}
         autoCollapseReady={processAutoCollapseReady}
       />
-      {!hasAgentActivity ? (
-        <MessageTraceEventBlocks
-          events={postProcessEvents}
-          activeToolBlock={toolTrace}
-          activeThinkBlock={upstreamThink}
-          messageStreaming={messageStreaming}
-          autoCollapseReady={hasStreamdownContent || Boolean(item.inlineAlert)}
-        />
-      ) : null}
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

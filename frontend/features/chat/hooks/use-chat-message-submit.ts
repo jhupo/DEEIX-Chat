@@ -20,12 +20,7 @@ import {
   resolveDefaultSubmissionParentMessage,
   resolvePersistedPublicID,
   toPendingAttachments,
-  toPendingProcessTrace,
 } from "@/features/chat/model/message-submit";
-import {
-  preserveRicherLiveUpstreamThinkTrace,
-  readLiveUpstreamThinkTrace,
-} from "@/features/chat/model/upstream-think-store";
 import type {
   ChatModelOption,
   PendingAttachment,
@@ -490,10 +485,8 @@ export function useChatMessageSubmit({
   visibleMessages,
   combinedMessages,
   serverMessagePublicIDs,
-  enqueueUpstreamThinkDelta,
   enqueueStreamText,
   flushStreamTextNow,
-  flushUpstreamThinkNow,
   resetStreamBuffer,
   startStream,
   activeGenerationRunsRef,
@@ -538,10 +531,8 @@ export function useChatMessageSubmit({
   visibleMessages: ChatAreaMessage[];
   combinedMessages: ChatAreaMessage[];
   serverMessagePublicIDs: Set<string>;
-  enqueueUpstreamThinkDelta: (exchangeKey: string, event: Extract<StreamMessageEvent, { type: "upstream_think_delta" }>) => void;
   enqueueStreamText: (exchangeKey: string, delta: string) => void;
   flushStreamTextNow: (exchangeKey: string) => void;
-  flushUpstreamThinkNow: (exchangeKey: string) => void;
   resetStreamBuffer: (exchangeKey?: string) => void;
   startStream: (exchangeKey: string, runID?: string) => void;
   activeGenerationRunsRef?: React.RefObject<Set<string>>;
@@ -949,7 +940,6 @@ export function useChatMessageSubmit({
           assistantImageAspectRatio,
           assistantInlineAlert: undefined,
           assistantCreatedAt: createdAt,
-          assistantProcessTrace: undefined,
         },
       }));
       if (shouldFollowSubmittedBranch) {
@@ -1170,19 +1160,6 @@ export function useChatMessageSubmit({
               compactDone: { method: event.method, freed_tokens: event.freed_tokens, summary_preview: event.summary_preview },
             }));
           },
-          onProcessUpdate: (event) => {
-            if (!acceptsIncrementalUpdate()) return;
-            updatePendingExchange(exchangeKey, (current) => ({
-              ...current,
-              assistantFileProc: false,
-              assistantActivityLabel: undefined,
-              assistantProcessTrace: event.trace ? toPendingProcessTrace(event.trace) : current.assistantProcessTrace,
-            }));
-          },
-          onUpstreamThinkDelta: (event) => {
-            if (!acceptsIncrementalUpdate()) return;
-            enqueueUpstreamThinkDelta(exchangeKey, event);
-          },
           onDelta: (delta) => {
             if (!acceptsIncrementalUpdate()) return;
             // Always clear assistantFileProc so batched React updates cannot keep the file_proc spinner alive.
@@ -1243,7 +1220,6 @@ export function useChatMessageSubmit({
         failedGenerationRunsRef?.current.delete(clientRunID);
         sentSuccessfully = true;
         flushStreamTextNow(exchangeKey);
-        flushUpstreamThinkNow(exchangeKey);
         resetStreamBuffer(exchangeKey);
         const assistantMessageStatus = completed.assistantMessage.status || "success";
         const assistantMessageSucceeded = assistantMessageStatus === "success";
@@ -1302,13 +1278,6 @@ export function useChatMessageSubmit({
             ),
             assistantReasoningTokens: completed.assistantMessage.reasoningTokens,
             assistantLatencyMS: completed.assistantMessage.latencyMS,
-            assistantProcessTrace:
-              assistantMessageStatus === "interrupted"
-                ? preserveRicherLiveUpstreamThinkTrace(
-                    toPendingProcessTrace(completed.assistantMessage.processTrace),
-                    readLiveUpstreamThinkTrace(clientRunID),
-                  )
-                : toPendingProcessTrace(completed.assistantMessage.processTrace),
             assistantStatus: assistantMessageStatus,
             assistantErrorCode: completed.assistantMessage.errorCode,
             assistantErrorMessage: completed.assistantMessage.errorMessage,
@@ -1437,7 +1406,6 @@ export function useChatMessageSubmit({
         }
       } catch (error) {
         flushStreamTextNow(exchangeKey);
-        flushUpstreamThinkNow(exchangeKey);
         resetStreamBuffer(exchangeKey);
         const streamDisconnected = isConversationStreamDisconnect(error);
         if (streamAbortController.signal.aborted || streamDisconnected) {
@@ -1449,7 +1417,6 @@ export function useChatMessageSubmit({
             assistantStreaming: streamDisconnected,
             assistantFileProc: false,
             assistantActivityLabel: undefined,
-            assistantProcessTrace: readLiveUpstreamThinkTrace(clientRunID) ?? current.assistantProcessTrace,
             assistantInlineAlert: undefined,
           }));
           if (streamDisconnected && targetConversationID && conversationScopeKeyRef.current === targetConversationScopeKey) {
@@ -1482,7 +1449,6 @@ export function useChatMessageSubmit({
           assistantStreaming: false,
           assistantFileProc: false,
           assistantActivityLabel: undefined,
-          assistantProcessTrace: readLiveUpstreamThinkTrace(clientRunID) ?? current.assistantProcessTrace,
           assistantStatus: "error",
           assistantErrorMessage: errorMessage,
           assistantInlineAlert: {
@@ -1542,10 +1508,8 @@ export function useChatMessageSubmit({
       autoGenerateLabels,
       failedGenerationRunsRef,
       generationSeqByRunRef,
-      enqueueUpstreamThinkDelta,
       enqueueStreamText,
       flushStreamTextNow,
-      flushUpstreamThinkNow,
       options,
       onConversationCreated,
       prependNewConversation,
@@ -1740,7 +1704,6 @@ export function useChatMessageSubmit({
 
     active.cancelRequested = true;
     flushStreamTextNow(active.exchangeKey);
-    flushUpstreamThinkNow(active.exchangeKey);
     resetStreamBuffer(active.exchangeKey);
     updatePendingExchange(active.exchangeKey, (current) => ({
       ...current,
@@ -1748,7 +1711,6 @@ export function useChatMessageSubmit({
       assistantStreaming: false,
       assistantFileProc: false,
       assistantActivityLabel: undefined,
-      assistantProcessTrace: readLiveUpstreamThinkTrace(active.runID) ?? current.assistantProcessTrace,
       assistantStatus: "interrupted",
       assistantInlineAlert: undefined,
     }));
@@ -1802,7 +1764,6 @@ export function useChatMessageSubmit({
     currentLeafMessage?.runID,
     currentLeafMessage?.status,
     flushStreamTextNow,
-    flushUpstreamThinkNow,
     reload,
     resetStreamBuffer,
     updatePendingExchange,

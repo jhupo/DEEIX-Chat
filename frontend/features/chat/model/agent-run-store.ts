@@ -4,7 +4,6 @@ import * as React from "react";
 
 import type {
   AgentExecutionEventPayloadDTO,
-  AgentExecutionItemDTO,
   AgentFileChangeDTO,
   AgentTokenUsageDTO,
   ConversationExecutionEventDTO,
@@ -35,6 +34,19 @@ export type AgentCommandActivity = {
   exitCode: number | null;
 };
 
+export type AgentToolActivity = {
+  itemID: string;
+  seq: number;
+  kind: "tool";
+  status: AgentActivityStatus;
+  name: string;
+  toolType: string;
+  input: string;
+  output: string;
+  error: string;
+  durationMS: number | null;
+};
+
 export type AgentTextActivity = {
   itemID: string;
   seq: number;
@@ -45,7 +57,6 @@ export type AgentTextActivity = {
 };
 
 export type AgentFileChange = {
-  fileID: string;
   path: string;
   previousPath: string;
   change: string;
@@ -67,7 +78,7 @@ export type AgentFileActivity = {
 };
 
 export type AgentUsage = Required<AgentTokenUsageDTO> & { scope: "thread" };
-export type AgentActivityItem = AgentCommandActivity | AgentFileActivity | AgentTextActivity;
+export type AgentActivityItem = AgentCommandActivity | AgentToolActivity | AgentFileActivity | AgentTextActivity;
 
 export type AgentRunSnapshot = {
   runID: string;
@@ -148,50 +159,46 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function activityStatus(value: unknown, fallback: AgentActivityStatus = "running"): AgentActivityStatus {
-  switch (stringValue(value).toLowerCase()) {
+function activityStatus(value: unknown): AgentActivityStatus | null {
+  switch (stringValue(value)) {
+    case "inProgress":
+      return "running";
     case "completed":
-    case "success":
       return "completed";
     case "interrupted":
-    case "cancelled":
-    case "canceled":
       return "interrupted";
     case "failed":
-    case "error":
       return "failed";
     default:
-      return fallback;
+      return null;
   }
 }
 
-function turnStatus(payload: AgentExecutionEventPayloadDTO): AgentRunStatus {
-  const value = stringValue(payload.turn?.status ?? payload.status).toLowerCase();
-  if (value === "completed" || value === "success") return "completed";
-  if (value === "interrupted" || value === "cancelled" || value === "canceled") return "interrupted";
-  if (value === "failed" || value === "error") return "failed";
-  return "running";
+function turnStatus(payload: AgentExecutionEventPayloadDTO): AgentRunStatus | null {
+  const value = stringValue(payload.turn?.status);
+  if (value === "completed") return "completed";
+  if (value === "interrupted") return "interrupted";
+  if (value === "failed") return "failed";
+  return null;
 }
 
 function normalizePlan(payload: AgentExecutionEventPayloadDTO): AgentPlanStep[] {
   return (payload.plan ?? []).flatMap((step, index) => {
-    const text = stringValue(step.step ?? step.text);
+    const text = stringValue(step.step);
     if (!text) return [];
-    const rawStatus = stringValue(step.status);
-    const status = rawStatus === "completed" ? "completed" : rawStatus === "inProgress" || rawStatus === "in_progress" ? "inProgress" : "pending";
-    return [{ key: `${index}:${text}`, text, status } satisfies AgentPlanStep];
+    return [{ key: `${index}:${text}`, text, status: step.status } satisfies AgentPlanStep];
   });
 }
 
 function normalizeFiles(values: AgentFileChangeDTO[] | undefined): AgentFileChange[] {
-  return (values ?? []).flatMap((file, index) => {
+  return (values ?? []).flatMap((file) => {
     const path = stringValue(file.path);
-    if (!path) return [];
+    const change = stringValue(file.change);
+    if (!path || !change) return [];
     return [{
-      fileID: stringValue(file.fileID) || `${index}:${path}`,
       path,
       previousPath: stringValue(file.previousPath),
-      change: stringValue(file.change) || "modify",
+      change,
       additions: finiteNumber(file.additions),
       deletions: finiteNumber(file.deletions),
       binary: file.binary === true,
@@ -201,25 +208,27 @@ function normalizeFiles(values: AgentFileChangeDTO[] | undefined): AgentFileChan
   });
 }
 
-function itemID(payload: AgentExecutionEventPayloadDTO, seq: number, kind: string): string {
-  return stringValue(payload.itemID ?? payload.item?.itemID) || `${kind}:${seq}`;
+function itemID(payload: AgentExecutionEventPayloadDTO): string {
+  return stringValue(payload.itemID);
 }
 
-function isFileItem(item: AgentExecutionItemDTO | undefined): boolean {
-  const kind = stringValue(item?.type ?? item?.kind).toLowerCase();
-  return kind.includes("file") || Boolean(item?.files?.length || item?.changes?.length || item?.diff);
+function isToolItem(kind: string): boolean {
+  return kind === "mcpToolCall" || kind === "dynamicToolCall" || kind === "collabToolCall" ||
+    kind === "webSearch" || kind === "imageGeneration";
 }
 
 function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, terminal: boolean): AgentActivityItem | null {
   const item = payload.item;
   if (!item) return null;
-  const fileItem = isFileItem(item);
-  const kind = stringValue(item.type ?? item.kind).toLowerCase();
-  const status = activityStatus(item.status ?? payload.status, terminal ? "completed" : "running");
-  if (kind === "agentmessage") {
+  const id = itemID(payload);
+  if (!id) return null;
+  const kind = stringValue(item.kind);
+  const status = activityStatus(item.status);
+  if (!status || terminal && status === "running") return null;
+  if (kind === "agentMessage") {
     if (stringValue(item.phase) !== "commentary") return null;
     return {
-      itemID: itemID(payload, seq, "commentary"),
+      itemID: id,
       seq,
       kind: "commentary",
       status,
@@ -229,7 +238,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   }
   if (kind === "reasoning") {
     return {
-      itemID: itemID(payload, seq, "reasoning"),
+      itemID: id,
       seq,
       kind: "reasoning",
       status,
@@ -237,16 +246,34 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
       truncated: item.truncated === true,
     };
   }
-  if (!fileItem && !kind.includes("command")) return null;
-  const id = itemID(payload, seq, fileItem ? "file" : "command");
+  const fileItem = kind === "fileChange";
+  const commandItem = kind === "commandExecution";
+  const toolItem = isToolItem(kind);
+  if (!fileItem && !commandItem && !toolItem) return null;
+  if (toolItem && !commandItem) {
+    const name = stringValue(item.tool);
+    if (!name) return null;
+    return {
+      itemID: id,
+      seq,
+      kind: "tool",
+      status,
+      name,
+      toolType: stringValue(item.toolType),
+      input: rawString(item.arguments),
+      output: rawString(item.result),
+      error: rawString(item.error),
+      durationMS: finiteNumber(item.durationMs),
+    };
+  }
   if (fileItem) {
     return {
       itemID: id,
       seq,
       kind: "file",
       status,
-      files: normalizeFiles(item.files ?? item.changes ?? payload.files ?? payload.changes),
-      diff: rawString(item.diff ?? payload.patch ?? payload.diff),
+      files: normalizeFiles(item.changes),
+      diff: rawString(item.diff),
       truncated: item.truncated === true,
     };
   }
@@ -259,7 +286,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
     cwd: rawString(item.cwd),
     durationMS: finiteNumber(item.durationMs),
     commandActions: Array.isArray(item.commandActions) ? item.commandActions : [],
-    output: rawString(item.aggregatedOutput ?? item.output),
+    output: rawString(item.output),
     outputTruncated: item.truncated === true,
     exitCode: finiteNumber(item.exitCode),
   };
@@ -301,6 +328,18 @@ function upsertItem(items: AgentActivityItem[], item: AgentActivityItem): AgentA
       durationMS: item.durationMS ?? current.durationMS,
       exitCode: item.exitCode ?? current.exitCode,
     };
+  } else if (current.kind === "tool" && item.kind === "tool") {
+    next[index] = {
+      ...current,
+      ...item,
+      seq: current.seq,
+      name: item.name || current.name,
+      toolType: item.toolType || current.toolType,
+      input: item.input || current.input,
+      output: item.output || current.output,
+      error: item.error || current.error,
+      durationMS: item.durationMS ?? current.durationMS,
+    };
   } else if (current.kind === "commentary" && item.kind === "commentary") {
     next[index] = {
       ...current,
@@ -330,8 +369,7 @@ function usageValue(usage: AgentTokenUsageDTO | undefined): AgentUsage | null {
   const value = {
     inputTokens: finiteNumber(usage.inputTokens) ?? 0,
     outputTokens: finiteNumber(usage.outputTokens) ?? 0,
-    cachedInputTokens: finiteNumber(usage.cachedInputTokens ?? usage.cacheReadTokens) ?? 0,
-    cacheReadTokens: finiteNumber(usage.cacheReadTokens ?? usage.cachedInputTokens) ?? 0,
+    cachedInputTokens: finiteNumber(usage.cachedInputTokens) ?? 0,
     reasoningTokens: finiteNumber(usage.reasoningTokens) ?? 0,
     totalTokens: finiteNumber(usage.totalTokens) ?? 0,
     scope: "thread" as const,
@@ -350,7 +388,7 @@ function reduceAgentExecutionEvent(
       next.status = "running";
       break;
     case "turn/completed":
-      next.status = turnStatus(payload);
+      next.status = turnStatus(payload) ?? next.status;
       next.durationMS = finiteNumber(payload.turn?.durationMs);
       break;
     case "turn/plan/updated":
@@ -365,8 +403,9 @@ function reduceAgentExecutionEvent(
       break;
     }
     case "item/commandExecution/outputDelta": {
-      const id = itemID(payload, event.seq, "command");
-      const delta = rawString(payload.delta ?? payload.outputDelta);
+      const id = itemID(payload);
+      if (!id) break;
+      const delta = rawString(payload.outputDelta);
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "command",
       ) as AgentCommandActivity | undefined;
@@ -387,7 +426,8 @@ function reduceAgentExecutionEvent(
     }
     case "item/agentMessage/delta": {
       if (stringValue(payload.phase) !== "commentary") break;
-      const id = itemID(payload, event.seq, "commentary");
+      const id = itemID(payload);
+      if (!id) break;
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "commentary",
       ) as AgentTextActivity | undefined;
@@ -402,7 +442,8 @@ function reduceAgentExecutionEvent(
       break;
     }
     case "item/reasoning/summaryTextDelta": {
-      const id = itemID(payload, event.seq, "reasoning");
+      const id = itemID(payload);
+      if (!id) break;
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "reasoning",
       ) as AgentTextActivity | undefined;
@@ -417,7 +458,8 @@ function reduceAgentExecutionEvent(
       break;
     }
     case "item/reasoning/summaryPartAdded": {
-      const id = itemID(payload, event.seq, "reasoning");
+      const id = itemID(payload);
+      if (!id) break;
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "reasoning",
       ) as AgentTextActivity | undefined;
@@ -427,33 +469,34 @@ function reduceAgentExecutionEvent(
       break;
     }
     case "item/fileChange/patchUpdated": {
-      const id = itemID(payload, event.seq, "file");
+      const id = itemID(payload);
+      if (!id) break;
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "file",
       ) as AgentFileActivity | undefined;
-      const files = normalizeFiles(payload.files ?? payload.changes);
+      const files = normalizeFiles(payload.changes);
       next.items = upsertItem(next.items, {
         itemID: id,
         seq: currentItem?.seq ?? event.seq,
         kind: "file",
         status: currentItem?.status ?? "running",
         files: files.length > 0 ? files : currentItem?.files ?? [],
-        diff: rawString(payload.patch ?? payload.diff) || currentItem?.diff || "",
+        diff: rawString(payload.patch) || currentItem?.diff || "",
         truncated: currentItem?.truncated === true || payload.truncated === true,
       });
       break;
     }
     case "turn/diff/updated":
-      next.diff = rawString(payload.diff ?? payload.patch);
+      next.diff = rawString(payload.diff);
       next.diffTruncated = payload.truncated === true;
       if (next.diffSeq === 0) next.diffSeq = event.seq;
-      next.files = normalizeFiles(payload.files ?? payload.changes);
+      next.files = normalizeFiles(payload.changes);
       break;
     case "thread/tokenUsage/updated":
-      next.usage = usageValue(payload.tokenUsage?.total ?? payload.tokenUsage ?? payload.usage);
+      next.usage = usageValue(payload.tokenUsage?.total);
       break;
     case "model/rerouted":
-      next.actualModel = stringValue(payload.toModel ?? payload.model);
+      next.actualModel = stringValue(payload.toModel);
       next.previousModel = stringValue(payload.fromModel);
       next.rerouteReason = stringValue(payload.reason);
       if (next.rerouteSeq === 0) next.rerouteSeq = event.seq;
@@ -463,8 +506,9 @@ function reduceAgentExecutionEvent(
 }
 
 export function hasAgentRunActivity(run: AgentRunSnapshot): boolean {
-  return run.status !== "idle" || run.plan.length > 0 || run.items.length > 0 ||
-    Boolean(run.diff || run.actualModel || run.usage || run.interactions.length > 0);
+  const active = run.status === "running" || run.status === "waiting_interaction";
+  return active || run.items.length > 0 || run.files.length > 0 ||
+    Boolean(run.diff || run.actualModel || run.interactions.length > 0);
 }
 
 export function hasComposerAgentActivity(

@@ -1,6 +1,5 @@
 import type {
   ChatInlineAlert,
-  ChatMessageProcessTrace,
   ImageLoadingAspectRatio,
   MessageAttachment,
 } from "@/features/chat/types/messages";
@@ -96,7 +95,6 @@ export type PendingExchange = {
   assistantFileProc?: boolean; // Active file_proc stage.
   assistantActivityLabel?: string;
   assistantImageAspectRatio?: ImageLoadingAspectRatio;
-  assistantProcessTrace?: ChatMessageProcessTrace;
   assistantInlineAlert?: ChatInlineAlert;
   assistantServerMessageID?: number;
   assistantCreatedAt: string;

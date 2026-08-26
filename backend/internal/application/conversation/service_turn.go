@@ -59,54 +59,296 @@ func (s *Service) executeCloudTurn(ctx context.Context, input SendMessageInput, 
 	if _, err := nativetool.ResolveConversationPluginRefs(input.InputResourceRefs, s.cfg.Snapshot().ConversationPluginKeys); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrConversationPluginUnavailable, err)
 	}
-	originalOnEvent := input.OnEvent
-	input.OnEvent = func(kind string, payload map[string]interface{}) error {
-		if durableCloudEvent(kind) {
-			if err := s.recordCloudExecutionEvent(ctx, input, kind, payload); err != nil {
-				return err
-			}
-		}
-		if originalOnEvent != nil {
-			return originalOnEvent(kind, payload)
-		}
-		return nil
-	}
+	projection := newCloudExecutionProjection(s, ctx, input, input.OnEvent)
+	input.OnEvent = projection.handle
 	wrappedDelta := func(delta string) error {
+		if err := projection.start(); err != nil {
+			return err
+		}
 		if onDelta != nil {
 			return onDelta(delta)
 		}
 		return nil
 	}
 	result, err := s.sendMessageInternal(ctx, input, wrappedDelta, stream)
-	terminal := map[string]interface{}{"status": "completed"}
+	terminalStatus := "completed"
 	if err != nil {
-		terminal = map[string]interface{}{"status": "failed", "error": err.Error()}
+		terminalStatus = "failed"
+		if errors.Is(err, ErrMessageGenerationCanceled) {
+			terminalStatus = "interrupted"
+		}
 	}
 	terminalCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if eventErr := s.recordCloudExecutionEvent(terminalCtx, input, "turn.completed", terminal); err == nil && eventErr != nil {
+	projection.ctx = terminalCtx
+	if eventErr := projection.complete(terminalStatus, err, result); err == nil && eventErr != nil {
 		err = eventErr
 	}
 	return result, err
 }
 
-func durableCloudEvent(kind string) bool {
-	kind = strings.TrimSpace(kind)
-	return kind != "" && kind != "usage" && kind != "process_update" &&
-		!strings.HasSuffix(kind, ".delta") && !strings.HasSuffix(kind, "_delta")
+type cloudReasoningProjection struct {
+	itemID string
+	text   string
+	open   bool
 }
 
-func (s *Service) recordCloudExecutionEvent(ctx context.Context, input SendMessageInput, kind string, payload map[string]interface{}) error {
+type cloudToolProjection struct {
+	itemID   string
+	row      model.ToolCall
+	terminal bool
+}
+
+type cloudExecutionProjection struct {
+	service        *Service
+	ctx            context.Context
+	input          SendMessageInput
+	emit           func(string, map[string]interface{}) error
+	reasoning      map[string]*cloudReasoningProjection
+	reasoningOrder []string
+	tools          map[string]*cloudToolProjection
+	toolOrder      []string
+	started        bool
+}
+
+func newCloudExecutionProjection(
+	service *Service,
+	ctx context.Context,
+	input SendMessageInput,
+	emit func(string, map[string]interface{}) error,
+) *cloudExecutionProjection {
+	return &cloudExecutionProjection{
+		service: service, ctx: ctx, input: input, emit: emit,
+		reasoning: make(map[string]*cloudReasoningProjection),
+		tools:     make(map[string]*cloudToolProjection),
+	}
+}
+
+func (p *cloudExecutionProjection) start() error {
+	if p.started {
+		return nil
+	}
+	if err := p.project("turn/started", map[string]interface{}{
+		"turn": map[string]interface{}{"status": "inProgress"},
+	}); err != nil {
+		return err
+	}
+	p.started = true
+	return nil
+}
+
+func (p *cloudExecutionProjection) handle(kind string, payload map[string]interface{}) error {
+	if err := p.start(); err != nil {
+		return err
+	}
+	switch strings.TrimSpace(kind) {
+	case cloudReasoningSummaryEvent:
+		return p.projectReasoning(payload)
+	case cloudToolActivityEvent:
+		return p.projectTools(payload)
+	default:
+		if p.emit != nil {
+			return p.emit(kind, payload)
+		}
+		return nil
+	}
+}
+
+func (p *cloudExecutionProjection) project(kind string, payload map[string]interface{}) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	_, err = s.repo.ProjectExecutionEvent(ctx, &model.ExecutionEvent{
-		ConversationID: input.ConversationID, UserID: input.UserID, RunID: normalizeRunID(input.ClientRunID),
+	event := &model.ExecutionEvent{
+		ConversationID: p.input.ConversationID, UserID: p.input.UserID, RunID: normalizeRunID(p.input.ClientRunID),
 		SourceKey: "cloud:" + strings.ReplaceAll(uuid.NewString(), "-", ""), Kind: kind,
 		PayloadJSON: string(encoded), OccurredAt: time.Now().UTC(),
+	}
+	applied, err := p.service.repo.ProjectExecutionEvent(p.ctx, event)
+	if err != nil || !applied || p.emit == nil {
+		return err
+	}
+	streamPayload := gatewayStreamPayload(event)
+	delete(streamPayload, "type")
+	return p.emit("execution_event", streamPayload)
+}
+
+func cloudProjectionString(payload map[string]interface{}, key string) string {
+	value, _ := payload[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func cloudReasoningIdentity(payload map[string]interface{}) (string, string) {
+	return cloudProjectionString(payload, "itemID"), cloudProjectionString(payload, "kind")
+}
+
+func (p *cloudExecutionProjection) projectReasoning(payload map[string]interface{}) error {
+	itemID, kind := cloudReasoningIdentity(payload)
+	if itemID == "" {
+		return nil
+	}
+	state := p.reasoning[itemID]
+	if state == nil {
+		state = &cloudReasoningProjection{itemID: itemID}
+		p.reasoning[itemID] = state
+		p.reasoningOrder = append(p.reasoningOrder, itemID)
+	}
+
+	if kind == messageTraceThinkKindSummary || kind == "summary_part_added" {
+		if !state.open {
+			if err := p.project("item/started", map[string]interface{}{
+				"itemID": itemID,
+				"item": map[string]interface{}{
+					"itemID": itemID, "kind": "reasoning", "status": "inProgress", "summary": []string{},
+				},
+			}); err != nil {
+				return err
+			}
+			state.open = true
+		}
+		if kind == "summary_part_added" {
+			if err := p.project("item/reasoning/summaryPartAdded", map[string]interface{}{"itemID": itemID}); err != nil {
+				return err
+			}
+		} else {
+			delta := cloudProjectionString(payload, "delta")
+			if delta == "" {
+				content := cloudProjectionString(payload, "contentMarkdown")
+				if strings.HasPrefix(content, state.text) {
+					delta = content[len(state.text):]
+				}
+			}
+			if delta != "" {
+				state.text += delta
+				if err := p.project("item/reasoning/summaryTextDelta", map[string]interface{}{
+					"itemID": itemID, "delta": delta,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	status := cloudProjectionString(payload, "status")
+	if status == messageTraceStatusCompleted || status == messageTraceStatusError {
+		return p.completeReasoning(state, status)
+	}
+	return nil
+}
+
+func (p *cloudExecutionProjection) completeReasoning(state *cloudReasoningProjection, status string) error {
+	if state == nil || !state.open {
+		return nil
+	}
+	state.open = false
+	itemStatus := "completed"
+	if status == messageTraceStatusError || status == "failed" {
+		itemStatus = "failed"
+	}
+	return p.project("item/completed", map[string]interface{}{
+		"itemID": state.itemID,
+		"item": map[string]interface{}{
+			"itemID": state.itemID, "kind": "reasoning", "status": itemStatus, "summary": []string{state.text},
+		},
 	})
-	return err
+}
+
+func cloudToolStatus(status string) (string, bool) {
+	switch strings.TrimSpace(status) {
+	case "success", "completed", "reused":
+		return "completed", true
+	case "error", "failed":
+		return "failed", true
+	default:
+		return "inProgress", false
+	}
+}
+
+func cloudToolItem(row model.ToolCall, itemID, status string) map[string]interface{} {
+	return map[string]interface{}{
+		"itemID":     itemID,
+		"kind":       "dynamicToolCall",
+		"status":     status,
+		"tool":       strings.TrimSpace(row.ToolName),
+		"toolType":   strings.TrimSpace(row.ToolType),
+		"arguments":  strings.TrimSpace(row.InputJSON),
+		"result":     strings.TrimSpace(row.OutputJSON),
+		"error":      strings.TrimSpace(row.ErrorJSON),
+		"durationMs": row.LatencyMS,
+	}
+}
+
+func (p *cloudExecutionProjection) projectTools(payload map[string]interface{}) error {
+	rows, _ := payload["tools"].([]model.ToolCall)
+	for _, row := range rows {
+		itemID := strings.TrimSpace(row.ToolCallID)
+		if itemID == "" || strings.TrimSpace(row.ToolName) == "" {
+			continue
+		}
+		status, terminal := cloudToolStatus(row.Status)
+		state := p.tools[itemID]
+		if state == nil {
+			state = &cloudToolProjection{itemID: itemID}
+			p.tools[itemID] = state
+			p.toolOrder = append(p.toolOrder, itemID)
+			if err := p.project("item/started", map[string]interface{}{
+				"itemID": itemID, "item": cloudToolItem(row, itemID, "inProgress"),
+			}); err != nil {
+				return err
+			}
+		}
+		state.row = row
+		if terminal && !state.terminal {
+			state.terminal = true
+			if err := p.project("item/completed", map[string]interface{}{
+				"itemID": itemID, "item": cloudToolItem(row, itemID, status),
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (p *cloudExecutionProjection) complete(status string, runErr error, result *SendMessageResult) error {
+	if err := p.start(); err != nil {
+		return err
+	}
+	reasoningStatus := messageTraceStatusCompleted
+	if status == "failed" {
+		reasoningStatus = messageTraceStatusError
+	}
+	for _, itemID := range p.reasoningOrder {
+		if err := p.completeReasoning(p.reasoning[itemID], reasoningStatus); err != nil {
+			return err
+		}
+	}
+	for _, itemID := range p.toolOrder {
+		state := p.tools[itemID]
+		if state.terminal {
+			continue
+		}
+		itemStatus := "completed"
+		if status == "failed" {
+			itemStatus = "failed"
+		} else if status == "interrupted" {
+			itemStatus = "interrupted"
+		}
+		if err := p.project("item/completed", map[string]interface{}{
+			"itemID": itemID, "item": cloudToolItem(state.row, itemID, itemStatus),
+		}); err != nil {
+			return err
+		}
+		state.terminal = true
+	}
+	turn := map[string]interface{}{"status": status}
+	if runErr != nil {
+		turn["error"] = map[string]interface{}{"message": runErr.Error()}
+	}
+	if result != nil && result.AssistantMessage.LatencyMS > 0 {
+		turn["durationMs"] = result.AssistantMessage.LatencyMS
+	}
+	return p.project("turn/completed", map[string]interface{}{"turn": turn})
 }
 
 const executionEventPageSize = 500
@@ -463,10 +705,6 @@ func (s *Service) awaitGatewayTurn(ctx context.Context, input SendMessageInput, 
 				if onDelta != nil {
 					return false, onDelta(delta)
 				}
-			}
-		case "upstream_think_delta":
-			if input.OnEvent != nil {
-				return false, input.OnEvent(typeName, payload)
 			}
 		case "execution_event":
 			if input.OnEvent != nil {

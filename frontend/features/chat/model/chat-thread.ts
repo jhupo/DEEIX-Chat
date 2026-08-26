@@ -35,133 +35,6 @@ export function parseAttachments(raw: string): MessageAttachment[] {
   }
 }
 
-function parseProcessTrace(item: MessageDTO) {
-  const trace = item.processTrace;
-  if (!trace?.enabled) {
-    return undefined;
-  }
-  const mapBlock = (block: typeof trace.process) =>
-    block
-      ? {
-          title: block.title,
-          summary: block.summary,
-          contentMarkdown: block.contentMarkdown,
-          status: block.status,
-          stage: block.stage,
-          roundID: block.roundID,
-          parentEventID: block.parentEventID,
-          updatedAt: block.updatedAt,
-          payloadJson: block.payloadJSON,
-        }
-      : undefined;
-  const promptTrace = trace.promptTrace
-    ? {
-        mode: trace.promptTrace.mode,
-        promptFingerprint: trace.promptTrace.promptFingerprint,
-        statefulUsed: trace.promptTrace.statefulUsed,
-        statefulDisabledReason: trace.promptTrace.statefulDisabledReason,
-        totalTokenEstimate: trace.promptTrace.totalTokenEstimate,
-        sentTokenEstimate: trace.promptTrace.sentTokenEstimate,
-        fullMessageCount: trace.promptTrace.fullMessageCount,
-        sentMessageCount: trace.promptTrace.sentMessageCount,
-        statefulSavedMessages: trace.promptTrace.statefulSavedMessages,
-        statefulSavedTokens: trace.promptTrace.statefulSavedTokens,
-        blocks: trace.promptTrace.blocks?.map((block) => ({
-          kind: block.kind,
-          title: block.title,
-          tokenEstimate: block.tokenEstimate,
-          cacheable: block.cacheable,
-          sourceCount: block.sourceCount,
-          sourceRefs: block.sourceRefs?.map((ref) => ({
-            sourceType: ref.sourceType,
-            sourceID: ref.sourceID,
-            title: ref.title,
-            artifactID: ref.artifactID,
-          })),
-        })) ?? [],
-      }
-    : undefined;
-  return {
-    enabled: true,
-    status: trace.status,
-    process: mapBlock(trace.process),
-    tools: mapBlock(trace.tools),
-    upstreamThink: mapBlock(trace.upstreamThink),
-    promptTrace,
-    events: trace.events?.map((event) => ({
-      eventID: event.eventID,
-      eventType: event.eventType,
-      phase: event.phase,
-      stage: event.stage,
-      roundID: event.roundID,
-      parentEventID: event.parentEventID,
-      title: event.title,
-      summary: event.summary,
-      contentMarkdown: event.contentMarkdown,
-      status: event.status,
-      seq: event.seq,
-      startedAt: event.startedAt,
-      endedAt: event.endedAt,
-      updatedAt: event.updatedAt,
-      payloadJson: event.payloadJSON,
-    })),
-  };
-}
-
-function parseUpstreamDebugInfo(value: unknown): UpstreamDebugInfo | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  const candidate = value as UpstreamDebugInfo;
-  const hasRequest = Boolean(candidate.request && typeof candidate.request === "object" && !Array.isArray(candidate.request));
-  const hasResponse = Boolean(candidate.response && typeof candidate.response === "object" && !Array.isArray(candidate.response));
-  if (hasRequest || hasResponse) {
-    return candidate;
-  }
-  return undefined;
-}
-
-function parseUpstreamDebugPayload(payloadJSON: string | undefined): UpstreamDebugInfo | undefined {
-  if (!payloadJSON) {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(payloadJSON.trim()) as { upstream_debug?: unknown };
-    return parseUpstreamDebugInfo(parsed.upstream_debug);
-  } catch {
-    return undefined;
-  }
-}
-
-function upstreamDebugScore(value: UpstreamDebugInfo): number {
-  let score = 0;
-  if (value.request?.body?.trim()) score += 8;
-  if (value.response?.body?.trim()) score += 4;
-  if (value.request?.headers && Object.keys(value.request.headers).length > 0) score += 2;
-  if (value.response?.headers && Object.keys(value.response.headers).length > 0) score += 1;
-  return score;
-}
-
-function extractInlineAlertDetails(item: MessageDTO): UpstreamDebugInfo | undefined {
-  const trace = item.processTrace;
-  const payloads = [
-    trace?.process?.payloadJSON,
-    trace?.tools?.payloadJSON,
-    trace?.upstreamThink?.payloadJSON,
-    ...(trace?.events?.map((event) => event.payloadJSON) ?? []),
-  ];
-  return payloads.reduce<UpstreamDebugInfo | undefined>((best, payloadJSON) => {
-    const current = parseUpstreamDebugPayload(payloadJSON);
-    if (!current) {
-      return best;
-    }
-    if (!best || upstreamDebugScore(current) > upstreamDebugScore(best)) {
-      return current;
-    }
-    return best;
-  }, undefined);
-}
-
 const ROOT_BRANCH_KEY = "__root__";
 
 type MessageLabels = {
@@ -171,14 +44,14 @@ type MessageLabels = {
   resolveErrorMessage?: (errorCode: string, fallback: string, details?: UpstreamDebugInfo) => string;
 };
 
-function resolveAssistantErrorMessage(item: MessageDTO, labels: MessageLabels, details?: UpstreamDebugInfo): string {
+function resolveAssistantErrorMessage(item: MessageDTO, labels: MessageLabels): string {
   const fallback = item.errorMessage.trim();
   if (item.errorCode === "stream_interrupted" || item.errorCode === "conversation_run.stream_interrupted") {
     return labels.streamInterrupted || fallback;
   }
   const errorCode = item.errorCode.trim();
   if (errorCode && labels.resolveErrorMessage) {
-    return labels.resolveErrorMessage(errorCode, fallback, details);
+    return labels.resolveErrorMessage(errorCode, fallback);
   }
   return fallback;
 }
@@ -227,13 +100,10 @@ export function mapServerMessage(
     msg.cacheWriteTokens = item.cacheWriteTokens ?? 0;
     msg.reasoningTokens = item.reasoningTokens ?? 0;
     msg.latencyMS = item.latencyMS ?? 0;
-    msg.processTrace = parseProcessTrace(item);
     if ((item.status === "error" || item.status === "interrupted") && item.errorMessage?.trim()) {
-      const details = extractInlineAlertDetails(item);
       msg.inlineAlert = {
         title: labels.generationInterrupted,
-        message: resolveAssistantErrorMessage(item, labels, details),
-        details,
+        message: resolveAssistantErrorMessage(item, labels),
       };
     }
     if (item.status === "pending") {

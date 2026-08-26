@@ -14770,148 +14770,6 @@ const docTemplate = `{
                 }
             }
         },
-        "MessageProcessTraceResponse": {
-            "type": "object",
-            "required": [
-                "enabled",
-                "status"
-            ],
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "events": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/MessageTraceEventResponse"
-                    }
-                },
-                "process": {
-                    "$ref": "#/definitions/MessageTraceBlockResponse"
-                },
-                "promptTrace": {
-                    "$ref": "#/definitions/MessagePromptTraceResponse"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "tools": {
-                    "$ref": "#/definitions/MessageTraceBlockResponse"
-                },
-                "upstreamThink": {
-                    "$ref": "#/definitions/MessageTraceBlockResponse"
-                }
-            }
-        },
-        "MessagePromptTraceBlockResponse": {
-            "type": "object",
-            "required": [
-                "cacheable",
-                "kind",
-                "sourceCount",
-                "title",
-                "tokenEstimate"
-            ],
-            "properties": {
-                "cacheable": {
-                    "type": "boolean"
-                },
-                "kind": {
-                    "type": "string"
-                },
-                "sourceCount": {
-                    "type": "integer"
-                },
-                "sourceRefs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/MessagePromptTraceSourceResponse"
-                    }
-                },
-                "title": {
-                    "type": "string"
-                },
-                "tokenEstimate": {
-                    "type": "integer"
-                }
-            }
-        },
-        "MessagePromptTraceResponse": {
-            "type": "object",
-            "required": [
-                "blocks",
-                "fullMessageCount",
-                "mode",
-                "promptFingerprint",
-                "sentMessageCount",
-                "sentTokenEstimate",
-                "statefulDisabledReason",
-                "statefulSavedMessages",
-                "statefulSavedTokens",
-                "statefulUsed",
-                "totalTokenEstimate"
-            ],
-            "properties": {
-                "blocks": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/MessagePromptTraceBlockResponse"
-                    }
-                },
-                "fullMessageCount": {
-                    "type": "integer"
-                },
-                "mode": {
-                    "type": "string"
-                },
-                "promptFingerprint": {
-                    "type": "string"
-                },
-                "sentMessageCount": {
-                    "type": "integer"
-                },
-                "sentTokenEstimate": {
-                    "type": "integer"
-                },
-                "statefulDisabledReason": {
-                    "type": "string"
-                },
-                "statefulSavedMessages": {
-                    "type": "integer"
-                },
-                "statefulSavedTokens": {
-                    "type": "integer"
-                },
-                "statefulUsed": {
-                    "type": "boolean"
-                },
-                "totalTokenEstimate": {
-                    "type": "integer"
-                }
-            }
-        },
-        "MessagePromptTraceSourceResponse": {
-            "type": "object",
-            "required": [
-                "sourceID",
-                "sourceType",
-                "title"
-            ],
-            "properties": {
-                "artifactID": {
-                    "type": "integer"
-                },
-                "sourceID": {
-                    "type": "string"
-                },
-                "sourceType": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
         "MessageResponse": {
             "type": "object",
             "required": [
@@ -15018,9 +14876,6 @@ const docTemplate = `{
                 "platformModelName": {
                     "type": "string"
                 },
-                "processTrace": {
-                    "$ref": "#/definitions/MessageProcessTraceResponse"
-                },
                 "publicID": {
                     "type": "string"
                 },
@@ -15075,107 +14930,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/MessageResponse"
                 },
                 "errorMsg": {
-                    "type": "string"
-                }
-            }
-        },
-        "MessageTraceBlockResponse": {
-            "type": "object",
-            "required": [
-                "contentMarkdown",
-                "status",
-                "summary",
-                "title",
-                "updatedAt"
-            ],
-            "properties": {
-                "contentMarkdown": {
-                    "type": "string"
-                },
-                "parentEventID": {
-                    "type": "string"
-                },
-                "payloadJSON": {
-                    "type": "string"
-                },
-                "roundID": {
-                    "type": "string"
-                },
-                "stage": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updatedAt": {
-                    "type": "string"
-                }
-            }
-        },
-        "MessageTraceEventResponse": {
-            "type": "object",
-            "required": [
-                "contentMarkdown",
-                "eventID",
-                "eventType",
-                "phase",
-                "seq",
-                "startedAt",
-                "status",
-                "summary",
-                "title",
-                "updatedAt"
-            ],
-            "properties": {
-                "contentMarkdown": {
-                    "type": "string"
-                },
-                "endedAt": {
-                    "type": "string"
-                },
-                "eventID": {
-                    "type": "string"
-                },
-                "eventType": {
-                    "type": "string"
-                },
-                "parentEventID": {
-                    "type": "string"
-                },
-                "payloadJSON": {
-                    "type": "string"
-                },
-                "phase": {
-                    "type": "string"
-                },
-                "roundID": {
-                    "type": "string"
-                },
-                "seq": {
-                    "type": "integer"
-                },
-                "stage": {
-                    "type": "string"
-                },
-                "startedAt": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updatedAt": {
                     "type": "string"
                 }
             }
@@ -16681,9 +16435,6 @@ const docTemplate = `{
                 },
                 "platformModelName": {
                     "type": "string"
-                },
-                "processTrace": {
-                    "$ref": "#/definitions/MessageProcessTraceResponse"
                 },
                 "publicID": {
                     "type": "string"

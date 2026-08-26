@@ -10,7 +10,6 @@ import {
   shouldSurfaceConversationLoadError,
 } from "@/features/chat/model/conversation-load-policy";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
-import { upsertLiveUpstreamThinkTrace } from "@/features/chat/model/upstream-think-store";
 import {
   cancelMessageGeneration,
   ensureConversationHistory,
@@ -607,22 +606,6 @@ export function useChatData(
             }
             pendingTextDelta += delta;
             scheduleTextFlush();
-          },
-          onProcessUpdate: (event) => {
-            updateResumeState((prev) => ({
-              ...prev,
-              messages: prev.messages.map((message) =>
-                message.runID === pendingRunID && message.role === "assistant" && message.status === "pending"
-                  ? { ...message, processTrace: event.trace }
-                  : message,
-              ),
-            }));
-          },
-          onUpstreamThinkDelta: (event) => {
-            if (isResumeInactive()) {
-              return;
-            }
-            upsertLiveUpstreamThinkTrace(pendingRunID, event);
           },
           onUsage: (event) => {
             updateResumeState((prev) => ({

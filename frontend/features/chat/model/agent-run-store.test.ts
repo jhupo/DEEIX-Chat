@@ -12,7 +12,7 @@ test("applies a historical event page as one ordered batch", () => {
       runID: "run-1",
       seq: 3,
       kind: "turn/completed",
-      payload: { status: "completed" },
+      payload: { turn: { status: "completed" } },
       occurredAt: "2026-08-24T00:00:03Z",
     },
     {
@@ -38,7 +38,7 @@ test("applies a historical event page as one ordered batch", () => {
     runID: "run-1",
     seq: 3,
     kind: "turn/completed",
-    payload: { status: "completed" },
+    payload: { turn: { status: "completed" } },
     occurredAt: "2026-08-24T00:00:03Z",
   }], "conversation-1"), 0);
 });
@@ -70,9 +70,11 @@ test("preserves a file patch when the completed item omits it", () => {
       seq: 1,
       kind: "item/started",
       payload: {
+        itemID: "file-item",
         item: {
           itemID: "file-item",
-          type: "fileChange",
+          kind: "fileChange",
+          status: "inProgress",
           changes: [{ path: "src/a.ts", change: "update" }, { path: "src/b.ts", change: "update" }],
         },
       },
@@ -94,9 +96,10 @@ test("preserves a file patch when the completed item omits it", () => {
       seq: 3,
       kind: "item/completed",
       payload: {
+        itemID: "file-item",
         item: {
           itemID: "file-item",
-          type: "fileChange",
+          kind: "fileChange",
           status: "completed",
           changes: [{ path: "src/a.ts", change: "update" }, { path: "src/b.ts", change: "update" }],
         },
@@ -129,14 +132,14 @@ test("keeps activity items in their first event order while applying later updat
       runID: "run-timeline",
       seq: 2,
       kind: "item/started",
-      payload: { item: { itemID: "reasoning-1", type: "reasoning", summary: ["Think"] } },
+      payload: { itemID: "reasoning-1", item: { itemID: "reasoning-1", kind: "reasoning", status: "inProgress", summary: ["Think"] } },
       occurredAt: "2026-08-25T00:00:02Z",
     },
     {
       runID: "run-timeline",
       seq: 3,
       kind: "item/started",
-      payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test" } },
+      payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", status: "inProgress", command: "pnpm test" } },
       occurredAt: "2026-08-25T00:00:03Z",
     },
     {
@@ -150,14 +153,14 @@ test("keeps activity items in their first event order while applying later updat
       runID: "run-timeline",
       seq: 5,
       kind: "item/started",
-      payload: { item: { itemID: "reasoning-2", type: "reasoning", summary: ["Reconsider"] } },
+      payload: { itemID: "reasoning-2", item: { itemID: "reasoning-2", kind: "reasoning", status: "inProgress", summary: ["Reconsider"] } },
       occurredAt: "2026-08-25T00:00:05Z",
     },
     {
       runID: "run-timeline",
       seq: 6,
       kind: "item/completed",
-      payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test", status: "completed" } },
+      payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", command: "pnpm test", status: "completed" } },
       occurredAt: "2026-08-25T00:00:06Z",
     },
     {
@@ -182,15 +185,61 @@ test("keeps activity items in their first event order while applying later updat
 test("keeps compacted command output and reasoning when terminal items omit text", () => {
   setAgentRunContext("compact-history-context", "conversation-compact");
   applyAgentExecutionEvents([
-    { runID: "run-compact", seq: 1, kind: "item/started", payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test" } }, occurredAt: "2026-08-26T00:00:01Z" },
+    { runID: "run-compact", seq: 1, kind: "item/started", payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", status: "inProgress", command: "pnpm test" } }, occurredAt: "2026-08-26T00:00:01Z" },
     { runID: "run-compact", seq: 2, kind: "item/commandExecution/outputDelta", payload: { itemID: "command-1", outputDelta: "passed" }, occurredAt: "2026-08-26T00:00:02Z" },
-    { runID: "run-compact", seq: 3, kind: "item/completed", payload: { item: { itemID: "command-1", type: "commandExecution", status: "completed" } }, occurredAt: "2026-08-26T00:00:03Z" },
-    { runID: "run-compact", seq: 4, kind: "item/started", payload: { item: { itemID: "reasoning-1", type: "reasoning", summary: [] } }, occurredAt: "2026-08-26T00:00:04Z" },
+    { runID: "run-compact", seq: 3, kind: "item/completed", payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", status: "completed" } }, occurredAt: "2026-08-26T00:00:03Z" },
+    { runID: "run-compact", seq: 4, kind: "item/started", payload: { itemID: "reasoning-1", item: { itemID: "reasoning-1", kind: "reasoning", status: "inProgress", summary: [] } }, occurredAt: "2026-08-26T00:00:04Z" },
     { runID: "run-compact", seq: 5, kind: "item/reasoning/summaryTextDelta", payload: { itemID: "reasoning-1", delta: "checked history" }, occurredAt: "2026-08-26T00:00:05Z" },
-    { runID: "run-compact", seq: 6, kind: "item/completed", payload: { item: { itemID: "reasoning-1", type: "reasoning", status: "completed", summary: [] } }, occurredAt: "2026-08-26T00:00:06Z" },
+    { runID: "run-compact", seq: 6, kind: "item/completed", payload: { itemID: "reasoning-1", item: { itemID: "reasoning-1", kind: "reasoning", status: "completed", summary: [] } }, occurredAt: "2026-08-26T00:00:06Z" },
   ], "conversation-compact");
 
   const [command, reasoning] = getAgentRunSnapshot("run-compact").items;
   assert.equal(command?.kind === "command" ? command.output : "", "passed");
   assert.equal(reasoning?.kind === "reasoning" ? reasoning.text : "", "checked history");
+});
+
+test("normalizes canonical tool items into the shared activity timeline", () => {
+  setAgentRunContext("tool-context", "conversation-tool");
+  applyAgentExecutionEvents([
+    {
+      runID: "run-tool",
+      seq: 1,
+      kind: "item/started",
+      payload: {
+        itemID: "tool-1",
+        item: {
+          itemID: "tool-1",
+          kind: "dynamicToolCall",
+          status: "inProgress",
+          tool: "web_search",
+          arguments: "latest Codex docs",
+        },
+      },
+      occurredAt: "2026-08-27T00:00:01Z",
+    },
+    {
+      runID: "run-tool",
+      seq: 2,
+      kind: "item/completed",
+      payload: {
+        itemID: "tool-1",
+        item: {
+          itemID: "tool-1",
+          kind: "dynamicToolCall",
+          status: "completed",
+          tool: "web_search",
+          result: "docs found",
+        },
+      },
+      occurredAt: "2026-08-27T00:00:02Z",
+    },
+  ], "conversation-tool");
+
+  const item = getAgentRunSnapshot("run-tool").items[0];
+  assert.equal(item?.kind, "tool");
+  if (item?.kind !== "tool") return;
+  assert.equal(item.name, "web_search");
+  assert.equal(item.input, "latest Codex docs");
+  assert.equal(item.output, "docs found");
+  assert.equal(item.status, "completed");
 });

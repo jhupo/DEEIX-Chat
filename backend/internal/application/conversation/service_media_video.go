@@ -210,7 +210,7 @@ func (s *Service) StreamMediaVideo(ctx context.Context, input MediaVideoInput) (
 		userMessage.SourcePublicID = branchState.SourcePublicID
 		assistantMessage.ParentPublicID = userMessage.PublicID
 	}
-	traceRecorder := newMessageTraceRecorder(s, ctx, assistantMessage, input.OnEvent)
+	traceRecorder := newMessageTraceRecorder(s, ctx, assistantMessage, nil)
 	defer func() {
 		if retErr != nil && traceRecorder != nil {
 			traceRecorder.fail(retErr)

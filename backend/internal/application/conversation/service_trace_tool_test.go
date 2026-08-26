@@ -123,30 +123,6 @@ func TestToolTracePayloadMergesStreamingPlaceholderWithFinalCall(t *testing.T) {
 	}
 }
 
-func TestBuildMessageProcessTraceDTOIncludesOrderedEvents(t *testing.T) {
-	trace := buildMessageProcessTraceDTO(nil, []model.MessageTraceEventRow{
-		{
-			EventID:         "tools_1",
-			EventType:       "tool",
-			Phase:           messageTraceTypeTools,
-			Status:          messageTraceStatusCompleted,
-			Title:           "工具",
-			Summary:         "工具完成",
-			ContentMarkdown: "**fetch**：执行成功",
-			Seq:             2,
-		},
-	})
-	if trace == nil || len(trace.Events) != 1 {
-		t.Fatalf("expected trace events, got %#v", trace)
-	}
-	if trace.Status != messageTraceStatusCompleted {
-		t.Fatalf("expected completed trace status, got %q", trace.Status)
-	}
-	if trace.Events[0].EventID != "tools_1" || trace.Events[0].EventType != "tool" {
-		t.Fatalf("unexpected event payload: %#v", trace.Events[0])
-	}
-}
-
 func TestTracePayloadJSONBoundsOversizedPayload(t *testing.T) {
 	secret := strings.Repeat("x", maxTracePayloadBytes+1)
 	serialized := tracePayloadJSON(map[string]interface{}{"upstream_debug": secret})
@@ -199,7 +175,7 @@ func TestUpstreamThinkingDeltaIsCoalescedBetweenFlushes(t *testing.T) {
 		},
 		assistant: &model.Message{ID: 1, ConversationID: 2, UserID: 3, RunID: "run_1"},
 		onEvent: func(eventType string, payload map[string]interface{}) error {
-			if eventType == "upstream_think_delta" {
+			if eventType == cloudReasoningSummaryEvent {
 				eventCount++
 				events = append(events, payload)
 			}
@@ -246,7 +222,7 @@ func TestFailedUpstreamThinkingFlushesBufferedContent(t *testing.T) {
 		},
 		assistant: &model.Message{ID: 1, ConversationID: 2, UserID: 3, RunID: "run_cancel"},
 		onEvent: func(eventType string, payload map[string]interface{}) error {
-			if eventType == "upstream_think_delta" {
+			if eventType == cloudReasoningSummaryEvent {
 				events = append(events, payload)
 			}
 			return nil
@@ -282,7 +258,7 @@ func TestUpstreamThinkingLiveDeltaSkipsOversizedContent(t *testing.T) {
 		},
 		assistant: &model.Message{ID: 1, ConversationID: 2, UserID: 3, RunID: "run_1"},
 		onEvent: func(eventType string, payload map[string]interface{}) error {
-			if eventType == "upstream_think_delta" {
+			if eventType == cloudReasoningSummaryEvent {
 				events = append(events, payload)
 			}
 			return nil
@@ -303,57 +279,6 @@ func TestUpstreamThinkingLiveDeltaSkipsOversizedContent(t *testing.T) {
 	}
 	if recorder.upstreamThink == nil || recorder.upstreamThink.contentMarkdown != largeDelta {
 		t.Fatal("expected oversized thinking content to remain available for final trace")
-	}
-}
-
-func TestBuildMessageProcessTraceDTOExtractsPromptTrace(t *testing.T) {
-	payload := map[string]interface{}{
-		"prompt_trace": messagePromptTracePayload(&model.MessagePromptTrace{
-			Mode:                  "stateful",
-			PromptFingerprint:     "fp_1",
-			StatefulUsed:          true,
-			TotalTokenEstimate:    120,
-			SentTokenEstimate:     20,
-			FullMessageCount:      6,
-			SentMessageCount:      1,
-			StatefulSavedMessages: 5,
-			StatefulSavedTokens:   100,
-			Blocks: []model.MessagePromptTraceBlock{{
-				Kind:          string(PromptBlockStableContext),
-				Title:         "稳定文件上下文",
-				TokenEstimate: 80,
-				Cacheable:     true,
-				SourceCount:   1,
-				SourceRefs: []model.MessagePromptTraceSourceRef{{
-					SourceType: string(model.ContextArtifactSummary),
-					SourceID:   "summary",
-					Title:      "上下文摘要",
-					ArtifactID: 77,
-				}},
-			}},
-		}),
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload failed: %v", err)
-	}
-	trace := buildMessageProcessTraceDTO([]model.MessageTrace{{
-		TraceType:       messageTraceTypeProcess,
-		Status:          messageTraceStatusCompleted,
-		Title:           "处理",
-		Summary:         "已规划上下文",
-		ContentMarkdown: "**上下文规划**：续接发送",
-		PayloadJSON:     string(raw),
-	}}, nil)
-
-	if trace == nil || trace.PromptTrace == nil {
-		t.Fatalf("expected prompt trace, got %#v", trace)
-	}
-	if !trace.PromptTrace.StatefulUsed || trace.PromptTrace.SentMessageCount != 1 || len(trace.PromptTrace.Blocks) != 1 {
-		t.Fatalf("unexpected prompt trace: %#v", trace.PromptTrace)
-	}
-	if got := trace.PromptTrace.Blocks[0].SourceRefs[0].ArtifactID; got != 77 {
-		t.Fatalf("expected prompt trace source artifact id to survive payload, got %d", got)
 	}
 }
 

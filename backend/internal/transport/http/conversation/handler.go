@@ -48,20 +48,7 @@ func normalizeStreamEventPayload(eventType string, payload map[string]interface{
 	}
 
 	for key, value := range payload {
-		switch typed := value.(type) {
-		case *model.MessageTraceBlock:
-			normalized[key] = toTraceBlockResponse(typed)
-		case model.MessageTraceBlock:
-			block := typed
-			normalized[key] = toTraceBlockResponse(&block)
-		case *model.MessageProcessTrace:
-			normalized[key] = toMessageProcessTraceResponse(typed)
-		case model.MessageProcessTrace:
-			trace := typed
-			normalized[key] = toMessageProcessTraceResponse(&trace)
-		default:
-			normalized[key] = value
-		}
+		normalized[key] = value
 	}
 
 	return normalized

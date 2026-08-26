@@ -43,6 +43,8 @@ const (
 	processTraceStatusSkipped       = "skipped"
 	processTraceFallbackFullText    = "full_text"
 	processTraceFallbackUnavailable = "unavailable"
+	cloudToolActivityEvent          = "cloud_tool_activity"
+	cloudReasoningSummaryEvent      = "cloud_reasoning_summary"
 )
 
 const (
@@ -304,7 +306,6 @@ func (r *messageTraceRecorder) appendProcessSection(summary string, markdown str
 	}
 	mergeTracePayload(draft.payload, payload)
 	r.persistDraft(draft, false)
-	r.emitProcessUpdate()
 }
 
 func (r *messageTraceRecorder) appendToolSection(summary string, markdown string, payload map[string]interface{}, status string) {
@@ -513,7 +514,6 @@ func (r *messageTraceRecorder) recordPromptTrace(trace *model.MessagePromptTrace
 	draft.status = messageTraceStatusStreaming
 	draft.endedAt = nil
 	r.persistDraft(draft, false)
-	r.emitProcessUpdate()
 }
 
 func (r *messageTraceRecorder) completeDraft(draft *messageTraceDraft) bool {
@@ -533,9 +533,7 @@ func (r *messageTraceRecorder) completeDraft(draft *messageTraceDraft) bool {
 }
 
 func (r *messageTraceRecorder) completeProcess() {
-	if r.completeDraft(r.process) {
-		r.emitProcessUpdate()
-	}
+	r.completeDraft(r.process)
 }
 
 func (r *messageTraceRecorder) completeTools() {
@@ -922,25 +920,14 @@ func (r *messageTraceRecorder) upsertSnapshotEvent(draft *messageTraceDraft, pay
 	r.events = append(r.events, event)
 }
 
-func (r *messageTraceRecorder) emitProcessUpdate() {
-	if !r.visible() || r.process == nil {
-		return
-	}
-	emitEvent(r.onEvent, "process_update", map[string]interface{}{
-		"status": r.process.status,
-		"block":  traceDraftToBlock(r.process),
-		"trace":  r.snapshot(),
-	})
-}
-
 func (r *messageTraceRecorder) emitToolUpdate() {
 	if !r.visible() || r.tools == nil {
 		return
 	}
-	emitEvent(r.onEvent, "process_update", map[string]interface{}{
+	rows := toolTraceRowsFromPayload(r.tools.payload)
+	emitEvent(r.onEvent, cloudToolActivityEvent, map[string]interface{}{
 		"status": r.tools.status,
-		"block":  traceDraftToBlock(r.tools),
-		"trace":  r.snapshot(),
+		"tools":  rows,
 	})
 }
 
@@ -949,12 +936,8 @@ func (r *messageTraceRecorder) emitUpstreamThinkDelta(update upstreamThinkLiveUp
 		return
 	}
 	payload := map[string]interface{}{
-		"status":  r.upstreamThink.status,
-		"title":   r.upstreamThink.title,
-		"summary": r.upstreamThink.summary,
-		"stage":   r.upstreamThink.stage,
-		"roundID": r.upstreamThink.roundID,
-		"eventID": r.upstreamThink.eventID,
+		"itemID": r.upstreamThink.eventID,
+		"status": r.upstreamThink.status,
 	}
 	if update.kind != "" {
 		payload["kind"] = update.kind
@@ -965,10 +948,7 @@ func (r *messageTraceRecorder) emitUpstreamThinkDelta(update upstreamThinkLiveUp
 	if update.contentMarkdown != "" {
 		payload["contentMarkdown"] = update.contentMarkdown
 	}
-	if len(update.reasoning) > 0 {
-		payload["reasoning"] = update.reasoning
-	}
-	emitEvent(r.onEvent, "upstream_think_delta", payload)
+	emitEvent(r.onEvent, cloudReasoningSummaryEvent, payload)
 }
 
 func traceDraftToBlock(draft *messageTraceDraft) *model.MessageTraceBlock {

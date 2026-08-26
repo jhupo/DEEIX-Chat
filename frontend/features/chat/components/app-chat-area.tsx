@@ -1464,7 +1464,7 @@ export function AppChatArea() {
   const workspaceRef = React.useRef<HTMLDivElement | null>(null);
   const artifactResizeCleanupRef = React.useRef<(() => void) | null>(null);
   const [artifactResizing, setArtifactResizing] = React.useState(false);
-  const hasInlineArtifact = Boolean((artifactWorkspace.activeArtifact || artifactWorkspace.activeDiff) && artifactWorkspace.isInlineViewport);
+  const hasInlineArtifact = Boolean(artifactWorkspace.activeArtifact && artifactWorkspace.isInlineViewport);
   const workspaceGridColumns = hasInlineArtifact
     ? `minmax(0, ${1 - artifactWorkspace.artifactRatio}fr) minmax(0, ${artifactWorkspace.artifactRatio}fr)`
     : "minmax(0, 1fr) minmax(0, 0fr)";
@@ -1798,7 +1798,6 @@ export function AppChatArea() {
 
           <ChatArtifactWorkspace
             artifact={artifactWorkspace.activeArtifact}
-            diff={artifactWorkspace.activeDiff}
             artifacts={artifactWorkspace.artifacts}
             isInlineViewport={artifactWorkspace.isInlineViewport}
             onArtifactChange={artifactWorkspace.selectArtifact}

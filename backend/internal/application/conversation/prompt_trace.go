@@ -1,7 +1,6 @@
 package conversation
 
 import (
-	"encoding/json"
 	"strings"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -123,58 +122,6 @@ func messagePromptTracePayload(trace *model.MessagePromptTrace) map[string]inter
 	}
 }
 
-// messagePromptTraceFromPayload 从 process trace payload 中恢复结构化 PromptTrace。
-func messagePromptTraceFromPayload(raw string) *model.MessagePromptTrace {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return nil
-	}
-	payload := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(value), &payload); err != nil {
-		return nil
-	}
-	rawTrace, ok := payload["prompt_trace"]
-	if !ok {
-		rawTrace, ok = payload["promptTrace"]
-	}
-	traceMap, ok := rawTrace.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	trace := &model.MessagePromptTrace{
-		Mode:                   promptTraceString(traceMap, "mode"),
-		PromptFingerprint:      promptTraceString(traceMap, "promptFingerprint"),
-		StatefulUsed:           promptTraceBool(traceMap, "statefulUsed"),
-		StatefulDisabledReason: promptTraceString(traceMap, "statefulDisabledReason"),
-		TotalTokenEstimate:     promptTraceInt64(traceMap, "totalTokenEstimate"),
-		SentTokenEstimate:      promptTraceInt64(traceMap, "sentTokenEstimate"),
-		FullMessageCount:       int(promptTraceInt64(traceMap, "fullMessageCount")),
-		SentMessageCount:       int(promptTraceInt64(traceMap, "sentMessageCount")),
-		StatefulSavedMessages:  int(promptTraceInt64(traceMap, "statefulSavedMessages")),
-		StatefulSavedTokens:    promptTraceInt64(traceMap, "statefulSavedTokens"),
-	}
-	if blocks, ok := traceMap["blocks"].([]interface{}); ok {
-		for _, item := range blocks {
-			blockMap, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			trace.Blocks = append(trace.Blocks, model.MessagePromptTraceBlock{
-				Kind:          promptTraceString(blockMap, "kind"),
-				Title:         promptTraceString(blockMap, "title"),
-				TokenEstimate: promptTraceInt64(blockMap, "tokenEstimate"),
-				Cacheable:     promptTraceBool(blockMap, "cacheable"),
-				SourceCount:   int(promptTraceInt64(blockMap, "sourceCount")),
-				SourceRefs:    promptTraceSourceRefsFromPayload(blockMap["sourceRefs"]),
-			})
-		}
-	}
-	if trace.Mode == "" && len(trace.Blocks) == 0 {
-		return nil
-	}
-	return trace
-}
-
 // promptTraceSourceRefs 将规划器来源引用转换为领域 trace 来源引用。
 func promptTraceSourceRefs(refs []PromptSourceRef) []model.MessagePromptTraceSourceRef {
 	if len(refs) == 0 {
@@ -190,56 +137,4 @@ func promptTraceSourceRefs(refs []PromptSourceRef) []model.MessagePromptTraceSou
 		})
 	}
 	return result
-}
-
-// promptTraceSourceRefsFromPayload 从持久化 payload 中恢复来源引用。
-func promptTraceSourceRefsFromPayload(raw interface{}) []model.MessagePromptTraceSourceRef {
-	items, ok := raw.([]interface{})
-	if !ok {
-		return nil
-	}
-	refs := make([]model.MessagePromptTraceSourceRef, 0, len(items))
-	for _, item := range items {
-		refMap, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		refs = append(refs, model.MessagePromptTraceSourceRef{
-			SourceType: promptTraceString(refMap, "sourceType"),
-			SourceID:   promptTraceString(refMap, "sourceID"),
-			Title:      promptTraceString(refMap, "title"),
-			ArtifactID: uint(promptTraceInt64(refMap, "artifactID")),
-		})
-	}
-	return refs
-}
-
-func promptTraceString(payload map[string]interface{}, key string) string {
-	if value, ok := payload[key].(string); ok {
-		return strings.TrimSpace(value)
-	}
-	return ""
-}
-
-func promptTraceBool(payload map[string]interface{}, key string) bool {
-	if value, ok := payload[key].(bool); ok {
-		return value
-	}
-	return false
-}
-
-func promptTraceInt64(payload map[string]interface{}, key string) int64 {
-	switch value := payload[key].(type) {
-	case int64:
-		return value
-	case int:
-		return int64(value)
-	case float64:
-		return int64(value)
-	case json.Number:
-		result, _ := value.Int64()
-		return result
-	default:
-		return 0
-	}
 }

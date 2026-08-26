@@ -156,20 +156,6 @@ func TestProjectGatewayEventSkipsDuplicateLivePublication(t *testing.T) {
 	}
 }
 
-func TestAttachReasoningSummaryTrace(t *testing.T) {
-	updatedAt := time.Now().UTC()
-	message := model.Message{
-		Role: "assistant", Status: "success", ReasoningContent: "checked configuration", UpdatedAt: updatedAt,
-	}
-	attachReasoningSummaryTrace(&message)
-	if message.ProcessTrace == nil || message.ProcessTrace.UpstreamThink == nil ||
-		message.ProcessTrace.UpstreamThink.ContentMarkdown != "checked configuration" ||
-		message.ProcessTrace.UpstreamThink.Status != messageTraceStatusCompleted ||
-		!message.ProcessTrace.UpstreamThink.UpdatedAt.Equal(updatedAt) {
-		t.Fatalf("reasoning trace = %#v", message.ProcessTrace)
-	}
-}
-
 func TestGatewayTurnSettingsRejectsUnknownOptions(t *testing.T) {
 	valid := map[string]interface{}{
 		"reasoningEffort": "high", "approvalPolicy": "on-request",
@@ -191,16 +177,123 @@ func TestGatewayTurnSettingsRejectsUnknownOptions(t *testing.T) {
 	}
 }
 
-func TestDurableCloudEventSkipsStreamingDeltas(t *testing.T) {
-	for _, kind := range []string{"upstream_think_delta", "output_text.delta", "usage", "process_update"} {
-		if durableCloudEvent(kind) {
-			t.Fatalf("%s should remain a live-only event", kind)
+type cloudProjectionRepoStub struct {
+	repository.ConversationRepository
+	events []model.ExecutionEvent
+}
+
+func (s *cloudProjectionRepoStub) ProjectExecutionEvent(_ context.Context, event *model.ExecutionEvent) (bool, error) {
+	event.Seq = uint64(len(s.events) + 1)
+	s.events = append(s.events, *event)
+	return true, nil
+}
+
+func TestCloudExecutionProjectionUsesCanonicalReasoningEvents(t *testing.T) {
+	repo := &cloudProjectionRepoStub{}
+	streamKinds := []string{}
+	projection := newCloudExecutionProjection(
+		&Service{repo: repo},
+		context.Background(),
+		SendMessageInput{ConversationID: 11, UserID: 7, ClientRunID: "run_cloud"},
+		func(kind string, _ map[string]interface{}) error {
+			streamKinds = append(streamKinds, kind)
+			return nil
+		},
+	)
+	if err := projection.start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.handle(cloudReasoningSummaryEvent, map[string]interface{}{
+		"eventID": "legacy_reasoning", "kind": "summary_text", "status": "streaming", "delta": "must be ignored",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.events) != 1 {
+		t.Fatalf("legacy reasoning payload was projected: %#v", repo.events)
+	}
+	if err := projection.handle(cloudReasoningSummaryEvent, map[string]interface{}{
+		"itemID": "reasoning_1", "kind": "summary_text", "status": "streaming", "delta": "Checked the repository",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.handle(cloudReasoningSummaryEvent, map[string]interface{}{
+		"itemID": "reasoning_1", "kind": "content_text", "status": "streaming", "delta": "raw reasoning",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.handle(cloudReasoningSummaryEvent, map[string]interface{}{
+		"itemID": "reasoning_1", "kind": "summary_text", "status": "completed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.complete("completed", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := make([]string, 0, len(repo.events))
+	for _, event := range repo.events {
+		kinds = append(kinds, event.Kind)
+		if strings.Contains(event.PayloadJSON, "raw reasoning") {
+			t.Fatalf("raw reasoning leaked into execution event: %s", event.PayloadJSON)
 		}
 	}
-	for _, kind := range []string{"rag_search", "compact_done", "turn.completed"} {
-		if !durableCloudEvent(kind) {
-			t.Fatalf("%s should be durable", kind)
+	want := []string{
+		"turn/started", "item/started", "item/reasoning/summaryTextDelta", "item/completed", "turn/completed",
+	}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("cloud event kinds = %v, want %v", kinds, want)
+	}
+	for _, kind := range streamKinds {
+		if kind != "execution_event" {
+			t.Fatalf("cloud stream kind = %q", kind)
 		}
+	}
+}
+
+func TestCloudExecutionProjectionInterruptsOpenTool(t *testing.T) {
+	repo := &cloudProjectionRepoStub{}
+	projection := newCloudExecutionProjection(
+		&Service{repo: repo},
+		context.Background(),
+		SendMessageInput{ConversationID: 11, UserID: 7, ClientRunID: "run_cloud"},
+		nil,
+	)
+	if err := projection.start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.handle(cloudToolActivityEvent, map[string]interface{}{
+		"tools": []model.ToolCall{{
+			ToolCallID: "tool_1", ToolName: "web_search", ToolType: "builtin", Status: "running",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.complete("interrupted", errors.New("generation canceled"), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	kinds := make([]string, 0, len(repo.events))
+	for _, event := range repo.events {
+		kinds = append(kinds, event.Kind)
+	}
+	want := []string{"turn/started", "item/started", "item/completed", "turn/completed"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("cloud event kinds = %v, want %v", kinds, want)
+	}
+	var completed struct {
+		ItemID string `json:"itemID"`
+		Item   struct {
+			Kind   string `json:"kind"`
+			Status string `json:"status"`
+			Tool   string `json:"tool"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(repo.events[2].PayloadJSON), &completed); err != nil {
+		t.Fatal(err)
+	}
+	if completed.ItemID != "tool_1" || completed.Item.Kind != "dynamicToolCall" ||
+		completed.Item.Status != "interrupted" || completed.Item.Tool != "web_search" {
+		t.Fatalf("completed cloud tool = %#v", completed)
 	}
 }
 

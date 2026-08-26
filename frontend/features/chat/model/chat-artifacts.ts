@@ -1,5 +1,4 @@
 import type { ChatAreaMessage } from "@/features/chat/types/messages";
-import type { AgentFileChange } from "@/features/chat/model/agent-run-store";
 import {
   resolveArtifactPreviewKind,
   type ArtifactPreviewKind,
@@ -27,19 +26,6 @@ export type OpenCodeArtifactInput = {
   code: string;
   language: string;
   kind: ArtifactPreviewKind;
-};
-
-export type OpenAgentDiffInput = {
-  diff: string;
-  files: AgentFileChange[];
-  truncated: boolean;
-};
-
-export type ChatDiffArtifact = OpenAgentDiffInput & {
-  id: string;
-  messageID: string;
-  messageKey: string;
-  runID?: string;
 };
 
 const SCRIPT_CLOSE_RE = /<\/script/gi;

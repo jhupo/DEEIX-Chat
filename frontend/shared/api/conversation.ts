@@ -1,8 +1,3 @@
-import type {
-  MessageProcessTraceResponse,
-  MessageTraceBlockResponse,
-  MessageTraceEventResponse,
-} from "@deeix/api-contract";
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
@@ -35,7 +30,6 @@ import type {
   MediaVideoRequest,
   MessageDTO,
   MessageFeedbackResult,
-  MessageProcessTraceDTO,
   PublicSharedConversationDTO,
   RenameConversationRequest,
   ReorderConversationProjectsRequest,
@@ -48,14 +42,11 @@ import type {
   SetConversationStarRequest,
   SetMessageFeedbackRequest,
   StreamMessageEvent,
-  TraceBlockDTO,
   UpdateConversationLabelsRequest,
   UpdateConversationProjectRequest,
   UpdateMessageRequest,
 } from "@/shared/api/conversation.types";
 import { ApiError, ApiNetworkError, apiRequest, pathParam } from "@/shared/api/http-client";
-
-type RawTraceBlock = MessageTraceBlockResponse;
 
 class ConversationStreamDisconnectError extends ApiNetworkError {
   constructor(cause?: unknown) {
@@ -64,96 +55,12 @@ class ConversationStreamDisconnectError extends ApiNetworkError {
   }
 }
 
-type RawProcessTrace = Omit<
-  MessageProcessTraceResponse,
-  "events" | "process" | "promptTrace" | "tools" | "upstreamThink"
-> & {
-  process?: RawTraceBlock;
-  tools?: RawTraceBlock;
-  upstreamThink?: RawTraceBlock;
-  promptTrace?: MessageProcessTraceDTO["promptTrace"];
-  events?: RawTraceEvent[];
-};
-
-type RawTraceEvent = MessageTraceEventResponse;
-
-function normalizeTraceBlock(block: unknown): TraceBlockDTO | undefined {
-  if (!block || typeof block !== "object") {
-    return undefined;
-  }
-  const raw = block as RawTraceBlock;
-  return {
-    title: raw.title ?? "",
-    summary: raw.summary ?? "",
-    contentMarkdown: raw.contentMarkdown ?? "",
-    status: raw.status ?? "",
-    stage: raw.stage,
-    roundID: raw.roundID,
-    parentEventID: raw.parentEventID,
-    updatedAt: raw.updatedAt ?? "",
-    payloadJSON: raw.payloadJSON,
-  };
-}
-
-function normalizeTraceEvent(event: unknown) {
-  if (!event || typeof event !== "object") {
-    return undefined;
-  }
-  const raw = event as RawTraceEvent;
-  return {
-    eventID: raw.eventID ?? "",
-    eventType: raw.eventType ?? "",
-    phase: raw.phase ?? "",
-    stage: raw.stage,
-    roundID: raw.roundID,
-    parentEventID: raw.parentEventID,
-    title: raw.title ?? "",
-    summary: raw.summary ?? "",
-    contentMarkdown: raw.contentMarkdown ?? "",
-    status: raw.status ?? "",
-    seq: raw.seq ?? 0,
-    startedAt: raw.startedAt ?? "",
-    endedAt: raw.endedAt,
-    updatedAt: raw.updatedAt ?? "",
-    payloadJSON: raw.payloadJSON,
-  };
-}
-
-function normalizeProcessTrace(trace: unknown): MessageProcessTraceDTO | undefined {
-  if (!trace || typeof trace !== "object") {
-    return undefined;
-  }
-  const raw = trace as RawProcessTrace;
-  return {
-    enabled: Boolean(raw.enabled),
-    status: raw.status ?? "",
-    process: normalizeTraceBlock(raw.process),
-    tools: normalizeTraceBlock(raw.tools),
-    upstreamThink: normalizeTraceBlock(raw.upstreamThink),
-    promptTrace: raw.promptTrace,
-    events: Array.isArray(raw.events) ? raw.events.map(normalizeTraceEvent).filter((event): event is NonNullable<ReturnType<typeof normalizeTraceEvent>> => Boolean(event)) : undefined,
-  };
-}
-
 function normalizeStreamEvent(rawEvent: unknown): StreamMessageEvent {
   if (!rawEvent || typeof rawEvent !== "object") {
     throw new ApiError("stream event is invalid", 500);
   }
 
-  const event = rawEvent as StreamMessageEvent & {
-    block?: unknown;
-    trace?: unknown;
-  };
-
-  if (event.type === "process_update" || event.type === "upstream_think_delta") {
-    return {
-      ...event,
-      block: normalizeTraceBlock(event.block),
-      trace: normalizeProcessTrace(event.trace),
-    };
-  }
-
-  return event;
+  return rawEvent as StreamMessageEvent;
 }
 
 function streamEventSeq(event: StreamMessageEvent): number {
@@ -258,15 +165,6 @@ function handleStreamEvent(event: StreamMessageEvent, options: ConversationStrea
     return null;
   }
 
-  if (event.type === "process_update") {
-    options.onProcessUpdate?.(event);
-    return null;
-  }
-
-  if (event.type === "upstream_think_delta") {
-    options.onUpstreamThinkDelta?.(event);
-    return null;
-  }
 
   if (event.type === "delta") {
     options.onDelta?.(event.delta);
@@ -1104,8 +1002,6 @@ export type ConversationStreamOptions = {
   onMediaStatus?: (event: Extract<StreamMessageEvent, { type: "media_status" }>) => void;
   onMediaImageDelta?: (event: Extract<StreamMessageEvent, { type: "media_image_delta" }>) => void;
   onCompactDone?: (event: CompactDoneEvent) => void;
-  onProcessUpdate?: (event: Extract<StreamMessageEvent, { type: "process_update" }>) => void;
-  onUpstreamThinkDelta?: (event: Extract<StreamMessageEvent, { type: "upstream_think_delta" }>) => void;
   onUsage?: (event: Extract<StreamMessageEvent, { type: "usage" }>) => void;
   onExecutionEvent?: (event: ConversationExecutionEventDTO) => void;
   onInterrupted?: (event: Extract<StreamMessageEvent, { type: "error" }>) => void;

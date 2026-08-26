@@ -29,85 +29,6 @@ export type ChatMessageBranchNavigator = {
   canNext: boolean;
 };
 
-export type RAGCitation = {
-  file_name: string;
-  file_id: string;
-  chunk_index: number;
-  score: number;
-  preview: string;
-};
-
-export type ChatTraceBlock = {
-  title: string;
-  summary: string;
-  contentMarkdown: string;
-  contentSegments?: string[];
-  status: string;
-  stage?: string;
-  roundID?: string;
-  parentEventID?: string;
-  updatedAt?: string;
-  payloadJson?: string;
-};
-
-export type ChatTraceEvent = {
-  eventID: string;
-  eventType: "process" | "tool" | "think" | string;
-  phase: "process" | "tools" | "upstream_think" | string;
-  stage?: "process" | "think" | "tool" | "answer" | string;
-  roundID?: string;
-  parentEventID?: string;
-  title: string;
-  summary: string;
-  contentMarkdown: string;
-  status: string;
-  seq: number;
-  startedAt?: string;
-  endedAt?: string;
-  updatedAt?: string;
-  payloadJson?: string;
-};
-
-export type ChatPromptTraceBlock = {
-  kind: string;
-  title: string;
-  tokenEstimate: number;
-  cacheable: boolean;
-  sourceCount: number;
-  sourceRefs?: ChatPromptTraceSource[];
-};
-
-export type ChatPromptTraceSource = {
-  sourceType: string;
-  sourceID: string;
-  title: string;
-  artifactID?: number;
-};
-
-export type ChatPromptTrace = {
-  mode: string;
-  promptFingerprint: string;
-  statefulUsed: boolean;
-  statefulDisabledReason: string;
-  totalTokenEstimate: number;
-  sentTokenEstimate: number;
-  fullMessageCount: number;
-  sentMessageCount: number;
-  statefulSavedMessages: number;
-  statefulSavedTokens: number;
-  blocks: ChatPromptTraceBlock[];
-};
-
-export type ChatMessageProcessTrace = {
-  enabled: boolean;
-  status: string;
-  process?: ChatTraceBlock;
-  tools?: ChatTraceBlock;
-  upstreamThink?: ChatTraceBlock;
-  promptTrace?: ChatPromptTrace;
-  events?: ChatTraceEvent[];
-};
-
 export type ChatInlineAlert = {
   title: string;
   message: string;
@@ -149,7 +70,6 @@ export type ChatAreaMessage = {
   cacheWriteTokens?: number;
   reasoningTokens?: number;
   latencyMS?: number;
-  processTrace?: ChatMessageProcessTrace;
   inlineAlert?: ChatInlineAlert;
   compactDone?: { method: string; freed_tokens: number; summary_preview: string };
 };

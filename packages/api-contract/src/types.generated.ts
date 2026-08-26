@@ -1242,46 +1242,6 @@ export interface MessageListResponseDoc {
   errorMsg: string;
 }
 
-export interface MessageProcessTraceResponse {
-  enabled: boolean;
-  events?: MessageTraceEventResponse[];
-  process?: MessageTraceBlockResponse;
-  promptTrace?: MessagePromptTraceResponse;
-  status: string;
-  tools?: MessageTraceBlockResponse;
-  upstreamThink?: MessageTraceBlockResponse;
-}
-
-export interface MessagePromptTraceBlockResponse {
-  cacheable: boolean;
-  kind: string;
-  sourceCount: number;
-  sourceRefs?: MessagePromptTraceSourceResponse[];
-  title: string;
-  tokenEstimate: number;
-}
-
-export interface MessagePromptTraceResponse {
-  blocks: MessagePromptTraceBlockResponse[];
-  fullMessageCount: number;
-  mode: string;
-  promptFingerprint: string;
-  sentMessageCount: number;
-  sentTokenEstimate: number;
-  statefulDisabledReason: string;
-  statefulSavedMessages: number;
-  statefulSavedTokens: number;
-  statefulUsed: boolean;
-  totalTokenEstimate: number;
-}
-
-export interface MessagePromptTraceSourceResponse {
-  artifactID?: number;
-  sourceID: string;
-  sourceType: string;
-  title: string;
-}
-
 export interface MessageResponse {
   attachments: string;
   branchReason: string;
@@ -1304,7 +1264,6 @@ export interface MessageResponse {
   parentMessageID: number | null;
   parentPublicID: string;
   platformModelName: string;
-  processTrace?: MessageProcessTraceResponse;
   publicID: string;
   reasoningTokens: number;
   role: string;
@@ -1323,36 +1282,6 @@ export interface MessageResponse {
 export interface MessageResponseDoc {
   data: MessageResponse;
   errorMsg: string;
-}
-
-export interface MessageTraceBlockResponse {
-  contentMarkdown: string;
-  parentEventID?: string;
-  payloadJSON?: string;
-  roundID?: string;
-  stage?: string;
-  status: string;
-  summary: string;
-  title: string;
-  updatedAt: string;
-}
-
-export interface MessageTraceEventResponse {
-  contentMarkdown: string;
-  endedAt?: string;
-  eventID: string;
-  eventType: string;
-  parentEventID?: string;
-  payloadJSON?: string;
-  phase: string;
-  roundID?: string;
-  seq: number;
-  stage?: string;
-  startedAt: string;
-  status: string;
-  summary: string;
-  title: string;
-  updatedAt: string;
 }
 
 export interface ModelDataResponse {
@@ -1790,7 +1719,6 @@ export interface PublicSharedMessageResponse {
   outputTokens: number;
   parentPublicID: string;
   platformModelName: string;
-  processTrace?: MessageProcessTraceResponse;
   publicID: string;
   reasoningTokens: number;
   role: string;

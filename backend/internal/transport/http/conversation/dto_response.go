@@ -1,7 +1,6 @@
 package conversation
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 
@@ -331,33 +330,32 @@ type RevokeConversationSharesResponse struct {
 
 // PublicSharedMessageResponse 公开分享消息响应 DTO。
 type PublicSharedMessageResponse struct {
-	PublicID          string                       `json:"publicID"`
-	ParentPublicID    string                       `json:"parentPublicID"`
-	SourcePublicID    string                       `json:"sourcePublicID"`
-	RunID             string                       `json:"runID"`
-	Role              string                       `json:"role"`
-	ContentType       string                       `json:"contentType"`
-	Content           string                       `json:"content"`
-	BranchReason      string                       `json:"branchReason"`
-	TokenUsage        int64                        `json:"tokenUsage"`
-	InputTokens       int64                        `json:"inputTokens"`
-	OutputTokens      int64                        `json:"outputTokens"`
-	CacheReadTokens   int64                        `json:"cacheReadTokens"`
-	CacheWriteTokens  int64                        `json:"cacheWriteTokens"`
-	ReasoningTokens   int64                        `json:"reasoningTokens"`
-	LatencyMS         int64                        `json:"latencyMS"`
-	Status            string                       `json:"status"`
-	ErrorCode         string                       `json:"errorCode"`
-	ErrorMessage      string                       `json:"errorMessage"`
-	Attachments       string                       `json:"attachments"`
-	PlatformModelName string                       `json:"platformModelName"`
-	UpstreamModelName string                       `json:"upstreamModelName"`
-	ModelVendor       string                       `json:"modelVendor"`
-	ModelIcon         string                       `json:"modelIcon"`
-	ProcessTrace      *MessageProcessTraceResponse `json:"processTrace,omitempty"`
-	EditedAt          *time.Time                   `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
-	CreatedAt         time.Time                    `json:"createdAt"`
-	UpdatedAt         time.Time                    `json:"updatedAt"`
+	PublicID          string     `json:"publicID"`
+	ParentPublicID    string     `json:"parentPublicID"`
+	SourcePublicID    string     `json:"sourcePublicID"`
+	RunID             string     `json:"runID"`
+	Role              string     `json:"role"`
+	ContentType       string     `json:"contentType"`
+	Content           string     `json:"content"`
+	BranchReason      string     `json:"branchReason"`
+	TokenUsage        int64      `json:"tokenUsage"`
+	InputTokens       int64      `json:"inputTokens"`
+	OutputTokens      int64      `json:"outputTokens"`
+	CacheReadTokens   int64      `json:"cacheReadTokens"`
+	CacheWriteTokens  int64      `json:"cacheWriteTokens"`
+	ReasoningTokens   int64      `json:"reasoningTokens"`
+	LatencyMS         int64      `json:"latencyMS"`
+	Status            string     `json:"status"`
+	ErrorCode         string     `json:"errorCode"`
+	ErrorMessage      string     `json:"errorMessage"`
+	Attachments       string     `json:"attachments"`
+	PlatformModelName string     `json:"platformModelName"`
+	UpstreamModelName string     `json:"upstreamModelName"`
+	ModelVendor       string     `json:"modelVendor"`
+	ModelIcon         string     `json:"modelIcon"`
+	EditedAt          *time.Time `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
 }
 
 func toPublicSharedMessageResponse(
@@ -393,7 +391,6 @@ func toPublicSharedMessageResponse(
 		UpstreamModelName: runModel.UpstreamModelName,
 		ModelVendor:       runModel.ModelVendor,
 		ModelIcon:         runModel.ModelIcon,
-		ProcessTrace:      toPublicMessageProcessTraceResponse(item.ProcessTrace),
 		EditedAt:          item.EditedAt,
 		CreatedAt:         item.CreatedAt,
 		UpdatedAt:         item.UpdatedAt,
@@ -562,151 +559,6 @@ func toDeleteFileResponse(r *appupload.DeleteFileResult) DeleteFileResponse {
 
 // ---------- Message ----------
 
-// MessageTraceBlockResponse 消息轨迹块响应 DTO。
-type MessageTraceBlockResponse struct {
-	Title           string    `json:"title"`
-	Summary         string    `json:"summary"`
-	ContentMarkdown string    `json:"contentMarkdown"`
-	Status          string    `json:"status"`
-	Stage           string    `json:"stage,omitempty"`
-	RoundID         string    `json:"roundID,omitempty"`
-	ParentEventID   string    `json:"parentEventID,omitempty"`
-	UpdatedAt       time.Time `json:"updatedAt"`
-	PayloadJSON     string    `json:"payloadJSON,omitempty"`
-}
-
-// MessageTraceEventResponse 消息轨迹事件响应 DTO。
-type MessageTraceEventResponse struct {
-	EventID         string     `json:"eventID"`
-	EventType       string     `json:"eventType"`
-	Phase           string     `json:"phase"`
-	Stage           string     `json:"stage,omitempty"`
-	RoundID         string     `json:"roundID,omitempty"`
-	ParentEventID   string     `json:"parentEventID,omitempty"`
-	Title           string     `json:"title"`
-	Summary         string     `json:"summary"`
-	ContentMarkdown string     `json:"contentMarkdown"`
-	Status          string     `json:"status"`
-	Seq             int        `json:"seq"`
-	StartedAt       time.Time  `json:"startedAt"`
-	EndedAt         *time.Time `json:"endedAt,omitempty"`
-	UpdatedAt       time.Time  `json:"updatedAt"`
-	PayloadJSON     string     `json:"payloadJSON,omitempty"`
-}
-
-// MessagePromptTraceBlockResponse 上下文规划块响应 DTO。
-type MessagePromptTraceBlockResponse struct {
-	Kind          string                             `json:"kind"`
-	Title         string                             `json:"title"`
-	TokenEstimate int64                              `json:"tokenEstimate"`
-	Cacheable     bool                               `json:"cacheable"`
-	SourceCount   int                                `json:"sourceCount"`
-	SourceRefs    []MessagePromptTraceSourceResponse `json:"sourceRefs,omitempty"`
-}
-
-// MessagePromptTraceSourceResponse 上下文来源引用响应 DTO。
-type MessagePromptTraceSourceResponse struct {
-	SourceType string `json:"sourceType"`
-	SourceID   string `json:"sourceID"`
-	Title      string `json:"title"`
-	ArtifactID uint   `json:"artifactID,omitempty"`
-}
-
-// MessagePromptTraceResponse 上下文规划响应 DTO。
-type MessagePromptTraceResponse struct {
-	Mode                   string                            `json:"mode"`
-	PromptFingerprint      string                            `json:"promptFingerprint"`
-	StatefulUsed           bool                              `json:"statefulUsed"`
-	StatefulDisabledReason string                            `json:"statefulDisabledReason"`
-	TotalTokenEstimate     int64                             `json:"totalTokenEstimate"`
-	SentTokenEstimate      int64                             `json:"sentTokenEstimate"`
-	FullMessageCount       int                               `json:"fullMessageCount"`
-	SentMessageCount       int                               `json:"sentMessageCount"`
-	StatefulSavedMessages  int                               `json:"statefulSavedMessages"`
-	StatefulSavedTokens    int64                             `json:"statefulSavedTokens"`
-	Blocks                 []MessagePromptTraceBlockResponse `json:"blocks"`
-}
-
-// MessageProcessTraceResponse 消息处理轨迹响应 DTO。
-type MessageProcessTraceResponse struct {
-	Enabled       bool                        `json:"enabled"`
-	Status        string                      `json:"status"`
-	Process       *MessageTraceBlockResponse  `json:"process,omitempty"`
-	Tools         *MessageTraceBlockResponse  `json:"tools,omitempty"`
-	UpstreamThink *MessageTraceBlockResponse  `json:"upstreamThink,omitempty"`
-	PromptTrace   *MessagePromptTraceResponse `json:"promptTrace,omitempty"`
-	Events        []MessageTraceEventResponse `json:"events,omitempty"`
-}
-
-func toMessageProcessTraceResponse(trace *model.MessageProcessTrace) *MessageProcessTraceResponse {
-	if trace == nil {
-		return nil
-	}
-	return &MessageProcessTraceResponse{
-		Enabled:       trace.Enabled,
-		Status:        trace.Status,
-		Process:       toTraceBlockResponse(trace.Process),
-		Tools:         toTraceBlockResponse(trace.Tools),
-		UpstreamThink: toTraceBlockResponse(trace.UpstreamThink),
-		PromptTrace:   toPromptTraceResponse(trace.PromptTrace),
-		Events:        toTraceEventResponses(trace.Events),
-	}
-}
-
-func toPublicMessageProcessTraceResponse(trace *model.MessageProcessTrace) *MessageProcessTraceResponse {
-	if trace == nil {
-		return nil
-	}
-	return &MessageProcessTraceResponse{
-		Enabled:       trace.Enabled,
-		Status:        trace.Status,
-		Process:       toPublicTraceBlockResponse(trace.Process),
-		Tools:         toPublicTraceBlockResponse(trace.Tools),
-		UpstreamThink: toPublicTraceBlockResponse(trace.UpstreamThink),
-		PromptTrace:   toPromptTraceResponse(trace.PromptTrace),
-		Events:        toPublicTraceEventResponses(trace.Events),
-	}
-}
-
-func toPromptTraceResponse(trace *model.MessagePromptTrace) *MessagePromptTraceResponse {
-	if trace == nil {
-		return nil
-	}
-	blocks := make([]MessagePromptTraceBlockResponse, 0, len(trace.Blocks))
-	for _, block := range trace.Blocks {
-		sourceRefs := make([]MessagePromptTraceSourceResponse, 0, len(block.SourceRefs))
-		for _, ref := range block.SourceRefs {
-			sourceRefs = append(sourceRefs, MessagePromptTraceSourceResponse{
-				SourceType: ref.SourceType,
-				SourceID:   ref.SourceID,
-				Title:      ref.Title,
-				ArtifactID: ref.ArtifactID,
-			})
-		}
-		blocks = append(blocks, MessagePromptTraceBlockResponse{
-			Kind:          block.Kind,
-			Title:         block.Title,
-			TokenEstimate: block.TokenEstimate,
-			Cacheable:     block.Cacheable,
-			SourceCount:   block.SourceCount,
-			SourceRefs:    sourceRefs,
-		})
-	}
-	return &MessagePromptTraceResponse{
-		Mode:                   trace.Mode,
-		PromptFingerprint:      trace.PromptFingerprint,
-		StatefulUsed:           trace.StatefulUsed,
-		StatefulDisabledReason: trace.StatefulDisabledReason,
-		TotalTokenEstimate:     trace.TotalTokenEstimate,
-		SentTokenEstimate:      trace.SentTokenEstimate,
-		FullMessageCount:       trace.FullMessageCount,
-		SentMessageCount:       trace.SentMessageCount,
-		StatefulSavedMessages:  trace.StatefulSavedMessages,
-		StatefulSavedTokens:    trace.StatefulSavedTokens,
-		Blocks:                 blocks,
-	}
-}
-
 // ContextArtifactResponse 上下文证据详情响应 DTO。
 type ContextArtifactResponse struct {
 	ID            uint       `json:"id"`
@@ -742,232 +594,42 @@ func toContextArtifactResponse(item *model.ContextArtifact) ContextArtifactRespo
 	}
 }
 
-func toTraceEventResponses(events []model.MessageTraceEvent) []MessageTraceEventResponse {
-	if len(events) == 0 {
-		return nil
-	}
-	result := make([]MessageTraceEventResponse, 0, len(events))
-	for _, event := range events {
-		result = append(result, MessageTraceEventResponse{
-			EventID:         event.EventID,
-			EventType:       event.EventType,
-			Phase:           event.Phase,
-			Stage:           event.Stage,
-			RoundID:         event.RoundID,
-			ParentEventID:   event.ParentEventID,
-			Title:           event.Title,
-			Summary:         event.Summary,
-			ContentMarkdown: event.ContentMarkdown,
-			Status:          event.Status,
-			Seq:             event.Seq,
-			StartedAt:       event.StartedAt,
-			EndedAt:         event.EndedAt,
-			UpdatedAt:       event.UpdatedAt,
-			PayloadJSON:     sanitizeTracePayloadJSON(event.PayloadJSON),
-		})
-	}
-	return result
-}
-
-func toPublicTraceEventResponses(events []model.MessageTraceEvent) []MessageTraceEventResponse {
-	if len(events) == 0 {
-		return nil
-	}
-	result := make([]MessageTraceEventResponse, 0, len(events))
-	for _, event := range events {
-		result = append(result, MessageTraceEventResponse{
-			EventID:         event.EventID,
-			EventType:       event.EventType,
-			Phase:           event.Phase,
-			Stage:           event.Stage,
-			RoundID:         event.RoundID,
-			ParentEventID:   event.ParentEventID,
-			Title:           event.Title,
-			Summary:         event.Summary,
-			ContentMarkdown: event.ContentMarkdown,
-			Status:          event.Status,
-			Seq:             event.Seq,
-			StartedAt:       event.StartedAt,
-			EndedAt:         event.EndedAt,
-			UpdatedAt:       event.UpdatedAt,
-			PayloadJSON:     sanitizePublicTracePayloadJSON(event.PayloadJSON),
-		})
-	}
-	return result
-}
-
 // MessageResponse 消息响应 DTO。
 type MessageResponse struct {
-	ID                uint                         `json:"id"`
-	ConversationID    uint                         `json:"conversationID"`
-	UserID            uint                         `json:"userID"`
-	PublicID          string                       `json:"publicID"`
-	ParentMessageID   *uint                        `json:"parentMessageID" extensions:"x-nullable,!x-omitempty"`
-	RunID             string                       `json:"runID"`
-	Role              string                       `json:"role"`
-	ContentType       string                       `json:"contentType"`
-	Content           string                       `json:"content"`
-	BranchReason      string                       `json:"branchReason"`
-	SourceMessageID   *uint                        `json:"sourceMessageID" extensions:"x-nullable,!x-omitempty"`
-	TokenUsage        int64                        `json:"tokenUsage"`
-	InputTokens       int64                        `json:"inputTokens"`
-	OutputTokens      int64                        `json:"outputTokens"`
-	CacheReadTokens   int64                        `json:"cacheReadTokens"`
-	CacheWriteTokens  int64                        `json:"cacheWriteTokens"`
-	ReasoningTokens   int64                        `json:"reasoningTokens"`
-	LatencyMS         int64                        `json:"latencyMS"`
-	Status            string                       `json:"status"`
-	ErrorCode         string                       `json:"errorCode"`
-	ErrorMessage      string                       `json:"errorMessage"`
-	Attachments       string                       `json:"attachments"`
-	PlatformModelName string                       `json:"platformModelName"`
-	UpstreamModelName string                       `json:"upstreamModelName"`
-	ModelVendor       string                       `json:"modelVendor"`
-	ModelIcon         string                       `json:"modelIcon"`
-	ParentPublicID    string                       `json:"parentPublicID"`
-	SourcePublicID    string                       `json:"sourcePublicID"`
-	MyFeedback        string                       `json:"myFeedback"`
-	ThumbsUpCount     int64                        `json:"thumbsUpCount"`
-	ThumbsDownCount   int64                        `json:"thumbsDownCount"`
-	ProcessTrace      *MessageProcessTraceResponse `json:"processTrace,omitempty"`
-	EditedAt          *time.Time                   `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
-	CreatedAt         time.Time                    `json:"createdAt"`
-	UpdatedAt         time.Time                    `json:"updatedAt"`
-}
-
-func toTraceBlockResponse(b *model.MessageTraceBlock) *MessageTraceBlockResponse {
-	if b == nil {
-		return nil
-	}
-	return &MessageTraceBlockResponse{
-		Title:           b.Title,
-		Summary:         b.Summary,
-		ContentMarkdown: b.ContentMarkdown,
-		Status:          b.Status,
-		Stage:           b.Stage,
-		RoundID:         b.RoundID,
-		ParentEventID:   b.ParentEventID,
-		UpdatedAt:       b.UpdatedAt,
-		PayloadJSON:     sanitizeTracePayloadJSON(b.PayloadJSON),
-	}
-}
-
-func toPublicTraceBlockResponse(b *model.MessageTraceBlock) *MessageTraceBlockResponse {
-	if b == nil {
-		return nil
-	}
-	return &MessageTraceBlockResponse{
-		Title:           b.Title,
-		Summary:         b.Summary,
-		ContentMarkdown: b.ContentMarkdown,
-		Status:          b.Status,
-		Stage:           b.Stage,
-		RoundID:         b.RoundID,
-		ParentEventID:   b.ParentEventID,
-		UpdatedAt:       b.UpdatedAt,
-		PayloadJSON:     sanitizePublicTracePayloadJSON(b.PayloadJSON),
-	}
-}
-
-func sanitizeTracePayloadJSON(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return ""
-	}
-	payload := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(value), &payload); err != nil {
-		return value
-	}
-	deleteUpstreamNameFields(payload, "")
-	if len(payload) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func sanitizePublicTracePayloadJSON(raw string) string {
-	value := sanitizeTracePayloadJSON(raw)
-	if value == "" {
-		return ""
-	}
-	payload := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(value), &payload); err != nil {
-		return ""
-	}
-	deletePublicSensitiveTraceFields(payload)
-	if len(payload) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func deleteUpstreamNameFields(payload map[string]interface{}, parentKey string) {
-	for key, value := range payload {
-		if isUpstreamNameField(key, parentKey) {
-			delete(payload, key)
-			continue
-		}
-		switch child := value.(type) {
-		case map[string]interface{}:
-			deleteUpstreamNameFields(child, key)
-		case []interface{}:
-			for _, item := range child {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					deleteUpstreamNameFields(itemMap, key)
-				}
-			}
-		}
-	}
-}
-
-func deletePublicSensitiveTraceFields(payload map[string]interface{}) {
-	for key, value := range payload {
-		if isPublicSensitiveTraceField(key) {
-			delete(payload, key)
-			continue
-		}
-		switch child := value.(type) {
-		case map[string]interface{}:
-			deletePublicSensitiveTraceFields(child)
-		case []interface{}:
-			for _, item := range child {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					deletePublicSensitiveTraceFields(itemMap)
-				}
-			}
-		}
-	}
-}
-
-func isPublicSensitiveTraceField(key string) bool {
-	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(strings.TrimSpace(key)))
-	switch normalized {
-	case "upstreamdebug", "authorization", "proxyauthorization", "cookie", "setcookie":
-		return true
-	default:
-		return strings.Contains(normalized, "apikey") ||
-			strings.Contains(normalized, "secretkey") ||
-			strings.Contains(normalized, "accesskey")
-	}
-}
-
-func isUpstreamNameField(key string, parentKey string) bool {
-	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", ""))
-	if normalized == "upstreamname" {
-		return true
-	}
-	if strings.ToLower(strings.TrimSpace(parentKey)) == "upstream" && (normalized == "name" || normalized == "displayname") {
-		return true
-	}
-	return false
+	ID                uint       `json:"id"`
+	ConversationID    uint       `json:"conversationID"`
+	UserID            uint       `json:"userID"`
+	PublicID          string     `json:"publicID"`
+	ParentMessageID   *uint      `json:"parentMessageID" extensions:"x-nullable,!x-omitempty"`
+	RunID             string     `json:"runID"`
+	Role              string     `json:"role"`
+	ContentType       string     `json:"contentType"`
+	Content           string     `json:"content"`
+	BranchReason      string     `json:"branchReason"`
+	SourceMessageID   *uint      `json:"sourceMessageID" extensions:"x-nullable,!x-omitempty"`
+	TokenUsage        int64      `json:"tokenUsage"`
+	InputTokens       int64      `json:"inputTokens"`
+	OutputTokens      int64      `json:"outputTokens"`
+	CacheReadTokens   int64      `json:"cacheReadTokens"`
+	CacheWriteTokens  int64      `json:"cacheWriteTokens"`
+	ReasoningTokens   int64      `json:"reasoningTokens"`
+	LatencyMS         int64      `json:"latencyMS"`
+	Status            string     `json:"status"`
+	ErrorCode         string     `json:"errorCode"`
+	ErrorMessage      string     `json:"errorMessage"`
+	Attachments       string     `json:"attachments"`
+	PlatformModelName string     `json:"platformModelName"`
+	UpstreamModelName string     `json:"upstreamModelName"`
+	ModelVendor       string     `json:"modelVendor"`
+	ModelIcon         string     `json:"modelIcon"`
+	ParentPublicID    string     `json:"parentPublicID"`
+	SourcePublicID    string     `json:"sourcePublicID"`
+	MyFeedback        string     `json:"myFeedback"`
+	ThumbsUpCount     int64      `json:"thumbsUpCount"`
+	ThumbsDownCount   int64      `json:"thumbsDownCount"`
+	EditedAt          *time.Time `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
 }
 
 func toMessageResponse(m model.Message) MessageResponse {
@@ -1019,7 +681,6 @@ func toMessageResponseWithRunAndFallback(m model.Message, run model.Run, fallbac
 		MyFeedback:        m.MyFeedback,
 		ThumbsUpCount:     m.ThumbsUpCount,
 		ThumbsDownCount:   m.ThumbsDownCount,
-		ProcessTrace:      toMessageProcessTraceResponse(m.ProcessTrace),
 		EditedAt:          m.EditedAt,
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,

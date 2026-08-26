@@ -232,9 +232,6 @@ func (s *Service) GetPublicSharedConversation(ctx context.Context, shareID strin
 	if len(messages) == 0 {
 		return nil, ErrConversationShareNotFound
 	}
-	if err = s.hydrateMessageProcessTraces(ctx, messages); err != nil {
-		return nil, err
-	}
 	runModels, err := s.loadPublicSharedRunModels(ctx, share.UserID, conversation.ID, messages)
 	if err != nil {
 		return nil, err
@@ -284,10 +281,6 @@ func (s *Service) CloneSharedConversation(ctx context.Context, userID uint, shar
 	if len(messages) == 0 {
 		return nil, ErrConversationShareNotFound
 	}
-	if err = s.hydrateMessageProcessTraces(ctx, messages); err != nil {
-		return nil, err
-	}
-
 	clonedFiles, err := s.cloneSharedFiles(ctx, share.UserID, userID, messages)
 	if err != nil {
 		return nil, err
@@ -330,18 +323,12 @@ func (s *Service) CloneSharedConversation(ctx context.Context, userID uint, shar
 	clonedMessageIDs := make(map[string]uint, len(orderedMessages))
 	for _, sourceMessage := range orderedMessages {
 		clonedRunID := runIDMap[strings.TrimSpace(sourceMessage.RunID)]
-		if clonedRunID == "" && sourceMessage.ProcessTrace != nil {
-			clonedRunID = "run_" + normalizePublicID(uuid.NewString())
-		}
 		clonedMessage, err := s.cloneSharedMessage(ctx, userID, targetConversation.ID, sourceMessage, clonedRunID, clonedMessageIDs)
 		if err != nil {
 			return nil, err
 		}
 		clonedMessageIDs[sourceMessage.PublicID] = clonedMessage.ID
 		if err = s.cloneSharedMessageAttachments(ctx, userID, targetConversation.ID, clonedMessage.ID, sourceMessage.Attachments, clonedFiles); err != nil {
-			return nil, err
-		}
-		if err = s.cloneSharedMessageTrace(ctx, userID, targetConversation.ID, clonedMessage.ID, clonedRunID, sourceMessage.ProcessTrace); err != nil {
 			return nil, err
 		}
 	}
@@ -601,100 +588,6 @@ func (s *Service) cloneSharedMessageAttachments(
 	return s.repo.CreateAttachments(ctx, items)
 }
 
-func (s *Service) cloneSharedMessageTrace(
-	ctx context.Context,
-	userID uint,
-	conversationID uint,
-	messageID uint,
-	runID string,
-	trace *model.MessageProcessTrace,
-) error {
-	if trace == nil {
-		return nil
-	}
-	startedAt := time.Now().UTC()
-	if err := s.cloneSharedTraceBlock(ctx, userID, conversationID, messageID, runID, messageTraceTypeProcess, 1, startedAt, trace.Process); err != nil {
-		return err
-	}
-	if err := s.cloneSharedTraceBlock(ctx, userID, conversationID, messageID, runID, messageTraceTypeTools, 2, startedAt, trace.Tools); err != nil {
-		return err
-	}
-	if err := s.cloneSharedTraceBlock(ctx, userID, conversationID, messageID, runID, messageTraceTypeUpstreamThink, 3, startedAt, trace.UpstreamThink); err != nil {
-		return err
-	}
-	for _, event := range trace.Events {
-		eventID := strings.TrimSpace(event.EventID)
-		if eventID == "" {
-			eventID = "event_" + normalizePublicID(uuid.NewString())
-		}
-		eventStartedAt := event.StartedAt
-		if eventStartedAt.IsZero() {
-			eventStartedAt = startedAt
-		}
-		row := &model.MessageTraceEventRow{
-			MessageID:       messageID,
-			ConversationID:  conversationID,
-			UserID:          userID,
-			RunID:           runID,
-			EventID:         eventID,
-			EventType:       event.EventType,
-			Phase:           event.Phase,
-			Stage:           event.Stage,
-			RoundID:         event.RoundID,
-			ParentEventID:   event.ParentEventID,
-			Status:          event.Status,
-			Title:           event.Title,
-			Summary:         event.Summary,
-			ContentMarkdown: event.ContentMarkdown,
-			PayloadJSON:     sanitizeSharedTracePayloadJSON(event.PayloadJSON),
-			Seq:             event.Seq,
-			StartedAt:       eventStartedAt,
-			EndedAt:         event.EndedAt,
-		}
-		if err := s.repo.UpsertConversationMessageTraceEvent(ctx, row); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Service) cloneSharedTraceBlock(
-	ctx context.Context,
-	userID uint,
-	conversationID uint,
-	messageID uint,
-	runID string,
-	traceType string,
-	seq int,
-	startedAt time.Time,
-	block *model.MessageTraceBlock,
-) error {
-	if block == nil {
-		return nil
-	}
-	rowStartedAt := block.UpdatedAt
-	if rowStartedAt.IsZero() {
-		rowStartedAt = startedAt
-	}
-	return s.repo.UpsertConversationMessageTrace(ctx, &model.MessageTrace{
-		MessageID:       messageID,
-		ConversationID:  conversationID,
-		UserID:          userID,
-		RunID:           runID,
-		TraceType:       traceType,
-		Status:          block.Status,
-		Stage:           block.Stage,
-		RoundID:         block.RoundID,
-		ParentEventID:   block.ParentEventID,
-		Title:           block.Title,
-		Summary:         block.Summary,
-		ContentMarkdown: block.ContentMarkdown,
-		PayloadJSON:     sanitizeSharedTracePayloadJSON(block.PayloadJSON),
-		Seq:             seq,
-		StartedAt:       rowStartedAt,
-	})
-}
-
 func orderSharedMessagesForClone(messages []model.Message, defaultMessagePublicIDs []string) []model.Message {
 	if len(messages) <= 1 {
 		return append([]model.Message(nil), messages...)
@@ -784,61 +677,6 @@ func parseSharedAttachmentSnapshots(raw string) []sharedAttachmentSnapshot {
 		return nil
 	}
 	return items
-}
-
-func sanitizeSharedTracePayloadJSON(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return ""
-	}
-	payload := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(value), &payload); err != nil {
-		return ""
-	}
-	deleteSharedTraceInternalFields(payload, "")
-	if len(payload) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func deleteSharedTraceInternalFields(payload map[string]interface{}, parentKey string) {
-	for key, value := range payload {
-		if isSharedTraceInternalField(key, parentKey) {
-			delete(payload, key)
-			continue
-		}
-		switch child := value.(type) {
-		case map[string]interface{}:
-			deleteSharedTraceInternalFields(child, key)
-		case []interface{}:
-			for _, item := range child {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					deleteSharedTraceInternalFields(itemMap, key)
-				}
-			}
-		}
-	}
-}
-
-func isSharedTraceInternalField(key string, parentKey string) bool {
-	normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(strings.TrimSpace(key)))
-	parent := strings.ToLower(strings.TrimSpace(parentKey))
-	if normalized == "upstreamname" || normalized == "upstreamdebug" ||
-		normalized == "authorization" || normalized == "proxyauthorization" ||
-		normalized == "cookie" || normalized == "setcookie" {
-		return true
-	}
-	if parent == "upstream" && (normalized == "name" || normalized == "displayname") {
-		return true
-	}
-	return strings.Contains(normalized, "apikey") ||
-		strings.Contains(normalized, "secretkey") ||
-		strings.Contains(normalized, "accesskey")
 }
 
 func isFileNotFoundError(err error) bool {

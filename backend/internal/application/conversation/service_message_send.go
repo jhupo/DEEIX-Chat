@@ -487,7 +487,7 @@ func (s *Service) sendMessageInternal(
 		return nil, err
 	}
 	conversationAttachments = bindAttachmentMessageRoles(conversationAttachments, promptMessages)
-	conversationAttachments, err = s.hydrateAttachmentsForSend(ctx, input.UserID, conversationAttachments, input.OnEvent)
+	conversationAttachments, err = s.hydrateAttachmentsForSend(ctx, input.UserID, conversationAttachments)
 	if err != nil {
 		retErr = err
 		return nil, err
@@ -1022,8 +1022,6 @@ func (s *Service) sendMessageInternal(
 					return err
 				}
 			}
-			if event.Reasoning != nil && event.Reasoning.Text != "" {
-			}
 			if traceRecorder != nil && event.Reasoning != nil && event.Reasoning.Text != "" {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
 					attemptObservation.markObservable()
@@ -1032,8 +1030,6 @@ func (s *Service) sendMessageInternal(
 				if strings.EqualFold(strings.TrimSpace(event.Reasoning.Status), "completed") {
 					traceRecorder.completeUpstreamThink()
 				}
-			}
-			if event.ServerToolCall != nil {
 			}
 			if traceRecorder != nil && event.ServerToolCall != nil {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
@@ -1056,8 +1052,6 @@ func (s *Service) sendMessageInternal(
 				return nil
 			}
 			visibleDelta, thinkDelta := thinkingRouter.consume(event.Delta)
-			if thinkDelta != "" {
-			}
 			if traceRecorder != nil && thinkDelta != "" {
 				if traceRecorder.visible() && traceRecorder.onEvent != nil {
 					attemptObservation.markObservable()
@@ -1463,7 +1457,6 @@ func (s *Service) sendMessageInternal(
 	if !preferStream {
 		feedbackMessages := []model.Message{*userMessage, *assistantMessage}
 		if err = s.hydrateMessageFeedback(ctx, input.UserID, feedbackMessages); err == nil {
-			_ = s.hydrateMessageProcessTraces(ctx, feedbackMessages)
 			*userMessage = feedbackMessages[0]
 			*assistantMessage = feedbackMessages[1]
 		}

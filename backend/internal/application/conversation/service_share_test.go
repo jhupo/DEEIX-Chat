@@ -81,19 +81,6 @@ func TestOrderSharedMessagesForCloneMakesDefaultBranchLatest(t *testing.T) {
 	}
 }
 
-func TestSanitizeSharedTracePayloadJSONRemovesInternalFields(t *testing.T) {
-	got := sanitizeSharedTracePayloadJSON(`{
-		"tool_calls": [{"tool_call_id":"call_1","output":"ok"}],
-		"upstream_debug": {"authorization":"Bearer token"},
-		"upstream": {"name":"hidden","model":"visible"},
-		"api_key": "secret"
-	}`)
-	want := `{"tool_calls":[{"output":"ok","tool_call_id":"call_1"}],"upstream":{"model":"visible"}}`
-	if got != want {
-		t.Fatalf("sanitized payload mismatch: got %s, want %s", got, want)
-	}
-}
-
 func TestNormalizeMessagePublicIDsDeduplicatesAndKeepsOrder(t *testing.T) {
 	got := normalizeMessagePublicIDs([]string{"", " msg_a ", "msg_b", "msg_a", "\n"})
 	want := []string{"msg_a", "msg_b"}

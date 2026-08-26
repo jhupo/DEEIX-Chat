@@ -99,7 +99,6 @@ function toReadOnlyMessageDTO(item: PublicSharedMessageDTO): MessageDTO {
     errorCode: item.errorCode || "",
     errorMessage: item.errorMessage || "",
     attachments: item.attachments || "[]",
-    processTrace: item.processTrace,
     myFeedback: "",
     thumbsUpCount: 0,
     thumbsDownCount: 0,

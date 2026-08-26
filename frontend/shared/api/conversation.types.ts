@@ -29,13 +29,7 @@ import type {
   ConversationSearchResultResponse,
   ConversationShareResponse,
   MessageFeedbackResponse,
-  MessageProcessTraceResponse,
-  MessagePromptTraceBlockResponse,
-  MessagePromptTraceResponse,
-  MessagePromptTraceSourceResponse,
   MessageResponse,
-  MessageTraceBlockResponse,
-  MessageTraceEventResponse,
   ModelProbeDebugResponse,
   PublicSharedConversationResponse,
   PublicSharedMessageResponse,
@@ -98,7 +92,6 @@ export type ConversationInteractionDTO =
     }>
   | ConversationInteractionBaseDTO<"file_approval", {
       reason?: string;
-      files?: Array<{ path?: string; change?: string }>;
       changes?: Array<{ path?: string; change?: string }>;
     }>
   | ConversationInteractionBaseDTO<"user_input", {
@@ -122,7 +115,6 @@ export type ConversationInteractionDTO =
     }>
   | ConversationInteractionBaseDTO<"dynamic_tool", {
       tool?: string;
-      name?: string;
       argumentsPreview?: string;
       acceptedContentKinds?: Array<"text" | "image">;
     }>;
@@ -172,7 +164,6 @@ export type MessageDTO = Omit<
   | "modelIcon"
   | "modelVendor"
   | "platformModelName"
-  | "processTrace"
   | "upstreamModelName"
 > & {
   branchReason: "default" | "retry" | "edit";
@@ -180,7 +171,6 @@ export type MessageDTO = Omit<
   upstreamModelName?: string;
   modelVendor?: string;
   modelIcon?: string;
-  processTrace?: MessageProcessTraceDTO;
   myFeedback: "up" | "down" | "";
 };
 
@@ -196,40 +186,17 @@ export type ConversationExportDTO = Omit<
   compatibility: ConversationExportResponse["compatibility"];
 };
 
-export type TraceBlockDTO = MessageTraceBlockResponse;
-
-export type PromptTraceBlockDTO = Omit<MessagePromptTraceBlockResponse, "sourceRefs"> & {
-  sourceRefs?: PromptTraceSourceDTO[];
-};
-
-export type PromptTraceSourceDTO = MessagePromptTraceSourceResponse;
-
 export type ContextArtifactDTO = ContextArtifactResponse;
 
-export type PromptTraceDTO = Omit<MessagePromptTraceResponse, "blocks"> & {
-  blocks: PromptTraceBlockDTO[];
-};
-
-export type ReasoningDeltaDTO = {
-  event_type: string;
-  item_id?: string;
-  status?: string;
-  kind: "summary_text" | "content_text" | "summary_part_added" | "signature";
-  signature?: string;
-  encrypted_content?: string;
-};
-
 export type AgentPlanStepDTO = {
-  step?: string;
-  text?: string;
-  status?: "pending" | "inProgress" | "completed" | string;
+  step: string;
+  status: "pending" | "inProgress" | "completed";
 };
 
 export type AgentFileChangeDTO = {
-  fileID?: string;
-  path?: string;
+  path: string;
   previousPath?: string;
-  change?: string;
+  change: string;
   additions?: number;
   deletions?: number;
   binary?: boolean;
@@ -238,23 +205,25 @@ export type AgentFileChangeDTO = {
 };
 
 export type AgentExecutionItemDTO = {
-  itemID?: string;
-  type?: string;
-  kind?: string;
-  status?: string;
+  itemID: string;
+  kind: string;
+  status: string;
   command?: string;
   cwd?: string;
   durationMs?: number;
   commandActions?: Array<Record<string, unknown>>;
+  tool?: string;
+  toolType?: string;
+  arguments?: string;
+  result?: string;
   output?: string;
-  aggregatedOutput?: string;
+  error?: string;
   exitCode?: number;
   text?: string;
   phase?: "commentary" | "final_answer" | string;
   summary?: string[];
   content?: string[];
   changes?: AgentFileChangeDTO[];
-  files?: AgentFileChangeDTO[];
   diff?: string;
   truncated?: boolean;
 };
@@ -263,13 +232,11 @@ export type AgentTokenUsageDTO = {
   inputTokens?: number;
   outputTokens?: number;
   cachedInputTokens?: number;
-  cacheReadTokens?: number;
   reasoningTokens?: number;
   totalTokens?: number;
 };
 
 export type AgentExecutionEventPayloadDTO = {
-  status?: string;
   error?: { code?: string; message?: string } | string;
   turn?: { status?: string; durationMs?: number; error?: { code?: string; message?: string } | string };
   explanation?: string;
@@ -284,11 +251,8 @@ export type AgentExecutionEventPayloadDTO = {
   patch?: string;
   diff?: string;
   truncated?: boolean;
-  files?: AgentFileChangeDTO[];
   changes?: AgentFileChangeDTO[];
   tokenUsage?: AgentTokenUsageDTO & { total?: AgentTokenUsageDTO; last?: AgentTokenUsageDTO };
-  usage?: AgentTokenUsageDTO;
-  model?: string;
   fromModel?: string;
   toModel?: string;
   reason?: string;
@@ -308,19 +272,6 @@ export type ConversationExecutionEventPageDTO = {
   cursor: number;
   hasMore: boolean;
 };
-
-export type MessageProcessTraceDTO = Omit<
-  MessageProcessTraceResponse,
-  "events" | "process" | "promptTrace" | "tools" | "upstreamThink"
-> & {
-  process?: TraceBlockDTO;
-  tools?: TraceBlockDTO;
-  upstreamThink?: TraceBlockDTO;
-  promptTrace?: PromptTraceDTO;
-  events?: TraceEventDTO[];
-};
-
-export type TraceEventDTO = MessageTraceEventResponse;
 
 export type CreateConversationRequest = ContractCreateConversationRequest;
 
@@ -364,9 +315,7 @@ export type RevokeConversationSharesRequest = ContractRevokeConversationSharesRe
 
 export type RevokeConversationSharesResult = RevokeConversationSharesResponse;
 
-export type PublicSharedMessageDTO = Omit<PublicSharedMessageResponse, "processTrace"> & {
-  processTrace?: MessageProcessTraceDTO;
-};
+export type PublicSharedMessageDTO = PublicSharedMessageResponse;
 
 export type PublicSharedConversationDTO = Omit<PublicSharedConversationResponse, "messages"> & {
   messages: PublicSharedMessageDTO[];
@@ -424,31 +373,6 @@ export type StreamMessageEvent =
       type: "rag_search";
       seq?: number;
       message: string;
-    }
-  | {
-      type: "process_update";
-      seq?: number;
-      status: string;
-      block?: TraceBlockDTO;
-      trace?: MessageProcessTraceDTO;
-    }
-  | {
-      type: "upstream_think_delta";
-      seq?: number;
-      status: string;
-      title?: string;
-      summary?: string;
-      stage?: string;
-      roundID?: string;
-      eventID?: string;
-      kind?: ReasoningDeltaDTO["kind"] | string;
-      summaryIndex?: number;
-      contentIndex?: number;
-      delta?: string;
-      contentMarkdown?: string;
-      block?: TraceBlockDTO;
-      trace?: MessageProcessTraceDTO;
-      reasoning?: ReasoningDeltaDTO;
     }
   | {
       type: "delta";

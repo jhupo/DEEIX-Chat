@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
@@ -256,7 +255,6 @@ func (s *Service) hydrateAttachmentsForSend(
 	ctx context.Context,
 	userID uint,
 	attachments []AttachmentInput,
-	onEvent func(string, map[string]interface{}) error,
 ) ([]AttachmentInput, error) {
 	if len(attachments) == 0 {
 		return attachments, nil
@@ -269,8 +267,6 @@ func (s *Service) hydrateAttachmentsForSend(
 		items[i] = att // 预置，图片/空 FileID 直接保留
 	}
 
-	// mu 保护 onEvent 的并发调用（onEvent 非 goroutine-safe）。
-	var mu sync.Mutex
 	g, gCtx := errgroup.WithContext(ctx)
 
 	cfg := config.Config{}
@@ -290,11 +286,6 @@ func (s *Service) hydrateAttachmentsForSend(
 					return
 				}
 				latestFile = fileObj
-				mu.Lock()
-				defer mu.Unlock()
-				emitEvent(onEvent, "process_update", map[string]interface{}{
-					"status": "streaming",
-				})
 			})
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

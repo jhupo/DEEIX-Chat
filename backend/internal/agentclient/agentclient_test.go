@@ -366,6 +366,32 @@ func TestElicitationSchemaProjectionUsesStableAllowlist(t *testing.T) {
 	}
 }
 
+func TestDynamicToolProjectionUsesCanonicalFieldsOnly(t *testing.T) {
+	adapter := &CodexAdapter{}
+	projected, _, err := adapter.projectServerRequest("item/tool/call", map[string]any{
+		"namespace": "media",
+		"tool":      "render",
+		"arguments": map[string]any{"prompt": "sunrise"},
+	})
+	if err != nil || projected["tool"] != "media/render" || projected["argumentsPreview"] != `{"prompt":"sunrise"}` {
+		t.Fatalf("dynamic tool projection = %#v, %v", projected, err)
+	}
+	if _, exists := projected["name"]; exists {
+		t.Fatalf("dynamic tool projection exposed duplicate name: %#v", projected)
+	}
+
+	legacy, _, err := adapter.projectServerRequest("item/tool/call", map[string]any{
+		"name":  "render",
+		"input": map[string]any{"prompt": "sunrise"},
+	})
+	if err != nil || legacy["tool"] != "" {
+		t.Fatalf("legacy dynamic tool fields were accepted: %#v, %v", legacy, err)
+	}
+	if _, exists := legacy["argumentsPreview"]; exists {
+		t.Fatalf("legacy dynamic tool input was accepted: %#v", legacy)
+	}
+}
+
 func TestUserInputProjectionUsesOpaqueRequiredQuestions(t *testing.T) {
 	adapter := &CodexAdapter{}
 	projected, answerKeys, err := adapter.projectServerRequest("item/tool/requestUserInput", map[string]any{
@@ -437,8 +463,8 @@ func TestExecutionProjectionUsesBoundedStartedItemContext(t *testing.T) {
 	fileRequest, _, err := adapter.projectServerRequest("item/fileChange/requestApproval", map[string]any{
 		"itemId": "file-provider-item", "reason": "Apply changes",
 	})
-	files, ok := fileRequest["files"].([]any)
-	if err != nil || !ok || len(files) != 2 {
+	changes, ok := fileRequest["changes"].([]any)
+	if err != nil || !ok || len(changes) != 2 {
 		t.Fatalf("file approval projection = %#v, %v", fileRequest, err)
 	}
 	encodedFiles, _ := json.Marshal(fileRequest)
@@ -447,7 +473,7 @@ func TestExecutionProjectionUsesBoundedStartedItemContext(t *testing.T) {
 	}
 	emit("turn/completed", `{"threadId":"thread-provider","turn":{"id":"turn-provider","status":"completed"}}`)
 	fileAfterTurn, _, _ := adapter.projectServerRequest("item/fileChange/requestApproval", map[string]any{"itemId": "file-provider-item"})
-	if files, _ := fileAfterTurn["files"].([]any); len(files) != 0 {
+	if changes, _ := fileAfterTurn["changes"].([]any); len(changes) != 0 {
 		t.Fatalf("completed turn items remained cached: %#v", fileAfterTurn)
 	}
 

@@ -2,7 +2,6 @@ package conversation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -179,92 +178,6 @@ func TestGenerationStreamStoreReturnsLatestWindow(t *testing.T) {
 	}
 }
 
-func TestGenerationStreamSanitizesOversizedTracePayload(t *testing.T) {
-	store := newTestGenerationStreamStore()
-	registry := newGenerationStreamRegistry(store, generationStreamOptions{
-		Retention:        time.Minute,
-		ActiveTTL:        time.Minute,
-		MaxEvents:        8,
-		SubscriberBuffer: 4,
-	})
-	ctx := context.Background()
-	runID := EnsureMessageGenerationRunID("")
-	registry.register(ctx, runID, 7, func() {})
-	defer registry.finish(ctx, runID)
-
-	largeOutput := strings.Repeat("x", generationStreamMaxPayloadBytes)
-	tracePayload, err := json.Marshal(map[string]interface{}{
-		"tool_calls": []map[string]interface{}{{
-			"tool_call_id":   "call_1",
-			"name":           "fetch",
-			"status":         "success",
-			"output":         largeOutput,
-			"output_detail":  largeOutput,
-			"output_text":    largeOutput,
-			"output_preview": "short result",
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	published := registry.publish(ctx, runID, map[string]interface{}{
-		"type":   "process_update",
-		"status": "streaming",
-		"trace": map[string]interface{}{
-			"tools": map[string]interface{}{
-				"payloadJSON": string(tracePayload),
-			},
-		},
-	})
-	if published["payloadTruncated"] != true {
-		t.Fatalf("expected published payload to be marked truncated, got %#v", published)
-	}
-
-	records, err := store.ListGenerationStreamEvents(ctx, runID, 8)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(records) != 1 {
-		t.Fatalf("expected one stream record, got %d", len(records))
-	}
-	record := records[0].PayloadJSON
-	if len(record) > generationStreamMaxPayloadBytes {
-		t.Fatalf("expected sanitized stream payload below hard limit, got %d bytes", len(record))
-	}
-	if strings.Contains(record, largeOutput[:1024]) {
-		t.Fatal("sanitized stream payload still contains full tool output")
-	}
-	var parsed struct {
-		Trace struct {
-			Tools struct {
-				PayloadJSON string `json:"payloadJSON"`
-			} `json:"tools"`
-		} `json:"trace"`
-	}
-	if err := json.Unmarshal([]byte(record), &parsed); err != nil {
-		t.Fatal(err)
-	}
-	var parsedTrace struct {
-		ToolCalls []map[string]interface{} `json:"tool_calls"`
-	}
-	if err := json.Unmarshal([]byte(parsed.Trace.Tools.PayloadJSON), &parsedTrace); err != nil {
-		t.Fatal(err)
-	}
-	if len(parsedTrace.ToolCalls) != 1 {
-		t.Fatalf("expected one sanitized tool call, got %#v", parsedTrace.ToolCalls)
-	}
-	call := parsedTrace.ToolCalls[0]
-	if traceInt64(call["output_size"]) != int64(len(largeOutput)) ||
-		traceInt64(call["output_detail_size"]) != int64(len(largeOutput)) ||
-		traceInt64(call["output_text_size"]) != int64(len(largeOutput)) {
-		t.Fatalf("expected output size metadata in sanitized payload, got %#v", call)
-	}
-	if _, ok := call["output_detail"]; ok {
-		t.Fatalf("expected oversized output detail to be removed, got %#v", call)
-	}
-}
-
 func TestGenerationStreamDoesNotCompactOversizedCompletedPayload(t *testing.T) {
 	store := newTestGenerationStreamStore()
 	registry := newGenerationStreamRegistry(store, generationStreamOptions{
@@ -278,7 +191,7 @@ func TestGenerationStreamDoesNotCompactOversizedCompletedPayload(t *testing.T) {
 	registry.register(ctx, runID, 7, func() {})
 	defer registry.finish(ctx, runID)
 
-	largeContent := strings.Repeat("a", generationStreamMaxPayloadBytes)
+	largeContent := strings.Repeat("a", 128*1024)
 	published := registry.publish(ctx, runID, map[string]interface{}{
 		"type": "completed",
 		"data": map[string]interface{}{
