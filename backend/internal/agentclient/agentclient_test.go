@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestResolveCodexEnforcesSupportedVersionRangeBeforeAppServer(t *testing.T) {
+	t.Setenv(WindowsUserSIDEnvironment, "")
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1328,14 +1329,46 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 	}`), &detail); err != nil {
 		t.Fatal(err)
 	}
-	messages := projectSessionMessages(detail)
+	messages := mustProjectSessionMessages(t, detail)
 	if len(messages) != 2 {
 		t.Fatalf("projected messages = %#v", messages)
 	}
 	assistant, ok := messages[1].(map[string]any)
+	user, _ := messages[0].(map[string]any)
+	executionEvents, _ := assistant["executionEvents"].([]any)
 	if !ok || assistant["content"] != "first paragraph\n\nsecond paragraph" ||
-		assistant["reasoningContent"] != "checked configuration\n\nvalidated settings\n\nconfirmed result" {
+		assistant["reasoningContent"] != "checked configuration\n\nvalidated settings\n\nconfirmed result" ||
+		assistant["sourceTurnRef"] == "" || assistant["sourceTurnRef"] != user["sourceTurnRef"] || len(executionEvents) != 3 {
 		t.Fatalf("projected assistant message = %#v", messages[1])
+	}
+}
+
+func TestProjectSessionMessagesReusesPublishedTurnWithoutPersistingHistoricalItems(t *testing.T) {
+	state, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceTurnRef, err := state.PublishSource("codex-test", "turn", "provider-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{profileID: "codex-test", state: state}
+	detail := map[string]any{"thread": map[string]any{"id": "provider-thread", "turns": []any{
+		map[string]any{"id": "provider-turn", "startedAt": 1, "completedAt": 2, "items": []any{
+			map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "inspect"}}},
+			map[string]any{"id": "provider-reasoning", "type": "reasoning", "summary": []any{"checked"}},
+			map[string]any{"id": "provider-command", "type": "commandExecution", "command": "go test", "output": "ok"},
+			map[string]any{"type": "agentMessage", "text": "done"},
+		}},
+	}}}
+	messages := adapter.projectSessionMessages(detail)
+	user, _ := messages[0].(map[string]any)
+	assistant, _ := messages[1].(map[string]any)
+	if user["sourceTurnRef"] != sourceTurnRef || assistant["sourceTurnRef"] != sourceTurnRef {
+		t.Fatalf("published turn source was not reused: %#v", messages)
+	}
+	if len(state.state.Sources) != 1 {
+		t.Fatalf("historical items were persisted in Agent state: %#v", state.state.Sources)
 	}
 }
 
@@ -1348,7 +1381,7 @@ func TestProjectSessionMessagesPreservesLocalImages(t *testing.T) {
 			}},
 		}},
 	}}}
-	messages := projectSessionMessages(detail)
+	messages := mustProjectSessionMessages(t, detail)
 	if len(messages) != 1 {
 		t.Fatalf("projected messages = %#v", messages)
 	}
@@ -1425,7 +1458,7 @@ func TestProjectSessionMessagesPreservesCompleteHistory(t *testing.T) {
 			}},
 		}},
 	}
-	messages := projectSessionMessages(detail)
+	messages := mustProjectSessionMessages(t, detail)
 	if len(messages) != 4 {
 		t.Fatalf("projected complete history count = %d, want 4", len(messages))
 	}
@@ -1437,6 +1470,16 @@ func TestProjectSessionMessagesPreservesCompleteHistory(t *testing.T) {
 	if !ok || third["content"] != "second question" {
 		t.Fatalf("history after long turn was lost: %#v", third)
 	}
+}
+
+func mustProjectSessionMessages(t *testing.T, detail map[string]any) []any {
+	t.Helper()
+	state, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &CodexAdapter{profileID: "codex-test", state: state}
+	return adapter.projectSessionMessages(detail)
 }
 
 func TestProjectSessionsIncludesDesktopAssignments(t *testing.T) {

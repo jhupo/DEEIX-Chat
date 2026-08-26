@@ -49,6 +49,7 @@ func (h *Handler) ListInputResources(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Conversation public ID"
 // @Param after query int false "Last applied sequence"
+// @Param runs query string false "Comma-separated visible run IDs for compact initial hydration"
 // @Success 200 {object} ExecutionEventListResponseDoc
 // @Failure 404 {object} ErrorDoc
 // @Router /conversations/{id}/events [get]
@@ -63,7 +64,8 @@ func (h *Handler) ListExecutionEvents(c *gin.Context) {
 		}
 		after = parsed
 	}
-	items, err := h.service.ListExecutionEvents(c.Request.Context(), middleware.MustUserID(c), c.Param("id"), after)
+	runIDs := strings.Split(strings.TrimSpace(c.Query("runs")), ",")
+	page, err := h.service.ListExecutionEvents(c.Request.Context(), middleware.MustUserID(c), c.Param("id"), after, runIDs)
 	if err != nil {
 		if errors.Is(err, appconversation.ErrConversationNotFound) {
 			response.Error(c, http.StatusNotFound, "conversation not found")
@@ -72,8 +74,8 @@ func (h *Handler) ListExecutionEvents(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "load execution events failed")
 		return
 	}
-	result := make([]ExecutionEventResponse, 0, len(items))
-	for _, item := range items {
+	result := make([]ExecutionEventResponse, 0, len(page.Events))
+	for _, item := range page.Events {
 		var payload interface{}
 		if json.Unmarshal([]byte(item.PayloadJSON), &payload) != nil {
 			payload = map[string]interface{}{}
@@ -82,7 +84,7 @@ func (h *Handler) ListExecutionEvents(c *gin.Context) {
 			RunID: item.RunID, Seq: item.Seq, Kind: item.Kind, Payload: payload, OccurredAt: item.OccurredAt,
 		})
 	}
-	response.Success(c, result)
+	response.Success(c, ExecutionEventPageResponse{Events: result, Cursor: page.Cursor, HasMore: page.HasMore})
 }
 
 // ListInteractions godoc

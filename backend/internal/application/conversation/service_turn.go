@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -107,12 +109,185 @@ func (s *Service) recordCloudExecutionEvent(ctx context.Context, input SendMessa
 	return err
 }
 
-func (s *Service) ListExecutionEvents(ctx context.Context, userID uint, conversationPublicID string, after uint64) ([]model.ExecutionEvent, error) {
+const executionEventPageSize = 500
+
+type ExecutionEventPage struct {
+	Events  []model.ExecutionEvent
+	Cursor  uint64
+	HasMore bool
+}
+
+func (s *Service) ListExecutionEvents(ctx context.Context, userID uint, conversationPublicID string, after uint64, runIDs []string) (*ExecutionEventPage, error) {
 	conversation, err := s.repo.GetConversationByPublicID(ctx, strings.TrimSpace(conversationPublicID), userID)
 	if err != nil {
 		return nil, ErrConversationNotFound
 	}
-	return s.repo.ListExecutionEvents(ctx, userID, conversation.ID, after, 500)
+	if after > 0 {
+		events, listErr := s.repo.ListExecutionEvents(ctx, userID, conversation.ID, after, nil, executionEventPageSize)
+		if listErr != nil {
+			return nil, listErr
+		}
+		cursor := conversation.ExecutionEventSeq
+		if len(events) > 0 {
+			cursor = events[len(events)-1].Seq
+		}
+		return &ExecutionEventPage{
+			Events: events, Cursor: cursor,
+			HasMore: len(events) == executionEventPageSize && cursor < conversation.ExecutionEventSeq,
+		}, nil
+	}
+
+	runIDs = normalizedExecutionRunIDs(runIDs)
+	if len(runIDs) == 0 {
+		return &ExecutionEventPage{Events: []model.ExecutionEvent{}, Cursor: conversation.ExecutionEventSeq}, nil
+	}
+	events := make([]model.ExecutionEvent, 0)
+	var cursor uint64
+	for {
+		page, listErr := s.repo.ListExecutionEvents(ctx, userID, conversation.ID, cursor, runIDs, executionEventPageSize)
+		if listErr != nil {
+			return nil, listErr
+		}
+		events = append(events, page...)
+		if len(page) > 0 {
+			cursor = page[len(page)-1].Seq
+		}
+		if len(page) < executionEventPageSize {
+			break
+		}
+	}
+	return &ExecutionEventPage{
+		Events: compactExecutionHistory(events), Cursor: max(conversation.ExecutionEventSeq, cursor),
+	}, nil
+}
+
+func normalizedExecutionRunIDs(values []string) []string {
+	result := make([]string, 0, min(len(values), 64))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = normalizeRunID(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+		if len(result) == 64 {
+			break
+		}
+	}
+	return result
+}
+
+type compactedTextDelta struct {
+	event     model.ExecutionEvent
+	text      strings.Builder
+	truncated bool
+}
+
+func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEvent {
+	retained := make([]model.ExecutionEvent, 0, len(events)/4)
+	latest := make(map[string]model.ExecutionEvent)
+	first := make(map[string]model.ExecutionEvent)
+	deltas := make(map[string]*compactedTextDelta)
+	for _, event := range events {
+		itemID, delta, truncated := executionEventDelta(event)
+		key := event.RunID + ":" + itemID
+		switch event.Kind {
+		case "item/commandExecution/outputDelta", "item/agentMessage/delta", "item/reasoning/summaryTextDelta":
+			if itemID == "" || delta == "" {
+				continue
+			}
+			buffer := deltas[event.Kind+":"+key]
+			if buffer == nil {
+				buffer = &compactedTextDelta{event: event}
+				deltas[event.Kind+":"+key] = buffer
+			}
+			if buffer.text.Len() < maxExecutionHistoryTextBytes {
+				remaining := maxExecutionHistoryTextBytes - buffer.text.Len()
+				if len(delta) > remaining {
+					for remaining > 0 && !utf8.ValidString(delta[:remaining]) {
+						remaining--
+					}
+					delta = delta[:remaining]
+					buffer.truncated = true
+				}
+				buffer.text.WriteString(delta)
+			} else {
+				buffer.truncated = true
+			}
+			buffer.truncated = buffer.truncated || truncated
+		case "item/reasoning/summaryPartAdded":
+			buffer := deltas["item/reasoning/summaryTextDelta:"+key]
+			if buffer != nil && buffer.text.Len() > 0 && buffer.text.Len()+2 <= maxExecutionHistoryTextBytes {
+				buffer.text.WriteString("\n\n")
+			}
+		case "item/reasoning/textDelta", "item/plan/delta":
+			continue
+		case "turn/started":
+			if _, exists := first[event.RunID+":"+event.Kind]; !exists {
+				first[event.RunID+":"+event.Kind] = event
+			}
+		case "turn/completed", "turn/plan/updated", "turn/diff/updated", "thread/tokenUsage/updated", "model/rerouted":
+			latest[event.RunID+":"+event.Kind] = event
+		case "item/fileChange/patchUpdated":
+			latest[event.Kind+":"+key] = event
+		case "item/started", "item/completed":
+			retained = append(retained, event)
+		}
+	}
+	for _, event := range first {
+		retained = append(retained, event)
+	}
+	for _, event := range latest {
+		retained = append(retained, event)
+	}
+	for _, buffer := range deltas {
+		payload := map[string]any{"itemID": executionEventItemID(buffer.event), "truncated": buffer.truncated}
+		if buffer.event.Kind == "item/commandExecution/outputDelta" {
+			payload["outputDelta"] = buffer.text.String()
+		} else {
+			payload["delta"] = buffer.text.String()
+			if buffer.event.Kind == "item/agentMessage/delta" {
+				payload["phase"] = "commentary"
+			}
+		}
+		encoded, _ := json.Marshal(payload)
+		buffer.event.PayloadJSON = string(encoded)
+		retained = append(retained, buffer.event)
+	}
+	sort.Slice(retained, func(i, j int) bool { return retained[i].Seq < retained[j].Seq })
+	return retained
+}
+
+const maxExecutionHistoryTextBytes = 1 << 20
+
+func executionEventItemID(event model.ExecutionEvent) string {
+	var payload struct {
+		ItemID string `json:"itemID"`
+	}
+	_ = json.Unmarshal([]byte(event.PayloadJSON), &payload)
+	return strings.TrimSpace(payload.ItemID)
+}
+
+func executionEventDelta(event model.ExecutionEvent) (string, string, bool) {
+	var payload struct {
+		ItemID      string `json:"itemID"`
+		Delta       string `json:"delta"`
+		OutputDelta string `json:"outputDelta"`
+		Phase       string `json:"phase"`
+		Truncated   bool   `json:"truncated"`
+	}
+	if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil ||
+		(event.Kind == "item/agentMessage/delta" && payload.Phase != "commentary") {
+		return "", "", false
+	}
+	if event.Kind == "item/commandExecution/outputDelta" {
+		payload.Delta = payload.OutputDelta
+	}
+	return strings.TrimSpace(payload.ItemID), payload.Delta, payload.Truncated
 }
 
 func (s *Service) executionConversation(ctx context.Context, input SendMessageInput) (*model.Conversation, error) {

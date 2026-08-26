@@ -2,8 +2,11 @@ package agentgateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -26,7 +29,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 3
+	historyProjectionVersion     = 4
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -965,8 +968,16 @@ type workspaceSessionMessage struct {
 	Role             string                       `json:"role"`
 	Content          string                       `json:"content"`
 	ReasoningContent string                       `json:"reasoningContent"`
+	SourceTurnRef    string                       `json:"sourceTurnRef"`
+	RunID            string                       `json:"-"`
 	CreatedAt        int64                        `json:"createdAt"`
 	Attachments      []workspaceSessionAttachment `json:"attachments"`
+	ExecutionEvents  []workspaceSessionEvent      `json:"executionEvents"`
+}
+
+type workspaceSessionEvent struct {
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 type workspaceSessionAttachment struct {
@@ -1112,6 +1123,16 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 		if len(message.Attachments) > 32 {
 			return false
 		}
+		if !validRepoRef(message.SourceTurnRef) || len(message.ExecutionEvents) > 1024 ||
+			(message.Role != "assistant" && len(message.ExecutionEvents) > 0) {
+			return false
+		}
+		for _, event := range message.ExecutionEvents {
+			if !validWorkspaceSessionEvent(event) {
+				return false
+			}
+			total += len(event.Payload)
+		}
 		seenAttachments := make(map[string]struct{}, len(message.Attachments))
 		for _, attachment := range message.Attachments {
 			if !strings.HasPrefix(attachment.FileID, "file_") || !validRepoRef(attachment.FileID) {
@@ -1128,6 +1149,17 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 		}
 	}
 	return true
+}
+
+func validWorkspaceSessionEvent(event workspaceSessionEvent) bool {
+	if event.Kind != "turn/started" && event.Kind != "item/completed" && event.Kind != "turn/completed" {
+		return false
+	}
+	if len(event.Payload) == 0 || len(event.Payload) > 1<<20 {
+		return false
+	}
+	var payload map[string]any
+	return json.Unmarshal(event.Payload, &payload) == nil
 }
 
 func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, workspace *model.AgentWorkspace, session workspaceSession, now time.Time) (bool, error) {
@@ -1199,6 +1231,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if !session.HistoryLoaded {
 		return changed, nil
 	}
+	if err := resolveWorkspaceSessionRunIDs(tx, thread, session.Messages); err != nil {
+		return false, err
+	}
 	var stored []model.Message
 	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {
 		return false, err
@@ -1233,6 +1268,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			if storedMessage.ReasoningContent != source.ReasoningContent {
 				updates["reasoning_content"] = source.ReasoningContent
 			}
+			if storedMessage.RunID != source.RunID {
+				updates["run_id"] = source.RunID
+			}
 			if (parentID == nil && storedMessage.ParentMessageID != nil) ||
 				(parentID != nil && (storedMessage.ParentMessageID == nil || *storedMessage.ParentMessageID != *parentID)) {
 				updates["parent_message_id"] = parentID
@@ -1252,7 +1290,7 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		message := model.Message{
 			ConversationID: conversation.ID, UserID: thread.UserID, PublicID: newChatPublicID(),
 			ParentMessageID: parentID, Role: source.Role, ContentType: "text", Content: source.Content,
-			ReasoningContent: source.ReasoningContent, BranchReason: "default", Status: "success",
+			RunID: source.RunID, ReasoningContent: source.ReasoningContent, BranchReason: "default", Status: "success",
 			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: createdAt},
 		}
 		if err := tx.Create(&message).Error; err != nil {
@@ -1262,6 +1300,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			return false, err
 		}
 		parentID = &message.ID
+	}
+	if err := syncWorkspaceSessionExecutionEvents(tx, &conversation, session.Messages, now); err != nil {
+		return false, err
 	}
 	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "history_version": historyProjectionVersion, "updated_at": now}).Error; err != nil {
 		return false, err
@@ -1347,6 +1388,96 @@ func syncWorkspaceMessageAttachments(tx *gorm.DB, message *model.Message, source
 
 func historyMessageMatches(stored model.Message, source workspaceSessionMessage) bool {
 	return stored.Role == source.Role && stored.Content == source.Content && stored.ReasoningContent == source.ReasoningContent
+}
+
+func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messages []workspaceSessionMessage) error {
+	refs := make([]string, 0, len(messages))
+	seenRefs := make(map[string]struct{}, len(messages))
+	for _, message := range messages {
+		if _, exists := seenRefs[message.SourceTurnRef]; exists {
+			continue
+		}
+		seenRefs[message.SourceTurnRef] = struct{}{}
+		refs = append(refs, message.SourceTurnRef)
+	}
+	type turnRun struct {
+		SourceTurnRef string
+		RunID         string
+	}
+	rows := make([]turnRun, 0)
+	if err := tx.Model(&model.AgentTurn{}).Select("source_turn_ref, run_id").
+		Where("thread_id = ? AND source_turn_ref IN ?", thread.ID, refs).Find(&rows).Error; err != nil {
+		return err
+	}
+	byRef := make(map[string]string, len(rows))
+	for _, row := range rows {
+		byRef[row.SourceTurnRef] = row.RunID
+	}
+	for index := range messages {
+		if runID := byRef[messages[index].SourceTurnRef]; runID != "" {
+			messages[index].RunID = runID
+			continue
+		}
+		digest := sha256.Sum256([]byte(messages[index].SourceTurnRef))
+		messages[index].RunID = "run_" + hex.EncodeToString(digest[:16])
+	}
+	return nil
+}
+
+func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conversation, messages []workspaceSessionMessage, now time.Time) error {
+	runIDs := make([]string, 0, len(messages)/2)
+	seenRunIDs := make(map[string]struct{}, len(messages)/2)
+	for _, message := range messages {
+		if message.Role != "assistant" || message.RunID == "" || len(message.ExecutionEvents) == 0 {
+			continue
+		}
+		if _, exists := seenRunIDs[message.RunID]; exists {
+			continue
+		}
+		seenRunIDs[message.RunID] = struct{}{}
+		runIDs = append(runIDs, message.RunID)
+	}
+	if len(runIDs) == 0 {
+		return nil
+	}
+	var existingRunIDs []string
+	if err := tx.Model(&model.ConversationExecutionEvent{}).Distinct("run_id").
+		Where("conversation_id = ? AND run_id IN ?", conversation.ID, runIDs).Pluck("run_id", &existingRunIDs).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(existingRunIDs))
+	for _, runID := range existingRunIDs {
+		existing[runID] = struct{}{}
+	}
+
+	sequence := conversation.ExecutionEventSeq
+	for _, message := range messages {
+		if message.Role != "assistant" || message.RunID == "" || len(message.ExecutionEvents) == 0 {
+			continue
+		}
+		if _, exists := existing[message.RunID]; exists {
+			continue
+		}
+		occurredAt := validSessionTime(message.CreatedAt, now)
+		rows := make([]model.ConversationExecutionEvent, 0, len(message.ExecutionEvents))
+		for index, event := range message.ExecutionEvents {
+			sequence++
+			rows = append(rows, model.ConversationExecutionEvent{
+				ConversationID: conversation.ID, UserID: conversation.UserID, RunID: message.RunID,
+				SourceKey: fmt.Sprintf("history:%s:%d", message.RunID, index), Seq: sequence,
+				Kind: event.Kind, PayloadJSON: string(event.Payload), OccurredAt: occurredAt,
+			})
+		}
+		if err := tx.CreateInBatches(&rows, 500).Error; err != nil {
+			return err
+		}
+		existing[message.RunID] = struct{}{}
+	}
+	if sequence == conversation.ExecutionEventSeq {
+		return nil
+	}
+	conversation.ExecutionEventSeq = sequence
+	return tx.Model(conversation).Update("execution_event_seq", sequence).Error
 }
 
 func syncThreadHistory(tx *gorm.DB, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {

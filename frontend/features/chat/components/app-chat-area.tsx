@@ -388,11 +388,16 @@ export function AppChatArea() {
   const onConversationInvalidated = React.useCallback(() => {
     reload();
   }, [reload]);
+  const hydratedRunIDs = React.useMemo(
+    () => [...new Set(messages.map((message) => message.runID.trim()).filter(Boolean))],
+    [messages],
+  );
   useAgentRunHydration({
     conversationID,
     deviceID: currentConversation?.executionDeviceID,
     profileID: currentConversation?.executionProfileID,
     workspaceID: currentConversation?.executionWorkspaceID,
+    runIDs: hydratedRunIDs,
     agentEvent: lastAgentEvent,
     onExecutionBoundary,
     onConversationInvalidated,

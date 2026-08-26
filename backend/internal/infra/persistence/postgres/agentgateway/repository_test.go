@@ -32,7 +32,7 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 
 func TestHistoryMessageMatchesExactProjection(t *testing.T) {
 	content := strings.Repeat("x", 16*1024)
-	if !historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content}) {
+	if !historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content, RunID: "run_test"}) {
 		t.Fatal("identical history messages did not match")
 	}
 	if historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content + "suffix"}) {
@@ -543,7 +543,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.FileObject{},
-		&model.Conversation{}, &model.Message{}, &model.Attachment{},
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationExecutionEvent{},
 		&model.AgentDevice{}, &model.AgentCommand{}, &model.AgentBridgeFrame{},
 		&model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentArtifact{}, &model.AgentResourceSnapshot{}, &model.AgentThread{},
 		&model.AgentTurn{}, &model.AgentItem{}, &model.AgentEvent{}, &model.AgentInteraction{},
@@ -829,14 +829,27 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := database.Create(&historyFile).Error; err != nil {
 		t.Fatal(err)
 	}
-	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}}}`
+	sourceTurnRef := "source-turn-1"
+	if err := database.Create(&model.AgentTurn{
+		PublicID: "agturn_history_0123456789abcdef", UserID: 7, ThreadID: importedThread.ID,
+		RunID: "run_existing_history", SourceTurnRef: &sourceTurnRef, Status: "completed", InputJSON: "[]", SettingsJSON: "{}",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","sourceTurnRef":"source-turn-1","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","createdAt":1786615260,"executionEvents":[{"kind":"turn/started","payload":{"turn":{"status":"running"}}},{"kind":"item/completed","payload":{"itemID":"source-item-1","item":{"itemID":"source-item-1","kind":"reasoning","summary":["checked files"],"status":"completed"}}},{"kind":"turn/completed","payload":{"turn":{"status":"completed"}}}] }]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
 	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil ||
 		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
+		importedMessages[0].RunID != "run_existing_history" || importedMessages[0].RunID != importedMessages[1].RunID ||
 		importedMessages[1].ParentMessageID == nil || *importedMessages[1].ParentMessageID != importedMessages[0].ID {
 		t.Fatalf("imported messages mismatch: %#v %v", importedMessages, err)
+	}
+	var importedExecutionEvents []model.ConversationExecutionEvent
+	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("seq ASC").Find(&importedExecutionEvents).Error; err != nil ||
+		len(importedExecutionEvents) != 3 || importedExecutionEvents[1].Kind != "item/completed" || importedExecutionEvents[1].RunID != importedMessages[1].RunID {
+		t.Fatalf("imported execution events mismatch: %#v %v", importedExecutionEvents, err)
 	}
 	var historyAttachment model.Attachment
 	if err := database.Where("message_id = ?", importedMessages[0].ID).First(&historyAttachment).Error; err != nil ||
@@ -848,7 +861,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		importedConversation.UpdatedAt.Unix() != 1786615360 {
 		t.Fatalf("imported settings or recency mismatch: %#v %v", importedConversation, err)
 	}
-	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","createdAt":1786615260}]}`
+	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","sourceTurnRef":"source-turn-1","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","createdAt":1786615260}]}`
 	if err := syncThreadHistory(database, &storedHistoryCommand, json.RawMessage(blankSettingsHistory), now.Add(11*time.Second)); err != nil {
 		t.Fatalf("refresh thread history without settings: %v", err)
 	}

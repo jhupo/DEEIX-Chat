@@ -134,7 +134,7 @@ type ConversationTraceRepository interface {
 	ListConversationEventLogs(ctx context.Context, filter ConversationEventLogListFilter, offset int, limit int) ([]domainconversation.EventLog, int64, error)
 	GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error)
 	ProjectExecutionEvent(ctx context.Context, item *domainconversation.ExecutionEvent) (bool, error)
-	ListExecutionEvents(ctx context.Context, userID uint, conversationID uint, after uint64, limit int) ([]domainconversation.ExecutionEvent, error)
+	ListExecutionEvents(ctx context.Context, userID uint, conversationID uint, after uint64, runIDs []string, limit int) ([]domainconversation.ExecutionEvent, error)
 }
 
 // ConversationEventLogListFilter 描述管理员对话事件列表筛选和排序条件。

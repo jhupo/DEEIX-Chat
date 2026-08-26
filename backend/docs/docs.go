@@ -7950,6 +7950,12 @@ const docTemplate = `{
                         "description": "Last applied sequence",
                         "name": "after",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated visible run IDs for compact initial hydration",
+                        "name": "runs",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -14019,13 +14025,32 @@ const docTemplate = `{
             ],
             "properties": {
                 "data": {
+                    "$ref": "#/definitions/ExecutionEventPageResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ExecutionEventPageResponse": {
+            "type": "object",
+            "required": [
+                "cursor",
+                "events",
+                "hasMore"
+            ],
+            "properties": {
+                "cursor": {
+                    "type": "integer"
+                },
+                "events": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/ExecutionEventResponse"
                     }
                 },
-                "errorMsg": {
-                    "type": "string"
+                "hasMore": {
+                    "type": "boolean"
                 }
             }
         },

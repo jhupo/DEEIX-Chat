@@ -2245,14 +2245,27 @@ definitions:
   ExecutionEventListResponseDoc:
     properties:
       data:
-        items:
-          $ref: '#/definitions/ExecutionEventResponse'
-        type: array
+        $ref: '#/definitions/ExecutionEventPageResponse'
       errorMsg:
         type: string
     required:
     - data
     - errorMsg
+    type: object
+  ExecutionEventPageResponse:
+    properties:
+      cursor:
+        type: integer
+      events:
+        items:
+          $ref: '#/definitions/ExecutionEventResponse'
+        type: array
+      hasMore:
+        type: boolean
+    required:
+    - cursor
+    - events
+    - hasMore
     type: object
   ExecutionEventResponse:
     properties:
@@ -11732,6 +11745,10 @@ paths:
         in: query
         name: after
         type: integer
+      - description: Comma-separated visible run IDs for compact initial hydration
+        in: query
+        name: runs
+        type: string
       produces:
       - application/json
       responses:

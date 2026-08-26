@@ -396,6 +396,17 @@ func (store *StateStore) PublishSource(profileID, kind, providerID string) (stri
 	return sourceRef, nil
 }
 
+func (store *StateStore) PublishedSource(profileID, kind, providerID string) (string, bool) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for _, mapping := range store.state.Sources {
+		if mapping.ProfileID == profileID && mapping.Kind == kind && mapping.ProviderID == providerID {
+			return mapping.SourceRef, true
+		}
+	}
+	return "", false
+}
+
 func (store *StateStore) validateLocked() error {
 	if store.state.Version != 1 || store.state.AckBridgeSeq > store.state.NextBridgeSeq || store.state.Commands == nil {
 		return errors.New("agent state is invalid")

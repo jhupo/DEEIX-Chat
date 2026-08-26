@@ -5,6 +5,7 @@ import * as React from "react";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import {
   shouldRetryConversationStream,
+  shouldPollConversationHistory,
   shouldRefreshMessagesAfterHistory,
   shouldSurfaceConversationLoadError,
 } from "@/features/chat/model/conversation-load-policy";
@@ -220,8 +221,7 @@ export function useChatData(
         });
 
         let history = await ensureConversationHistory(token, conversationID);
-        const historyWasLoaded = history.status === "loaded";
-        for (let attempt = 0; history.status !== "loaded" && attempt < HISTORY_POLL_ATTEMPTS; attempt += 1) {
+        for (let attempt = 0; shouldPollConversationHistory(initialData.results.length, history.status) && attempt < HISTORY_POLL_ATTEMPTS; attempt += 1) {
           if (history.status === "error") {
             throw new Error(history.error || t("loadFailed"));
           }
@@ -229,12 +229,15 @@ export function useChatData(
           if (cancelled) return;
           history = await getConversationHistory(token, conversationID);
         }
-        if (history.status !== "loaded") {
+        if (initialData.results.length === 0 && history.status !== "loaded") {
           throw new Error(history.error || t("loadFailed"));
+        }
+        if (history.status !== "loaded") {
+          return;
         }
         onHistoryLoadedRef.current?.();
 
-        if (!shouldRefreshMessagesAfterHistory(initialData.results.length, historyWasLoaded)) {
+        if (!shouldRefreshMessagesAfterHistory(initialData.results.length)) {
           return;
         }
         const data = await listMessagesPage(token, conversationID, {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error Node's TypeScript runner requires an explicit extension.
-import { applyAgentExecutionEvents, getAgentExecutionRecoverySnapshot, getAgentRunSnapshot, hasComposerAgentActivity, setAgentRunContext } from "./agent-run-store.ts";
+import { applyAgentExecutionEvents, getAgentRunSnapshot, hasComposerAgentActivity, setAgentRunContext } from "./agent-run-store.ts";
 
 test("applies a historical event page as one ordered batch", () => {
   setAgentRunContext("test-context", "conversation-1");
@@ -32,11 +32,6 @@ test("applies a historical event page as one ordered batch", () => {
   ], "conversation-1");
 
   assert.equal(accepted, 3);
-  assert.deepEqual(getAgentExecutionRecoverySnapshot(), {
-    contiguousSeq: 3,
-    highestSeq: 3,
-    hasGap: false,
-  });
   assert.equal(getAgentRunSnapshot("run-1").status, "completed");
   assert.deepEqual(getAgentRunSnapshot("run-1").plan.map((step) => step.text), ["Inspect"]);
   assert.equal(applyAgentExecutionEvents([{
@@ -182,4 +177,20 @@ test("keeps activity items in their first event order while applying later updat
     "reasoning:reasoning-2:5",
   ]);
   assert.equal(run.planSeq, 1);
+});
+
+test("keeps compacted command output and reasoning when terminal items omit text", () => {
+  setAgentRunContext("compact-history-context", "conversation-compact");
+  applyAgentExecutionEvents([
+    { runID: "run-compact", seq: 1, kind: "item/started", payload: { item: { itemID: "command-1", type: "commandExecution", command: "pnpm test" } }, occurredAt: "2026-08-26T00:00:01Z" },
+    { runID: "run-compact", seq: 2, kind: "item/commandExecution/outputDelta", payload: { itemID: "command-1", outputDelta: "passed" }, occurredAt: "2026-08-26T00:00:02Z" },
+    { runID: "run-compact", seq: 3, kind: "item/completed", payload: { item: { itemID: "command-1", type: "commandExecution", status: "completed" } }, occurredAt: "2026-08-26T00:00:03Z" },
+    { runID: "run-compact", seq: 4, kind: "item/started", payload: { item: { itemID: "reasoning-1", type: "reasoning", summary: [] } }, occurredAt: "2026-08-26T00:00:04Z" },
+    { runID: "run-compact", seq: 5, kind: "item/reasoning/summaryTextDelta", payload: { itemID: "reasoning-1", delta: "checked history" }, occurredAt: "2026-08-26T00:00:05Z" },
+    { runID: "run-compact", seq: 6, kind: "item/completed", payload: { item: { itemID: "reasoning-1", type: "reasoning", status: "completed", summary: [] } }, occurredAt: "2026-08-26T00:00:06Z" },
+  ], "conversation-compact");
+
+  const [command, reasoning] = getAgentRunSnapshot("run-compact").items;
+  assert.equal(command?.kind === "command" ? command.output : "", "passed");
+  assert.equal(reasoning?.kind === "reasoning" ? reasoning.text : "", "checked history");
 });

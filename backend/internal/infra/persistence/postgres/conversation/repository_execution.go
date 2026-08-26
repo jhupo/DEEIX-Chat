@@ -176,13 +176,16 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 	return nil
 }
 
-func (r *Repo) ListExecutionEvents(ctx context.Context, userID, conversationID uint, after uint64, limit int) ([]domainconversation.ExecutionEvent, error) {
+func (r *Repo) ListExecutionEvents(ctx context.Context, userID, conversationID uint, after uint64, runIDs []string, limit int) ([]domainconversation.ExecutionEvent, error) {
 	if userID == 0 || conversationID == 0 || limit < 1 || limit > 500 {
 		return nil, repository.ErrInvalidInput
 	}
 	rows := make([]model.ConversationExecutionEvent, 0)
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND conversation_id = ? AND seq > ?", userID, conversationID, after).
-		Order("seq ASC").Limit(limit).Find(&rows).Error; err != nil {
+	query := r.db.WithContext(ctx).Where("user_id = ? AND conversation_id = ? AND seq > ?", userID, conversationID, after)
+	if len(runIDs) > 0 {
+		query = query.Where("run_id IN ?", runIDs)
+	}
+	if err := query.Order("seq ASC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
 	result := make([]domainconversation.ExecutionEvent, 0, len(rows))

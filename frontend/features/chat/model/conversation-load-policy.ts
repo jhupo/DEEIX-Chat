@@ -2,8 +2,12 @@ export function shouldSurfaceConversationLoadError(messageCount: number): boolea
   return messageCount <= 0;
 }
 
-export function shouldRefreshMessagesAfterHistory(messageCount: number, historyWasLoaded: boolean): boolean {
-  return messageCount <= 0 || !historyWasLoaded;
+export function shouldRefreshMessagesAfterHistory(messageCount: number): boolean {
+  return messageCount <= 0;
+}
+
+export function shouldPollConversationHistory(messageCount: number, historyStatus: string): boolean {
+  return messageCount <= 0 && historyStatus !== "loaded" && historyStatus !== "error";
 }
 
 export function shouldReloadMessagesForExecutionBoundary(
@@ -11,11 +15,8 @@ export function shouldReloadMessagesForExecutionBoundary(
   assistantStatus: string | null | undefined,
 ): boolean {
   const status = assistantStatus?.trim().toLowerCase();
-  if (kind === "turn/started") {
-    return status === undefined;
-  }
   if (kind === "turn/completed") {
-    return status === "pending";
+    return status === undefined || status === "pending";
   }
   return false;
 }

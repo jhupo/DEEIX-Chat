@@ -46,6 +46,7 @@ const (
 	runtimeChallengeTTL  = time.Minute
 	runtimeLeaseTTL      = 10 * time.Minute
 	runtimePresenceTTL   = 75 * time.Second
+	maxTerminalOutcome   = 64 << 20
 )
 
 type RuntimeUserResolver interface {
@@ -1333,7 +1334,7 @@ func (s *Service) AckServerCommands(ctx context.Context, identity *ConnectionIde
 
 func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionIdentity, bridgeSeq, serverSeq uint64, commandID string, outcome json.RawMessage) (uint64, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || bridgeSeq == 0 || serverSeq == 0 ||
-		!validPublicID(commandID, "agcmd") || len(outcome) == 0 || len(outcome) > 2*1024*1024 {
+		!validPublicID(commandID, "agcmd") || len(outcome) == 0 || len(outcome) > maxTerminalOutcome {
 		return 0, ErrInvalidInput
 	}
 	payloadHash := sha256.Sum256(outcome)

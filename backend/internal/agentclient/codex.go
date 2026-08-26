@@ -1332,6 +1332,7 @@ func (adapter *CodexAdapter) projectSessionDetail(detail map[string]any, provide
 	if err != nil {
 		return nil, err
 	}
+	messages := adapter.projectSessionMessages(detail)
 	return map[string]any{
 		"sourceThreadRef": sourceRef,
 		"preview":         sessionText(thread["preview"], 512),
@@ -1341,7 +1342,7 @@ func (adapter *CodexAdapter) projectSessionDetail(detail map[string]any, provide
 		"updatedAt":       thread["updatedAt"],
 		"recencyAt":       thread["recencyAt"],
 		"historyLoaded":   true,
-		"messages":        projectSessionMessages(detail),
+		"messages":        messages,
 	}, nil
 }
 
@@ -2694,16 +2695,24 @@ func mapInteractionResponse(pending *pendingInteraction, raw json.RawMessage) (a
 	}
 }
 
-func projectSessionMessages(detail map[string]any) []any {
+func (adapter *CodexAdapter) projectSessionMessages(detail map[string]any) []any {
 	thread, _ := detail["thread"].(map[string]any)
 	turns, _ := thread["turns"].([]any)
 	messages := make([]any, 0)
-	for _, rawTurn := range turns {
+	providerThreadID, _ := thread["id"].(string)
+	for turnIndex, rawTurn := range turns {
 		turn, _ := rawTurn.(map[string]any)
+		providerTurnID, _ := turn["id"].(string)
+		providerTurnID = strings.TrimSpace(providerTurnID)
+		if providerTurnID == "" {
+			providerTurnID = fmt.Sprintf("history:%s:%d", providerThreadID, turnIndex)
+		}
+		sourceTurnRef := adapter.sessionTurnSourceRef(providerThreadID, providerTurnID)
 		items, _ := turn["items"].([]any)
 		reasoningParts := make([]string, 0)
 		assistantParts := make([]string, 0)
-		for _, rawItem := range items {
+		executionEvents := make([]any, 0)
+		for itemIndex, rawItem := range items {
 			item, _ := rawItem.(map[string]any)
 			switch item["type"] {
 			case "userMessage":
@@ -2728,7 +2737,8 @@ func projectSessionMessages(detail map[string]any) []any {
 				if len(textParts) > 0 || len(localAttachments) > 0 {
 					message := map[string]any{
 						"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), maxSessionMessageRunes),
-						"createdAt": turn["startedAt"],
+						"createdAt":     turn["startedAt"],
+						"sourceTurnRef": sourceTurnRef,
 					}
 					if len(localAttachments) > 0 {
 						message["localAttachments"] = localAttachments
@@ -2740,23 +2750,94 @@ func projectSessionMessages(detail map[string]any) []any {
 				reasoningParts = append(reasoningParts, parts...)
 			case "agentMessage":
 				text := strings.TrimSpace(fmt.Sprint(item["text"]))
-				if text != "" {
+				if text != "" && agentMessagePhase(item["phase"]) == "final_answer" {
 					assistantParts = append(assistantParts, text)
 				}
+			}
+			if projected := adapter.projectSessionExecutionItem(item, providerTurnID, itemIndex); projected != nil {
+				executionEvents = append(executionEvents, projected)
 			}
 		}
 		if len(assistantParts) > 0 {
 			message := map[string]any{
 				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), maxSessionMessageRunes),
-				"createdAt": firstValue(turn["completedAt"], turn["startedAt"]),
+				"createdAt":     firstValue(turn["completedAt"], turn["startedAt"]),
+				"sourceTurnRef": sourceTurnRef,
 			}
 			if len(reasoningParts) > 0 {
 				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n\n"), maxSessionMessageRunes)
+			}
+			if turn["completedAt"] != nil {
+				message["executionEvents"] = sessionExecutionEvents(turn, executionEvents)
 			}
 			messages = append(messages, message)
 		}
 	}
 	return messages
+}
+
+func (adapter *CodexAdapter) projectSessionExecutionItem(item map[string]any, providerTurnID string, index int) map[string]any {
+	kind := stringField(item, "type")
+	if kind == "agentMessage" && agentMessagePhase(item["phase"]) != "commentary" {
+		return nil
+	}
+	if kind != "reasoning" && kind != "agentMessage" && !strings.Contains(strings.ToLower(kind), "command") && !strings.Contains(strings.ToLower(kind), "file") {
+		return nil
+	}
+	providerItemID, _ := item["id"].(string)
+	providerItemID = strings.TrimSpace(providerItemID)
+	if providerItemID == "" {
+		providerItemID = fmt.Sprintf("history:%s:%d", providerTurnID, index)
+	}
+	sourceItemRef := stableSessionSourceRef("item", adapter.profileID, providerTurnID, providerItemID)
+	return map[string]any{
+		"kind": "item/completed",
+		"payload": map[string]any{
+			"itemID": sourceItemRef,
+			"item":   adapter.projectExecutionItem(item, sourceItemRef),
+		},
+	}
+}
+
+func (adapter *CodexAdapter) sessionTurnSourceRef(providerThreadID, providerTurnID string) string {
+	if sourceRef, exists := adapter.state.PublishedSource(adapter.profileID, "turn", providerTurnID); exists {
+		return sourceRef
+	}
+	return stableSessionSourceRef("turn", adapter.profileID, providerThreadID, providerTurnID)
+}
+
+func stableSessionSourceRef(kind string, values ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(append([]string{kind}, values...), "\x00")))
+	return kind + "_" + hex.EncodeToString(digest[:16])
+}
+
+func sessionExecutionEvents(turn map[string]any, items []any) []any {
+	events := make([]any, 0, len(items)+2)
+	events = append(events, map[string]any{"kind": "turn/started", "payload": map[string]any{"turn": map[string]any{"status": "running"}}})
+	events = append(events, items...)
+	completed := map[string]any{"status": "completed"}
+	startedAt, startedOK := executionTimestamp(turn["startedAt"])
+	completedAt, completedOK := executionTimestamp(turn["completedAt"])
+	if startedOK && completedOK {
+		if completedAt >= startedAt {
+			completed["durationMs"] = (completedAt - startedAt) * 1000
+		}
+	}
+	events = append(events, map[string]any{"kind": "turn/completed", "payload": map[string]any{"turn": completed}})
+	return events
+}
+
+func executionTimestamp(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case int64:
+		return float64(number), true
+	case int:
+		return float64(number), true
+	default:
+		return 0, false
+	}
 }
 
 func stringSlice(value any) []string {

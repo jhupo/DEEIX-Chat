@@ -1047,6 +1047,12 @@ type ExecutionEventResponse struct {
 	OccurredAt time.Time   `json:"occurredAt"`
 }
 
+type ExecutionEventPageResponse struct {
+	Events  []ExecutionEventResponse `json:"events"`
+	Cursor  uint64                   `json:"cursor"`
+	HasMore bool                     `json:"hasMore"`
+}
+
 type InteractionResponse struct {
 	InteractionID string      `json:"interactionID"`
 	RunID         string      `json:"runID"`
@@ -1057,8 +1063,8 @@ type InteractionResponse struct {
 }
 
 type ExecutionEventListResponseDoc struct {
-	ErrorMsg string                   `json:"errorMsg"`
-	Data     []ExecutionEventResponse `json:"data"`
+	ErrorMsg string                     `json:"errorMsg"`
+	Data     ExecutionEventPageResponse `json:"data"`
 }
 
 type InteractionListResponseDoc struct {

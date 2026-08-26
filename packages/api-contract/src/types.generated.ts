@@ -1006,8 +1006,14 @@ export interface Envelope {
 }
 
 export interface ExecutionEventListResponseDoc {
-  data: ExecutionEventResponse[];
+  data: ExecutionEventPageResponse;
   errorMsg: string;
+}
+
+export interface ExecutionEventPageResponse {
+  cursor: number;
+  events: ExecutionEventResponse[];
+  hasMore: boolean;
 }
 
 export interface ExecutionEventResponse {
@@ -6190,6 +6196,8 @@ export namespace Conversations {
     export type RequestQuery = {
       /** Last applied sequence */
       after?: number;
+      /** Comma-separated visible run IDs for compact initial hydration */
+      runs?: string;
     };
     export type RequestBody = never;
     export type RequestHeaders = {};

@@ -303,6 +303,12 @@ export type ConversationExecutionEventDTO = {
   occurredAt: string;
 };
 
+export type ConversationExecutionEventPageDTO = {
+  events: ConversationExecutionEventDTO[];
+  cursor: number;
+  hasMore: boolean;
+};
+
 export type MessageProcessTraceDTO = Omit<
   MessageProcessTraceResponse,
   "events" | "process" | "promptTrace" | "tools" | "upstreamThink"

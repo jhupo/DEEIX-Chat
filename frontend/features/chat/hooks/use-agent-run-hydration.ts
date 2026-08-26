@@ -3,10 +3,8 @@
 import * as React from "react";
 import {
   applyAgentExecutionEvents,
-  getAgentExecutionRecoverySnapshot,
   replaceActiveAgentInteractions,
   setAgentRunContext,
-  useAgentExecutionRecoverySnapshot,
 } from "@/features/chat/model/agent-run-store";
 import {
   listConversationExecutionEvents,
@@ -25,6 +23,7 @@ type AgentRunHydrationScope = {
   deviceID?: string;
   profileID?: string;
   workspaceID?: string;
+  runIDs?: string[];
   agentEvent?: AgentStreamEvent | null;
   onExecutionBoundary?: (event: ConversationExecutionEventDTO) => void;
   onConversationInvalidated?: () => void;
@@ -35,12 +34,13 @@ export function useAgentRunHydration({
   deviceID = "",
   profileID = "",
   workspaceID = "",
+  runIDs = [],
   agentEvent = null,
   onExecutionBoundary,
   onConversationInvalidated,
 }: AgentRunHydrationScope) {
-  const recovery = useAgentExecutionRecoverySnapshot();
   const normalizedConversationID = conversationID?.trim() || "";
+  const runIDKey = [...new Set(runIDs.map((runID) => runID.trim()).filter(Boolean))].slice(-64).join(",");
   const contextKey = JSON.stringify([
     normalizedConversationID,
     deviceID.trim(),
@@ -59,6 +59,7 @@ export function useAgentRunHydration({
   React.useEffect(() => {
     setAgentRunContext(contextKey, normalizedConversationID);
     if (!normalizedConversationID) return;
+    const hydratedRunIDs = runIDKey ? runIDKey.split(",") : [];
 
     let cancelled = false;
     let accessToken = "";
@@ -68,6 +69,7 @@ export function useAgentRunHydration({
     let interactionSyncRequested = false;
     let eventRetryTimer: number | null = null;
     let eventRetryDelay = 1_000;
+    let executionCursor = 0;
     let interactionRetryTimer: number | null = null;
     let interactionRetryDelay = 1_000;
 
@@ -77,25 +79,24 @@ export function useAgentRunHydration({
       eventSync = (async () => {
         while (eventSyncRequested && !cancelled) {
           eventSyncRequested = false;
-          let cursor = getAgentExecutionRecoverySnapshot().contiguousSeq;
           while (!cancelled) {
-            const events = await listConversationExecutionEvents(
+            const historical = executionCursor === 0;
+            const page = await listConversationExecutionEvents(
               accessToken,
               normalizedConversationID,
-              cursor,
+              executionCursor,
+              historical ? hydratedRunIDs : [],
             );
-            if (cancelled || events.length === 0) break;
-            let nextCursor = cursor;
-            const sortedEvents = events.slice().sort((left, right) => left.seq - right.seq);
+            if (cancelled) break;
+            const sortedEvents = page.events.slice().sort((left, right) => left.seq - right.seq);
             applyAgentExecutionEvents(sortedEvents, normalizedConversationID);
             for (const event of sortedEvents) {
-              nextCursor = Math.max(nextCursor, event.seq);
-              if (event.kind === "turn/started" || event.kind === "turn/completed") {
+              if (!historical && (event.kind === "turn/started" || event.kind === "turn/completed")) {
                 onExecutionBoundaryRef.current?.(event);
               }
             }
-            if (nextCursor <= cursor) break;
-            cursor = nextCursor;
+            executionCursor = Math.max(executionCursor, page.cursor);
+            if (!page.hasMore) break;
           }
         }
       })().finally(() => {
@@ -195,7 +196,7 @@ export function useAgentRunHydration({
       if (eventRetryTimer !== null) window.clearTimeout(eventRetryTimer);
       if (interactionRetryTimer !== null) window.clearTimeout(interactionRetryTimer);
     };
-  }, [contextKey, normalizedConversationID]);
+  }, [contextKey, normalizedConversationID, runIDKey]);
 
   React.useEffect(() => {
     if (!agentEvent || !normalizedConversationID) return;
@@ -209,8 +210,4 @@ export function useAgentRunHydration({
       onConversationInvalidatedRef.current?.();
     }
   }, [agentEvent, deviceID, normalizedConversationID]);
-
-  React.useEffect(() => {
-    if (recovery.hasGap) requestExecutionSyncRef.current?.();
-  }, [contextKey, recovery.hasGap, recovery.highestSeq]);
 }

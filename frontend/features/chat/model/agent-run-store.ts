@@ -90,12 +90,6 @@ export type AgentRunSnapshot = {
   lastExecutionSeq: number;
 };
 
-export type AgentExecutionRecoverySnapshot = {
-  contiguousSeq: number;
-  highestSeq: number;
-  hasGap: boolean;
-};
-
 const EMPTY_RUN: AgentRunSnapshot = Object.freeze({
   runID: "",
   status: "idle",
@@ -119,14 +113,7 @@ const EMPTY_RUN: AgentRunSnapshot = Object.freeze({
 
 const runs = new Map<string, AgentRunSnapshot>();
 const eventJournals = new Map<string, Map<number, ConversationExecutionEventDTO>>();
-const executionEvents = new Map<number, ConversationExecutionEventDTO>();
 const listeners = new Set<() => void>();
-const EMPTY_RECOVERY: AgentExecutionRecoverySnapshot = Object.freeze({
-  contiguousSeq: 0,
-  highestSeq: 0,
-  hasGap: false,
-});
-let recoverySnapshot = EMPTY_RECOVERY;
 let activeContextKey = "";
 let activeConversationID = "";
 
@@ -300,6 +287,35 @@ function upsertItem(items: AgentActivityItem[], item: AgentActivityItem): AgentA
       diff: item.diff || current.diff,
       truncated: current.truncated || item.truncated,
       files: [...currentFiles.values()],
+    };
+  } else if (current.kind === "command" && item.kind === "command") {
+    next[index] = {
+      ...current,
+      ...item,
+      seq: current.seq,
+      command: item.command || current.command,
+      cwd: item.cwd || current.cwd,
+      output: item.output || current.output,
+      outputTruncated: current.outputTruncated || item.outputTruncated,
+      commandActions: item.commandActions.length > 0 ? item.commandActions : current.commandActions,
+      durationMS: item.durationMS ?? current.durationMS,
+      exitCode: item.exitCode ?? current.exitCode,
+    };
+  } else if (current.kind === "commentary" && item.kind === "commentary") {
+    next[index] = {
+      ...current,
+      ...item,
+      seq: current.seq,
+      text: item.text || current.text,
+      truncated: current.truncated || item.truncated,
+    };
+  } else if (current.kind === "reasoning" && item.kind === "reasoning") {
+    next[index] = {
+      ...current,
+      ...item,
+      seq: current.seq,
+      text: item.text || current.text,
+      truncated: current.truncated || item.truncated,
     };
   } else {
     next[index] = current.kind === item.kind
@@ -499,32 +515,22 @@ export function applyAgentExecutionEvents(
   if (normalizedSourceConversationID && normalizedSourceConversationID !== activeConversationID) return 0;
 
   const acceptedByRun = new Map<string, ConversationExecutionEventDTO[]>();
-  let highestSeq = recoverySnapshot.highestSeq;
   let acceptedCount = 0;
   for (const event of events) {
     const runID = event.runID.trim();
-    if (!runID || !Number.isSafeInteger(event.seq) || event.seq <= 0 || executionEvents.has(event.seq)) {
+    if (!runID || !Number.isSafeInteger(event.seq) || event.seq <= 0) {
       continue;
     }
     const journal = eventJournals.get(runID) ?? new Map<number, ConversationExecutionEventDTO>();
-    executionEvents.set(event.seq, event);
+    if (journal.has(event.seq)) continue;
     journal.set(event.seq, event);
     eventJournals.set(runID, journal);
     const accepted = acceptedByRun.get(runID) ?? [];
     accepted.push(event);
     acceptedByRun.set(runID, accepted);
-    highestSeq = Math.max(highestSeq, event.seq);
     acceptedCount += 1;
   }
   if (acceptedCount === 0) return 0;
-
-  let contiguousSeq = recoverySnapshot.contiguousSeq;
-  while (executionEvents.has(contiguousSeq + 1)) contiguousSeq += 1;
-  recoverySnapshot = {
-    contiguousSeq,
-    highestSeq,
-    hasGap: highestSeq > contiguousSeq,
-  };
 
   for (const [runID, accepted] of acceptedByRun) {
     const current = runs.get(runID);
@@ -601,25 +607,11 @@ export function setAgentRunContext(contextKey: string, conversationID: string) {
   activeConversationID = normalizedConversationID;
   runs.clear();
   eventJournals.clear();
-  executionEvents.clear();
-  recoverySnapshot = EMPTY_RECOVERY;
   emitChange();
-}
-
-export function getAgentExecutionRecoverySnapshot(): AgentExecutionRecoverySnapshot {
-  return recoverySnapshot;
 }
 
 export function getAgentRunSnapshot(runID: string | undefined): AgentRunSnapshot {
   return runs.get(runID?.trim() || "") ?? EMPTY_RUN;
-}
-
-export function useAgentExecutionRecoverySnapshot(): AgentExecutionRecoverySnapshot {
-  return React.useSyncExternalStore(
-    subscribe,
-    getAgentExecutionRecoverySnapshot,
-    () => EMPTY_RECOVERY,
-  );
 }
 
 export function useAgentRunSnapshot(runID: string | undefined): AgentRunSnapshot {

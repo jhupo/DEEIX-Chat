@@ -12,6 +12,7 @@ import type {
   ConversationDefaultModelCandidateDTO,
   ConversationDTO,
   ConversationExecutionEventDTO,
+  ConversationExecutionEventPageDTO,
   ConversationExportDTO,
   ConversationInputResourceCatalogDTO,
   ConversationInteractionDTO,
@@ -954,10 +955,15 @@ export async function listConversationExecutionEvents(
   accessToken: string,
   conversationPublicID: string,
   after = 0,
-): Promise<ConversationExecutionEventDTO[]> {
+  runIDs: string[] = [],
+): Promise<ConversationExecutionEventPageDTO> {
   const cursor = Number.isSafeInteger(after) && after > 0 ? Math.floor(after) : 0;
-  return authedRequest<ConversationExecutionEventDTO[]>(
-    `/api/v1/conversations/${pathParam(conversationPublicID)}/events?after=${cursor}`,
+  const query = new URLSearchParams({ after: String(cursor) });
+  if (cursor === 0 && runIDs.length > 0) {
+    query.set("runs", runIDs.join(","));
+  }
+  return authedRequest<ConversationExecutionEventPageDTO>(
+    `/api/v1/conversations/${pathParam(conversationPublicID)}/events?${query}`,
     { accessToken },
     true,
   );

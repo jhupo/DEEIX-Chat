@@ -2,7 +2,9 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,5 +201,44 @@ func TestDurableCloudEventSkipsStreamingDeltas(t *testing.T) {
 		if !durableCloudEvent(kind) {
 			t.Fatalf("%s should be durable", kind)
 		}
+	}
+}
+
+func TestCompactExecutionHistoryMergesIncrementalText(t *testing.T) {
+	events := []model.ExecutionEvent{
+		{RunID: "run_test", Seq: 1, Kind: "turn/started", PayloadJSON: `{"turn":{"status":"running"}}`},
+		{RunID: "run_test", Seq: 2, Kind: "item/started", PayloadJSON: `{"itemID":"command_1","item":{"itemID":"command_1","kind":"commandExecution","command":"go test"}}`},
+	}
+	for seq := uint64(3); seq < 103; seq++ {
+		events = append(events, model.ExecutionEvent{RunID: "run_test", Seq: seq, Kind: "item/commandExecution/outputDelta", PayloadJSON: `{"itemID":"command_1","outputDelta":"x"}`})
+	}
+	events = append(events,
+		model.ExecutionEvent{RunID: "run_test", Seq: 103, Kind: "item/completed", PayloadJSON: `{"itemID":"command_1","item":{"itemID":"command_1","kind":"commandExecution","status":"completed"}}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 104, Kind: "item/started", PayloadJSON: `{"itemID":"reasoning_1","item":{"itemID":"reasoning_1","kind":"reasoning","summary":[]}}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 105, Kind: "item/reasoning/summaryTextDelta", PayloadJSON: `{"itemID":"reasoning_1","delta":"first"}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 106, Kind: "item/reasoning/summaryPartAdded", PayloadJSON: `{"itemID":"reasoning_1"}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 107, Kind: "item/reasoning/summaryTextDelta", PayloadJSON: `{"itemID":"reasoning_1","delta":"second"}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 108, Kind: "item/completed", PayloadJSON: `{"itemID":"reasoning_1","item":{"itemID":"reasoning_1","kind":"reasoning","status":"completed","summary":[]}}`},
+		model.ExecutionEvent{RunID: "run_test", Seq: 109, Kind: "turn/completed", PayloadJSON: `{"turn":{"status":"completed"}}`},
+	)
+
+	compacted := compactExecutionHistory(events)
+	if len(compacted) != 8 {
+		t.Fatalf("compacted event count = %d, want 8", len(compacted))
+	}
+	var commandDelta, reasoningDelta struct {
+		OutputDelta string `json:"outputDelta"`
+		Delta       string `json:"delta"`
+	}
+	for _, event := range compacted {
+		switch event.Kind {
+		case "item/commandExecution/outputDelta":
+			_ = json.Unmarshal([]byte(event.PayloadJSON), &commandDelta)
+		case "item/reasoning/summaryTextDelta":
+			_ = json.Unmarshal([]byte(event.PayloadJSON), &reasoningDelta)
+		}
+	}
+	if commandDelta.OutputDelta != strings.Repeat("x", 100) || reasoningDelta.Delta != "first\n\nsecond" {
+		t.Fatalf("compacted deltas = command %q reasoning %q", commandDelta.OutputDelta, reasoningDelta.Delta)
 	}
 }
