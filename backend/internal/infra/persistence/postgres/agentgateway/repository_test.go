@@ -840,6 +840,11 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
+	if err := database.Model(&storedHistoryCommand).Updates(map[string]any{
+		"state": "completed", "completed_at": now.Add(10 * time.Second),
+	}).Error; err != nil {
+		t.Fatalf("complete thread history command: %v", err)
+	}
 	if err := database.Where("conversation_id = ?", importedConversation.ID).Order("id ASC").Find(&importedMessages).Error; err != nil ||
 		len(importedMessages) != 2 || importedMessages[0].Role != "user" || importedMessages[1].ReasoningContent != "checked files" ||
 		importedMessages[0].RunID != "run_existing_history" || importedMessages[0].RunID != importedMessages[1].RunID ||
