@@ -4,7 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
-import { getAppVersion, resolveAppBuildID } from "@/shared/api/app-version";
+import { getAppVersion } from "@/shared/api/app-version";
 
 const APP_VERSION_TOAST_ID = "deeix-chat:app-version-refresh";
 const APP_VERSION_CHECK_INTERVAL_MS = 10 * 60 * 1000;
@@ -48,10 +48,7 @@ export function AppVersionGuard() {
       checkingRef.current = true;
       lastCheckAtRef.current = now;
       try {
-        const nextBuildID = resolveAppBuildID(await getAppVersion());
-        if (!nextBuildID) {
-          return;
-        }
+        const nextBuildID = (await getAppVersion()).buildID;
 
         if (!loadedBuildIDRef.current) {
           loadedBuildIDRef.current = nextBuildID;

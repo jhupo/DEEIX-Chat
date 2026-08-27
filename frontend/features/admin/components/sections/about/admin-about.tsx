@@ -128,20 +128,34 @@ function AdminUpdateCheck() {
   useEffect(() => {
     if (!jobID || !jobStatus || terminalStatuses.has(jobStatus)) return;
 
-    const timer = window.setInterval(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    let finished = false;
+    const poll = () => {
       void getAdminUpdateJob(accessToken, jobID)
         .then((job) => {
+          if (cancelled) return;
           setReconnecting(false);
           setStatus((current) => (current ? { ...current, job } : current));
-          if (terminalStatuses.has(job.status) && completedJobID.current !== job.id) {
+          finished = terminalStatuses.has(job.status);
+          if (finished && completedJobID.current !== job.id) {
             completedJobID.current = job.id;
             void loadStatus(false).catch(() => setReconnecting(true));
           }
         })
-        .catch(() => setReconnecting(true));
-    }, 2000);
+        .catch(() => {
+          if (!cancelled) setReconnecting(true);
+        })
+        .finally(() => {
+          if (!cancelled && !finished) timer = window.setTimeout(poll, 2000);
+        });
+    };
+    timer = window.setTimeout(poll, 2000);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [accessToken, jobID, jobStatus, loadStatus]);
 
   const state = useDialogSnapshot(dialog);

@@ -38,6 +38,29 @@ export class ApiNetworkError extends Error {
   }
 }
 
+export function parseApiEnvelope<T>(value: unknown): ApiEnvelope<T> {
+  if (!value || typeof value !== "object" || !Object.hasOwn(value, "data")) {
+    throw new Error("invalid api response envelope");
+  }
+  const errorMsg = Reflect.get(value, "errorMsg");
+  const errorCode = Reflect.get(value, "errorCode");
+  const requestId = Reflect.get(value, "requestId");
+  if (
+    typeof errorMsg !== "string" ||
+    errorCode !== undefined && typeof errorCode !== "string" ||
+    requestId !== undefined && typeof requestId !== "string"
+  ) {
+    throw new Error("invalid api response envelope");
+  }
+  return {
+    data: Reflect.get(value, "data") as T,
+    details: Reflect.get(value, "details"),
+    errorCode,
+    errorMsg,
+    requestId,
+  };
+}
+
 function normalizeApiErrorMessage(message: string, status: number): string {
   const normalized = message.trim();
   if (/^errors\.[a-zA-Z0-9_.]+$/.test(normalized)) {
@@ -114,9 +137,20 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
   const contentType = response.headers.get("content-type") || "";
   const responseRequestId = response.headers.get("x-request-id") || undefined;
-  const payload = contentType.includes("application/json")
-    ? ((await response.json()) as ApiEnvelope<T>)
-    : ({ errorMsg: response.ok ? "" : await response.text(), requestId: responseRequestId } as ApiEnvelope<T>);
+  let payload: ApiEnvelope<T>;
+  if (contentType.includes("application/json")) {
+    try {
+      payload = parseApiEnvelope<T>(await response.json());
+    } catch {
+      throw new ApiError("invalid api response", 502, undefined, "response.invalid", responseRequestId);
+    }
+  } else {
+    const errorMsg = await response.text();
+    if (response.ok) {
+      throw new ApiError("invalid api response", 502, undefined, "response.invalid", responseRequestId);
+    }
+    payload = { data: undefined as T, errorMsg, requestId: responseRequestId };
+  }
 
   if (!response.ok) {
     throw new ApiError(

@@ -308,11 +308,22 @@ export function useFilesPage(): UseFilesPageResult {
       return;
     }
 
-    const timer = window.setInterval(() => {
-      void loadFiles({ silent: true, background: true, preferredFileID: selectedFileID });
-    }, 2000);
+    let cancelled = false;
+    let timer: number | null = null;
+    const poll = async () => {
+      await loadFiles({ silent: true, background: true, preferredFileID: selectedFileID });
+      if (!cancelled) {
+        timer = window.setTimeout(() => void poll(), 2000);
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 2000);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [files, loadFiles, loading, loadingMore, selectedFileID, uploading]);
 
   useFileInvalidation(

@@ -116,6 +116,7 @@ export function useRecentPage() {
     batchSetProjectByPublicIDs,
     touchByPublicID,
     lastChange,
+    lastAgentEvent,
   } = useSidebarConversations();
   const [items, setItems] = React.useState<ConversationDTO[]>([]);
   const [loadingInitial, setLoadingInitial] = React.useState(true);
@@ -270,7 +271,7 @@ export function useRecentPage() {
     pageRef.current = 1;
 
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         await loadPage(1, { replace: true, version });
       } finally {
@@ -278,12 +279,27 @@ export function useRecentPage() {
           setLoadingInitial(false);
         }
       }
-    })();
+    })().catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
   }, [loadPage]);
+
+  React.useEffect(() => {
+    if (
+      executionMode !== "gateway" ||
+      lastAgentEvent?.type !== "change" ||
+      lastAgentEvent.kind !== "workspace/sessions/updated" ||
+      lastAgentEvent.deviceID !== defaultDevice?.deviceId
+    ) {
+      return;
+    }
+
+    requestVersionRef.current += 1;
+    const version = requestVersionRef.current;
+    void loadPage(1, { replace: true, version }).catch(() => undefined);
+  }, [defaultDevice?.deviceId, executionMode, lastAgentEvent, loadPage]);
 
   const loadMore = React.useCallback(async () => {
     if (loadingInitial || loadingMoreRef.current || !hasMore || loadMoreFailedRef.current) {

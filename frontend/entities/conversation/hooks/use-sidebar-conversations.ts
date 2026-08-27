@@ -469,7 +469,7 @@ export function useSidebarConversationsController({
   }, [executionDeviceID, executionType, setProjectList]);
 
   React.useEffect(() => {
-    void loadInitial();
+    void loadInitial().catch(() => undefined);
   }, [loadInitial]);
 
   React.useEffect(() => {
@@ -488,7 +488,7 @@ export function useSidebarConversationsController({
       if (cancelled || reloadTimer !== null) return;
       reloadTimer = window.setTimeout(() => {
         reloadTimer = null;
-        void loadInitial();
+        void loadInitial().catch(() => undefined);
       }, AGENT_EVENT_RELOAD_DEBOUNCE_MS);
     };
 

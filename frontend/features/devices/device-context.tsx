@@ -8,6 +8,25 @@ import { useAuthSession } from "@/shared/auth/auth-session-context";
 
 const DEFAULT_DEVICE_KEY = "agent.default_device_id";
 
+function devicesEqual(current: AgentDeviceDTO[], next: AgentDeviceDTO[]): boolean {
+  return current.length === next.length && current.every((device, index) => {
+    const candidate = next[index];
+    return candidate !== undefined &&
+      device.agentVersion === candidate.agentVersion &&
+      device.createdAt === candidate.createdAt &&
+      device.deviceId === candidate.deviceId &&
+      device.lastSeenAt === candidate.lastSeenAt &&
+      device.latestAgentVersion === candidate.latestAgentVersion &&
+      device.name === candidate.name &&
+      device.online === candidate.online &&
+      device.platform === candidate.platform &&
+      device.status === candidate.status &&
+      device.updateAvailable === candidate.updateAvailable &&
+      device.updatedAt === candidate.updatedAt &&
+      device.userId === candidate.userId;
+  });
+}
+
 type DeviceContextValue = {
   devices: AgentDeviceDTO[];
   defaultDeviceId: string;
@@ -24,10 +43,13 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   const [devices, setDevices] = React.useState<AgentDeviceDTO[]>([]);
   const [defaultDeviceId, setDefaultDeviceId] = React.useState("");
   const [loading, setLoading] = React.useState(true);
+  const accessTokenRef = React.useRef(accessToken);
+  const refreshInFlightRef = React.useRef(false);
+  accessTokenRef.current = accessToken;
 
   const applyDevices = React.useCallback((nextDevices: AgentDeviceDTO[], preferredDeviceId?: string) => {
     const active = nextDevices.filter((item) => item.status === "active");
-    setDevices(nextDevices);
+    setDevices((current) => devicesEqual(current, nextDevices) ? current : nextDevices);
     setDefaultDeviceId((current) => {
       const preferred = preferredDeviceId ?? current;
       return active.some((item) => item.deviceId === preferred) ? preferred : (active[0]?.deviceId ?? "");
@@ -35,10 +57,19 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refresh = React.useCallback(async () => {
+    if (refreshInFlightRef.current) {
+      return;
+    }
+    refreshInFlightRef.current = true;
     try {
-      applyDevices(await listAgentDevices(accessToken));
+      const nextDevices = await listAgentDevices(accessToken);
+      if (accessTokenRef.current === accessToken) {
+        applyDevices(nextDevices);
+      }
     } catch {
       // Keep the last known state during a transient polling failure.
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [accessToken, applyDevices]);
 
@@ -58,10 +89,17 @@ export function DeviceProvider({ children }: { children: React.ReactNode }) {
       .finally(() => {
         if (active) setLoading(false);
       });
-    const timer = window.setInterval(() => { void refresh(); }, 15_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    const timer = window.setInterval(refreshWhenVisible, 15_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       active = false;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [accessToken, applyDevices, refresh]);
 
