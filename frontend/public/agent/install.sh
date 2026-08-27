@@ -22,8 +22,8 @@ done
 }
 
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64) asset="deeix-agent-linux-x64"; service="systemd" ;;
-  Darwin-arm64) asset="deeix-agent-macos-arm64"; service="launchd" ;;
+  Linux-x86_64) asset="deeix-agent-linux-x64"; service="systemd"; checksum="sha256sum" ;;
+  Darwin-arm64) asset="deeix-agent-macos-arm64"; service="launchd"; checksum="shasum" ;;
   *) echo "This operating system package is not published." >&2; exit 1 ;;
 esac
 
@@ -39,33 +39,29 @@ installed="$install_dir/deeix-agent"
 temporary="$(mktemp -d)"
 download="$temporary/$asset"
 backup="$installed.previous"
+config_path="$data_dir/config.json"
+config_backup="$temporary/config.json.previous"
+had_config=0
 trap 'rm -rf "$temporary"' EXIT INT TERM
+
+if [ -f "$config_path" ]; then
+  cp -p "$config_path" "$config_backup"
+  had_config=1
+fi
 
 curl -fL --retry 3 "$base/$asset" -o "$download"
 curl -fL --retry 3 "$base/$asset.sha256" -o "$download.sha256"
-(cd "$temporary" && shasum -a 256 -c "$asset.sha256")
+if [ "$checksum" = "sha256sum" ]; then
+  (cd "$temporary" && sha256sum -c "$asset.sha256")
+else
+  (cd "$temporary" && shasum -a 256 -c "$asset.sha256")
+fi
 chmod 755 "$download"
 
 set -- install --server "$server" --user "$user" --codex "$codex" --data-dir "$data_dir"
 [ -z "$workspace" ] || set -- "$@" --workspace "$workspace"
 [ -z "$name" ] || set -- "$@" --name "$name"
 "$download" "$@"
-
-if [ "$service" = "systemd" ]; then
-  systemctl --user stop deeix-agent.service >/dev/null 2>&1 || true
-else
-  launchctl bootout "gui/$(id -u)/com.deeix.agent" >/dev/null 2>&1 || true
-fi
-mkdir -p "$install_dir" "$bin_dir"
-rm -f "$backup"
-[ ! -f "$installed" ] || mv "$installed" "$backup"
-if mv "$download" "$installed"; then
-  chmod 755 "$installed"
-else
-  [ ! -f "$backup" ] || mv "$backup" "$installed"
-  exit 1
-fi
-ln -sf "$installed" "$bin_dir/deeix-agent"
 
 start_service() {
   if [ "$service" = "systemd" ]; then
@@ -107,20 +103,82 @@ EOF
   fi
 }
 
-rm -f "$data_dir/runtime-status.json"
-rollback() {
+stop_service() {
   if [ "$service" = "systemd" ]; then
     systemctl --user stop deeix-agent.service >/dev/null 2>&1 || true
   else
     launchctl bootout "gui/$(id -u)/com.deeix.agent" >/dev/null 2>&1 || true
   fi
-  rm -f "$installed"
-  if [ -f "$backup" ]; then
-    mv "$backup" "$installed"
-    start_service >/dev/null 2>&1 || true
-  fi
 }
 
+restore_config() {
+  if [ "$had_config" -eq 0 ]; then
+    rm -f "$config_path"
+    return 0
+  fi
+  cp -p "$config_backup" "$config_path.rollback" || return 1
+  mv -f "$config_path.rollback" "$config_path"
+}
+
+had_binary=0
+replacement_started=0
+link_replaced=0
+service_attempted=0
+[ ! -f "$installed" ] || had_binary=1
+rollback() {
+  rollback_failed=0
+  stop_service
+  restore_config || rollback_failed=1
+  if [ "$had_binary" -eq 1 ]; then
+    if [ -f "$backup" ]; then
+      rm -f "$installed" || rollback_failed=1
+      mv "$backup" "$installed" || rollback_failed=1
+    fi
+    if [ "$rollback_failed" -eq 0 ]; then
+      start_service >/dev/null 2>&1 || rollback_failed=1
+    fi
+  else
+    if [ "$replacement_started" -eq 1 ]; then rm -f "$installed" || rollback_failed=1; fi
+    if [ "$service_attempted" -eq 1 ]; then
+      if [ "$service" = "systemd" ]; then
+        systemctl --user disable deeix-agent.service >/dev/null 2>&1 || true
+        rm -f "$HOME/.config/systemd/user/deeix-agent.service" || rollback_failed=1
+        systemctl --user daemon-reload >/dev/null 2>&1 || rollback_failed=1
+      else
+        rm -f "$HOME/Library/LaunchAgents/com.deeix.agent.plist" || rollback_failed=1
+      fi
+    fi
+    if [ "$link_replaced" -eq 1 ]; then rm -f "$bin_dir/deeix-agent" || rollback_failed=1; fi
+  fi
+  [ "$rollback_failed" -eq 0 ]
+}
+
+mkdir -p "$install_dir" "$bin_dir"
+rm -f "$backup"
+stop_service
+if [ "$had_binary" -eq 1 ] && ! mv "$installed" "$backup"; then
+  if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+  echo "DEEIX Agent executable backup failed" >&2
+  exit 1
+fi
+if ! mv "$download" "$installed"; then
+  if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+  echo "DEEIX Agent executable installation failed" >&2
+  exit 1
+fi
+replacement_started=1
+if ! chmod 755 "$installed" || ! ln -sf "$installed" "$bin_dir/deeix-agent"; then
+  if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+  echo "DEEIX Agent command installation failed" >&2
+  exit 1
+fi
+link_replaced=1
+if ! rm -f "$data_dir/runtime-status.json"; then
+  if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+  echo "DEEIX Agent runtime status reset failed" >&2
+  exit 1
+fi
+service_attempted=1
 if start_service; then
   attempts=0
   connected_seconds=0
@@ -133,10 +191,17 @@ if start_service; then
       connected_seconds=0
     fi
   done
-  if [ "$connected_seconds" -lt 20 ]; then rollback; exit 1; fi
+  if [ "$connected_seconds" -lt 20 ]; then
+    detail="no runtime log was written"
+    [ ! -f "$data_dir/agent.log" ] || detail=$(tail -n 1 "$data_dir/agent.log")
+    if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+    echo "DEEIX Agent service did not connect: $detail" >&2
+    exit 1
+  fi
   rm -f "$backup"
 else
-  rollback
+  if ! rollback; then echo "DEEIX Agent rollback failed" >&2; fi
+  echo "DEEIX Agent service installation failed" >&2
   exit 1
 fi
 echo "DEEIX Agent is installed and running: $installed"

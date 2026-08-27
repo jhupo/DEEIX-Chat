@@ -6,6 +6,42 @@ param(
   [string]$Codex = "codex"
 )
 $ErrorActionPreference = "Stop"
+function Invoke-DEEIXNative {
+  param(
+    [Parameter(Mandatory = $true)][string]$FilePath,
+    [string[]]$ArgumentList = @()
+  )
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = "Continue"
+    $output = ((& $FilePath @ArgumentList 2>&1) | ForEach-Object {
+      if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ }
+    } | Out-String).Trim()
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+  [pscustomobject]@{ Output = $output; ExitCode = $exitCode }
+}
+function Restore-DEEIXConfig {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][string]$Destination
+  )
+  $restorePath = "$Destination.rollback"
+  $replacedPath = "$Destination.replaced"
+  Remove-Item -LiteralPath $replacedPath -Force -ErrorAction SilentlyContinue
+  Copy-Item -LiteralPath $Source -Destination $restorePath -Force
+  try {
+    if (Test-Path -LiteralPath $Destination) {
+      [IO.File]::Replace($restorePath, $Destination, $replacedPath)
+    } else {
+      Move-Item -LiteralPath $restorePath -Destination $Destination
+    }
+  } finally {
+    Remove-Item -LiteralPath $restorePath, $replacedPath -Force -ErrorAction SilentlyContinue
+  }
+}
 $base = if ($env:DEEIX_AGENT_RELEASE_BASE) { $env:DEEIX_AGENT_RELEASE_BASE } else { "$($Server.TrimEnd('/'))/agent/releases/current" }
 $asset = "deeix-agent-windows-x64.exe"
 $installDir = if ($env:DEEIX_AGENT_HOME) { $env:DEEIX_AGENT_HOME } else { Join-Path $env:LOCALAPPDATA "Programs\DEEIX Agent" }
@@ -14,6 +50,8 @@ $installed = Join-Path $installDir "deeix-agent.exe"
 $temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("deeix-agent-" + [guid]::NewGuid().ToString("N"))
 $download = Join-Path $temporary $asset
 $backup = "$installed.previous"
+$configPath = Join-Path $dataDir "config.json"
+$configBackup = Join-Path $temporary "config.json.previous"
 $taskName = "DEEIX Agent"
 $legacyTaskName = "DEEIX Agent Bridge"
 $legacyInstallDir = Join-Path $env:LOCALAPPDATA "DEEIX\AgentBridge"
@@ -23,15 +61,18 @@ $hadScheduledTask = $null -ne (Get-ScheduledTask -TaskName $taskName -ErrorActio
 $hadLegacyScheduledTask = $null -ne (Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue)
 $hadService = $null -ne (Get-Service -Name "DEEIXAgent" -ErrorAction SilentlyContinue)
 New-Item -ItemType Directory -Force -Path $temporary, $installDir, $dataDir | Out-Null
+$hadConfig = Test-Path -LiteralPath $configPath
+if ($hadConfig) { Copy-Item -LiteralPath $configPath -Destination $configBackup }
 try {
   Write-Host "DEEIX Agent: downloading and verifying the current release..."
-  Invoke-WebRequest "$base/$asset" -OutFile $download
-  Invoke-WebRequest "$base/$asset.sha256" -OutFile "$download.sha256"
+  Invoke-WebRequest "$base/$asset" -UseBasicParsing -OutFile $download
+  Invoke-WebRequest "$base/$asset.sha256" -UseBasicParsing -OutFile "$download.sha256"
   $expected = ((Get-Content "$download.sha256" -Raw).Trim() -split "\s+")[0]
   $actual = (Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $expected.ToLowerInvariant()) { throw "DEEIX Agent checksum mismatch" }
-  $downloadVersion = ((& $download version 2>&1) | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $downloadVersion) { throw "DEEIX Agent version check failed" }
+  $versionCheck = Invoke-DEEIXNative -FilePath $download -ArgumentList @("version")
+  $downloadVersion = $versionCheck.Output
+  if ($versionCheck.ExitCode -ne 0 -or -not $downloadVersion) { throw "DEEIX Agent version check failed" }
 
   @($taskName, $legacyTaskName) | ForEach-Object {
     Stop-ScheduledTask -TaskName $_ -ErrorAction SilentlyContinue
@@ -52,9 +93,9 @@ try {
   Write-Host "DEEIX Agent: configuring this device..."
   $installArgs = @("install", "--server", $Server, "--user", $User, "--name", $Name, "--codex", $Codex, "--data-dir", $dataDir)
   if ($Workspace) { $installArgs += @("--workspace", $Workspace) }
-  $installOutput = ((& $download @installArgs 2>&1) | Out-String).Trim()
-  $installExitCode = $LASTEXITCODE
-  if ($installExitCode -ne 0) {
+  $installResult = Invoke-DEEIXNative -FilePath $download -ArgumentList $installArgs
+  $installOutput = $installResult.Output
+  if ($installResult.ExitCode -ne 0) {
     $detail = if ($installOutput) { $installOutput } else { "no diagnostic output was returned" }
     throw "DEEIX Agent configuration failed: $detail"
   }
@@ -66,6 +107,10 @@ try {
   $dataDirLiteral = $dataDir.Replace("'", "''")
   $legacyInstallDirLiteral = $legacyInstallDir.Replace("'", "''")
   $userSIDLiteral = $userSID.Replace("'", "''")
+  $configPathLiteral = $configPath.Replace("'", "''")
+  $configBackupLiteral = $configBackup.Replace("'", "''")
+  $configRestorePathLiteral = "$configPath.rollback".Replace("'", "''")
+  $configReplacedPathLiteral = "$configPath.replaced".Replace("'", "''")
   $errorFile = Join-Path $temporary "service-install.error.txt"
   $errorFileLiteral = $errorFile.Replace("'", "''")
   $serviceScript = @"
@@ -104,6 +149,19 @@ try {
     Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath '$backupLiteral') {
       Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral'
+      if ('$hadConfig' -eq 'True' -and (Test-Path -LiteralPath '$configBackupLiteral')) {
+        Remove-Item -LiteralPath '$configReplacedPathLiteral' -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath '$configBackupLiteral' -Destination '$configRestorePathLiteral' -Force
+        try {
+          if (Test-Path -LiteralPath '$configPathLiteral') {
+            [IO.File]::Replace('$configRestorePathLiteral', '$configPathLiteral', '$configReplacedPathLiteral')
+          } else {
+            Move-Item -LiteralPath '$configRestorePathLiteral' -Destination '$configPathLiteral'
+          }
+        } finally {
+          Remove-Item -LiteralPath '$configRestorePathLiteral', '$configReplacedPathLiteral' -Force -ErrorAction SilentlyContinue
+        }
+      }
       if ('$hadService' -eq 'True') {
         & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
         if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent previous service restoration failed' }
@@ -161,29 +219,60 @@ try {
     Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue
   }
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-  $installedVersion = ((& $installed version 2>&1) | Out-String).Trim()
-  Write-Host "DEEIX Agent system service is installed and connected: $installedVersion ($installed)"
+  Write-Host "DEEIX Agent system service is installed and connected: $downloadVersion ($installed)"
 } catch {
-	$installError = $_
+  $installError = $_
+  $recoveryError = ""
+  if ($hadConfig -and (Test-Path -LiteralPath $configBackup)) {
+    try {
+      Restore-DEEIXConfig -Source $configBackup -Destination $configPath
+    } catch {
+      $recoveryError = "restore previous Agent configuration: $($_.Exception.Message)"
+    }
+  } elseif (-not $hadConfig) {
+    Remove-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
+  }
   if ($serviceInstalled) {
     $installedLiteral = $installed.Replace("'", "''")
     $backupLiteral = $backup.Replace("'", "''")
     $dataDirLiteral = $dataDir.Replace("'", "''")
     $userSIDLiteral = $userSID.Replace("'", "''")
+    $rollbackErrorFile = Join-Path $temporary "service-rollback.error.txt"
+    $rollbackErrorFileLiteral = $rollbackErrorFile.Replace("'", "''")
     $rollbackScript = @"
 `$ErrorActionPreference = 'Stop'
-if (Test-Path -LiteralPath '$installedLiteral') { & '$installedLiteral' service-uninstall 2>`$null }
-Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
-if (Test-Path -LiteralPath '$backupLiteral') {
-  Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral'
-  if ('$hadService' -eq 'True') {
-    & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
-    if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent previous service restoration failed' }
+try {
+  if (Test-Path -LiteralPath '$installedLiteral') { & '$installedLiteral' service-uninstall 2>`$null }
+  Remove-Item -LiteralPath '$installedLiteral' -Force -ErrorAction SilentlyContinue
+  if (Test-Path -LiteralPath '$backupLiteral') {
+    Move-Item -LiteralPath '$backupLiteral' -Destination '$installedLiteral'
+    if ('$hadService' -eq 'True') {
+      & '$installedLiteral' service-install --data-dir '$dataDirLiteral' --user-sid '$userSIDLiteral'
+      if (`$LASTEXITCODE -ne 0) { throw 'DEEIX Agent previous service restoration failed' }
+    }
   }
+} catch {
+  [IO.File]::WriteAllText('$rollbackErrorFileLiteral', `$_.Exception.Message)
+  exit 1
 }
 "@
     $encodedRollback = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($rollbackScript))
-    Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback" | Out-Null
+    try {
+      if ($isElevated) {
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback
+        $rollbackExitCode = $LASTEXITCODE
+      } else {
+        $rollbackProcess = Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedRollback"
+        $rollbackExitCode = $rollbackProcess.ExitCode
+      }
+      if ($rollbackExitCode -ne 0) {
+        $detail = if (Test-Path -LiteralPath $rollbackErrorFile) { (Get-Content -LiteralPath $rollbackErrorFile -Raw).Trim() } else { "administrator approval was not completed" }
+        throw $detail
+      }
+    } catch {
+      $detail = "restore previous Agent service: $($_.Exception.Message)"
+      $recoveryError = if ($recoveryError) { "$recoveryError; $detail" } else { $detail }
+    }
   } elseif ($hadService) {
     try {
       $service = Get-Service -Name "DEEIXAgent" -ErrorAction Stop
@@ -192,16 +281,22 @@ if (Test-Path -LiteralPath '$backupLiteral') {
         $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
       }
     } catch {
-      throw "DEEIX Agent update failed and the previous service did not restart: $($installError.Exception.Message); recovery: $($_.Exception.Message)"
+      $detail = "restart previous Agent service: $($_.Exception.Message)"
+      $recoveryError = if ($recoveryError) { "$recoveryError; $detail" } else { $detail }
     }
   }
-  Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
-  if ($hadService) {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-  } elseif ($hadScheduledTask) {
-    Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($hadService -and -not $recoveryError) {
+    @($taskName, $legacyTaskName) | ForEach-Object {
+      Unregister-ScheduledTask -TaskName $_ -Confirm:$false -ErrorAction SilentlyContinue
+    }
+  } else {
+    if ($hadScheduledTask) { Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
+    if ($hadLegacyScheduledTask) { Start-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue }
   }
-	throw $installError
+  if ($recoveryError) {
+    throw "DEEIX Agent update failed: $($installError.Exception.Message); recovery failed: $recoveryError"
+  }
+  throw $installError
 } finally {
   Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
 }
