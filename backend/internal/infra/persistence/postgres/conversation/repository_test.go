@@ -72,6 +72,16 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.EndedAt == nil {
 		t.Fatalf("recovered run = %#v, %v", run, err)
 	}
+	late := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:late-delta", Kind: "item/agentMessage/delta",
+		PayloadJSON: `{"delta":" must not be appended"}`, TextDelta: " must not be appended", OccurredAt: now.Add(3 * time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), late); err != nil || applied {
+		t.Fatalf("late gateway event: applied=%v err=%v", applied, err)
+	}
+	if err := db.First(&assistant, messages[1].ID).Error; err != nil || assistant.Content != "partial continued" {
+		t.Fatalf("late gateway event changed assistant = %#v, %v", assistant, err)
+	}
 }
 
 func TestGatewayProjectionTruncatesLongTerminalError(t *testing.T) {

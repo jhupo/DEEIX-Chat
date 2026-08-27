@@ -19,11 +19,10 @@ func (s *Service) ProjectGatewayEvent(ctx context.Context, input GatewayExecutio
 		return err
 	}
 	// Repository projection is idempotent by SourceKey. Only the first
-	// application may advance the live stream; replayed bridge deltas must
-	// remain durable no-ops for connected subscribers. A terminal event is
-	// safe to republish because it is the signal that closes the stream.
+	// application may advance the live stream; replayed bridge events are
+	// durable no-ops unless an active subscriber still needs its terminal.
 	if !applied {
-		if event.TerminalStatus != "" {
+		if event.TerminalStatus != "" && s.HasActiveMessageGeneration(ctx, event.RunID) {
 			if err := s.publishMessageGenerationEventReliable(event.RunID, map[string]interface{}{
 				"type": "gateway_completed", "status": event.TerminalStatus,
 			}); err != nil {

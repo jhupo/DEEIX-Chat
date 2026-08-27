@@ -24,7 +24,7 @@ func (s *steerConversationRepoStub) GetConversationExecutionByRunID(context.Cont
 type steerGatewayExecutorStub struct {
 	gatewayExecutor
 	steerCalls, startCalls, interruptCalls int
-	steerErr                               error
+	steerErr, interruptErr                 error
 	steerInput                             []byte
 }
 
@@ -41,7 +41,7 @@ func (s *steerGatewayExecutorStub) StartTurn(context.Context, uint, GatewayStart
 
 func (s *steerGatewayExecutorStub) InterruptRun(context.Context, uint, string, string) error {
 	s.interruptCalls++
-	return nil
+	return s.interruptErr
 }
 
 func TestSteerConversationRunUsesOnlyActiveGatewaySteer(t *testing.T) {
@@ -77,6 +77,39 @@ func TestSteerConversationRunUsesOnlyActiveGatewaySteer(t *testing.T) {
 type gatewayProjectionRepoStub struct {
 	repository.ConversationRepository
 	applied bool
+}
+
+type cancelGatewayRepoStub struct {
+	repository.ConversationRepository
+	event model.ExecutionEvent
+}
+
+func (s *cancelGatewayRepoStub) GetConversationExecutionByRunID(context.Context, uint, string) (*model.Conversation, error) {
+	return &model.Conversation{ID: 11, UserID: 7, ExecutionType: model.ExecutionTypeGateway}, nil
+}
+
+func (s *cancelGatewayRepoStub) ProjectExecutionEvent(_ context.Context, event *model.ExecutionEvent) (bool, error) {
+	event.Seq = 1
+	s.event = *event
+	return true, nil
+}
+
+func TestCancelGatewayRunCommitsInterruptedStateWhenRemoteInterruptFails(t *testing.T) {
+	repo := &cancelGatewayRepoStub{}
+	gateway := &steerGatewayExecutorStub{interruptErr: errors.New("thread not found")}
+	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), defaultGenerationStreamOptions())
+	registry.register(context.Background(), "run_cancel", 7, func() {})
+	service := &Service{repo: repo, gatewayExecutor: gateway, generationStreams: registry}
+
+	if !service.CancelMessageGeneration(context.Background(), 7, "run_cancel") {
+		t.Fatal("gateway cancellation was rejected after the remote thread disappeared")
+	}
+	if gateway.interruptCalls != 1 || repo.event.TerminalStatus != "interrupted" || repo.event.Kind != "turn/completed" {
+		t.Fatalf("gateway cancellation = calls %d event %#v", gateway.interruptCalls, repo.event)
+	}
+	if service.HasActiveMessageGeneration(context.Background(), "run_cancel") {
+		t.Fatal("interrupted generation retained an active lease")
+	}
 }
 
 func (s *gatewayProjectionRepoStub) ProjectExecutionEvent(_ context.Context, _ *model.ExecutionEvent) (bool, error) {
@@ -333,5 +366,44 @@ func TestCompactExecutionHistoryMergesIncrementalText(t *testing.T) {
 	}
 	if commandDelta.OutputDelta != strings.Repeat("x", 100) || reasoningDelta.Delta != "first\n\nsecond" {
 		t.Fatalf("compacted deltas = command %q reasoning %q", commandDelta.OutputDelta, reasoningDelta.Delta)
+	}
+}
+
+type executionPageRepoStub struct {
+	repository.ConversationRepository
+	conversation model.Conversation
+	events       []model.ExecutionEvent
+}
+
+func (s *executionPageRepoStub) GetConversationByPublicID(context.Context, string, uint) (*model.Conversation, error) {
+	result := s.conversation
+	return &result, nil
+}
+
+func (s *executionPageRepoStub) ListExecutionEvents(context.Context, uint, uint, uint64, []string, int) ([]model.ExecutionEvent, error) {
+	return append([]model.ExecutionEvent(nil), s.events...), nil
+}
+
+func TestListExecutionEventsCompactsLivePageWithoutMovingCursorBackward(t *testing.T) {
+	repo := &executionPageRepoStub{
+		conversation: model.Conversation{ID: 11, UserID: 7, ExecutionEventSeq: 4},
+		events: []model.ExecutionEvent{
+			{RunID: "run_live", Seq: 2, Kind: "item/commandExecution/outputDelta", PayloadJSON: `{"itemID":"command_1","outputDelta":"first"}`},
+			{RunID: "run_live", Seq: 3, Kind: "item/commandExecution/outputDelta", PayloadJSON: `{"itemID":"command_1","outputDelta":" second"}`},
+			{RunID: "run_live", Seq: 4, Kind: "thread/tokenUsage/updated", PayloadJSON: `{"tokenUsage":{"totalTokens":12}}`},
+		},
+	}
+	page, err := (&Service{repo: repo}).ListExecutionEvents(context.Background(), 7, "conversation_live", 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Cursor != 4 || page.HasMore || len(page.Events) != 2 {
+		t.Fatalf("live page = cursor %d hasMore %v events %#v", page.Cursor, page.HasMore, page.Events)
+	}
+	var delta struct {
+		Output string `json:"outputDelta"`
+	}
+	if err := json.Unmarshal([]byte(page.Events[0].PayloadJSON), &delta); err != nil || delta.Output != "first second" {
+		t.Fatalf("compacted live delta = %#v, %v", delta, err)
 	}
 }

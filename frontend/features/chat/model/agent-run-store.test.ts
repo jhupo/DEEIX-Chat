@@ -198,6 +198,21 @@ test("keeps compacted command output and reasoning when terminal items omit text
   assert.equal(reasoning?.kind === "reasoning" ? reasoning.text : "", "checked history");
 });
 
+test("bounds command output accumulated from live events", () => {
+  setAgentRunContext("command-output-context", "conversation-output");
+  applyAgentExecutionEvents([
+    { runID: "run-output", seq: 1, kind: "item/started", payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", status: "inProgress", command: "rg pattern" } }, occurredAt: "2026-08-27T00:00:01Z" },
+    { runID: "run-output", seq: 2, kind: "item/commandExecution/outputDelta", payload: { itemID: "command-1", outputDelta: "x".repeat(256 * 1024 + 1) }, occurredAt: "2026-08-27T00:00:02Z" },
+    { runID: "run-output", seq: 3, kind: "item/commandExecution/outputDelta", payload: { itemID: "command-1", outputDelta: "ignored" }, occurredAt: "2026-08-27T00:00:03Z" },
+  ], "conversation-output");
+
+  const item = getAgentRunSnapshot("run-output").items[0];
+  assert.equal(item?.kind, "command");
+  if (item?.kind !== "command") return;
+  assert.equal(item.output.length, 256 * 1024);
+  assert.equal(item.outputTruncated, true);
+});
+
 test("normalizes canonical tool items into the shared activity timeline", () => {
   setAgentRunContext("tool-context", "conversation-tool");
   applyAgentExecutionEvents([

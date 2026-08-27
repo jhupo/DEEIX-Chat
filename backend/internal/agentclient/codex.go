@@ -41,6 +41,7 @@ var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", 
 
 const maxSessionMessageRunes = 64 * 1024
 const maxExecutionTextBytes = 1 << 20
+const maxCommandExecutionOutputBytes = 256 << 10
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
 
@@ -95,11 +96,13 @@ type pendingInteraction struct {
 }
 
 type executionItemProjection struct {
-	TurnID  string
-	Kind    string
-	Phase   string
-	Command string
-	Files   []any
+	TurnID          string
+	Kind            string
+	Phase           string
+	Command         string
+	Files           []any
+	OutputBytes     int
+	OutputTruncated bool
 }
 
 type workspaceSessionSnapshot struct {
@@ -1404,6 +1407,9 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 		}
 	}
 	payload := adapter.projectNotification(notification.Method, params, sourceItemRef)
+	if payload == nil {
+		return nil
+	}
 	if event["kind"] == "provider.extension" {
 		payload = map[string]any{"method": notification.Method, "data": payload}
 	}
@@ -1595,7 +1601,9 @@ func (adapter *CodexAdapter) rememberExecutionItem(itemID, turnID string, item m
 	if adapter.executionItems == nil {
 		adapter.executionItems = make(map[string]executionItemProjection)
 	}
-	if _, exists := adapter.executionItems[itemID]; exists {
+	if existing, exists := adapter.executionItems[itemID]; exists {
+		projection.OutputBytes = existing.OutputBytes
+		projection.OutputTruncated = existing.OutputTruncated
 		adapter.executionItems[itemID] = projection
 		return
 	}
@@ -1614,6 +1622,29 @@ func (adapter *CodexAdapter) executionItem(itemID string) executionItemProjectio
 	projection := adapter.executionItems[itemID]
 	projection.Files = append([]any(nil), projection.Files...)
 	return projection
+}
+
+func (adapter *CodexAdapter) projectCommandOutputDelta(itemID, delta string) (string, bool, bool) {
+	if itemID == "" || delta == "" {
+		return "", false, false
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	projection, exists := adapter.executionItems[itemID]
+	if !exists || projection.Kind != "commandExecution" || projection.OutputTruncated {
+		return "", false, false
+	}
+	remaining := maxCommandExecutionOutputBytes - projection.OutputBytes
+	if remaining <= 0 {
+		projection.OutputTruncated = true
+		adapter.executionItems[itemID] = projection
+		return "", true, true
+	}
+	output, truncated := boundedText(delta, remaining)
+	projection.OutputBytes += len(output)
+	projection.OutputTruncated = truncated
+	adapter.executionItems[itemID] = projection
+	return output, truncated, true
 }
 
 func (adapter *CodexAdapter) forgetExecutionItem(itemID string) {
@@ -1906,7 +1937,10 @@ func (adapter *CodexAdapter) projectNotification(method string, params map[strin
 		}
 		return result
 	case "item/commandExecution/outputDelta":
-		output, truncated := boundedText(stringField(params, "delta"), maxExecutionTextBytes)
+		output, truncated, emit := adapter.projectCommandOutputDelta(stringField(params, "itemId"), stringField(params, "delta"))
+		if !emit {
+			return nil
+		}
 		return map[string]any{"itemID": sourceItemRef, "outputDelta": output, "truncated": truncated}
 	case "item/fileChange/patchUpdated":
 		result := map[string]any{"itemID": sourceItemRef, "changes": adapter.projectExecutionChanges(params["changes"])}
@@ -1999,7 +2033,11 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 		result["commandActions"] = sanitizeCommandActions(actions)
 	}
 	if output, ok := item["aggregatedOutput"].(string); ok {
-		result["output"], result["truncated"] = boundedText(output, maxExecutionTextBytes)
+		limit := maxExecutionTextBytes
+		if kind == "commandExecution" {
+			limit = maxCommandExecutionOutputBytes
+		}
+		result["output"], result["truncated"] = boundedText(output, limit)
 	}
 	if exitCode, ok := finiteNumber(item["exitCode"]); ok {
 		result["exitCode"] = exitCode

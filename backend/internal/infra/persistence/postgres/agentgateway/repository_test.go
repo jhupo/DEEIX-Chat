@@ -40,6 +40,83 @@ func TestHistoryMessageMatchesExactProjection(t *testing.T) {
 	}
 }
 
+func TestQueueTurnInterruptImmediatelyTerminalizesLocalTurn(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{},
+		&model.AgentTurn{}, &model.AgentInteraction{}, &model.AgentCommand{}, &model.AgentIdempotencyRecord{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 28, 1, 0, 0, 0, time.UTC)
+	lease := now.Add(time.Minute)
+	device := model.AgentDevice{
+		PublicID: "agd_interrupt", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("1", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{
+		PublicID: "profile-interrupt", UserID: 7, DeviceID: device.ID, Provider: "codex",
+		Status: domainagent.RuntimeStatusReady, ManifestJSON: "{}", LeaseExpiresAt: &lease,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-interrupt", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "project", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	threadRef, turnRef := "source-thread", "source-turn"
+	thread := model.AgentThread{
+		PublicID: "agth_interrupt", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		WorkspaceID: workspace.ID, ConversationID: 1, SourceThreadRef: &threadRef, Status: "active",
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	turn := model.AgentTurn{
+		PublicID: "agturn_interrupt", UserID: 7, ThreadID: thread.ID, RunID: "run_interrupt",
+		SourceTurnRef: &turnRef, Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	interaction := model.AgentInteraction{
+		PublicID: "agint_interrupt", UserID: 7, ThreadID: thread.ID, TurnID: &turn.ID,
+		RuntimeProfileID: profile.ID, SourceRequestRef: "request-interrupt", Kind: "command_approval",
+		RequestJSON: "{}", Status: "pending",
+	}
+	if err := database.Create(&interaction).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	queued, err := repo.QueueTurnInterrupt(
+		context.Background(), "interrupt-key", "interrupt-hash", 7, turn.PublicID,
+		&domainagent.Command{PublicID: "agcmd_interrupt", Kind: "turn.interrupt"}, now,
+	)
+	if err != nil || queued.State != "queued" {
+		t.Fatalf("queue interrupt = %#v, %v", queued, err)
+	}
+	if err := database.First(&turn, turn.ID).Error; err != nil || turn.Status != "interrupted" {
+		t.Fatalf("interrupted turn = %#v, %v", turn, err)
+	}
+	if err := database.First(&interaction, interaction.ID).Error; err != nil || interaction.Status != "resolved" {
+		t.Fatalf("resolved interaction = %#v, %v", interaction, err)
+	}
+	if err := updateAgentTurnTerminal(database, turn.ID, "completed", "", "", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.First(&turn, turn.ID).Error; err != nil || turn.Status != "interrupted" {
+		t.Fatalf("late completion changed interrupted turn = %#v, %v", turn, err)
+	}
+}
+
 func TestDeviceEnrollmentIsIdempotentButDoesNotRestoreRevokedDevice(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(

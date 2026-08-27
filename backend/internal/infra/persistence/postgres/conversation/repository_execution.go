@@ -49,6 +49,15 @@ func (r *Repo) ProjectExecutionEvent(ctx context.Context, item *domainconversati
 		if messageCount == 0 {
 			return repository.ErrConflict
 		}
+		var run model.ConversationRun
+		if err := tx.Select("status").
+			Where("conversation_id = ? AND user_id = ? AND run_id = ?", item.ConversationID, item.UserID, item.RunID).
+			First(&run).Error; err != nil {
+			return err
+		}
+		if run.Status == "success" || run.Status == "interrupted" || run.Status == "error" {
+			return nil
+		}
 
 		var existing int64
 		if err := tx.Model(&model.ConversationExecutionEvent{}).Where("source_key = ?", item.SourceKey).Count(&existing).Error; err != nil {

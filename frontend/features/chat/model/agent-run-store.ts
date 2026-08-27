@@ -125,6 +125,7 @@ const EMPTY_RUN: AgentRunSnapshot = Object.freeze({
 const runs = new Map<string, AgentRunSnapshot>();
 const eventJournals = new Map<string, Map<number, ConversationExecutionEventDTO>>();
 const listeners = new Set<() => void>();
+const MAX_COMMAND_OUTPUT_LENGTH = 256 * 1024;
 let activeContextKey = "";
 let activeConversationID = "";
 
@@ -147,6 +148,13 @@ function stringValue(value: unknown): string {
 
 function rawString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function appendCommandOutput(current: string, delta: string): { text: string; truncated: boolean } {
+  const remaining = MAX_COMMAND_OUTPUT_LENGTH - current.length;
+  if (remaining <= 0) return { text: current, truncated: delta.length > 0 };
+  if (delta.length <= remaining) return { text: current + delta, truncated: false };
+  return { text: current + delta.slice(0, remaining), truncated: true };
 }
 
 function textParts(value: unknown): string {
@@ -277,6 +285,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
       truncated: item.truncated === true,
     };
   }
+  const output = appendCommandOutput("", rawString(item.output));
   return {
     itemID: id,
     seq,
@@ -286,8 +295,8 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
     cwd: rawString(item.cwd),
     durationMS: finiteNumber(item.durationMs),
     commandActions: Array.isArray(item.commandActions) ? item.commandActions : [],
-    output: rawString(item.output),
-    outputTruncated: item.truncated === true,
+    output: output.text,
+    outputTruncated: item.truncated === true || output.truncated,
     exitCode: finiteNumber(item.exitCode),
   };
 }
@@ -409,6 +418,7 @@ function reduceAgentExecutionEvent(
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "command",
       ) as AgentCommandActivity | undefined;
+      const output = appendCommandOutput(currentItem?.output ?? "", delta);
       next.items = upsertItem(next.items, {
         itemID: id,
         seq: currentItem?.seq ?? event.seq,
@@ -418,8 +428,8 @@ function reduceAgentExecutionEvent(
         cwd: currentItem?.cwd ?? "",
         durationMS: currentItem?.durationMS ?? null,
         commandActions: currentItem?.commandActions ?? [],
-        output: `${currentItem?.output ?? ""}${delta}`,
-        outputTruncated: currentItem?.outputTruncated ?? false,
+        output: output.text,
+        outputTruncated: currentItem?.outputTruncated === true || payload.truncated === true || output.truncated,
         exitCode: currentItem?.exitCode ?? null,
       });
       break;

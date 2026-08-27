@@ -514,6 +514,31 @@ func TestExecutionProjectionPreservesVisibleAgentFields(t *testing.T) {
 	}
 }
 
+func TestCommandExecutionOutputIsCappedAcrossDeltas(t *testing.T) {
+	adapter := &CodexAdapter{}
+	adapter.rememberExecutionItem("command-provider-item", "turn-provider", map[string]any{
+		"type": "commandExecution", "command": "rg pattern",
+	})
+	first := adapter.projectNotification("item/commandExecution/outputDelta", map[string]any{
+		"itemId": "command-provider-item", "delta": strings.Repeat("x", maxCommandExecutionOutputBytes+1),
+	}, "command-ref").(map[string]any)
+	if len(first["outputDelta"].(string)) != maxCommandExecutionOutputBytes || first["truncated"] != true {
+		t.Fatalf("bounded command output = len %d truncated %#v", len(first["outputDelta"].(string)), first["truncated"])
+	}
+	if next := adapter.projectNotification("item/commandExecution/outputDelta", map[string]any{
+		"itemId": "command-provider-item", "delta": "ignored",
+	}, "command-ref"); next != nil {
+		t.Fatalf("command output after truncation was forwarded: %#v", next)
+	}
+
+	completed := adapter.projectExecutionItem(map[string]any{
+		"type": "commandExecution", "aggregatedOutput": strings.Repeat("y", maxCommandExecutionOutputBytes+1),
+	}, "command-ref")
+	if len(completed["output"].(string)) != maxCommandExecutionOutputBytes || completed["truncated"] != true {
+		t.Fatalf("bounded completed output = len %d truncated %#v", len(completed["output"].(string)), completed["truncated"])
+	}
+}
+
 func TestParseWorkspaceRegisterCommand(t *testing.T) {
 	command, err := parseAgentCommand(json.RawMessage(`{
 		"kind":"workspace.register",

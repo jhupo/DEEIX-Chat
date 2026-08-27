@@ -374,7 +374,7 @@ func (s *Service) ListExecutionEvents(ctx context.Context, userID uint, conversa
 			cursor = events[len(events)-1].Seq
 		}
 		return &ExecutionEventPage{
-			Events: events, Cursor: cursor,
+			Events: compactExecutionHistory(events), Cursor: cursor,
 			HasMore: len(events) == executionEventPageSize && cursor < conversation.ExecutionEventSeq,
 		}, nil
 	}

@@ -2104,9 +2104,11 @@ func codexErrorCode(raw json.RawMessage) string {
 }
 
 func updateAgentTurnTerminal(tx *gorm.DB, turnID uint, status, code, message string, updatedAt time.Time) error {
-	return tx.Model(&model.AgentTurn{}).Where("id = ?", turnID).Updates(map[string]any{
-		"status": status, "error_code": code, "error_message": message, "updated_at": updatedAt,
-	}).Error
+	return tx.Model(&model.AgentTurn{}).
+		Where("id = ? AND status NOT IN ?", turnID, []string{"completed", "interrupted", "failed"}).
+		Updates(map[string]any{
+			"status": status, "error_code": code, "error_message": message, "updated_at": updatedAt,
+		}).Error
 }
 
 func resolveTurnInteractions(tx *gorm.DB, turnID uint, updatedAt time.Time) error {
@@ -3073,6 +3075,12 @@ func (r *Repo) QueueTurnInterrupt(
 			ServerSeq: device.NextServerSeq, Kind: "turn.interrupt", PayloadJSON: string(encoded), State: "queued", TerminalJSON: "{}",
 		}
 		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		if err := updateAgentTurnTerminal(tx, turn.ID, "interrupted", "", "", now); err != nil {
+			return err
+		}
+		if err := resolveTurnInteractions(tx, turn.ID, now); err != nil {
 			return err
 		}
 		if err := tx.Model(&device).Update("next_server_seq", gorm.Expr("next_server_seq + 1")).Error; err != nil {

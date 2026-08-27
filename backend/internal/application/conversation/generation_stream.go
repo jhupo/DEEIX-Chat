@@ -54,19 +54,31 @@ func EnsureMessageGenerationRunID(raw string) string {
 
 // CancelMessageGeneration 取消用户显式停止的流式生成；浏览器刷新不会走这个路径。
 func (s *Service) CancelMessageGeneration(ctx context.Context, userID uint, runID string) bool {
+	if s == nil || s.repo == nil {
+		return false
+	}
 	normalizedRunID := normalizeRunID(runID)
 	conversation, err := s.repo.GetConversationExecutionByRunID(ctx, userID, normalizedRunID)
 	if err != nil {
 		return false
 	}
 	if conversation.ExecutionType == model.ExecutionTypeGateway {
-		if s.gatewayExecutor == nil {
+		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if s.gatewayExecutor != nil {
+			_ = s.gatewayExecutor.InterruptRun(markCtx, userID, normalizedRunID, uuid.NewString())
+		}
+		if s.generationStreams != nil {
+			s.generationStreams.cancel(markCtx, userID, normalizedRunID)
+		}
+		if err := s.ProjectGatewayEvent(markCtx, GatewayExecutionEvent{
+			SourceKey: "control:interrupt:" + normalizedRunID,
+			UserID:    userID, ConversationID: conversation.ID, RunID: normalizedRunID,
+			Kind: "turn/completed", Payload: []byte(`{"turn":{"status":"interrupted"}}`), OccurredAt: time.Now().UTC(),
+		}); err != nil {
 			return false
 		}
-		if err := s.gatewayExecutor.InterruptRun(ctx, userID, normalizedRunID, uuid.NewString()); err != nil {
-			return false
-		}
-		return s.generationStreams.cancel(ctx, userID, normalizedRunID)
+		return true
 	}
 	canceled := s.generationStreams.cancel(ctx, userID, normalizedRunID)
 	if !canceled || s == nil || s.repo == nil {
