@@ -280,8 +280,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	err = h.service.FlushPendingConversationEvents(ctx, identity)
 	cancel()
 	if err != nil {
-		h.rejectBridge(connection, identity, "runtime_projection_failed", "Pending local events could not be restored.", err)
-		return
+		log.Printf("agent bridge projection deferred device=%s: %v", identity.DeviceID, err)
 	}
 	ctx, cancel = socketRuntimeAuthContext()
 	leaseExpiresAt, err = h.service.RenewRuntimeLease(ctx, identity, challenge.Profile.ID)
@@ -403,9 +402,12 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					ctx, identity, frame.BridgeSeq, frame.ServerSeq, frame.CommandID, frame.Outcome,
 				)
 				cancel()
-				if err != nil {
+				if err != nil && !errors.Is(err, appagent.ErrProjectionDeferred) {
 					log.Printf("agent bridge terminal failed device=%s bridge_seq=%d server_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, frame.ServerSeq, err)
 					return
+				}
+				if err != nil {
+					log.Printf("agent bridge terminal projection deferred device=%s bridge_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, err)
 				}
 				if err = websocket.JSON.Send(connection, bridgeFrame{
 					Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,
@@ -425,9 +427,12 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				ctx, cancel = socketOperationContext()
 				acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
 				cancel()
-				if err != nil {
+				if err != nil && !errors.Is(err, appagent.ErrProjectionDeferred) {
 					log.Printf("agent bridge event failed device=%s bridge_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, err)
 					return
+				}
+				if err != nil {
+					log.Printf("agent bridge event projection deferred device=%s bridge_seq=%d: %v", identity.DeviceID, frame.BridgeSeq, err)
 				}
 				if err = websocket.JSON.Send(connection, bridgeFrame{
 					Version: bridgeVersion, Type: "ack.bridge", AckBridgeSeq: acknowledged,

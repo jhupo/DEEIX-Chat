@@ -46,7 +46,7 @@ func (r *Repo) ProjectExecutionEvent(ctx context.Context, item *domainconversati
 			Count(&messageCount).Error; err != nil {
 			return err
 		}
-		if messageCount == 0 {
+		if messageCount == 0 && item.TerminalStatus == "" {
 			return repository.ErrConflict
 		}
 		var run model.ConversationRun
@@ -170,7 +170,7 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 	if assistant.Error != nil {
 		return assistant.Error
 	}
-	if assistant.RowsAffected != 1 {
+	if assistant.RowsAffected > 1 {
 		return repository.ErrConflict
 	}
 	run := tx.Model(&model.ConversationRun{}).

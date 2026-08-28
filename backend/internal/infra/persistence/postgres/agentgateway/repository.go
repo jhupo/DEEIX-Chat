@@ -1231,6 +1231,15 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if !session.HistoryLoaded {
 		return changed, nil
 	}
+	var activeGatewayRuns int64
+	if err := tx.Model(&model.ConversationRun{}).
+		Where("conversation_id = ? AND endpoint = ? AND status IN ?", conversation.ID, "local_gateway", []string{"queued", "running"}).
+		Count(&activeGatewayRuns).Error; err != nil {
+		return false, err
+	}
+	if activeGatewayRuns > 0 {
+		return changed, nil
+	}
 	if err := resolveWorkspaceSessionRunIDs(tx, thread, session.Messages); err != nil {
 		return false, err
 	}

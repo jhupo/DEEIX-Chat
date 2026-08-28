@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -82,6 +83,10 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 			ServerSeq: 2, Kind: "resource.refresh", State: "queued",
 			PayloadJSON: `{"kind":"resource.refresh","deviceId":"agd_f6f910e920934def9a5cda479fc25251","profileId":"profile_1","resource":{"scope":"profile","name":"apps"}}`,
 		}},
+		pending: []domainagent.AppliedEventFrame{{
+			ConversationID: 17, RunID: "run_projection_retry",
+			Event: domainagent.Event{ID: 19, PublicID: "agev_projection_retry", UserID: 7, Kind: "turn/completed", PayloadJSON: `{"turn":{"status":"failed"}}`, OccurredAt: time.Now().UTC()},
+		}},
 	}
 	service, err := appagent.NewService(repo, "01234567890123456789012345678901")
 	if err != nil {
@@ -89,6 +94,11 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	}
 	runtimeAuth := &socketRuntimeAuth{userPublicID: userPublicID, key: runtimeKey}
 	service.SetRuntimeAuth(runtimeAuth, runtimeAuth)
+	projectionAttempts := 0
+	service.SetConversationEventProjector(func(context.Context, domainagent.AppliedEventFrame) error {
+		projectionAttempts++
+		return errors.New("projection unavailable")
+	})
 	handler := NewHandler(service)
 	server := httptest.NewServer(http.HandlerFunc(handler.connect))
 	defer server.Close()
@@ -201,6 +211,9 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if repo.pendingReads == 0 {
 		t.Fatal("runtime handshake did not drain pending conversation events")
 	}
+	if projectionAttempts == 0 {
+		t.Fatal("runtime handshake did not attempt pending conversation projection")
+	}
 	if err = websocket.JSON.Send(connection, bridgeFrame{
 		Version: bridgeVersion, Type: "workspaces.sync",
 		Workspaces: []bridgeWorkspace{{WorkspaceID: "workspace_1", Name: "renamed-workspace", Revision: "1123456789abcdef01234567"}},
@@ -278,6 +291,7 @@ type socketRepo struct {
 	device        domainagent.Device
 	consumed      bool
 	commands      []domainagent.Command
+	pending       []domainagent.AppliedEventFrame
 	serverAck     uint64
 	bridgeAck     uint64
 	pendingReads  int
@@ -432,8 +446,8 @@ func (r *socketRepo) ApplyEventFrame(_ context.Context, _, _ uint, bridgeSeq uin
 func (r *socketRepo) ListPendingConversationEvents(context.Context, uint, int) ([]domainagent.AppliedEventFrame, error) {
 	r.mu.Lock()
 	r.pendingReads++
-	r.mu.Unlock()
-	return nil, nil
+	defer r.mu.Unlock()
+	return append([]domainagent.AppliedEventFrame(nil), r.pending...), nil
 }
 func (*socketRepo) MarkConversationEventProjected(context.Context, uint, time.Time) error { return nil }
 

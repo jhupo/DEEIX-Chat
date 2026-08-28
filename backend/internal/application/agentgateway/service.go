@@ -28,14 +28,15 @@ import (
 )
 
 var (
-	ErrInvalidInput     = errors.New("invalid agent gateway input")
-	ErrDeviceNotFound   = errors.New("agent device not found")
-	ErrResourceNotFound = errors.New("agent resource not found")
-	ErrCredential       = errors.New("invalid or expired agent credential")
-	ErrDeviceRevoked    = errors.New("agent device revoked")
-	ErrInvalidSignature = errors.New("invalid device signature")
-	ErrRuntimeAuth      = errors.New("runtime authentication failed")
-	ErrStateConflict    = errors.New("agent resource state conflicts with request")
+	ErrInvalidInput       = errors.New("invalid agent gateway input")
+	ErrDeviceNotFound     = errors.New("agent device not found")
+	ErrResourceNotFound   = errors.New("agent resource not found")
+	ErrCredential         = errors.New("invalid or expired agent credential")
+	ErrDeviceRevoked      = errors.New("agent device revoked")
+	ErrInvalidSignature   = errors.New("invalid device signature")
+	ErrRuntimeAuth        = errors.New("runtime authentication failed")
+	ErrStateConflict      = errors.New("agent resource state conflicts with request")
+	ErrProjectionDeferred = errors.New("conversation event projection deferred")
 )
 
 const (
@@ -1353,7 +1354,7 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 		return 0, err
 	}
 	if err := s.flushPendingConversationEvents(ctx, identity.InternalDeviceID); err != nil {
-		return 0, err
+		return acknowledged, fmt.Errorf("%w: %v", ErrProjectionDeferred, err)
 	}
 	s.notifyUser(identity.UserID)
 	return acknowledged, nil
@@ -1401,7 +1402,7 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 	}
 	if applied.ConversationID != 0 && applied.RunID != "" {
 		if err := s.projectConversationEvent(ctx, *applied); err != nil {
-			return 0, err
+			return applied.Acknowledged, fmt.Errorf("%w: %v", ErrProjectionDeferred, err)
 		}
 	}
 	if envelope.Kind == agentprotocol.SessionSnapshotEventKind {

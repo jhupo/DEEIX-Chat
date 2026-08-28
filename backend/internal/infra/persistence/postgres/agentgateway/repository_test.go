@@ -40,6 +40,50 @@ func TestHistoryMessageMatchesExactProjection(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHistoryDoesNotReplaceActiveGatewayMessages(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.Conversation{}, &model.Message{}, &model.ConversationRun{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 28, 2, 0, 0, 0, time.UTC)
+	conversation := model.Conversation{
+		UserID: 7, PublicID: "active_gateway_history", Title: "Active work", LabelsJSON: "[]",
+		ExecutionType: "gateway", ExecutionWorkspaceID: "workspace-active", SessionKey: "active_gateway_history", Status: "active",
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 7, PublicID: "active_gateway_user", Role: "user", ContentType: "text", Content: "new work", BranchReason: "default", Status: "pending", RunID: "run_active_history"},
+		{ConversationID: conversation.ID, UserID: 7, PublicID: "active_gateway_assistant", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending", RunID: "run_active_history"},
+	}
+	if err := database.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Create(&model.ConversationRun{
+		RunID: "run_active_history", UserID: 7, ConversationID: conversation.ID, TaskType: "agent",
+		Endpoint: "local_gateway", ProviderProtocol: "local_gateway", Status: "queued", StartedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	thread := model.AgentThread{UserID: 7, ConversationID: conversation.ID, WorkspaceID: 9, Status: "active"}
+	workspace := model.AgentWorkspace{ControlPlaneModel: model.ControlPlaneModel{ID: 9}, PublicID: "workspace-active"}
+	_, err := syncExistingWorkspaceSession(database, &thread, &workspace, workspaceSession{
+		SourceThreadRef: "source-thread", Name: conversation.Title, Status: "active", HistoryLoaded: true,
+		Messages: []workspaceSessionMessage{{Role: "user", Content: "older history", SourceTurnRef: "source-turn"}},
+	}, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored []model.Message
+	if err := database.Where("conversation_id = ?", conversation.ID).Order("id ASC").Find(&stored).Error; err != nil || len(stored) != 2 {
+		t.Fatalf("active Gateway messages were replaced: %#v %v", stored, err)
+	}
+	if stored[0].Content != "new work" || stored[0].Status != "pending" || stored[1].Status != "pending" {
+		t.Fatalf("active Gateway messages changed: %#v", stored)
+	}
+}
+
 func TestQueueTurnInterruptImmediatelyTerminalizesLocalTurn(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(

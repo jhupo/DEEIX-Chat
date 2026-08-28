@@ -147,6 +147,55 @@ func TestGatewayProjectionTruncatesLongTerminalError(t *testing.T) {
 	}
 }
 
+func TestGatewayTerminalProjectionCompletesRunWithoutVisibleMessages(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(db)
+	now := time.Now().UTC()
+	conversation := model.Conversation{
+		UserID: 1, PublicID: "gateway_deleted_messages", Title: "gateway deleted messages", LabelsJSON: "[]",
+		ExecutionType: domainconversation.ExecutionTypeGateway, SessionKey: "gateway_deleted_messages", Status: "active",
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	runID := "run_gateway_deleted_messages"
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_deleted_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "pending", RunID: runID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "gateway_deleted_assistant", Role: "assistant", ContentType: "text", BranchReason: "default", Status: "pending", RunID: runID},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := model.ConversationRun{
+		RunID: runID, UserID: 1, ConversationID: conversation.ID, TaskType: "agent", Endpoint: "local_gateway",
+		ProviderProtocol: "local_gateway", Status: "queued", StartedAt: now,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	terminal := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:deleted-terminal", Kind: "turn/completed",
+		PayloadJSON: `{"turn":{"status":"failed"}}`, TerminalStatus: "failed", ErrorCode: "gateway_failed",
+		ErrorMessage: "local execution failed", OccurredAt: now.Add(time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), terminal); err != nil || !applied {
+		t.Fatalf("project deleted-message terminal: applied=%v err=%v", applied, err)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "error" || run.EndedAt == nil {
+		t.Fatalf("terminal run did not converge: %#v %v", run, err)
+	}
+	var event model.ConversationExecutionEvent
+	if err := db.Where("source_key = ?", terminal.SourceKey).First(&event).Error; err != nil {
+		t.Fatalf("terminal event was not retained: %v", err)
+	}
+}
+
 func TestReconcileOrphanGatewayTurnsRepairsTerminalAndUndispatchedRuns(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	if err := db.AutoMigrate(&model.AgentTurn{}); err != nil {
