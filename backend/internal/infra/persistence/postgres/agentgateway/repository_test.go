@@ -664,7 +664,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.FileObject{},
-		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationExecutionEvent{},
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationExecutionEvent{}, &model.ConversationRun{},
 		&model.AgentDevice{}, &model.AgentCommand{}, &model.AgentBridgeFrame{},
 		&model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentArtifact{}, &model.AgentResourceSnapshot{}, &model.AgentThread{},
 		&model.AgentTurn{}, &model.AgentItem{}, &model.AgentEvent{}, &model.AgentInteraction{},
