@@ -44,7 +44,8 @@
     "invalidId": "Invalid conversation ID.",
     "invalidTitle": "Invalid conversation title.",
     "noTitleableContent": "This conversation has no content that can be used to generate a title.",
-    "notFound": "Conversation not found."
+    "notFound": "Conversation not found.",
+    "threadInUse": "This conversation is open in another Codex client. Close it there, then retry from the Web."
   },
   "conversationRun": {
     "canceled": "Generation was canceled.",

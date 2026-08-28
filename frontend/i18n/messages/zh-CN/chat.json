@@ -395,6 +395,7 @@
       "videoSavingArtifact": "正在保存视频"
     },
     "generationInterrupted": "生成中断",
+    "conversationInUse": "会话正在使用",
     "sendFailed": "发送失败",
     "continueGenerationPrompt": "请从上一条中断的回复处继续，不要重复已经生成的内容。",
     "continueReplyFailed": "无法继续生成",

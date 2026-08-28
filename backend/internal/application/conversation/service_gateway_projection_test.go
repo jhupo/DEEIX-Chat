@@ -135,9 +135,9 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 
 	terminal, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
 		SourceKey: "agent:agev_2", UserID: 7, ConversationID: 11, RunID: "run_1",
-		Kind: "turn/completed", Payload: []byte(`{"turn":{"status":"failed","durationMs":42,"error":{"message":"boom"}}}`), OccurredAt: now,
+		Kind: "turn/completed", Payload: []byte(`{"turn":{"status":"failed","durationMs":42,"error":{"code":"conversation.thread_in_use","message":"boom"}}}`), OccurredAt: now,
 	})
-	if err != nil || terminal.TerminalStatus != "failed" || terminal.ErrorMessage != "boom" || terminal.LatencyMS != 42 {
+	if err != nil || terminal.TerminalStatus != "failed" || terminal.ErrorCode != "conversation.thread_in_use" || terminal.ErrorMessage != "boom" || terminal.LatencyMS != 42 {
 		t.Fatalf("terminal projection = %#v, %v", terminal, err)
 	}
 }

@@ -1894,6 +1894,15 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	if adapter.isActive("thread-1") {
 		t.Fatal("thread read incorrectly marked the thread active")
 	}
+	adapter.setActive("thread-1", true)
+	_, err = adapter.Execute(context.Background(), AgentCommand{
+		Kind: "turn.start", DeviceID: config.DeviceID, ProfileID: config.ProfileID, WorkspaceID: want.WorkspaceID,
+		ThreadID: "agth_0123456789abcdef0123456789abcdef", SourceThreadRef: sourceRef,
+		Input: []AgentInput{{Kind: "text", Text: "blocked message"}}, Settings: &Settings{},
+	}, nil)
+	if !errors.Is(err, errCodexThreadInUse) || errorCode(err) != "conversation.thread_in_use" {
+		t.Fatalf("active writer error = %v, code = %q", err, errorCode(err))
+	}
 }
 
 func TestReadCodexAPIKeyRejectsInvalidCredential(t *testing.T) {
@@ -2031,7 +2040,15 @@ func runFakeAppServer() {
 				IncludeTurns bool   `json:"includeTurns"`
 			}
 			_ = json.Unmarshal(request["params"], &params)
-			if params.ThreadID != "thread-1" || !params.IncludeTurns {
+			if !params.IncludeTurns {
+				status := "idle"
+				if params.ThreadID == "thread-1" {
+					status = "notLoaded"
+				}
+				result = map[string]any{"thread": map[string]any{"id": params.ThreadID, "status": map[string]any{"type": status}}}
+				break
+			}
+			if params.ThreadID != "thread-1" {
 				var id any
 				_ = json.Unmarshal(request["id"], &id)
 				_ = encoder.Encode(map[string]any{"id": id, "error": map[string]any{

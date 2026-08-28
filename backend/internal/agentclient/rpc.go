@@ -53,6 +53,20 @@ type rpcResponse struct {
 	err    error
 }
 
+type rpcError struct {
+	Code    int
+	Message string
+}
+
+func (err *rpcError) Error() string {
+	return fmt.Sprintf("app-server error %d: %s", err.Code, err.Message)
+}
+
+func isRPCErrorCode(err error, code int) bool {
+	var rpcErr *rpcError
+	return errors.As(err, &rpcErr) && rpcErr.Code == code
+}
+
 type rpcEnvelope struct {
 	ID          json.RawMessage `json:"id"`
 	Method      string          `json:"method"`
@@ -243,7 +257,7 @@ func (client *RPCClient) handleLine(line []byte) error {
 		if len(message) > 4096 {
 			message = message[:4096]
 		}
-		pending <- rpcResponse{err: fmt.Errorf("app-server error %d: %s", envelope.Error.Code, message)}
+		pending <- rpcResponse{err: &rpcError{Code: envelope.Error.Code, Message: message}}
 		return nil
 	}
 	if len(envelope.Result) == 0 {

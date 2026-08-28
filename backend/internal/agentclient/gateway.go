@@ -1229,6 +1229,9 @@ func errorCode(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
 	}
+	if errors.Is(err, errCodexThreadInUse) {
+		return "conversation.thread_in_use"
+	}
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "artifact") {
 		return "artifact_error"

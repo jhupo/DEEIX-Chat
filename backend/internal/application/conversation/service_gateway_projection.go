@@ -92,6 +92,9 @@ func normalizeGatewayTerminal(event *model.ExecutionEvent, payload map[string]in
 		event.ErrorCode = "gateway_failed"
 		event.ErrorMessage = "local execution failed"
 		if failure, ok := turn["error"].(map[string]interface{}); ok {
+			if code, _ := failure["code"].(string); strings.TrimSpace(code) != "" {
+				event.ErrorCode = strings.TrimSpace(code)
+			}
 			if message, _ := failure["message"].(string); strings.TrimSpace(message) != "" {
 				event.ErrorMessage = message
 			}

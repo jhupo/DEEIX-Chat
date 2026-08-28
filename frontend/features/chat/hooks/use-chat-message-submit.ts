@@ -66,6 +66,7 @@ const CONVERSATION_METADATA_REFRESH_MAX_DELAY_MS = 5_000;
 const CONVERSATION_METADATA_REFRESH_BACKOFF = 1.5;
 const MAX_CONCURRENT_RUNS = 5;
 const GENERATION_CANCEL_SETTLEMENT_TIMEOUT_MS = 10_000;
+const THREAD_IN_USE_ERROR_CODE = "conversation.thread_in_use";
 
 function resolveSubmitBlockDescription(
   reason: ChatSubmitBlockReason,
@@ -1224,6 +1225,7 @@ export function useChatMessageSubmit({
         const assistantMessageStatus = completed.assistantMessage.status || "success";
         const assistantMessageSucceeded = assistantMessageStatus === "success";
         const canceledByUser = activeStreamsRef.current.get(clientRunID)?.cancelRequested === true;
+        const threadInUse = completed.assistantMessage.errorCode === THREAD_IN_USE_ERROR_CODE;
         updatePendingExchange(exchangeKey, (current) => {
           const streamedText = current.assistantText;
           const terminalErrorMessage = terminalStreamError
@@ -1285,7 +1287,7 @@ export function useChatMessageSubmit({
               completed.assistantMessage.status === "error" ||
               (completed.assistantMessage.status === "interrupted" && !canceledByUser)
                 ? {
-                    title: t("generationInterrupted"),
+                    title: t(threadInUse ? "conversationInUse" : "generationInterrupted"),
                     message: terminalErrorMessage || completedErrorMessage || t("retryLater"),
                     details: terminalStreamError?.debug,
                   }
@@ -1427,6 +1429,7 @@ export function useChatMessageSubmit({
         const errorMessage = resolveErrorMessage(error, t("retryLater"));
         const errorDetails = resolveErrorDetails(error);
         const errorSummary = resolveErrorSummary(error, t("retryLater"));
+        const threadInUse = error instanceof ApiError && error.errorCode === THREAD_IN_USE_ERROR_CODE;
         failedGenerationRunsRef?.current.add(clientRunID);
         shouldKeepConversationLayout = true;
         if (
@@ -1452,7 +1455,7 @@ export function useChatMessageSubmit({
           assistantStatus: "error",
           assistantErrorMessage: errorMessage,
           assistantInlineAlert: {
-            title: t("generationInterrupted"),
+            title: t(threadInUse ? "conversationInUse" : "generationInterrupted"),
             message: errorMessage,
             details: errorDetails,
           },

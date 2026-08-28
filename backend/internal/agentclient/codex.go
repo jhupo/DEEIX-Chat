@@ -38,6 +38,7 @@ const codexSupportedVersionRange = minimumCodexVersion + " through " + maximumCo
 var codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli\s+(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\s*$`)
 var codexAppIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,512}$`)
 var codexUserThreadSourceKinds = []string{"cli", "vscode", "exec", "appServer", "unknown"}
+var errCodexThreadInUse = errors.New("Codex thread is open in another client; close it there before sending from the Web")
 
 const maxSessionMessageRunes = 64 * 1024
 const maxExecutionTextBytes = 1 << 20
@@ -875,8 +876,27 @@ func (adapter *CodexAdapter) Execute(ctx context.Context, command AgentCommand, 
 		sourceRef, requestErr := adapter.state.PublishSource(adapter.profileID, "turn", turnID)
 		return map[string]any{"kind": "turn-started", "sourceTurnRef": sourceRef}, requestErr
 	case "turn.start":
+		if adapter.isActive(providerThreadID) {
+			detail, readErr := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": providerThreadID, "includeTurns": false})
+			if readErr != nil {
+				return nil, readErr
+			}
+			status, statusErr := codexThreadStatus(detail)
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			if status == "systemError" {
+				return nil, errors.New("Codex thread runtime is unavailable")
+			}
+			if status == "notLoaded" {
+				adapter.setActive(providerThreadID, false)
+			}
+		}
 		if !adapter.isActive(providerThreadID) {
-			if err = adapter.rpc.Request(ctx, "thread/resume", map[string]any{"threadId": providerThreadID, "cwd": cwd}, nil); err != nil {
+			if err = adapter.rpc.Request(ctx, "thread/resume", map[string]any{"threadId": providerThreadID, "cwd": cwd, "excludeTurns": true}, nil); err != nil {
+				if isRPCErrorCode(err, -32600) {
+					return nil, errCodexThreadInUse
+				}
 				return nil, err
 			}
 			adapter.setActive(providerThreadID, true)
@@ -1550,6 +1570,22 @@ func (adapter *CodexAdapter) requestAny(ctx context.Context, method string, para
 		return nil, err
 	}
 	return result, nil
+}
+
+func codexThreadStatus(response map[string]any) (string, error) {
+	thread, ok := response["thread"].(map[string]any)
+	if !ok {
+		return "", errors.New("Codex thread response is invalid")
+	}
+	status, ok := thread["status"].(map[string]any)
+	if !ok {
+		return "", errors.New("Codex thread status is invalid")
+	}
+	value := stringField(status, "type")
+	if value != "notLoaded" && value != "idle" && value != "active" && value != "systemError" {
+		return "", errors.New("Codex thread status is invalid")
+	}
+	return value, nil
 }
 
 func (adapter *CodexAdapter) publishOptional(kind, providerID string) (string, error) {
