@@ -10,7 +10,7 @@ import (
 	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 )
 
 type textTaskRouteResolverStub struct {

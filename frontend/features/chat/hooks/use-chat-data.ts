@@ -544,7 +544,7 @@ export function useChatData(
             resumeSeqByRunRef.current[pendingRunID] ?? afterSeq,
             generationSeqByRunRef?.current[pendingRunID] ?? afterSeq,
           ),
-          onExecutionEvent: (event) => applyAgentExecutionEvent(event, conversationID),
+          onExecutionEvent: (event) => applyAgentExecutionEvent(event, conversationID ?? undefined),
           onEventSeq: (seq) => {
             if (isResumeInactive()) {
               return;

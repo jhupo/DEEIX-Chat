@@ -60,7 +60,8 @@ import {
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubItem,
-  useSidebar,
+  useSidebarActions,
+  useSidebarIsMobile,
 } from "@/components/ui/sidebar";
 import {
   ConversationLabelsManagerDialog,
@@ -68,7 +69,7 @@ import {
   sharePatchFromDTO,
   type ConversationLabelsTarget,
   useConversationExport,
-  useSidebarConversations,
+  useSidebarConversationField,
 } from "@/entities/conversation";
 import { useChatSession } from "@/features/chat";
 import { useDevices } from "@/features/devices";
@@ -77,7 +78,7 @@ import { WorkspaceDialog, WorkspaceRenameDialog } from "@/features/layouts/compo
 import { SidebarConversationItem } from "@/features/layouts/components/navigation/sidebar-conversation-item";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutProjectConversations } from "@/features/layouts/hooks/use-layout-project-conversations";
-import { useSidebarConversationNavigation } from "@/features/layouts/hooks/use-sidebar-conversation-navigation";
+import { useLayoutSidebarNavigation } from "@/features/layouts/hooks/use-layout-sidebar-navigation";
 import type {
   SidebarConversationDeleteTarget,
   SidebarConversationRenameTarget,
@@ -395,9 +396,10 @@ export function NavProjects() {
   const t = useTranslations("recent.projects");
   const tRecent = useTranslations("recent");
   const resolveErrorMessage = useLocalizedErrorMessage();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const isMobile = useSidebarIsMobile();
+  const { setOpenMobile } = useSidebarActions();
   const router = useRouter();
-  const onNavigate = useSidebarConversationNavigation();
+  const onNavigate = useLayoutSidebarNavigation();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeRecentProjectID = searchParams.get("project") ?? "";
@@ -406,24 +408,22 @@ export function NavProjects() {
   const { deleteFilesByDefault: deleteConversationFilesByDefault } = useSettingsChatPreferences();
   const { executionMode, requestNewConversation } = useChatSession();
   const { defaultDevice } = useDevices();
-  const {
-    items,
-    projects,
-    reload,
-    lastChange,
-    createProject,
-    updateProject,
-    deleteProject,
-    reorderProjects,
-    renameByPublicID,
-    regenerateTitleByPublicID,
-    updateLabelsByPublicID,
-    setStarByPublicID,
-    setProjectByPublicID,
-    archiveByPublicID,
-    deleteByPublicID,
-    touchByPublicID,
-  } = useSidebarConversations();
+  const items = useSidebarConversationField("items");
+  const projects = useSidebarConversationField("projects");
+  const reload = useSidebarConversationField("reload");
+  const lastChange = useSidebarConversationField("lastChange");
+  const createProject = useSidebarConversationField("createProject");
+  const updateProject = useSidebarConversationField("updateProject");
+  const deleteProject = useSidebarConversationField("deleteProject");
+  const reorderProjects = useSidebarConversationField("reorderProjects");
+  const renameByPublicID = useSidebarConversationField("renameByPublicID");
+  const regenerateTitleByPublicID = useSidebarConversationField("regenerateTitleByPublicID");
+  const updateLabelsByPublicID = useSidebarConversationField("updateLabelsByPublicID");
+  const setStarByPublicID = useSidebarConversationField("setStarByPublicID");
+  const setProjectByPublicID = useSidebarConversationField("setProjectByPublicID");
+  const archiveByPublicID = useSidebarConversationField("archiveByPublicID");
+  const deleteByPublicID = useSidebarConversationField("deleteByPublicID");
+  const touchByPublicID = useSidebarConversationField("touchByPublicID");
   const canManageProjects = executionMode === "cloud";
   const canExpandProjects = executionMode === "cloud" || Boolean(defaultDevice);
   const canRegisterWorkspace = executionMode === "gateway" && Boolean(defaultDevice?.online);
@@ -647,6 +647,7 @@ export function NavProjects() {
         mcpDefaultMode: draft.mcpDefaultMode,
         defaultMCPToolIDs: draft.mcpDefaultMode === "custom" ? draft.defaultMCPToolIDs : [],
         defaultSkillIDs: draft.defaultSkillIDs,
+        defaultKnowledgeBaseIDs: draft.defaultKnowledgeBaseIDs,
       });
     } else {
       await createProject({
@@ -655,6 +656,7 @@ export function NavProjects() {
         mcpDefaultMode: draft.mcpDefaultMode,
         defaultMCPToolIDs: draft.mcpDefaultMode === "custom" ? draft.defaultMCPToolIDs : [],
         defaultSkillIDs: draft.defaultSkillIDs,
+        defaultKnowledgeBaseIDs: draft.defaultKnowledgeBaseIDs,
       });
     }
     closeDraft();
@@ -766,6 +768,7 @@ export function NavProjects() {
                       mcpDefaultMode: "inherit",
                       defaultMCPToolIDs: [],
                       defaultSkillIDs: [],
+                      defaultKnowledgeBaseIDs: [],
                     })
                   : canRegisterWorkspace ? () => setWorkspaceDialogOpen(true) : undefined}
                 onOpenChange={setProjectsOpen}
@@ -809,6 +812,7 @@ export function NavProjects() {
                     mcpDefaultMode: "inherit",
                     defaultMCPToolIDs: [],
                     defaultSkillIDs: [],
+                    defaultKnowledgeBaseIDs: [],
                   })
                 : canRegisterWorkspace ? () => setWorkspaceDialogOpen(true) : undefined}
               onOpenChange={setProjectsOpen}
@@ -933,6 +937,7 @@ export function NavProjects() {
                                             mcpDefaultMode: project.mcpDefaultMode ?? "inherit",
                                             defaultMCPToolIDs: project.defaultMCPToolIDs ?? [],
                                             defaultSkillIDs: project.defaultSkillIDs ?? [],
+                                            defaultKnowledgeBaseIDs: project.defaultKnowledgeBaseIDs ?? [],
                                           });
                                         } else {
                                           setWorkspaceRenameTarget({ workspaceId: project.publicID, name: project.name });

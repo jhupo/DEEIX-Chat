@@ -19,9 +19,11 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/auth"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/compact"
+	appcontentmoderation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	appembedding "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/embedding"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/extraction"
+	appknowledgebase "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/knowledgebase"
 	applogcleanup "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/logcleanup"
 	appmcp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/memory"
@@ -40,18 +42,24 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/usersettings"
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	moderationclient "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/contentmoderation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/embedding"
+	extractengines "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/extract/engines"
+	extractprobe "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/extract/probe"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mcp"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/mediaartifact"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/objectstore"
 	platformlogger "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/logger"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
 	agentgatewayrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/agentgateway"
 	announcementrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/announcement"
 	auditrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/audit"
 	channelrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/channel"
+	contentmoderationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/contentmoderation"
 	conversationrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/conversation"
+	knowledgebaserepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/knowledgebase"
 	logcleanuprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/logcleanup"
 	mcprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/mcp"
 	memoryrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/memory"
@@ -66,6 +74,7 @@ import (
 	platformruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/runtime"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/lifecycle"
 	platformhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
 	agentgatewayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgateway"
@@ -73,7 +82,9 @@ import (
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
+	contentmoderationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/contentmoderation"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
+	knowledgebasehttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/knowledgebase"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
@@ -101,7 +112,9 @@ type App struct {
 	mcpClient           *mcp.Client
 	embeddingClient     *embedding.Client
 	mediaArtifactClient *mediaartifact.Client
+	moderationClient    *moderationclient.Client
 	backgroundCancel    context.CancelFunc
+	shutdown            *lifecycle.Shutdown
 }
 
 type avatarContentOpener struct {
@@ -412,7 +425,7 @@ func NewApp() (*App, error) {
 	settingsRepo := settingsrepo.NewRepo(db)
 	settingsService := settings.NewService(settingsRepo, cfg.DataEncryptionKey)
 	settingsService.SetAuditWriter(auditService)
-	runtimeService := appruntime.NewService(runtimeCfg)
+	runtimeService := appruntime.NewService(runtimeCfg, extractprobe.Prober{})
 	runtimeService.SetDockerRunner(platformruntime.NewDockerRunner())
 	settingsCache := buildSettingsCache(redisClient)
 	runtimeSettings := settings.NewRuntimeSettings(settingsRepo, settingsCache, cfg.DataEncryptionKey)
@@ -443,7 +456,35 @@ func NewApp() (*App, error) {
 	}
 	agentGatewayModule := agentgatewayhttp.NewModule(agentgatewayhttp.NewHandler(agentGatewayService))
 	var billingModule *billinghttp.Module
-	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, nil)
+	appstorage.RegisterDefaultFactory(objectstore.New)
+	objectStoreProvider := appstorage.NewRuntimeProvider(runtimeCfg, objectstore.New)
+	extraction.RegisterEngineFactories(extraction.EngineFactories{
+		NewTika: func(cfg config.Config) extraction.DocumentExtractor {
+			if client := extractengines.NewTika(cfg); client != nil {
+				return client
+			}
+			return nil
+		},
+		NewDocling: func(cfg config.Config) extraction.DocumentExtractor {
+			if client := extractengines.NewDocling(cfg); client != nil {
+				return client
+			}
+			return nil
+		},
+		NewMinerU: func(cfg config.Config) extraction.DocumentExtractor {
+			if client := extractengines.NewMinerU(cfg); client != nil {
+				return client
+			}
+			return nil
+		},
+		NewOCR: func(provider string, cfg config.Config) extraction.OCRExtractor {
+			if client := extractengines.NewOCR(provider, cfg); client != nil {
+				return client
+			}
+			return nil
+		},
+		Builtin: extractengines.Builtin{},
+	})
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
 	sub2Client, err := sub2api.New(cfg.Sub2BaseURL, cfg.StrictOutboundPolicy())
 	if err != nil {
@@ -522,12 +563,21 @@ func NewApp() (*App, error) {
 	conversationService.SetAuditWriter(auditService)
 	conversationService.SetObjectStoreProvider(objectStoreProvider)
 	conversationService.SetMCPRepository(mcpRepo)
+	contentModerationRepo := contentmoderationrepo.NewRepo(db)
+	contentModerationService := appcontentmoderation.NewService(settingsRepo, contentModerationRepo, cfg.DataEncryptionKey, log)
+	moderationClient := moderationclient.New(trustedOutboundPolicy)
+	contentModerationService.SetProvider(moderationClient)
+	contentModerationService.SetAuditWriter(auditService)
+	conversationService.SetModerationService(contentModerationService)
+	contentModerationHandler := contentmoderationhttp.NewHandler(contentModerationService)
+	contentModerationModule := contentmoderationhttp.NewModule(contentModerationHandler)
 	agentGatewayService.SetArtifactContentStore(agentArtifactStore{conversationService: conversationService})
 	agentGatewayService.SetHistoryAttachmentStore(agentHistoryAttachmentStore{conversationService: conversationService})
 	userService.SetAvatarContentOpener(avatarContentOpener{conversationService: conversationService})
 	authService.SetAvatarFileValidator(conversationService)
 	memoryService.SetCacheInvalidator(conversationService.InvalidateMemoryCache)
-	conversationHandler := conversationhttp.NewHandler(conversationService, runtimeCfg)
+	shutdownSignal := lifecycle.NewShutdown()
+	conversationHandler := conversationhttp.NewHandler(conversationService, runtimeCfg, shutdownSignal)
 	conversationModule := conversationhttp.NewModule(conversationHandler)
 	userHandler := userhttp.NewHandler(userService)
 	userModule := userhttp.NewModule(userHandler)
@@ -557,9 +607,10 @@ func NewApp() (*App, error) {
 	adminHandler.SetUpdater(applicationUpdater)
 	adminHandler.SetConversationExporter(conversationService)
 	adminModule := adminhttp.NewModule(adminHandler)
+	contentModerationHandler.SetUserLabelResolver(adminService)
 	userSettingsRepo := usersettingsrepo.NewRepo(db)
 	userSettingsService := usersettings.NewService(userSettingsRepo)
-	userSettingsService.SetCacheInvalidator(conversationService.InvalidateUserSettingCache)
+	userSettingsService.SetCacheRefresher(conversationService.RefreshUserSettingCache)
 	userSettingsHandler := usersettingshttp.NewHandler(userSettingsService)
 	userSettingsModule := usersettingshttp.NewModule(userSettingsHandler)
 	announcementRepo := announcementrepo.NewRepo(db)
@@ -577,33 +628,52 @@ func NewApp() (*App, error) {
 	conversationService.SetSkillResolver(skillService)
 	skillHandler := skillhttp.NewHandler(skillService)
 	skillModule := skillhttp.NewModule(skillHandler)
+	knowledgeBaseRepo := knowledgebaserepo.NewRepo(db)
+	knowledgeBaseService := appknowledgebase.NewService(knowledgeBaseRepo)
+	knowledgeBaseService.SetAuditWriter(auditService)
+	knowledgeBaseService.SetFileCleaner(conversationService)
+	knowledgeBaseService.SetFileContentOpener(conversationService)
+	knowledgeBaseService.SetFileUploader(conversationService)
+	knowledgeBaseService.SetLogger(log)
+	conversationService.SetKnowledgeBaseResolver(knowledgeBaseService)
+	knowledgeBaseHandler := knowledgebasehttp.NewHandler(knowledgeBaseService, runtimeCfg)
+	knowledgeBaseModule := knowledgebasehttp.NewModule(knowledgeBaseHandler)
 
 	hc := newHealthChecker(db, redisClient)
 	rateLimiter := buildRateLimiter(redisClient)
 	engine, err := platformhttp.NewEngine(runtimeCfg, log, platformhttp.Modules{
-		AgentGateway: agentGatewayModule,
-		Auth:         authModule,
-		AuthService:  authService,
-		Channel:      channelModule,
-		Conversation: conversationModule,
-		MCP:          mcpModule,
-		Memory:       memoryModule,
-		Billing:      billingModule,
-		Sub2Key:      sub2KeyModule,
-		Admin:        adminModule,
-		Announcement: announcementModule,
-		PromptPreset: promptPresetModule,
-		Skill:        skillModule,
-		Settings:     settingsModule,
-		UserSettings: userSettingsModule,
-		User:         userModule,
+		AgentGateway:      agentGatewayModule,
+		Auth:              authModule,
+		AuthService:       authService,
+		Channel:           channelModule,
+		Conversation:      conversationModule,
+		MCP:               mcpModule,
+		Memory:            memoryModule,
+		Billing:           billingModule,
+		Sub2Key:           sub2KeyModule,
+		Admin:             adminModule,
+		ContentModeration: contentModerationModule,
+		Announcement:      announcementModule,
+		PromptPreset:      promptPresetModule,
+		Skill:             skillModule,
+		KnowledgeBase:     knowledgeBaseModule,
+		Settings:          settingsModule,
+		UserSettings:      userSettingsModule,
+		User:              userModule,
+		Shutdown:          shutdownSignal,
 	}, hc, rateLimiter)
 	if err != nil {
 		return nil, err
 	}
 
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	if _, reconcileErr := embeddingService.ReconcileIndex(backgroundCtx); reconcileErr != nil {
+		log.Warn("embedding index reconciliation failed", zap.Error(reconcileErr))
+	}
+	embeddingService.StartBackgroundWorkers(backgroundCtx)
 	conversationService.StartBackgroundWorkers(backgroundCtx)
+	contentModerationService.StartBackgroundWorkers(backgroundCtx)
+	channelService.StartModelIconAssetCleanup(backgroundCtx)
 
 	return &App{
 		cfg:                 runtimeCfg.Snapshot(),
@@ -616,7 +686,9 @@ func NewApp() (*App, error) {
 		mcpClient:           mcpClient,
 		embeddingClient:     embedClient,
 		mediaArtifactClient: mediaArtifactClient,
+		moderationClient:    moderationClient,
 		backgroundCancel:    backgroundCancel,
+		shutdown:            shutdownSignal,
 	}, nil
 }
 
@@ -651,14 +723,21 @@ func (a *App) Run() error {
 		a.logger.Info("server_shutting_down", zap.String("signal", sig.String()))
 	}
 
-	if a.backgroundCancel != nil {
-		a.backgroundCancel()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	a.shutdown.BeginDrain()
+	drainTimeout := httpTimeoutSeconds(a.cfg.HTTPShutdownTimeoutSeconds, 10)
+	ctx, cancel := context.WithTimeout(context.Background(), drainTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		a.logger.Error("server_shutdown_error", zap.Error(err))
-		return err
+		a.logger.Warn("server_drain_timeout_force_close",
+			zap.Duration("drain_timeout", drainTimeout),
+			zap.Error(err),
+		)
+		if closeErr := srv.Close(); closeErr != nil {
+			a.logger.Warn("server_force_close_error", zap.Error(closeErr))
+		}
+	}
+	if a.backgroundCancel != nil {
+		a.backgroundCancel()
 	}
 	a.logger.Info("server_stopped")
 	return nil
@@ -680,6 +759,7 @@ func httpMaxHeaderBytes(value int) int {
 
 // Close 关闭资源。
 func (a *App) Close() {
+	a.shutdown.BeginDrain()
 	if a.backgroundCancel != nil {
 		a.backgroundCancel()
 	}
@@ -700,6 +780,9 @@ func (a *App) Close() {
 	}
 	if a.mediaArtifactClient != nil {
 		a.mediaArtifactClient.CloseIdleConnections()
+	}
+	if a.moderationClient != nil {
+		a.moderationClient.CloseIdleConnections()
 	}
 	if a.db != nil {
 		if sqlDB, err := a.db.DB(); err == nil {

@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { AppLogo, DeeixLogo } from "@/shared/components/app-logo";
 import { useBranding } from "@/shared/config/branding-provider";
 import { PoweredByDeeix } from "@/shared/components/powered-by-deeix";
+import { MAX_SCREENSHOT_MESSAGES } from "@/features/chat/model/conversation-screenshot";
 
 const MESSAGE_SCROLL_EDGE_THRESHOLD_PX = 16;
 
@@ -475,15 +476,6 @@ export function ChatArea({
   const messageViewportBoundaryRef = React.useRef<HTMLDivElement | null>(null);
   const previousScrollTopRef = React.useRef<number | null>(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
-  const latestUserMessageKey = React.useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const item = messages[index];
-      if (item?.role === "user") {
-        return item.key;
-      }
-    }
-    return "";
-  }, [messages]);
   const handleViewportScroll = React.useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
       const viewport = event.currentTarget;
@@ -526,9 +518,9 @@ export function ChatArea({
             shareActive={shareActive}
             onExport={canOperateConversation ? onExport : undefined}
             onDelete={canOperateConversation ? onDelete : undefined}
-            screenshotFullLabel={tScreenshot("captureFull")}
+            screenshotLatestLabel={tScreenshot("captureLatest")}
             screenshotSelectLabel={tScreenshot("captureSelect")}
-            onScreenshotFull={onScreenshotFull}
+            onScreenshotLatest={onScreenshotFull}
             onScreenshotSelect={onScreenshotSelect}
           />
           {canOperateConversation ? (
@@ -539,9 +531,9 @@ export function ChatArea({
               active={shareActive}
               onShare={onShare}
               onExport={onExport}
-              screenshotFullLabel={tScreenshot("captureFull")}
+              screenshotLatestLabel={tScreenshot("captureLatest")}
               screenshotSelectLabel={tScreenshot("captureSelect")}
-              onScreenshotFull={onScreenshotFull}
+              onScreenshotLatest={onScreenshotFull}
               onScreenshotSelect={onScreenshotSelect}
             />
           ) : null}
@@ -554,6 +546,7 @@ export function ChatArea({
             <ChatScreenshotSelectionBar
               selectedCount={screenshot.selectedCount}
               totalCount={selectableMessagePublicIDs.length}
+              maxSelectionCount={MAX_SCREENSHOT_MESSAGES}
               capturing={screenshot.capturing}
               onSelectAll={onSelectAllMessages}
               onClearSelection={screenshot.onClearSelection}
@@ -684,7 +677,6 @@ export function ChatArea({
                     <MessageScrollerItem
                       key={item.key}
                       messageId={chatMessageScrollerID(item)}
-                      scrollAnchor={item.key === latestUserMessageKey}
                       className={spacingClass}
                       data-message-public-id={publicID || undefined}
                     >

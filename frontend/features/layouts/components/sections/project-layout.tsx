@@ -11,7 +11,13 @@ import { MobileHeader } from "@/features/layouts/components/sections/mobile-head
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
 import { DeviceProvider, ExecutionModeSwitch, useDevices } from "@/features/devices";
 import { AppearancePreferencesSync } from "@/features/settings";
-import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  useSidebarActions,
+  useSidebarIsMobile,
+  useSidebarMobileOpen,
+} from "@/components/ui/sidebar";
 import { UserLocaleSync } from "@/i18n/user-locale-sync";
 
 const AnnouncementDialogHost = dynamic(
@@ -28,7 +34,9 @@ function ProjectLayoutShell({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  const isMobile = useSidebarIsMobile();
+  const openMobile = useSidebarMobileOpen();
+  const { setOpenMobile } = useSidebarActions();
   const { executionMode, requestNewConversation, setExecutionMode } = useChatSession();
   const { defaultDevice, loading: devicesLoading } = useDevices();
   const showModeSwitch = pathname === "/chat";

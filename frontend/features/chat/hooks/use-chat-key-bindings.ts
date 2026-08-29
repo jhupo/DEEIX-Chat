@@ -2,9 +2,6 @@
 
 import * as React from "react";
 
-import {
-  dispatchUserSettingsUpdated,
-} from "@/features/settings/events/user-settings-events";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
 import {
   createSub2KeyBinding,
@@ -14,12 +11,15 @@ import {
   type Sub2KeyBindingDTO,
   type Sub2RemoteKeyDTO,
 } from "@/shared/api/sub2-key";
-import { getUserSettings, patchUserSettings } from "@/shared/api/user-settings";
 import {
   isUsableChatKeyBinding,
   resolveDefaultChatKeyBinding,
 } from "@/features/chat/hooks/chat-key-binding-validity";
 import { createIdempotencyKey } from "@/shared/lib/idempotency-key";
+import {
+  loadUserSettingsSnapshot,
+  updateUserSettings,
+} from "@/shared/model/user-settings-store";
 
 const DEFAULT_KEY_SETTING = "chat.default_sub2_key_binding_id";
 
@@ -40,10 +40,9 @@ export function useChatKeyBindings() {
 
   const persistSelection = React.useCallback(async (publicID: string) => {
     if (!accessToken) return;
-    const settings = await patchUserSettings(accessToken, { [DEFAULT_KEY_SETTING]: publicID });
+    const settings = await updateUserSettings(accessToken, { [DEFAULT_KEY_SETTING]: publicID });
     const saved = settings[DEFAULT_KEY_SETTING]?.trim() ?? "";
     applySelection(saved);
-    dispatchUserSettingsUpdated(settings);
   }, [accessToken, applySelection]);
 
   const refresh = React.useCallback(async () => {
@@ -62,7 +61,7 @@ export function useChatKeyBindings() {
       const [nextRemoteKeys, nextBindings, settings] = await Promise.all([
         listSub2RemoteKeys(accessToken),
         listSub2KeyBindings(accessToken),
-        getUserSettings(accessToken),
+        loadUserSettingsSnapshot(accessToken),
       ]);
       if (requestID !== requestRef.current) return;
       setRemoteKeys(nextRemoteKeys);

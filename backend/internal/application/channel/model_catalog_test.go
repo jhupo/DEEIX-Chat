@@ -445,9 +445,14 @@ func TestInferKindsJSONRecognizesGeminiOmniInteractionsModel(t *testing.T) {
 }
 
 func TestInferKindsJSONRecognizesVideoOnlyModels(t *testing.T) {
-	for _, modelName := range []string{"veo-3.1-fast", "grok-imagine-video", "grok-imagine-video-1.5-preview"} {
+	for _, modelName := range []string{"veo-3.1-fast"} {
 		if got := inferKindsJSON(modelName); got != `["video_gen"]` {
 			t.Fatalf("expected %s to infer video generation kind, got %s", modelName, got)
+		}
+	}
+	for _, modelName := range []string{"grok-imagine-video", "grok-imagine-video-1.5-preview"} {
+		if got := inferKindsJSON(modelName); got != `["video_gen","video_extension"]` {
+			t.Fatalf("expected %s to infer video generation and extension kinds, got %s", modelName, got)
 		}
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"golang.org/x/sync/singleflight"
 )
@@ -22,7 +22,7 @@ type TokenResolver interface {
 }
 type Service struct {
 	tokens        TokenResolver
-	client        *sub2api.Client
+	client        sub2api.Client
 	repo          repository.Sub2PaymentOperationRepository
 	checkoutMu    sync.Mutex
 	checkoutCache map[string]checkoutCacheEntry
@@ -52,7 +52,7 @@ const (
 	readCacheMax     = 1024
 )
 
-func NewService(tokens TokenResolver, client *sub2api.Client, repo repository.Sub2PaymentOperationRepository) *Service {
+func NewService(tokens TokenResolver, client sub2api.Client, repo repository.Sub2PaymentOperationRepository) *Service {
 	return &Service{
 		tokens: tokens, client: client, repo: repo,
 		checkoutCache: make(map[string]checkoutCacheEntry),

@@ -28,6 +28,7 @@ export function useChatSubmitStream({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedKnowledgeBaseIDs,
   selectedInputResources,
   htmlVisualPromptEnabled,
   options,
@@ -70,6 +71,7 @@ export function useChatSubmitStream({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
@@ -81,7 +83,7 @@ export function useChatSubmitStream({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
-  touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
+  touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -117,6 +119,7 @@ export function useChatSubmitStream({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedInputResources,
     htmlVisualPromptEnabled,
     options,

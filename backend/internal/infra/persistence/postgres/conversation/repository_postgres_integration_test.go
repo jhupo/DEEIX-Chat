@@ -6,16 +6,18 @@ import (
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/vectorutil"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
 func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
+	const embeddingSignature = "test-model@1536"
 	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.Message{}, &model.MessageChunk{}); err != nil {
 		t.Fatalf("migrate conversation vector models: %v", err)
 	}
-	if err := db.Exec(`ALTER TABLE chat_message_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536)`).Error; err != nil {
+	if err := db.Exec(`ALTER TABLE chat_message_chunks ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
 		t.Fatalf("add message embedding column: %v", err)
 	}
 
@@ -46,8 +48,8 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 	}
 
 	chunks := []model.MessageChunk{
-		{ConversationID: 20, MessageID: active.ID, UserID: 1, Role: "assistant", Content: "active branch target"},
-		{ConversationID: 20, MessageID: sibling.ID, UserID: 1, Role: "assistant", Content: "closer sibling target"},
+		{ConversationID: 20, MessageID: active.ID, UserID: 1, Role: "assistant", Content: "active branch target", EmbeddingSignature: embeddingSignature},
+		{ConversationID: 20, MessageID: sibling.ID, UserID: 1, Role: "assistant", Content: "closer sibling target", EmbeddingSignature: embeddingSignature},
 	}
 	if err := db.Create(&chunks).Error; err != nil {
 		t.Fatalf("create message chunks: %v", err)
@@ -56,14 +58,19 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 	queryEmbedding[0] = 1
 	activeEmbedding := make([]float32, 1536)
 	activeEmbedding[0], activeEmbedding[1] = 0.8, 0.6
-	if err := db.Exec(`UPDATE chat_message_chunks SET embedding = ?::vector WHERE id = ?`, float32SliceToPostgresVector(activeEmbedding), chunks[0].ID).Error; err != nil {
+	activeVector, err := vectorutil.PostgresLiteral(activeEmbedding)
+	if err != nil {
+		t.Fatalf("serialize active embedding: %v", err)
+	}
+	queryVector, err := vectorutil.PostgresLiteral(queryEmbedding)
+	if err != nil {
+		t.Fatalf("serialize query embedding: %v", err)
+	}
+	if err := db.Exec(`UPDATE chat_message_chunks SET embedding = ?::vector WHERE id = ?`, activeVector, chunks[0].ID).Error; err != nil {
 		t.Fatalf("write active embedding: %v", err)
 	}
-	if err := db.Exec(`UPDATE chat_message_chunks SET embedding = ?::vector WHERE id = ?`, float32SliceToPostgresVector(queryEmbedding), chunks[1].ID).Error; err != nil {
+	if err := db.Exec(`UPDATE chat_message_chunks SET embedding = ?::vector WHERE id = ?`, queryVector, chunks[1].ID).Error; err != nil {
 		t.Fatalf("write sibling embedding: %v", err)
-	}
-	if err := db.Exec(`CREATE INDEX message_chunks_embedding_test_idx ON chat_message_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1)`).Error; err != nil {
-		t.Fatalf("create message embedding index: %v", err)
 	}
 
 	results, err := NewRepo(db).SearchMessageChunks(context.Background(), repository.MessageChunkSearchInput{
@@ -72,8 +79,9 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 			UserID:         1,
 			LeafMessageID:  leaf.ID,
 		},
-		QueryEmbedding: queryEmbedding,
-		TopK:           1,
+		QueryEmbedding:     queryEmbedding,
+		EmbeddingSignature: embeddingSignature,
+		TopK:               1,
 	})
 	if err != nil {
 		t.Fatalf("SearchMessageChunks() error = %v", err)
@@ -84,11 +92,12 @@ func TestSearchMessageChunksFiltersPostgresBranchBeforeTopK(t *testing.T) {
 }
 
 func TestReplaceFileChunksSearchesNearestPostgresChunk(t *testing.T) {
+	const embeddingSignature = "test-model@1536"
 	db := testutil.Postgres(t)
-	if err := db.AutoMigrate(&model.FileChunk{}); err != nil {
+	if err := db.AutoMigrate(&model.FileObject{}, &model.FileChunk{}); err != nil {
 		t.Fatalf("migrate file chunks: %v", err)
 	}
-	if err := db.Exec(`ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS embedding vector(1536)`).Error; err != nil {
+	if err := db.Exec(`ALTER TABLE file_chunks ADD COLUMN IF NOT EXISTS embedding vector`).Error; err != nil {
 		t.Fatalf("add file chunk embedding column: %v", err)
 	}
 
@@ -97,16 +106,24 @@ func TestReplaceFileChunksSearchesNearestPostgresChunk(t *testing.T) {
 	otherEmbedding := make([]float32, 1536)
 	otherEmbedding[1] = 1
 	chunks := []domainconversation.FileChunk{
-		{FileObjID: 10, UserID: 1, ChunkIndex: 0, Content: "alpha search target", TokenCount: 3},
-		{FileObjID: 10, UserID: 1, ChunkIndex: 1, Content: "beta unrelated", TokenCount: 2},
+		{FileObjID: 10, UserID: 1, ChunkIndex: 0, Content: "alpha search target", TokenCount: 3, EmbeddingSignature: embeddingSignature},
+		{FileObjID: 10, UserID: 1, ChunkIndex: 1, Content: "beta unrelated", TokenCount: 2, EmbeddingSignature: embeddingSignature},
 	}
 
 	repo := NewRepo(db)
 	ctx := context.Background()
-	if err := repo.ReplaceFileChunks(ctx, 10, chunks, [][]float32{queryEmbedding, otherEmbedding}); err != nil {
+	file := model.FileObject{BaseModel: model.BaseModel{ID: 10}, FileID: "file-vector-test", UserID: 1, Status: "active", EmbedStatus: "processing", EmbedSignature: embeddingSignature}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatalf("create file object: %v", err)
+	}
+	published, err := repo.ReplaceFileChunks(ctx, 10, embeddingSignature, chunks, [][]float32{queryEmbedding, otherEmbedding})
+	if err != nil {
 		t.Fatalf("replace file chunks: %v", err)
 	}
-	results, err := repo.SearchFileChunks(ctx, 1, []uint{10}, queryEmbedding, 2)
+	if !published {
+		t.Fatal("replace file chunks did not publish")
+	}
+	results, err := repo.SearchFileChunks(ctx, 1, []uint{10}, queryEmbedding, embeddingSignature, 2)
 	if err != nil {
 		t.Fatalf("search file chunks: %v", err)
 	}

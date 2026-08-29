@@ -1,6 +1,7 @@
 import { authedFetch, authedRequest } from "@/shared/api/authed-client";
 import type { PagePayload } from "@/shared/api/common.types";
 import type {
+  ActiveConversationRunEvent,
   BatchSetConversationProjectRequest,
   BatchSetConversationProjectResult,
   ContextArtifactDTO,
@@ -17,6 +18,7 @@ import type {
   ConversationProjectFilter,
   ConversationProjectStatusFilter,
   ConversationRunDTO,
+  ConversationRunStatusDTO,
   ConversationSearchPageDTO,
   ConversationShareDTO,
   ConversationShareFilter,
@@ -865,6 +867,91 @@ export async function listConversationExecutionEvents(
     { accessToken },
     true,
   );
+}
+
+export async function getConversationRunStatuses(
+  accessToken: string,
+  runIDs: string[],
+  signal?: AbortSignal,
+): Promise<ConversationRunStatusDTO[]> {
+  const normalizedRunIDs = Array.from(new Set(runIDs.map((runID) => runID.trim()).filter(Boolean)));
+  if (normalizedRunIDs.length === 0) {
+    return [];
+  }
+  const requests: Promise<ConversationRunStatusDTO[]>[] = [];
+  for (let index = 0; index < normalizedRunIDs.length; index += 100) {
+    requests.push(authedRequest<ConversationRunStatusDTO[]>(
+      "/api/v1/conversation-runs/statuses",
+      {
+        method: "POST",
+        accessToken,
+        body: { runIDs: normalizedRunIDs.slice(index, index + 100) },
+        signal,
+      },
+      true,
+    ));
+  }
+  return (await Promise.all(requests)).flat();
+}
+
+export async function streamActiveConversationRuns(
+  accessToken: string,
+  options: {
+    signal?: AbortSignal;
+    onEvent: (event: ActiveConversationRunEvent) => void;
+  },
+): Promise<void> {
+  const response = await authedFetch(
+    "/api/v1/conversation-runs/stream",
+    {
+      accessToken,
+      headers: { Accept: "text/event-stream" },
+      signal: options.signal,
+    },
+    true,
+  );
+  if (!response.body) {
+    throw new ApiError("active conversation run stream is unavailable", response.status);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const consumeFrames = (flush: boolean) => {
+    buffer += flush ? decoder.decode() : "";
+    const frames = buffer.split(/\r?\n\r?\n/);
+    buffer = flush ? "" : (frames.pop() ?? "");
+    for (const frame of frames) {
+      const data = frame
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trimStart())
+        .join("\n")
+        .trim();
+      if (!data) {
+        continue;
+      }
+      try {
+        options.onEvent(JSON.parse(data) as ActiveConversationRunEvent);
+      } catch {
+        // Ignore malformed events and keep the long-lived connection healthy.
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        consumeFrames(true);
+        return;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      consumeFrames(false);
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function listConversationInteractions(

@@ -41,6 +41,7 @@ import { PlusIcon } from "@/components/ui/plus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MessageAgentComposerActivity } from "@/features/chat/components/message/message-agent-activity";
 import { ChatAgentSettings } from "@/features/chat/components/sections/chat-agent-settings";
+import { ChatKnowledgeBases } from "@/features/chat/components/sections/chat-knowledge-bases";
 import { ChatMCP } from "@/features/chat/components/sections/chat-mcp";
 import { ChatModelPicker } from "@/features/chat/components/sections/chat-model-picker";
 import { ChatMentionMenuPortal } from "@/features/chat/components/shared/chat-mention-menu";
@@ -52,7 +53,7 @@ import {
   type SpeechInputErrorCode,
   useChatSpeechInput,
 } from "@/features/chat/hooks/use-chat-speech-input";
-import { useMarkdownPreviewSync } from "@/features/chat/hooks/use-markdown-preview-sync";
+import { useChatPreviewSync } from "@/features/chat/hooks/use-chat-preview-sync";
 import {
   resolveChatModelReasoningSetting,
   setChatModelReasoningEffort,
@@ -111,6 +112,8 @@ type ChatInputProps = {
   isConversationMode: boolean;
   maxFilesPerMessage: number;
   fileMode?: "auto" | "full_context" | "rag";
+  ragAvailable: boolean | null;
+  ragAvailabilityReason: string;
   sendShortcut?: SendShortcut;
   inputHeight?: "compact" | "standard" | "loose";
   attachments: PendingAttachment[];
@@ -128,6 +131,7 @@ type ChatInputProps = {
   inputResources?: ConversationInputResourceDTO[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   selectedInputResources: ConversationInputResourceDTO[];
   defaultToolIDs: number[];
   queuedMessages: QueuedComposerMessage[];
@@ -147,6 +151,7 @@ type ChatInputProps = {
   onModelCatalogRefresh?: () => void | Promise<void>;
   onSelectedToolsChange: (toolIDs: number[]) => void;
   onSelectedSkillsChange: (skills: SkillSummaryDTO[]) => void;
+  onSelectedKnowledgeBasesChange: (ids: string[]) => void;
   onSelectedInputResourcesChange: (resources: ConversationInputResourceDTO[]) => void;
   onDefaultToolsChange: (toolIDs: number[]) => void | Promise<void>;
   onHTMLVisualPromptChange: (enabled: boolean) => void;
@@ -263,6 +268,8 @@ function ChatInputComponent({
   uploading,
   isConversationMode,
   fileMode,
+  ragAvailable,
+  ragAvailabilityReason,
   sendShortcut = "enter",
   inputHeight = "standard",
   attachments,
@@ -280,6 +287,7 @@ function ChatInputComponent({
   inputResources,
   selectedToolIDs,
   selectedSkills,
+  selectedKnowledgeBaseIDs,
   selectedInputResources,
   defaultToolIDs,
   queuedMessages,
@@ -299,6 +307,7 @@ function ChatInputComponent({
   onModelCatalogRefresh,
   onSelectedToolsChange,
   onSelectedSkillsChange,
+  onSelectedKnowledgeBasesChange,
   onSelectedInputResourcesChange,
   onDefaultToolsChange,
   onHTMLVisualPromptChange,
@@ -355,7 +364,7 @@ function ChatInputComponent({
   const showMarkdownPreview = markdownPreview && hasDraftText;
   const inputHeightClassName =
     inputHeight === "compact" ? "max-h-32" : inputHeight === "loose" ? "max-h-64" : "max-h-44";
-  const { onPreviewScroll, onSourceScroll } = useMarkdownPreviewSync({
+  const { onPreviewScroll, onSourceScroll } = useChatPreviewSync({
     enabled: showMarkdownPreview,
     previewRef: markdownPreviewRef,
     source: draft,
@@ -1110,6 +1119,16 @@ function ChatInputComponent({
                   disabled={loading || uploading || toolsLoading}
                   onSelectedToolsChange={onSelectedToolsChange}
                   onDefaultToolsChange={onDefaultToolsChange}
+                />
+              ) : null}
+
+              {executionMode === "cloud" && !isMediaMode ? (
+                <ChatKnowledgeBases
+                  selectedIDs={selectedKnowledgeBaseIDs}
+                  disabled={loading || uploading}
+                  available={ragAvailable}
+                  unavailableReason={ragAvailabilityReason}
+                  onChange={onSelectedKnowledgeBasesChange}
                 />
               ) : null}
 

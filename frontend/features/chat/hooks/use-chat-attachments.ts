@@ -15,7 +15,7 @@ import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import {
   getChatFilePolicy,
-  getFileProcessingStatus,
+  getFileProcessingStatuses,
   uploadFile,
 } from "@/shared/api/file";
 import type { ChatFilePolicyDTO } from "@/shared/api/file.types";
@@ -103,35 +103,33 @@ export function useChatAttachments({
         if (!token || cancelled) {
           return;
         }
-        const results = await Promise.allSettled(
-          pending.map((item) => getFileProcessingStatus(token, item.fileID)),
+        const results = await getFileProcessingStatuses(
+          token,
+          pending.map((item) => item.fileID),
         );
         if (cancelled) {
           return;
         }
+        const statusByFileID = new Map(results.map((status) => [status.fileID, status]));
         setAttachments((prev) =>
           prev.map((item) => {
-            const index = pending.findIndex((candidate) => candidate.fileID === item.fileID);
-            if (index < 0) {
-              return item;
-            }
-            const result = results[index];
-            if (!result || result.status !== "fulfilled") {
+            const status = statusByFileID.get(item.fileID);
+            if (!status) {
               return item;
             }
             return {
               ...item,
-              detectedMime: result.value.detectedMIME,
-              fileCategory: result.value.fileCategory,
-              processingStatus: result.value.processingStatus,
-              processingReady: result.value.processingReady,
-              processingErrorCode: result.value.errorCode,
-              processingErrorMessage: result.value.errorMessage,
-              extractStatus: result.value.extractStatus,
-              embedStatus: result.value.embedStatus,
-              ragReady: result.value.ragReady,
-              ragReason: result.value.ragReason,
-              ocrUsed: result.value.ocrUsed,
+              detectedMime: status.detectedMIME,
+              fileCategory: status.fileCategory,
+              processingStatus: status.processingStatus,
+              processingReady: status.processingReady,
+              processingErrorCode: status.errorCode,
+              processingErrorMessage: status.errorMessage,
+              extractStatus: status.extractStatus,
+              embedStatus: status.embedStatus,
+              ragReady: status.ragReady,
+              ragReason: status.ragReason,
+              ocrUsed: status.ocrUsed,
             };
           }),
         );
@@ -362,6 +360,8 @@ export function useChatAttachments({
     uploadingAttachments,
     maxFilesPerMessage,
     fileMode: chatFilePolicy?.fileMode ?? "auto",
+    ragAvailable: chatFilePolicy?.ragAvailable ?? null,
+    ragAvailabilityReason: chatFilePolicy?.ragAvailabilityReason ?? "",
     releaseAttachments,
     onRemoveAttachment,
     onUploadFiles,

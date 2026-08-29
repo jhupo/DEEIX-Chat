@@ -13,6 +13,7 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/lifecycle"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	adminhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/admin"
 	agentgatewayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/agentgateway"
@@ -20,7 +21,9 @@ import (
 	authhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/auth"
 	billinghttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/billing"
 	channelhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/channel"
+	contentmoderationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/contentmoderation"
 	conversationhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/conversation"
+	knowledgebasehttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/knowledgebase"
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
@@ -52,23 +55,26 @@ type HealthChecker interface {
 
 // Modules 聚合可注册的业务模块。
 type Modules struct {
-	AgentGateway *agentgatewayhttp.Module
-	Auth         *authhttp.Module
-	AuthService  middleware.SessionValidator
-	Channel      *channelhttp.Module
-	Conversation *conversationhttp.Module
-	MCP          *mcphttp.Module
-	Memory       *memoryhttp.Module
-	Billing      *billinghttp.Module
-	Sub2Key      *sub2keyhttp.Module
-	Admin        *adminhttp.Module
-	Announcement *announcementhttp.Module
-	PromptPreset *promptpresethttp.Module
-	Skill        *skillhttp.Module
-	Settings     *settingshttp.Module
-	User         *userhttp.Module
-	UserSettings *usersettingshttp.Module
-	StartupLog   func(*zap.Logger)
+	AgentGateway      *agentgatewayhttp.Module
+	Auth              *authhttp.Module
+	AuthService       middleware.SessionValidator
+	Channel           *channelhttp.Module
+	Conversation      *conversationhttp.Module
+	MCP               *mcphttp.Module
+	Memory            *memoryhttp.Module
+	Billing           *billinghttp.Module
+	Sub2Key           *sub2keyhttp.Module
+	Admin             *adminhttp.Module
+	ContentModeration *contentmoderationhttp.Module
+	Announcement      *announcementhttp.Module
+	PromptPreset      *promptpresethttp.Module
+	Skill             *skillhttp.Module
+	KnowledgeBase     *knowledgebasehttp.Module
+	Settings          *settingshttp.Module
+	User              *userhttp.Module
+	UserSettings      *usersettingshttp.Module
+	StartupLog        func(*zap.Logger)
+	Shutdown          *lifecycle.Shutdown
 }
 
 // NewEngine 创建并注册 API 路由。
@@ -105,7 +111,7 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		info := buildinfo.Snapshot()
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": info.Version})
 	})
-	engine.GET("/readyz", readyzHandler(hc))
+	engine.GET("/readyz", readyzHandler(hc, modules.Shutdown))
 	if swaggerEnabled(snapshot.Env) {
 		engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
@@ -116,7 +122,7 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		c.Header("Pragma", "no-cache")
 		c.JSON(http.StatusOK, buildinfo.Snapshot())
 	})
-	if modules.AgentGateway != nil || modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil {
+	if modules.AgentGateway != nil || modules.Auth != nil || modules.Settings != nil || modules.Billing != nil || modules.Conversation != nil || modules.User != nil || modules.Channel != nil {
 		publicAuth := api.Group("")
 		publicAuth.Use(middleware.PublicAuthRateLimit(limiter, cfg))
 		if modules.AgentGateway != nil {
@@ -127,6 +133,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		}
 		if modules.User != nil {
 			modules.User.RegisterPublicRoutes(publicAuth)
+		}
+		if modules.Channel != nil {
+			modules.Channel.RegisterPublicRoutes(publicAuth)
 		}
 		if modules.Conversation != nil {
 			modules.Conversation.RegisterPublicRoutes(publicAuth)
@@ -176,17 +185,23 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	if modules.Skill != nil {
 		modules.Skill.RegisterRoutes(authRequired)
 	}
+	if modules.KnowledgeBase != nil {
+		modules.KnowledgeBase.RegisterRoutes(authRequired)
+	}
 	if modules.UserSettings != nil {
 		modules.UserSettings.RegisterRoutes(authRequired)
 	}
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)
 	}
-	if modules.Admin != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil {
+	if modules.Admin != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil || modules.KnowledgeBase != nil || modules.ContentModeration != nil {
 		adminGroup := authRequired.Group("/admin")
 		adminGroup.Use(middleware.AdminOnly())
 		if modules.Admin != nil {
 			modules.Admin.RegisterRoutes(adminGroup)
+		}
+		if modules.ContentModeration != nil {
+			modules.ContentModeration.RegisterRoutes(adminGroup)
 		}
 		if modules.Billing != nil {
 			modules.Billing.RegisterAdminRoutes(adminGroup)
@@ -208,6 +223,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		}
 		if modules.Skill != nil {
 			modules.Skill.RegisterAdminRoutes(adminGroup)
+		}
+		if modules.KnowledgeBase != nil {
+			modules.KnowledgeBase.RegisterAdminRoutes(adminGroup)
 		}
 	}
 
@@ -382,8 +400,12 @@ func isNextExportRouteAsset(requestPath string) bool {
 	return extension == "" || strings.EqualFold(extension, ".html") || strings.EqualFold(extension, ".txt")
 }
 
-func readyzHandler(hc HealthChecker) gin.HandlerFunc {
+func readyzHandler(hc HealthChecker, shutdown *lifecycle.Shutdown) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if shutdown.Draining() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "draining"})
+			return
+		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 

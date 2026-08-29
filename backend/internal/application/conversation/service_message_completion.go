@@ -8,8 +8,8 @@ import (
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/channel"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
@@ -402,7 +402,11 @@ func shouldPersistInterruptedMessageGeneration(input persistInterruptedMessageGe
 	hasEstimatedCanceledInput := errors.Is(input.Error, ErrMessageGenerationCanceled) &&
 		input.UpstreamCallStarted &&
 		input.EstimatedInputTokens > 0
-	return strings.TrimSpace(input.AssistantText) != "" || hasRetainedToolTrace || hasObservedUsage || hasEstimatedCanceledInput
+	return strings.TrimSpace(input.AssistantText) != "" ||
+		strings.TrimSpace(input.AssistantReasoningText) != "" ||
+		hasRetainedToolTrace ||
+		hasObservedUsage ||
+		hasEstimatedCanceledInput
 }
 
 // resolveInterruptedMessageGenerationMetrics 缁熶竴澶勭悊涓柇娑堟伅鐨勭湡瀹?usage 涓庝及绠楀厹搴曘€?

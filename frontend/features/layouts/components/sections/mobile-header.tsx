@@ -4,7 +4,7 @@ import { PanelLeft, Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useSidebarActions } from "@/components/ui/sidebar";
 import { ExecutionModeSwitch } from "@/features/devices";
 
 export function MobileHeader({
@@ -15,7 +15,7 @@ export function MobileHeader({
   showModeSwitch: boolean;
 }) {
   const t = useTranslations("common.navigation");
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar } = useSidebarActions();
 
   return (
     <header className="grid h-12 shrink-0 grid-cols-[2rem_minmax(0,1fr)_2rem] items-center px-3 md:hidden">

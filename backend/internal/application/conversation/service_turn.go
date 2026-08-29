@@ -554,7 +554,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	validContentType := hasFiles && input.ContentType == "mixed" ||
 		!hasFiles && (input.ContentType == "text" || input.ContentType == "markdown")
 	if strings.TrimSpace(input.Content) == "" || !validContentType ||
-		len(input.SelectedToolIDs) != 0 || len(input.SkillIDs) != 0 || len(input.InputResourceRefs) > 16 || input.HTMLVisualPromptEnabled ||
+		len(input.SelectedToolIDs) != 0 || len(input.SkillIDs) != 0 || len(input.KnowledgeBaseIDs) != 0 || len(input.InputResourceRefs) > 16 || input.HTMLVisualPromptEnabled ||
 		strings.TrimSpace(input.ParentMessagePublicID) != "" || strings.TrimSpace(input.SourceMessagePublicID) != "" ||
 		(strings.TrimSpace(input.BranchReason) != "" && strings.TrimSpace(input.BranchReason) != "default") {
 		return nil, ErrInvalidMessageContent
@@ -619,7 +619,7 @@ func (s *Service) startGatewayTurn(ctx context.Context, input SendMessageInput, 
 	}
 	s.persistInitialConversationFallbackTitle(ctx, *conversation, *pair.user)
 
-	s.generationStreams.register(ctx, runID, input.UserID, nil)
+	s.generationStreams.register(ctx, runID, input.UserID, conversation.PublicID, nil)
 	if err := s.queueGatewayTurn(ctx, input, conversation, encodedInput, settings, runID); err != nil {
 		endedAt := time.Now().UTC()
 		_ = s.repo.FailGatewayTurn(context.Background(), input.UserID, runID, "gateway_start_failed", err.Error(), endedAt)
@@ -686,7 +686,7 @@ func validGatewayApprovalMode(approvalPolicy, approvalsReviewer, sandboxPolicy s
 
 func (s *Service) awaitGatewayTurn(ctx context.Context, input SendMessageInput, initial *SendMessageResult, onDelta func(string) error) (*SendMessageResult, error) {
 	runID := initial.AssistantMessage.RunID
-	replay, events, unsubscribe, ok := s.SubscribeMessageGeneration(ctx, input.UserID, runID, 0)
+	replay, events, unsubscribe, ok := s.SubscribeMessageGeneration(ctx, input.UserID, runID, 0, true)
 	if !ok {
 		return initial, ErrExecutionUnavailable
 	}

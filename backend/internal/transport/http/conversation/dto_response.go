@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -250,20 +251,21 @@ func ToConversationExportResponse(item *appconversation.ConversationExportResult
 
 // ConversationProjectResponse 对外会话项目响应 DTO。
 type ConversationProjectResponse struct {
-	PublicID          string    `json:"publicID"`
-	Name              string    `json:"name"`
-	Managed           bool      `json:"managed"`
-	Description       string    `json:"description"`
-	SystemPrompt      string    `json:"systemPrompt"`
-	MCPDefaultMode    string    `json:"mcpDefaultMode"`
-	DefaultMCPToolIDs []uint    `json:"defaultMCPToolIDs"`
-	DefaultSkillIDs   []uint    `json:"defaultSkillIDs"`
-	Color             string    `json:"color"`
-	Icon              string    `json:"icon"`
-	SortOrder         int       `json:"sortOrder"`
-	Status            string    `json:"status"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	PublicID                string    `json:"publicID"`
+	Name                    string    `json:"name"`
+	Managed                 bool      `json:"managed"`
+	Description             string    `json:"description"`
+	SystemPrompt            string    `json:"systemPrompt"`
+	MCPDefaultMode          string    `json:"mcpDefaultMode"`
+	DefaultMCPToolIDs       []uint    `json:"defaultMCPToolIDs"`
+	DefaultSkillIDs         []uint    `json:"defaultSkillIDs"`
+	DefaultKnowledgeBaseIDs []string  `json:"defaultKnowledgeBaseIDs"`
+	Color                   string    `json:"color"`
+	Icon                    string    `json:"icon"`
+	SortOrder               int       `json:"sortOrder"`
+	Status                  string    `json:"status"`
+	CreatedAt               time.Time `json:"createdAt"`
+	UpdatedAt               time.Time `json:"updatedAt"`
 }
 
 func toConversationProjectResponse(item *model.ConversationProject) ConversationProjectResponse {
@@ -271,20 +273,21 @@ func toConversationProjectResponse(item *model.ConversationProject) Conversation
 		return ConversationProjectResponse{}
 	}
 	return ConversationProjectResponse{
-		PublicID:          item.PublicID,
-		Name:              item.Name,
-		Managed:           item.Managed,
-		Description:       item.Description,
-		SystemPrompt:      item.SystemPrompt,
-		MCPDefaultMode:    item.MCPDefaultMode,
-		DefaultMCPToolIDs: append([]uint{}, item.DefaultMCPToolIDs...),
-		DefaultSkillIDs:   append([]uint{}, item.DefaultSkillIDs...),
-		Color:             item.Color,
-		Icon:              item.Icon,
-		SortOrder:         item.SortOrder,
-		Status:            item.Status,
-		CreatedAt:         item.CreatedAt,
-		UpdatedAt:         item.UpdatedAt,
+		PublicID:                item.PublicID,
+		Name:                    item.Name,
+		Managed:                 item.Managed,
+		Description:             item.Description,
+		SystemPrompt:            item.SystemPrompt,
+		MCPDefaultMode:          item.MCPDefaultMode,
+		DefaultMCPToolIDs:       append([]uint{}, item.DefaultMCPToolIDs...),
+		DefaultSkillIDs:         append([]uint{}, item.DefaultSkillIDs...),
+		DefaultKnowledgeBaseIDs: append([]string{}, item.DefaultKnowledgeBaseIDs...),
+		Color:                   item.Color,
+		Icon:                    item.Icon,
+		SortOrder:               item.SortOrder,
+		Status:                  item.Status,
+		CreatedAt:               item.CreatedAt,
+		UpdatedAt:               item.UpdatedAt,
 	}
 }
 
@@ -596,40 +599,57 @@ func toContextArtifactResponse(item *model.ContextArtifact) ContextArtifactRespo
 
 // MessageResponse 消息响应 DTO。
 type MessageResponse struct {
-	ID                uint       `json:"id"`
-	ConversationID    uint       `json:"conversationID"`
-	UserID            uint       `json:"userID"`
-	PublicID          string     `json:"publicID"`
-	ParentMessageID   *uint      `json:"parentMessageID" extensions:"x-nullable,!x-omitempty"`
-	RunID             string     `json:"runID"`
-	Role              string     `json:"role"`
-	ContentType       string     `json:"contentType"`
-	Content           string     `json:"content"`
-	BranchReason      string     `json:"branchReason"`
-	SourceMessageID   *uint      `json:"sourceMessageID" extensions:"x-nullable,!x-omitempty"`
-	TokenUsage        int64      `json:"tokenUsage"`
-	InputTokens       int64      `json:"inputTokens"`
-	OutputTokens      int64      `json:"outputTokens"`
-	CacheReadTokens   int64      `json:"cacheReadTokens"`
-	CacheWriteTokens  int64      `json:"cacheWriteTokens"`
-	ReasoningTokens   int64      `json:"reasoningTokens"`
-	LatencyMS         int64      `json:"latencyMS"`
-	Status            string     `json:"status"`
-	ErrorCode         string     `json:"errorCode"`
-	ErrorMessage      string     `json:"errorMessage"`
-	Attachments       string     `json:"attachments"`
-	PlatformModelName string     `json:"platformModelName"`
-	UpstreamModelName string     `json:"upstreamModelName"`
-	ModelVendor       string     `json:"modelVendor"`
-	ModelIcon         string     `json:"modelIcon"`
-	ParentPublicID    string     `json:"parentPublicID"`
-	SourcePublicID    string     `json:"sourcePublicID"`
-	MyFeedback        string     `json:"myFeedback"`
-	ThumbsUpCount     int64      `json:"thumbsUpCount"`
-	ThumbsDownCount   int64      `json:"thumbsDownCount"`
-	EditedAt          *time.Time `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                uint                             `json:"id"`
+	ConversationID    uint                             `json:"conversationID"`
+	UserID            uint                             `json:"userID"`
+	PublicID          string                           `json:"publicID"`
+	ParentMessageID   *uint                            `json:"parentMessageID" extensions:"x-nullable,!x-omitempty"`
+	RunID             string                           `json:"runID"`
+	Role              string                           `json:"role"`
+	ContentType       string                           `json:"contentType"`
+	Content           string                           `json:"content"`
+	BranchReason      string                           `json:"branchReason"`
+	SourceMessageID   *uint                            `json:"sourceMessageID" extensions:"x-nullable,!x-omitempty"`
+	TokenUsage        int64                            `json:"tokenUsage"`
+	InputTokens       int64                            `json:"inputTokens"`
+	OutputTokens      int64                            `json:"outputTokens"`
+	CacheReadTokens   int64                            `json:"cacheReadTokens"`
+	CacheWriteTokens  int64                            `json:"cacheWriteTokens"`
+	ReasoningTokens   int64                            `json:"reasoningTokens"`
+	LatencyMS         int64                            `json:"latencyMS"`
+	Status            string                           `json:"status"`
+	ErrorCode         string                           `json:"errorCode"`
+	ErrorMessage      string                           `json:"errorMessage"`
+	Attachments       string                           `json:"attachments"`
+	PlatformModelName string                           `json:"platformModelName"`
+	UpstreamModelName string                           `json:"upstreamModelName"`
+	ModelVendor       string                           `json:"modelVendor"`
+	ModelIcon         string                           `json:"modelIcon"`
+	ParentPublicID    string                           `json:"parentPublicID"`
+	SourcePublicID    string                           `json:"sourcePublicID"`
+	MyFeedback        string                           `json:"myFeedback"`
+	ThumbsUpCount     int64                            `json:"thumbsUpCount"`
+	ThumbsDownCount   int64                            `json:"thumbsDownCount"`
+	KnowledgeSources  []MessageKnowledgeSourceResponse `json:"knowledgeSources,omitempty"`
+	Moderation        *MessageModerationResponse       `json:"moderation,omitempty"`
+	EditedAt          *time.Time                       `json:"editedAt" extensions:"x-nullable,!x-omitempty"`
+	CreatedAt         time.Time                        `json:"createdAt"`
+	UpdatedAt         time.Time                        `json:"updatedAt"`
+}
+
+type MessageKnowledgeSourceResponse struct {
+	FileName   string  `json:"fileName"`
+	FileID     string  `json:"fileID"`
+	ChunkIndex int     `json:"chunkIndex"`
+	Score      float32 `json:"score"`
+	Preview    string  `json:"preview"`
+}
+
+type MessageModerationResponse struct {
+	State      string   `json:"state,omitempty"`
+	Direction  string   `json:"direction,omitempty"`
+	EventID    string   `json:"eventID,omitempty"`
+	Categories []string `json:"categories,omitempty"`
 }
 
 func toMessageResponse(m model.Message) MessageResponse {
@@ -649,6 +669,14 @@ func toMessageResponseWithRunAndFallback(m model.Message, run model.Run, fallbac
 	if platformModelName == "" {
 		platformModelName = strings.TrimSpace(fallbackModel)
 	}
+	content := m.Content
+	attachments := m.Attachments
+	knowledgeSources := m.KnowledgeSources
+	if strings.EqualFold(strings.TrimSpace(m.Status), "blocked") && m.Role == "assistant" {
+		content = ""
+		attachments = "[]"
+		knowledgeSources = nil
+	}
 	return MessageResponse{
 		ID:                m.ID,
 		ConversationID:    m.ConversationID,
@@ -658,7 +686,7 @@ func toMessageResponseWithRunAndFallback(m model.Message, run model.Run, fallbac
 		RunID:             m.RunID,
 		Role:              m.Role,
 		ContentType:       m.ContentType,
-		Content:           m.Content,
+		Content:           content,
 		BranchReason:      m.BranchReason,
 		SourceMessageID:   m.SourceMessageID,
 		TokenUsage:        m.TokenUsage,
@@ -671,7 +699,7 @@ func toMessageResponseWithRunAndFallback(m model.Message, run model.Run, fallbac
 		Status:            m.Status,
 		ErrorCode:         m.ErrorCode,
 		ErrorMessage:      m.ErrorMessage,
-		Attachments:       m.Attachments,
+		Attachments:       attachments,
 		PlatformModelName: platformModelName,
 		UpstreamModelName: strings.TrimSpace(run.UpstreamModelName),
 		ModelVendor:       strings.TrimSpace(run.ModelVendor),
@@ -681,10 +709,70 @@ func toMessageResponseWithRunAndFallback(m model.Message, run model.Run, fallbac
 		MyFeedback:        m.MyFeedback,
 		ThumbsUpCount:     m.ThumbsUpCount,
 		ThumbsDownCount:   m.ThumbsDownCount,
+		KnowledgeSources:  toMessageKnowledgeSourceResponses(knowledgeSources),
+		Moderation:        toMessageModerationResponse(m, run),
 		EditedAt:          m.EditedAt,
 		CreatedAt:         m.CreatedAt,
 		UpdatedAt:         m.UpdatedAt,
 	}
+}
+
+func toMessageKnowledgeSourceResponses(items []model.MessageKnowledgeSource) []MessageKnowledgeSourceResponse {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]MessageKnowledgeSourceResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, MessageKnowledgeSourceResponse{
+			FileName: item.FileName, FileID: item.FileID, ChunkIndex: item.ChunkIndex,
+			Score: item.Score, Preview: item.Preview,
+		})
+	}
+	return result
+}
+
+func toMessageModerationResponse(m model.Message, run model.Run) *MessageModerationResponse {
+	eventID := strings.TrimSpace(m.ModerationEventID)
+	if eventID == "" {
+		eventID = strings.TrimSpace(run.ModerationEventID)
+	}
+	state := strings.TrimSpace(run.ModerationState)
+	if strings.EqualFold(strings.TrimSpace(m.Status), "blocked") {
+		state = "blocked"
+	}
+	if eventID == "" && state == "" {
+		return nil
+	}
+	direction := ""
+	if strings.EqualFold(strings.TrimSpace(m.Status), "blocked") {
+		if m.Role == "user" {
+			direction = "input"
+		} else {
+			direction = "output"
+		}
+	}
+	return &MessageModerationResponse{
+		State: state, Direction: direction, EventID: eventID,
+		Categories: parseStringJSONArray(firstNonEmptyModerationJSON(m.ModerationCategoriesJSON, run.ModerationCategoriesJSON)),
+	}
+}
+
+func firstNonEmptyModerationJSON(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && value != "[]" && value != "null" {
+			return value
+		}
+	}
+	return "[]"
+}
+
+func parseStringJSONArray(raw string) []string {
+	var items []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &items); err != nil {
+		return nil
+	}
+	return items
 }
 
 // ---------- Send Message ----------
@@ -698,6 +786,18 @@ type SendMessageResponse struct {
 
 type CancelMessageGenerationResponse struct {
 	Canceled bool `json:"canceled"`
+}
+
+type ActiveMessageGenerationResponse struct {
+	RunID                string `json:"runID"`
+	ConversationPublicID string `json:"conversationPublicID"`
+}
+
+type ActiveMessageGenerationEventResponse struct {
+	Type                 string                            `json:"type"`
+	Runs                 []ActiveMessageGenerationResponse `json:"runs,omitempty"`
+	RunID                string                            `json:"runID,omitempty"`
+	ConversationPublicID string                            `json:"conversationPublicID,omitempty"`
 }
 
 type ExecutionEventResponse struct {
@@ -807,6 +907,11 @@ type RunResponse struct {
 	EndedAt             *time.Time `json:"endedAt" extensions:"x-nullable,!x-omitempty"`
 	CreatedAt           time.Time  `json:"createdAt"`
 	UpdatedAt           time.Time  `json:"updatedAt"`
+}
+
+type ConversationRunStatusResponse struct {
+	RunID  string `json:"runID"`
+	Status string `json:"status"`
 }
 
 func toRunResponse(r model.Run) RunResponse {

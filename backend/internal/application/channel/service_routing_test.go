@@ -30,6 +30,10 @@ func (r *routeResolutionRepositoryStub) ListActiveRoutesByModel(context.Context,
 	return append([]repository.ChannelUpstreamRouteRow(nil), r.routes...), nil
 }
 
+func (r *routeResolutionRepositoryStub) GetBreakerDefaults(context.Context) (domainchannel.BreakerDefaults, error) {
+	return domainchannel.BreakerDefaults{Enabled: false}, nil
+}
+
 func TestResolveRouteExcludesPreviouslyAttemptedRoutes(t *testing.T) {
 	const encryptionKey = "test-data-encryption-key-32-bytes"
 	apiKeysEnc, err := encryptAPIKeys(encryptionKey, `{"strategy":"failover","keys":[{"key":"sk-test","status":"active"}]}`)

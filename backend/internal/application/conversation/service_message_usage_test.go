@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 )
 
@@ -123,6 +124,7 @@ func TestResolveToolResultTokenBudgetUsesRemainingModelContext(t *testing.T) {
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	longBudget := resolveToolResultTokenBudget(
 		generateInput,
@@ -130,8 +132,9 @@ func TestResolveToolResultTokenBudgetUsesRemainingModelContext(t *testing.T) {
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
-	effectiveBudget := int64(llm.EffectiveContextBudgetFromCapabilities("custom-model", capabilities))
+	effectiveBudget := int64(domainchannel.EffectiveContextBudgetFromCapabilitiesWithFallback("custom-model", capabilities, 0))
 	if shortBudget <= 0 || shortBudget >= effectiveBudget {
 		t.Fatalf("expected short prompt to leave a bounded tool budget, got %d of %d", shortBudget, effectiveBudget)
 	}
@@ -148,6 +151,7 @@ func TestResolveToolResultTokenBudgetUsesRemainingModelContext(t *testing.T) {
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	if withOldHistoryBudget != shortBudget {
 		t.Fatalf("expected old history to be reclaimable for the current tool result, got %d want %d", withOldHistoryBudget, shortBudget)
@@ -164,13 +168,14 @@ func TestResolveToolResultTokenBudgetDoesNotExceedRemainingContext(t *testing.T)
 		}},
 	}
 	capabilities := `{"contextWindow":32000,"maxOutputTokens":4000}`
-	effectiveBudget := int64(llm.EffectiveContextBudgetFromCapabilities("custom-model", capabilities))
+	effectiveBudget := int64(domainchannel.EffectiveContextBudgetFromCapabilitiesWithFallback("custom-model", capabilities, 0))
 	baseBudget := resolveToolResultTokenBudget(
 		llm.GenerateInput{},
 		[]llm.Message{{Role: "user", Content: "summarize this video"}},
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	fillerTokens := baseBudget - 512
 	if fillerTokens <= 0 {
@@ -186,6 +191,7 @@ func TestResolveToolResultTokenBudgetDoesNotExceedRemainingContext(t *testing.T)
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	if remaining < 0 || remaining >= 1024 {
 		t.Fatalf("expected strict sub-1024 remaining budget, got %d", remaining)
@@ -237,6 +243,7 @@ func TestResolveToolResultTokenBudgetReclaimsPreviousToolPayloads(t *testing.T) 
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	largeBudget := resolveToolResultTokenBudget(
 		llm.GenerateInput{},
@@ -244,6 +251,7 @@ func TestResolveToolResultTokenBudgetReclaimsPreviousToolPayloads(t *testing.T) 
 		pendingAssistant,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	if largeBudget != smallBudget {
 		t.Fatalf("expected previous payloads to be reclaimable, got %d want %d", largeBudget, smallBudget)
@@ -268,11 +276,12 @@ func TestRebalanceToolFollowUpResultsFitsCurrentRoundWithinContext(t *testing.T)
 		messages,
 		"custom-model",
 		capabilities,
+		0,
 	)
 	if !changed {
 		t.Fatal("expected oversized current tool round to be rebalanced")
 	}
-	effectiveBudget := int64(llm.EffectiveContextBudgetFromCapabilities("custom-model", capabilities))
+	effectiveBudget := int64(domainchannel.EffectiveContextBudgetFromCapabilitiesWithFallback("custom-model", capabilities, 0))
 	if tokens := estimateToolFollowUpInputTokens(llm.GenerateInput{}, rebalanced); tokens > effectiveBudget {
 		t.Fatalf("expected rebalanced follow-up within context, got %d > %d", tokens, effectiveBudget)
 	}
@@ -307,7 +316,7 @@ func TestTrimToolFollowUpHistoryRemovesOldCompleteTurns(t *testing.T) {
 			OutputJSON: strings.Repeat("subtitle ", 2000),
 		}}},
 	}
-	trimmed, changed := trimToolFollowUpHistory(llm.GenerateInput{}, messages, "custom-model", capabilities)
+	trimmed, changed := trimToolFollowUpHistory(llm.GenerateInput{}, messages, "custom-model", capabilities, 0)
 	if !changed {
 		t.Fatal("expected oversized follow-up context to trim old history")
 	}
@@ -315,7 +324,7 @@ func TestTrimToolFollowUpHistoryRemovesOldCompleteTurns(t *testing.T) {
 		t.Fatalf("expected system prefix and current turn only, got %#v", trimmed)
 	}
 	if tokens := estimateToolFollowUpInputTokens(llm.GenerateInput{}, trimmed); tokens >
-		int64(llm.EffectiveContextBudgetFromCapabilities("custom-model", capabilities)) {
+		int64(domainchannel.EffectiveContextBudgetFromCapabilitiesWithFallback("custom-model", capabilities, 0)) {
 		t.Fatalf("expected trimmed follow-up within effective model budget, got %d tokens", tokens)
 	}
 }

@@ -18,7 +18,7 @@ import {
   ConversationShareDialog,
   sharePatchFromDTO,
   useConversationExport,
-  useSidebarConversations,
+  useSidebarConversationField,
 } from "@/entities/conversation";
 import { ChatArea, ChatAreaLoadError, ChatAreaSkeleton } from "@/features/chat/components/sections/chat-area";
 import { ChatArtifactWorkspace } from "@/features/chat/components/sections/chat-artifact";
@@ -38,7 +38,7 @@ import { useChatRuntime } from "@/features/chat/hooks/use-chat-runtime";
 import { useChatScreenshot } from "@/features/chat/hooks/use-chat-screenshot";
 import { useChatViewerProfile } from "@/features/chat/hooks/use-chat-viewer-profile";
 import { useChatVisualPrompt } from "@/features/chat/hooks/use-chat-visual-prompt";
-import { useNewConversationDefaults } from "@/features/chat/hooks/use-new-conversation-defaults";
+import { useChatConversationDefaults } from "@/features/chat/hooks/use-chat-conversation-defaults";
 import { resolveAgentComposerProfile } from "@/features/chat/model/agent-settings";
 import { modelSupportsChatImageTool } from "@/features/chat/model/chat-task";
 import { shouldReloadMessagesForExecutionBoundary } from "@/features/chat/model/conversation-load-policy";
@@ -285,19 +285,17 @@ export function AppChatArea() {
   const onConversationHistoryLoaded = React.useCallback(() => {
     setConversationInvalidationSequence((current) => current + 1);
   }, []);
-  const {
-    items,
-    projects,
-    prependNewConversation,
-    touchByPublicID,
-    renameByPublicID,
-    regenerateTitleByPublicID,
-    updateLabelsByPublicID,
-    setStarByPublicID,
-    setProjectByPublicID,
-    deleteByPublicID,
-    lastAgentEvent,
-  } = useSidebarConversations();
+  const items = useSidebarConversationField("items");
+  const projects = useSidebarConversationField("projects");
+  const prependNewConversation = useSidebarConversationField("prependNewConversation");
+  const touchByPublicID = useSidebarConversationField("touchByPublicID");
+  const renameByPublicID = useSidebarConversationField("renameByPublicID");
+  const regenerateTitleByPublicID = useSidebarConversationField("regenerateTitleByPublicID");
+  const updateLabelsByPublicID = useSidebarConversationField("updateLabelsByPublicID");
+  const setStarByPublicID = useSidebarConversationField("setStarByPublicID");
+  const setProjectByPublicID = useSidebarConversationField("setProjectByPublicID");
+  const deleteByPublicID = useSidebarConversationField("deleteByPublicID");
+  const lastAgentEvent = useSidebarConversationField("lastAgentEvent");
   const {
     cancelResumedGeneration,
     loading,
@@ -305,7 +303,6 @@ export function AppChatArea() {
     errorMsg,
     hasOlder,
     loadOlderMessages,
-    loadAllOlderMessages,
     messages,
     reload,
     replaceMessage,
@@ -496,9 +493,11 @@ export function AppChatArea() {
   const {
     selectedToolIDs,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedInputResources,
     setSelectedToolIDs,
     setSelectedSkills,
+    setSelectedKnowledgeBaseIDs,
     setSelectedInputResources,
   } = useChatComposerSelection({
     conversationKey,
@@ -860,15 +859,25 @@ export function AppChatArea() {
     () => (newConversationProject?.defaultSkillIDs ?? []).slice(0, mcpMaxSelectedTools),
     [mcpMaxSelectedTools, newConversationProject],
   );
-  const { onSelectedSkillsChange, onSelectedToolsChange: applySelectedToolsChange } = useNewConversationDefaults({
+  const newConversationDefaultKnowledgeBaseIDs = React.useMemo(
+    () => (newConversationProject?.defaultKnowledgeBaseIDs ?? []).slice(0, 8),
+    [newConversationProject],
+  );
+  const {
+    onSelectedKnowledgeBasesChange,
+    onSelectedSkillsChange,
+    onSelectedToolsChange: applySelectedToolsChange,
+  } = useChatConversationDefaults({
     conversationID,
     contextKey: newConversationSelectionKey,
     defaultsPending: Boolean(newConversationProjectID && !newConversationProject),
     defaultMCPToolIDs: newConversationDefaultMCPToolIDs,
     defaultSkillIDs: newConversationDefaultSkillIDs,
+    defaultKnowledgeBaseIDs: newConversationDefaultKnowledgeBaseIDs,
     toolsLoading,
     setSelectedToolIDs,
     setSelectedSkills,
+    setSelectedKnowledgeBaseIDs,
   });
   const onSelectedToolsChange = React.useCallback((nextToolIDs: number[]) => {
     if (hasMultipleImageAttachmentProcessors(nextToolIDs, availableTools)) {
@@ -908,13 +917,13 @@ export function AppChatArea() {
   }, [mcpMaxSelectedTools, setSelectedToolIDs]);
 
   React.useEffect(() => {
-    const platformModelName = selectedModel?.platformModelName.trim() || "";
-    if (!platformModelName) {
+    if (!selectedModel) {
       initializedOptionsModelRef.current = "";
       selectedModelDefaultOptionsRef.current = {};
       setOptions({});
       return;
     }
+    const platformModelName = selectedModel.platformModelName.trim();
     const nextDefaultOptions = cloneConversationOptions(selectedModel.defaultOptions);
     const previousDefaultOptions = selectedModelDefaultOptionsRef.current;
     if (initializedOptionsModelRef.current !== platformModelName) {
@@ -1032,6 +1041,8 @@ export function AppChatArea() {
     uploadingAttachments,
     maxFilesPerMessage,
     fileMode,
+    ragAvailable,
+    ragAvailabilityReason,
     releaseAttachments,
     onRemoveAttachment,
     onUploadFiles,
@@ -1073,6 +1084,7 @@ export function AppChatArea() {
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedKnowledgeBaseIDs: executionMode === "cloud" ? selectedKnowledgeBaseIDs : [],
     selectedInputResources: selectedComposerInputResources,
     htmlVisualPromptEnabled: executionMode === "cloud" && htmlVisualPrompt.enabled,
     options: effectiveOptions,
@@ -1259,10 +1271,10 @@ export function AppChatArea() {
   const screenshotMessages = React.useMemo(
     () => ({
       emptySelection: tScreenshot("emptySelection"),
+      selectionLimitReached: tScreenshot("selectionLimitReached"),
       generating: tScreenshot("generating"),
       ready: tScreenshot("ready"),
       failed: tScreenshot("failed"),
-      loadLimitReached: tScreenshot("loadLimitReached"),
       tooLarge: tScreenshot("tooLarge"),
       downloaded: tScreenshot("downloaded"),
       copied: tScreenshot("copied"),
@@ -1275,7 +1287,6 @@ export function AppChatArea() {
     conversationID: actionConversationID || null,
     messageContentRef,
     conversationTitle: activeConversationTitle,
-    onLoadAllMessages: loadAllOlderMessages,
     messages: screenshotMessages,
   });
   const screenshotPreview = screenshot.preview;
@@ -1454,7 +1465,8 @@ export function AppChatArea() {
   }, [messagesWithInlineError]);
 
   const artifactWorkspace = useChatArtifacts({
-    conversationID,
+    scopeKey: conversationID,
+    transient: !conversationID,
     messages: messagesWithInlineError,
   });
   const workspaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -1630,6 +1642,8 @@ export function AppChatArea() {
     isConversationMode,
     maxFilesPerMessage,
     fileMode,
+    ragAvailable,
+    ragAvailabilityReason,
     sendShortcut,
     inputHeight,
     attachments,
@@ -1647,6 +1661,7 @@ export function AppChatArea() {
     inputResources: executionMode === "gateway" ? inputResources : undefined,
     selectedToolIDs: executionMode === "cloud" ? selectedToolIDs : [],
     selectedSkills: executionMode === "cloud" ? selectedSkills : [],
+    selectedKnowledgeBaseIDs: executionMode === "cloud" ? selectedKnowledgeBaseIDs : [],
     selectedInputResources: selectedComposerInputResources,
     defaultToolIDs,
     queuedMessages,
@@ -1665,6 +1680,7 @@ export function AppChatArea() {
     onSelectedToolsChange,
     maxSelectedSkills: mcpMaxSelectedTools,
     onSelectedSkillsChange,
+    onSelectedKnowledgeBasesChange,
     onSelectedInputResourcesChange: setSelectedInputResources,
     onDefaultToolsChange: onDefaultToolIDsChange,
     onHTMLVisualPromptChange: htmlVisualPrompt.setEnabled,
@@ -1765,7 +1781,7 @@ export function AppChatArea() {
                   showTokenUsage={showTokenUsage}
                   splitRightInset={hasInlineArtifact}
                   contentWidthClassName={chatContentWidthClassName}
-                  onScreenshotFull={screenshot.captureFullConversation}
+                  onScreenshotFull={screenshot.captureLatestMessages}
                   onScreenshotSelect={screenshot.startSelectionScreenshot}
                   screenshot={{
                     selectionMode: screenshot.selectionMode,

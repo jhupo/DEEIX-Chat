@@ -20,7 +20,6 @@ import {
 import { listConversationRuns } from "@/shared/api/conversation";
 import { listPublicModels } from "@/shared/api/model";
 import { getMCPPolicy, getModelOptionPolicy } from "@/shared/api/settings";
-import { getUserSettings } from "@/shared/api/user-settings";
 import type { PublicModelDTO } from "@/shared/api/model.types";
 import type { ModelOptionPolicy } from "@/shared/lib/model-option-policy";
 import { parseKindsJSON } from "@/shared/model/llm-schema";
@@ -28,7 +27,7 @@ import { resolveConversationDefaultModel } from "@/shared/model/conversation-def
 import type { ConversationOptions } from "@/shared/api/conversation.types";
 import type { SendShortcut } from "@/features/settings/types/settings";
 import { parseSendShortcut } from "@/features/settings/utils/chat-settings";
-import { USER_SETTINGS_UPDATED_EVENT } from "@/features/settings/events/user-settings-events";
+import { useUserSettings } from "@/shared/model/user-settings-store";
 
 type ModelCatalogRefreshResult = {
   models: PublicModelDTO[];
@@ -175,6 +174,39 @@ function resolveOptionControls(raw: string): ModelOptionControl[] {
   return controls.filter((item, index) => controls.findIndex((candidate) => candidate.path === item.path) === index);
 }
 
+function resolveVideoExtensionConfig(raw: string, protocols: string[]): ChatModelOption["videoExtension"] {
+  const parsed = parseJSONObject(raw);
+  const mediaTasks = parsed?.mediaTasks;
+  const taskSource = mediaTasks && typeof mediaTasks === "object" && !Array.isArray(mediaTasks)
+    ? (mediaTasks as Record<string, unknown>).video_extension
+    : undefined;
+  const task = taskSource && typeof taskSource === "object" && !Array.isArray(taskSource)
+    ? (taskSource as Record<string, unknown>)
+    : null;
+  if (!protocols.includes("xai_video_extensions") || task?.enabled === false) {
+    return null;
+  }
+  const defaultOptions = task?.defaultOptions && typeof task.defaultOptions === "object" && !Array.isArray(task.defaultOptions)
+    ? sanitizeConversationOptions(task.defaultOptions as ConversationOptions)
+    : { duration: 6 };
+  const rawControls = Array.isArray(task?.optionControls)
+    ? task.optionControls
+    : [{ path: "duration", type: "select", options: ["2", "3", "4", "5", "6", "7", "8", "9", "10"] }];
+  const optionControls = rawControls.flatMap((item): ModelOptionControl[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const source = item as Record<string, unknown>;
+    if (normalizeOptionControlPath(source.path) !== "duration") return [];
+    return [{
+      path: "duration",
+      type: normalizeOptionControlType(source.type) ?? "select",
+      label: normalizeOptionControlString(source.label),
+      description: normalizeOptionControlString(source.description),
+      options: normalizeOptionControlOptions(source.options) ?? ["2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    }];
+  });
+  return { enabled: true, defaultOptions, optionControls };
+}
+
 function resolveMCPMaxSelectedTools(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -184,6 +216,7 @@ function resolveMCPMaxSelectedTools(value: unknown): number {
 }
 
 function toChatModelOption(item: PublicModelDTO): ChatModelOption {
+  const protocols = parseProtocolsJSON(item.protocolsJSON);
   return {
     platformModelName: item.platformModelName,
     icon: item.icon,
@@ -194,10 +227,11 @@ function toChatModelOption(item: PublicModelDTO): ChatModelOption {
     displayGroupName: item.displayGroupName,
     displayGroupIcon: item.displayGroupIcon,
     kinds: parseKindsJSON(item.kindsJSON),
-    protocols: parseProtocolsJSON(item.protocolsJSON),
+    protocols,
     defaultOptions: resolveDefaultOptions(item.capabilitiesJSON),
     optionControls: resolveOptionControls(item.capabilitiesJSON),
     lockedOptionPaths: resolveLockedOptionPaths(item.capabilitiesJSON),
+    videoExtension: resolveVideoExtensionConfig(item.capabilitiesJSON, protocols),
   };
 }
 
@@ -213,6 +247,7 @@ export function useChatModelOptions({
   groupPlatform?: string;
 }) {
   const t = useTranslations("chat.models");
+  const userSettings = useUserSettings();
   const [availableModels, setAvailableModels] = React.useState<PublicModelDTO[]>([]);
   const [modelsLoading, setModelsLoading] = React.useState(true);
   const [modelsErrorMsg, setModelsErrorMsg] = React.useState("");
@@ -293,9 +328,8 @@ export function useChatModelOptions({
           setModelsErrorMsg(t("signInRequired"));
           return;
         }
-        const [catalog, settings, nextMCPPolicy] = await Promise.all([
+        const [catalog, nextMCPPolicy] = await Promise.all([
           loadModelCatalog(token),
-          getUserSettings(token).catch(() => ({} as Record<string, string>)),
           getMCPPolicy(token).catch(() => null),
         ]);
         if (cancelled) {
@@ -303,20 +337,6 @@ export function useChatModelOptions({
         }
         applyModelCatalog(catalog);
         setMCPMaxSelectedTools(resolveMCPMaxSelectedTools(nextMCPPolicy?.maxSelectedToolsPerMessage));
-        setUserDefaultModel(settings["chat.default_model"]?.trim() ?? "");
-        setSendShortcut(parseSendShortcut(settings["chat.send_on_enter"]));
-        setRestoreDraftOnFailure(settings["chat.restore_draft_on_failure"] !== "false");
-        setPreserveConversationDrafts(settings["chat.preserve_conversation_drafts"] !== "false");
-        setMarkdownRender(settings["chat.markdown_render"] !== "false");
-        setShowModelInfo(settings["chat.show_model_info"] !== "false");
-        setShowLatency(settings["chat.show_latency"] !== "false");
-        setShowTokenUsage(settings["chat.show_token_usage"] !== "false");
-        setInputHeight(
-          settings["chat.input_height"] === "compact" || settings["chat.input_height"] === "loose"
-            ? settings["chat.input_height"]
-            : "standard",
-        );
-        setContentWidth(resolveChatContentWidth(settings));
       } catch {
         if (!cancelled) {
           setModelsErrorMsg(t("loadFailed"));
@@ -335,19 +355,22 @@ export function useChatModelOptions({
   }, [applyModelCatalog, loadModelCatalog, t]);
 
   React.useEffect(() => {
-    const handleUserSettingsUpdated = (event: Event) => {
-      const settings = (event as CustomEvent<Record<string, string>>).detail;
-      if (!settings || typeof settings !== "object") {
-        return;
-      }
-      setContentWidth(resolveChatContentWidth(settings));
-    };
-
-    window.addEventListener(USER_SETTINGS_UPDATED_EVENT, handleUserSettingsUpdated);
-    return () => {
-      window.removeEventListener(USER_SETTINGS_UPDATED_EVENT, handleUserSettingsUpdated);
-    };
-  }, []);
+    const settings = userSettings.settings;
+    setUserDefaultModel(settings["chat.default_model"]?.trim() ?? "");
+    setSendShortcut(parseSendShortcut(settings["chat.send_on_enter"]));
+    setRestoreDraftOnFailure(settings["chat.restore_draft_on_failure"] !== "false");
+    setPreserveConversationDrafts(settings["chat.preserve_conversation_drafts"] !== "false");
+    setMarkdownRender(settings["chat.markdown_render"] !== "false");
+    setShowModelInfo(settings["chat.show_model_info"] !== "false");
+    setShowLatency(settings["chat.show_latency"] !== "false");
+    setShowTokenUsage(settings["chat.show_token_usage"] !== "false");
+    setInputHeight(
+      settings["chat.input_height"] === "compact" || settings["chat.input_height"] === "loose"
+        ? settings["chat.input_height"]
+        : "standard",
+    );
+    setContentWidth(resolveChatContentWidth(settings));
+  }, [userSettings.settings]);
 
   React.useEffect(() => {
     const normalizedConversationID = conversationPublicID?.trim() || null;
@@ -356,6 +379,7 @@ export function useChatModelOptions({
       activeConversationRef.current = null;
       return;
     }
+    const targetConversationID = normalizedConversationID;
 
     const conversationChanged = activeConversationRef.current !== normalizedConversationID;
     if (conversationChanged) {
@@ -378,7 +402,7 @@ export function useChatModelOptions({
         return;
       }
 
-      const runs = await listConversationRuns(token, normalizedConversationID, { page: 1, pageSize: 1 });
+      const runs = await listConversationRuns(token, targetConversationID, { page: 1, pageSize: 1 });
       if (cancelled || requestID !== runModelRequestRef.current || userSelectedModelRef.current) {
         return;
       }

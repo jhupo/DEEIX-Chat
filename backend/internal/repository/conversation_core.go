@@ -37,6 +37,26 @@ type AssistantMessageCompletionUpdate struct {
 	Status           string
 	ErrorCode        string
 	ErrorMessage     string
+	KnowledgeSources []domainconversation.MessageKnowledgeSource
+}
+
+// ForkConversationMessage describes a new message and its source relationship.
+type ForkConversationMessage struct {
+	SourceMessageID       uint
+	SourceParentMessageID *uint
+	Message               domainconversation.Message
+}
+
+// CreateForkedConversationInput contains one atomic conversation fork.
+type CreateForkedConversationInput struct {
+	SourceConversationID uint
+	Conversation         *domainconversation.Conversation
+	Messages             []ForkConversationMessage
+}
+
+// ConversationForkRepository atomically copies a conversation branch and its display history.
+type ConversationForkRepository interface {
+	CreateForkedConversation(ctx context.Context, input CreateForkedConversationInput) error
 }
 
 // ConversationMetadataPatch 定义自动生成会话元数据的更新字段。
@@ -128,6 +148,8 @@ type MessageFeedbackRepository interface {
 type ConversationTraceRepository interface {
 	CreateAttachments(ctx context.Context, items []domainconversation.Attachment) error
 	CreateConversationRun(ctx context.Context, item *domainconversation.Run) error
+	EnsureConversationRun(ctx context.Context, item *domainconversation.Run) error
+	UpsertConversationRun(ctx context.Context, item *domainconversation.Run) error
 	UpdateConversationRun(ctx context.Context, item *domainconversation.Run) error
 	UpsertConversationMessageTrace(ctx context.Context, item *domainconversation.MessageTrace) error
 	ListConversationMessageTracesByMessageIDs(ctx context.Context, messageIDs []uint) ([]domainconversation.MessageTrace, error)
@@ -137,6 +159,7 @@ type ConversationTraceRepository interface {
 	CreateConversationToolCalls(ctx context.Context, items []domainconversation.ToolCall) error
 	ListConversationRuns(ctx context.Context, userID uint, conversationID uint, offset int, limit int) ([]domainconversation.Run, int64, error)
 	ListConversationRunsByRunIDs(ctx context.Context, userID uint, conversationID uint, runIDs []string) ([]domainconversation.Run, error)
+	ListConversationRunStatusesByRunIDs(ctx context.Context, userID uint, runIDs []string) ([]domainconversation.RunStatus, error)
 	GetConversationExecutionByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Conversation, error)
 	ListConversationEventLogs(ctx context.Context, filter ConversationEventLogListFilter, offset int, limit int) ([]domainconversation.EventLog, int64, error)
 	GetConversationEventLog(ctx context.Context, eventID uint) (*domainconversation.EventLog, error)
@@ -179,10 +202,11 @@ func (scope HistoricalMessageScope) Valid() bool {
 
 // MessageChunkSearchInput 描述当前分支内的历史消息语义检索。
 type MessageChunkSearchInput struct {
-	Scope          HistoricalMessageScope
-	QueryEmbedding []float32
-	TopK           int
-	MinSimilarity  float64
+	Scope              HistoricalMessageScope
+	QueryEmbedding     []float32
+	EmbeddingSignature string
+	TopK               int
+	MinSimilarity      float64
 }
 
 // CompactRepository 封装上下文压缩快照能力。

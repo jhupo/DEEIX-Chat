@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
-import { useConversationSearchPreview } from "@/features/layouts/hooks/use-conversation-search-preview";
+import { useLayoutSearchPreview } from "@/features/layouts/hooks/use-layout-search-preview";
 import { toConversationSearchResult } from "@/features/layouts/model/navigation-search";
 import { hasPlatformModifierKey } from "@/shared/lib/platform-shortcuts";
 import { normalizeConversationSearchText } from "@/shared/lib/conversation-search";
@@ -14,11 +14,13 @@ import { useChatSession } from "@/features/chat";
 import { useDevices } from "@/features/devices";
 
 type UseLayoutNavigationSearchOptions = {
+  initialResults?: readonly ConversationSearchResult[];
   untitled: string;
 };
 
 const NAVIGATION_SEARCH_DEBOUNCE_MS = 250;
 const NAVIGATION_SEARCH_PAGE_SIZE = 20;
+const EMPTY_SEARCH_RESULTS: readonly ConversationSearchResult[] = [];
 
 function mergeSearchResults(
   current: ConversationSearchResult[],
@@ -28,13 +30,13 @@ function mergeSearchResults(
   return [...current, ...next.filter((item) => !seen.has(item.publicID))];
 }
 
-export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearchOptions) {
+export function useLayoutNavigationSearch({ initialResults = EMPTY_SEARCH_RESULTS, untitled }: UseLayoutNavigationSearchOptions) {
   const router = useRouter();
   const { executionMode } = useChatSession();
   const { defaultDevice } = useDevices();
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const [results, setResults] = React.useState<ConversationSearchResult[]>([]);
+  const [results, setResults] = React.useState<ConversationSearchResult[]>(() => [...initialResults]);
   const [page, setPage] = React.useState(1);
   const [hasMore, setHasMore] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -45,12 +47,12 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
   const requestVersionRef = React.useRef(0);
   const loadingMoreRef = React.useRef(false);
   const loadMoreAbortRef = React.useRef<AbortController | null>(null);
-  const conversationPreview = useConversationSearchPreview(open);
+  const conversationPreview = useLayoutSearchPreview(open);
 
   React.useEffect(() => {
     if (!open) {
       setQuery("");
-      setResults([]);
+      setResults([...initialResults]);
       setPage(1);
       setHasMore(false);
       setLoading(false);
@@ -62,7 +64,7 @@ export function useLayoutNavigationSearch({ untitled }: UseLayoutNavigationSearc
       loadMoreAbortRef.current = null;
       requestVersionRef.current += 1;
     }
-  }, [open]);
+  }, [initialResults, open]);
 
   const normalizedQuery = normalizeConversationSearchText(query);
 

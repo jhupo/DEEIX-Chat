@@ -14,9 +14,9 @@ import (
 	appsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/sub2key"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	domainmemory "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/memory"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
 	platformtracing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/observability/tracing"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/traceid"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -27,7 +27,25 @@ import (
 const (
 	reasoningContentPassbackSettingKey = "chat.reasoning_content_passback"
 	maxRequestRouteAttempts            = 3
+	knowledgeBaseNoEvidenceNotice      = "An explicitly selected knowledge base returned no sufficiently relevant evidence for this request. Do not claim that the answer is supported by the knowledge base. If you answer from general knowledge, state that limitation clearly."
 )
+
+func messageKnowledgeSourcesFromRAGChunks(chunks []model.RAGChunk) []model.MessageKnowledgeSource {
+	if len(chunks) == 0 {
+		return nil
+	}
+	sources := make([]model.MessageKnowledgeSource, 0, len(chunks))
+	for _, chunk := range chunks {
+		sources = append(sources, model.MessageKnowledgeSource{
+			FileName:   strings.TrimSpace(chunk.FileName),
+			FileID:     strings.TrimSpace(chunk.FileID),
+			ChunkIndex: chunk.ChunkIndex,
+			Score:      chunk.Score,
+			Preview:    compactSnippet(chunk.Content, 100),
+		})
+	}
+	return sources
+}
 
 func (s *Service) reasoningContentPassbackEnabled(ctx context.Context, userID uint, route *channel.ResolvedRoute) bool {
 	if route == nil || !route.ReasoningContentPassback {
@@ -297,7 +315,7 @@ func (s *Service) sendMessageInternal(
 	if input.Cancelable {
 		cancelCtx, cancel := context.WithCancel(ctx)
 		ctx = cancelCtx
-		s.generationStreams.register(ctx, runID, input.UserID, cancel)
+		s.generationStreams.register(ctx, runID, input.UserID, conversation.PublicID, cancel)
 	}
 
 	currentPlatformModelName := strings.TrimSpace(conversation.Model)
@@ -429,8 +447,6 @@ func (s *Service) sendMessageInternal(
 		run.Provider = inferProvider(conversation.Model)
 	}
 
-	// 构建完整活跃分支路径；压缩裁剪先于模型预算截断，避免摘要和全量历史重复发送。
-	contextMessages := buildBranchMessagePath(branchState, userMessage)
 	cfg := s.cfg.Snapshot()
 	compactPolicy := s.resolveContextCompactionPolicy(ctx, cfg, input.UserID)
 
@@ -458,13 +474,65 @@ func (s *Service) sendMessageInternal(
 		fileMode = fm
 	}
 
-	// 收集并行预取结果，再规划本轮可发送的 PromptScope。
+	// 收集并行预取结果，再按当前分支和滚动快照加载完整上下文。
 	prefetch := <-prefetchCh
-	contextMessages = s.expandContextMessagesToSnapshotBoundary(ctx, input.ConversationID, userMessage.ID, contextMessages, prefetch.snapshot, compactPolicy)
-	// 快照扩展可能重新加载数据库中的原始 error 状态；在最终分支路径上统一恢复可用的重试上下文。
+	if err = s.loadMessageBranchContext(ctx, input.ConversationID, branchState, prefetch.snapshot, normalizedBranchReason); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("conversation_context_load_failed",
+				zap.String("trace_id", traceid.FromContext(ctx)),
+				zap.Uint("conversation_id", input.ConversationID),
+				zap.String("request_id", strings.TrimSpace(input.RequestID)),
+				zap.Error(err),
+			)
+		}
+		retErr = err
+		return nil, err
+	}
+	contextMessages := filterBlockedMessages(buildBranchMessagePath(branchState, userMessage))
 	contextMessages = recoverAssistantRetryUserStates(contextMessages)
+
+	preflightCompactInput := appcompact.MaybeCompactConversationInput{
+		ConversationID:   input.ConversationID,
+		UserID:           input.UserID,
+		RunID:            runID,
+		Messages:         contextMessages,
+		ExistingSnapshot: prefetch.snapshot,
+		PromptTokenEstimate: estimatePromptScopeTokens(
+			contextMessages,
+			prefetch.snapshot,
+			compactPolicy,
+			reasoningContentPassback,
+		),
+		ContextModelName:  route.UpstreamModel,
+		CapabilitiesJSON:  route.ModelCapabilitiesJSON,
+		PlatformModelName: s.resolveTextTaskModel(ctx, cfg.CompactTaskModel, conversation.Model, input.UserID, input.ConversationID, strings.TrimSpace(input.RequestID)),
+		Force:             true,
+	}
+	if compactPolicy.EffectiveEnabled() && s.compactSvc.ContextBudgetExceeded(preflightCompactInput) {
+		preflightSnapshot, compactErr := s.compactSvc.MaybeCompactConversation(ctx, preflightCompactInput)
+		if compactErr != nil {
+			retErr = compactErr
+			return nil, compactErr
+		}
+		if preflightSnapshot != nil {
+			prefetch.snapshot = preflightSnapshot
+			s.invalidateSnapshotCache(input.ConversationID)
+			_ = s.repo.UpdateConversationLastResponseID(ctx, input.ConversationID, "")
+			s.persistSnapshotContextArtifact(ctx, snapshotContextArtifactInput{
+				ConversationID: input.ConversationID,
+				UserID:         input.UserID,
+				MessageID:      assistantMessage.ID,
+				RunID:          runID,
+				Snapshot:       preflightSnapshot,
+			})
+			if traceRecorder != nil {
+				summary, markdown, payload := buildCompactionProcessTrace(preflightSnapshot)
+				traceRecorder.appendProcessSection(summary, markdown, payload, messageTraceStatusStreaming)
+			}
+		}
+	}
 	promptScope := buildPromptScope(contextMessages, prefetch.snapshot, compactPolicy)
-	promptMessages := s.applyContextTokenBudget(promptScope.activeMessages(), route.UpstreamModel, route.ModelCapabilitiesJSON, reasoningContentPassback)
+	promptMessages := promptScope.activeMessages()
 	ragQuery := buildRAGQuery(promptMessages, input.Content, cfg.RAGQueryHistoryTurns)
 	historicalScope := promptScope.historicalMessageScope(input.ConversationID, input.UserID, userMessage.ID)
 
@@ -529,6 +597,16 @@ func (s *Service) sendMessageInternal(
 	if imageProcessing.Routed {
 		fileContextPlan = withoutCurrentImageAttachments(fileContextPlan)
 	}
+	knowledgeBaseFiles, err := s.resolveKnowledgeBaseRAGFiles(
+		ctx,
+		input.UserID,
+		input.KnowledgeBaseIDs,
+		cfg.RAGEnabled && cfg.EmbeddingEnabled && capability.RAGAvailable,
+	)
+	if err != nil {
+		retErr = err
+		return nil, err
+	}
 
 	contextAssembler := NewContextAssembler(int64(cfg.ContextMaxInputTokens))
 	userCtx := userContextInput{ImageAnalyses: imageProcessing.Analyses}
@@ -568,8 +646,14 @@ func (s *Service) sendMessageInternal(
 	)
 	retrievalRAGFallbacks := make([]ragFallbackEvidence, 0)
 	ragContextChunks := make([]model.RAGChunk, 0)
-	if cfg.RAGEnabled && len(fileContextPlan.RAGAttachments) > 0 {
-		readyObjs := fileContextPlanRAGObjects(fileContextPlan.RAGAttachments)
+	if cfg.RAGEnabled && (len(fileContextPlan.RAGAttachments) > 0 || len(knowledgeBaseFiles) > 0) {
+		readyObjs := mergeRAGFileObjects(fileContextPlanRAGObjects(fileContextPlan.RAGAttachments), knowledgeBaseFiles)
+		knowledgeBaseFileIDs := make(map[string]struct{}, len(knowledgeBaseFiles))
+		for _, file := range knowledgeBaseFiles {
+			if fileID := strings.TrimSpace(file.FileID); fileID != "" {
+				knowledgeBaseFileIDs[fileID] = struct{}{}
+			}
+		}
 		emitEvent(input.OnEvent, "rag_search", map[string]interface{}{
 			"message": "正在检索相关内容…",
 		})
@@ -603,6 +687,13 @@ func (s *Service) sendMessageInternal(
 		ragSpan.End()
 		ragChunksRaw := ragResult.Chunks
 		ragChunks := contextAssembler.DeduplicateRAGChunks(ragChunksRaw)
+		knowledgeBaseHit := false
+		for _, chunk := range ragChunks {
+			if _, ok := knowledgeBaseFileIDs[strings.TrimSpace(chunk.FileID)]; ok {
+				knowledgeBaseHit = true
+				break
+			}
+		}
 		if ragErr != nil {
 			s.logger.Warn("rag_retrieval_failed",
 				zap.String("trace_id", traceid.FromContext(ctx)),
@@ -630,6 +721,13 @@ func (s *Service) sendMessageInternal(
 			ragFallbacks = append(ragFallbacks, evidences...)
 			retrievalRAGFallbacks = append(retrievalRAGFallbacks, evidences...)
 			appendRAGFallbackSkippedTrace(traceRecorder, skipped, fallbackReason)
+			if len(input.KnowledgeBaseIDs) > 0 {
+				retErr = ErrKnowledgeBaseUnavailable
+				return nil, retErr
+			}
+		} else if len(input.KnowledgeBaseIDs) > 0 && ragResult.Status == apprag.RetrieveStatusUnavailable {
+			retErr = ErrKnowledgeBaseUnavailable
+			return nil, retErr
 		} else if len(ragChunks) == 0 {
 			fallbacks, skipped := splitRetrievalFallbackAttachments(fileContextPlan.RAGAttachments, cfg)
 			fallbackLabel := "已改用全文"
@@ -653,18 +751,25 @@ func (s *Service) sendMessageInternal(
 			ragFallbacks = append(ragFallbacks, evidences...)
 			retrievalRAGFallbacks = append(retrievalRAGFallbacks, evidences...)
 			appendRAGFallbackSkippedTrace(traceRecorder, skipped, ragStatus)
+			if len(input.KnowledgeBaseIDs) > 0 {
+				userCtx.RAGNotice = knowledgeBaseNoEvidenceNotice
+			}
 		} else {
 			if traceRecorder != nil {
 				summary, markdown, payload := buildRAGProcessTrace(ragQuery, readyObjs, ragChunks)
 				traceRecorder.appendProcessSection(summary, markdown, payload, messageTraceStatusStreaming)
 			}
 			ragContextChunks = append(ragContextChunks, ragChunks...)
+			if len(input.KnowledgeBaseIDs) > 0 && !knowledgeBaseHit {
+				userCtx.RAGNotice = knowledgeBaseNoEvidenceNotice
+			}
 		}
 	}
 	stableFullContextAttachments := append([]AttachmentInput{}, fileContextPlan.FullAttachments...)
 	stableFullContextAttachments = append(stableFullContextAttachments, ragFallbackEvidenceAttachments(retrievalRAGFallbacks)...)
 	userCtx.Attachments = imageAttachmentsForCurrentUser(stableFullContextAttachments)
 	userCtx.RAGChunks = ragContextChunks
+	assistantMessage.KnowledgeSources = messageKnowledgeSourcesFromRAGChunks(ragContextChunks)
 	// 语义召回注入：收集异步结果（与 RAG 解耦，独立运行）。
 	// recallCh 为 nil 时（未启用语义召回或当前分支没有历史消息）直接跳过。
 	//
@@ -1161,6 +1266,7 @@ func (s *Service) sendMessageInternal(
 			assistantToolMessage,
 			route.UpstreamModel,
 			route.ModelCapabilitiesJSON,
+			cfg.ContextWindowFallbackTokens,
 		)
 		toolCtx, toolSpan := platformtracing.Start(ctx, "conversation.tool.execute",
 			trace.WithAttributes(
@@ -1181,7 +1287,7 @@ func (s *Service) sendMessageInternal(
 			ToolCallLimit:     remainingToolCalls,
 			TraceRecorder:     traceRecorder,
 			ToolNameMap:       toolRuntime.nameMap,
-			MCPConfigs:        toolRuntime.mcpConfigs,
+			MCPBindings:       toolRuntime.mcpBindings,
 			ToolSchemas:       toolRuntime.schemas,
 			Ledger:            toolLedger,
 			ResultTokenBudget: toolResultTokenBudget,
@@ -1218,6 +1324,7 @@ func (s *Service) sendMessageInternal(
 			llmMessages,
 			route.UpstreamModel,
 			route.ModelCapabilitiesJSON,
+			cfg.ContextWindowFallbackTokens,
 		)
 		if toolHistoryTrimmed {
 			toolHistoryTrimmedForRun = true
@@ -1229,6 +1336,7 @@ func (s *Service) sendMessageInternal(
 			llmMessages,
 			route.UpstreamModel,
 			route.ModelCapabilitiesJSON,
+			cfg.ContextWindowFallbackTokens,
 		)
 		if toolResultsRebalanced {
 			sendSpan.SetAttributes(attribute.Bool("conversation.tool.results_rebalanced", true))

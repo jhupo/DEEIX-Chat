@@ -33,8 +33,11 @@ var allowedKeys = map[string]string{
 	"chat.delete_conversation_files_by_default": "false",
 	"chat.context_compact_auto":                 "true",
 	"chat.markdown_render":                      "true",
+	"chat.auto_expand_thinking":                 "true",
+	"chat.auto_expand_tool_calls":               "true",
 	"chat.restore_draft_on_failure":             "true",
 	"chat.preserve_conversation_drafts":         "true",
+	"chat.reuse_model_options":                  "true",
 	"chat.reasoning_content_passback":           "true",
 	"chat.input_height":                         "standard",
 	"chat.content_width":                        "compact",
@@ -52,8 +55,11 @@ var boolKeys = map[string]bool{
 	"chat.delete_conversation_files_by_default": true,
 	"chat.context_compact_auto":                 true,
 	"chat.markdown_render":                      true,
+	"chat.auto_expand_thinking":                 true,
+	"chat.auto_expand_tool_calls":               true,
 	"chat.restore_draft_on_failure":             true,
 	"chat.preserve_conversation_drafts":         true,
+	"chat.reuse_model_options":                  true,
 	"chat.reasoning_content_passback":           true,
 }
 
@@ -147,8 +153,8 @@ func IsValidationError(err error) bool {
 
 // Service 封装用户配置业务逻辑。
 type Service struct {
-	repo             repository.UserSettingsRepository
-	cacheInvalidator func(userID uint)
+	repo           repository.UserSettingsRepository
+	cacheRefresher func(ctx context.Context, userID uint, keys []string)
 }
 
 // NewService 创建服务。
@@ -156,9 +162,9 @@ func NewService(repo repository.UserSettingsRepository) *Service {
 	return &Service{repo: repo}
 }
 
-// SetCacheInvalidator registers the conversation cache invalidation callback.
-func (s *Service) SetCacheInvalidator(fn func(userID uint)) {
-	s.cacheInvalidator = fn
+// SetCacheRefresher refreshes committed values in the shared conversation cache.
+func (s *Service) SetCacheRefresher(fn func(ctx context.Context, userID uint, keys []string)) {
+	s.cacheRefresher = fn
 }
 
 // ListSettings 返回指定用户的全部配置，缺失的 key 用默认值填充。
@@ -203,8 +209,12 @@ func (s *Service) PatchSettings(ctx context.Context, userID uint, patches map[st
 	if err := s.repo.Upsert(ctx, items); err != nil {
 		return nil, err
 	}
-	if s.cacheInvalidator != nil {
-		s.cacheInvalidator(userID)
+	if s.cacheRefresher != nil {
+		keys := make([]string, 0, len(items))
+		for _, item := range items {
+			keys = append(keys, item.Key)
+		}
+		s.cacheRefresher(ctx, userID, keys)
 	}
 	return s.ListSettings(ctx, userID)
 }

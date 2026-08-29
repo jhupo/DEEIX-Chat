@@ -9,7 +9,7 @@ import (
 	"time"
 
 	domainannouncement "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/announcement"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"golang.org/x/sync/singleflight"
 )
@@ -25,7 +25,7 @@ const (
 type Service struct {
 	repo    repository.AnnouncementRepository
 	tokens  TokenResolver
-	client  *sub2api.Client
+	client  sub2api.Client
 	cacheMu sync.Mutex
 	cache   map[string]activeAnnouncementCacheEntry
 	group   singleflight.Group
@@ -41,7 +41,7 @@ type TokenResolver interface {
 }
 
 // NewService 创建公告服务。
-func NewService(repo repository.AnnouncementRepository, tokens TokenResolver, client *sub2api.Client) *Service {
+func NewService(repo repository.AnnouncementRepository, tokens TokenResolver, client sub2api.Client) *Service {
 	return &Service{repo: repo, tokens: tokens, client: client, cache: make(map[string]activeAnnouncementCacheEntry)}
 }
 

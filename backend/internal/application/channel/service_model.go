@@ -2,13 +2,16 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 
 	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/channelconfig"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/nativetool"
+	"go.uber.org/zap"
 )
 
 // ---------------------------------------------------------------------------
@@ -213,15 +216,20 @@ func filterPublishedModels(items []repository.ChannelModelListRow) []ModelView {
 }
 
 func (s *Service) normalizeModelAvailability(ctx context.Context, items []ModelView) error {
+	return s.normalizeModelAvailabilityWithRepo(ctx, s.repo, items)
+}
+
+func (s *Service) normalizeModelAvailabilityWithRepo(ctx context.Context, repo repository.ChannelRepository, items []ModelView) error {
+	breakerEnabled := s.cache != nil && s.loadBreakerDefaults(ctx).Enabled
 	for index := range items {
 		if items[index].Status != "active" {
 			items[index].ActiveSourceCount = 0
 			continue
 		}
-		if s.cache == nil || items[index].SourceCount <= 0 || items[index].ActiveSourceCount <= 0 {
+		if !breakerEnabled || items[index].SourceCount <= 0 || items[index].ActiveSourceCount <= 0 {
 			continue
 		}
-		sources, _, err := s.repo.ListModelUpstreamSources(ctx, items[index].PlatformModelName, 0, int(items[index].SourceCount))
+		sources, _, err := repo.ListModelUpstreamSources(ctx, items[index].PlatformModelName, 0, int(items[index].SourceCount))
 		if err != nil {
 			return err
 		}
@@ -303,6 +311,9 @@ func (s *Service) CreateModel(ctx context.Context, input CreateModelInput) (*Mod
 	if err := validateOptionalJSON(strings.TrimSpace(input.CapabilitiesJSON)); err != nil {
 		return nil, ErrInvalidJSONConfig
 	}
+	if err := domainchannel.ValidateModelCapsOverrides(input.CapabilitiesJSON); err != nil {
+		return nil, ErrInvalidModelCapsConfig
+	}
 	systemPrompt := strings.TrimSpace(input.SystemPrompt)
 	if len([]rune(systemPrompt)) > maxSystemPromptChars {
 		return nil, ErrSystemPromptTooLong
@@ -325,12 +336,16 @@ func (s *Service) CreateModel(ctx context.Context, input CreateModelInput) (*Mod
 		displayGroupID = &value
 	}
 
+	explicitIcon, err := normalizeModelPresentationIcon(input.Icon)
+	if err != nil {
+		return nil, err
+	}
 	item := &domainchannel.PlatformModel{
 		PlatformModelName:  platformModelName,
 		Vendor:             vendor,
 		DisplayGroupID:     displayGroupID,
 		KindsJSON:          kindsJSON,
-		Icon:               normalizeModelIcon(input.Icon, vendor, platformModelName),
+		Icon:               normalizeModelIcon(explicitIcon, vendor, platformModelName),
 		CapabilitiesJSON:   strings.TrimSpace(input.CapabilitiesJSON),
 		SystemPrompt:       systemPrompt,
 		AccessScope:        accessScope,
@@ -341,11 +356,21 @@ func (s *Service) CreateModel(ctx context.Context, input CreateModelInput) (*Mod
 		CbDurationMin:      normalizeNonNegative(input.CbDurationMin),
 		CbWindowMin:        normalizeNonNegative(input.CbWindowMin),
 	}
+	if err = s.reserveModelIconReference(ctx, item.Icon); err != nil {
+		return nil, err
+	}
 	if err := s.repo.CreateModel(ctx, item); err != nil {
 		if isDuplicateKeyError(err) {
 			return nil, ErrDuplicatePlatformModelName
 		}
-		return nil, err
+		switch {
+		case errors.Is(err, repository.ErrModelVendorNotFound):
+			return nil, ErrModelVendorNotFound
+		case errors.Is(err, repository.ErrModelDisplayGroupNotFound):
+			return nil, ErrModelDisplayGroupNotFound
+		default:
+			return nil, err
+		}
 	}
 	s.InvalidateModelCatalog()
 	return s.getModelViewByID(ctx, item.ID)
@@ -362,6 +387,7 @@ func (s *Service) UpdateModel(ctx context.Context, modelID uint, input UpdateMod
 	if err != nil {
 		return nil, err
 	}
+	currentVendor := nextVendor
 	nextPlatformModelName := current.PlatformModelName
 
 	update := repository.UpdateChannelModelInput{}
@@ -394,13 +420,20 @@ func (s *Service) UpdateModel(ctx context.Context, modelID uint, input UpdateMod
 		update.KindsJSON = &kindsJSON
 	}
 	if input.Icon != nil {
-		icon := normalizeModelIcon(*input.Icon, nextVendor, nextPlatformModelName)
+		explicitIcon, normalizeErr := normalizeModelPresentationIcon(*input.Icon)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		icon := normalizeModelIcon(explicitIcon, nextVendor, nextPlatformModelName)
 		update.Icon = &icon
 	}
 	if input.CapabilitiesJSON != nil {
 		normalized := strings.TrimSpace(*input.CapabilitiesJSON)
 		if err := validateOptionalJSON(normalized); err != nil {
 			return nil, ErrInvalidJSONConfig
+		}
+		if err := domainchannel.ValidateModelCapsOverrides(normalized); err != nil {
+			return nil, ErrInvalidModelCapsConfig
 		}
 		update.CapabilitiesJSON = &normalized
 	}
@@ -452,6 +485,12 @@ func (s *Service) UpdateModel(ctx context.Context, modelID uint, input UpdateMod
 			nextVendor = autoVendor
 		}
 	}
+	identityChanged := nextPlatformModelName != current.PlatformModelName || nextVendor != currentVendor
+	if identityChanged && input.CapabilitiesJSON == nil {
+		if capabilitiesJSON, changed := clearAutomaticContextWindow(current.CapabilitiesJSON); changed {
+			update.CapabilitiesJSON = &capabilitiesJSON
+		}
+	}
 	if input.Icon == nil && (input.PlatformModelName != nil || input.Vendor != nil) && shouldRefreshAutoIcon(current) {
 		icon := normalizeModelIcon("", nextVendor, nextPlatformModelName)
 		update.Icon = &icon
@@ -460,12 +499,48 @@ func (s *Service) UpdateModel(ctx context.Context, modelID uint, input UpdateMod
 	if update.IsZero() {
 		return s.getModelViewByID(ctx, modelID)
 	}
+	if update.Icon != nil {
+		if err = s.reserveModelIconReference(ctx, *update.Icon); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := s.repo.UpdateModel(ctx, modelID, update); err != nil {
-		return nil, err
+		switch {
+		case errors.Is(err, repository.ErrModelVendorNotFound):
+			return nil, ErrModelVendorNotFound
+		case errors.Is(err, repository.ErrModelDisplayGroupNotFound):
+			return nil, ErrModelDisplayGroupNotFound
+		default:
+			return nil, err
+		}
 	}
 	s.InvalidateModelCatalog()
 	return s.getModelViewByID(ctx, modelID)
+}
+
+func clearAutomaticContextWindow(raw string) (string, bool) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil || payload == nil {
+		return raw, false
+	}
+	mode, ok := payload["_deeixContextWindowMode"].(string)
+	if !ok || !strings.EqualFold(strings.TrimSpace(mode), "auto") {
+		return raw, false
+	}
+	delete(payload, "_deeixContextWindowMode")
+	delete(payload, "contextWindow")
+	delete(payload, "context_window")
+	delete(payload, "contextWindowTokens")
+	delete(payload, "context_window_tokens")
+	if len(payload) == 0 {
+		return "", true
+	}
+	normalized, err := json.Marshal(payload)
+	if err != nil {
+		return raw, false
+	}
+	return string(normalized), true
 }
 
 func (s *Service) getModelViewByID(ctx context.Context, modelID uint) (*ModelView, error) {
@@ -745,12 +820,46 @@ func (s *Service) UpdateLLMSetting(ctx context.Context, key string, value string
 	if err != nil {
 		return nil, err
 	}
-	if err := validateOptionalJSON(strings.TrimSpace(value)); err != nil {
+	normalizedValue := strings.TrimSpace(value)
+	if err := validateOptionalJSON(normalizedValue); err != nil {
 		return nil, ErrInvalidJSONConfig
 	}
-	current.Value = strings.TrimSpace(value)
+	isBreakerDefaults := key == channelconfig.BreakerDefaultsKey
+	currentBreakerDefaults := domainchannel.DefaultBreakerDefaults()
+	nextBreakerDefaults := domainchannel.DefaultBreakerDefaults()
+	if isBreakerDefaults {
+		if parsed, parseErr := parseCircuitBreakerDefaults(current.Value); parseErr == nil {
+			currentBreakerDefaults = parsed
+		}
+		nextBreakerDefaults, err = parseCircuitBreakerDefaults(normalizedValue)
+		if err != nil {
+			return nil, ErrInvalidJSONConfig
+		}
+		if !currentBreakerDefaults.Enabled && nextBreakerDefaults.Enabled && s.cache != nil {
+			if err := s.cache.ResetAllCircuitStates(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
+	current.Value = normalizedValue
 	if err := s.repo.UpsertLLMSetting(ctx, current); err != nil {
 		return nil, err
 	}
+	if isBreakerDefaults {
+		s.storeBreakerDefaults(nextBreakerDefaults)
+		if currentBreakerDefaults.Enabled && !nextBreakerDefaults.Enabled && s.cache != nil {
+			if err := s.cache.ResetAllCircuitStates(ctx); err != nil {
+				s.warn("reset_circuit_states_after_settings_update_failed", zap.Error(err))
+			}
+		}
+	}
 	return current, nil
+}
+
+func parseCircuitBreakerDefaults(value string) (domainchannel.BreakerDefaults, error) {
+	defaults, err := channelconfig.ParseBreakerDefaults(value)
+	if err != nil {
+		return domainchannel.BreakerDefaults{}, ErrInvalidJSONConfig
+	}
+	return defaults, nil
 }

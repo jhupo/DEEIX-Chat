@@ -24,7 +24,8 @@ import {
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuButton,
-  useSidebar,
+  useSidebarActions,
+  useSidebarIsMobile,
 } from "@/components/ui/sidebar";
 import {
   ConversationLabelsManagerDialog,
@@ -32,7 +33,7 @@ import {
   sharePatchFromDTO,
   type ConversationLabelsTarget,
   useConversationExport,
-  useSidebarConversations,
+  useSidebarConversationField,
 } from "@/entities/conversation";
 import { LoadingReveal } from "@/shared/components/loading-reveal";
 import { NavigationSearch } from "@/features/layouts/components/navigation/navigation-search";
@@ -45,7 +46,7 @@ import { useSettingsChatPreferences } from "@/features/settings";
 import { useChatSession } from "@/features/chat";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutSidebarListFlip } from "@/features/layouts/hooks/use-layout-sidebar-list-flip";
-import { useSidebarConversationNavigation } from "@/features/layouts/hooks/use-sidebar-conversation-navigation";
+import { useLayoutSidebarNavigation } from "@/features/layouts/hooks/use-layout-sidebar-navigation";
 import { SIDEBAR_OVERFLOW_ROW_TRANSITION } from "@/features/layouts/model/sidebar-motion";
 import type {
   SidebarConversationDeleteTarget,
@@ -62,29 +63,28 @@ const STARRED_OPEN_STORAGE_KEY = "deeix.sidebar.starred.open";
 
 export function NavStarred() {
   const t = useTranslations("recent");
-  const { isMobile, setOpenMobile } = useSidebar();
+  const isMobile = useSidebarIsMobile();
+  const { setOpenMobile } = useSidebarActions();
   const router = useRouter();
   const { executionMode } = useChatSession();
-  const onNavigate = useSidebarConversationNavigation();
+  const onNavigate = useLayoutSidebarNavigation();
   const activeConversationID = useLayoutActiveConversation();
   const { deleteFilesByDefault } = useSettingsChatPreferences();
 
-  const {
-    starredItems,
-    projects,
-    starredTotal,
-    loadingInitial,
-    transferringStarPublicID,
-    setStarByPublicID,
-    renameByPublicID,
-    regenerateTitleByPublicID,
-    updateLabelsByPublicID,
-    loadAllStarred,
-    archiveByPublicID,
-    deleteByPublicID,
-    touchByPublicID,
-    setProjectByPublicID,
-  } = useSidebarConversations();
+  const starredItems = useSidebarConversationField("starredItems");
+  const projects = useSidebarConversationField("projects");
+  const starredTotal = useSidebarConversationField("starredTotal");
+  const loadingInitial = useSidebarConversationField("loadingInitial");
+  const transferringStarPublicID = useSidebarConversationField("transferringStarPublicID");
+  const setStarByPublicID = useSidebarConversationField("setStarByPublicID");
+  const renameByPublicID = useSidebarConversationField("renameByPublicID");
+  const regenerateTitleByPublicID = useSidebarConversationField("regenerateTitleByPublicID");
+  const updateLabelsByPublicID = useSidebarConversationField("updateLabelsByPublicID");
+  const loadAllStarred = useSidebarConversationField("loadAllStarred");
+  const archiveByPublicID = useSidebarConversationField("archiveByPublicID");
+  const deleteByPublicID = useSidebarConversationField("deleteByPublicID");
+  const touchByPublicID = useSidebarConversationField("touchByPublicID");
+  const setProjectByPublicID = useSidebarConversationField("setProjectByPublicID");
 
   const [showAllStarredDialog, setShowAllStarredDialog] = React.useState(false);
   const [dialogStarredItems, setDialogStarredItems] = React.useState<ConversationDTO[] | null>(null);

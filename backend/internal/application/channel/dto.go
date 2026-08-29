@@ -8,6 +8,9 @@ const (
 	ImportUpstreamModelStatusCreated  = "created"
 	ImportUpstreamModelStatusExisting = "existing"
 	ImportUpstreamModelStatusFailed   = "failed"
+
+	ModelVendorDeleteReasonBuiltIn          = "built_in"
+	ModelVendorDeleteReasonReferencedModels = "referenced_models"
 )
 
 // BatchDeleteResultView 单个批量删除结果。
@@ -141,6 +144,7 @@ type ModelView struct {
 	KindsJSON          string
 	Icon               string
 	CapabilitiesJSON   string
+	ContextWindow      int
 	SystemPrompt       string
 	AccessScope        string
 	Status             string
@@ -168,6 +172,33 @@ type ModelVendorView struct {
 	SortOrder int
 	CreatedAt string
 	UpdatedAt string
+}
+
+// ModelVendorReferenceView 描述阻止删除厂商的平台模型引用。
+type ModelVendorReferenceView struct {
+	ID                uint
+	PlatformModelName string
+}
+
+// ModelVendorDeleteBlockedError 携带厂商删除被拒绝的稳定原因和引用预览。
+type ModelVendorDeleteBlockedError struct {
+	Reason         string
+	ReferenceCount int64
+	Models         []ModelVendorReferenceView
+}
+
+func (e *ModelVendorDeleteBlockedError) Error() string {
+	if e != nil && e.Reason == ModelVendorDeleteReasonBuiltIn {
+		return ErrBuiltInModelVendorDelete.Error()
+	}
+	return ErrModelVendorInUse.Error()
+}
+
+func (e *ModelVendorDeleteBlockedError) Unwrap() error {
+	if e != nil && e.Reason == ModelVendorDeleteReasonBuiltIn {
+		return ErrBuiltInModelVendorDelete
+	}
+	return ErrModelVendorInUse
 }
 
 // ModelDisplayGroupView 表示自定义模型展示分组数据。

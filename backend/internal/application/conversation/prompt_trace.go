@@ -1,10 +1,11 @@
 package conversation
 
 import (
+	"encoding/json"
 	"strings"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 )
 
 type messagePromptTraceInput struct {
@@ -120,6 +121,20 @@ func messagePromptTracePayload(trace *model.MessagePromptTrace) map[string]inter
 		"statefulSavedTokens":    trace.StatefulSavedTokens,
 		"blocks":                 blocks,
 	}
+}
+
+func messagePromptTraceFromPayload(payloadJSON string) *model.MessagePromptTrace {
+	payload := struct {
+		PromptTrace json.RawMessage `json:"prompt_trace"`
+	}{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(payloadJSON)), &payload); err != nil || len(payload.PromptTrace) == 0 {
+		return nil
+	}
+	var trace model.MessagePromptTrace
+	if err := json.Unmarshal(payload.PromptTrace, &trace); err != nil {
+		return nil
+	}
+	return &trace
 }
 
 // promptTraceSourceRefs 将规划器来源引用转换为领域 trace 来源引用。

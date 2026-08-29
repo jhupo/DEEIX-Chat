@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -58,6 +59,9 @@ const (
 	upstreamThinkLiveFlushBytes    = 1024
 	upstreamThinkPersistInterval   = 2 * time.Second
 	upstreamThinkLiveReplaceBytes  = 16 * 1024
+	toolTraceLiveFlushInterval     = 80 * time.Millisecond
+	toolTracePersistInterval       = 2 * time.Second
+	tracePersistenceDrainTimeout   = 5 * time.Second
 )
 
 type messageTraceDraft struct {
@@ -78,20 +82,26 @@ type messageTraceDraft struct {
 	endedAt         *time.Time
 }
 
+type tracePersistenceJob struct {
+	draft       messageTraceDraft
+	payloadJSON string
+}
+
 type messageTraceRecorder struct {
-	service       *Service
-	ctx           context.Context
-	cfg           config.Config
-	assistant     *model.Message
-	onEvent       func(string, map[string]interface{}) error
-	process       *messageTraceDraft
-	tools         *messageTraceDraft
-	upstreamThink *messageTraceDraft
-	promptTrace   *model.MessagePromptTrace
-	nextEventSeq  int
-	nextRoundSeq  int
-	eventCounters map[string]int
-	events        []model.MessageTraceEvent
+	service         *Service
+	ctx             context.Context
+	cfg             config.Config
+	assistant       *model.Message
+	onEvent         func(string, map[string]interface{}) error
+	process         *messageTraceDraft
+	tools           *messageTraceDraft
+	upstreamThink   *messageTraceDraft
+	promptTrace     *model.MessagePromptTrace
+	nextEventSeq    int
+	nextRoundSeq    int
+	eventCounters   map[string]int
+	events          []model.MessageTraceEvent
+	toolRoundClosed bool
 
 	upstreamThinkLastLiveFlush  time.Time
 	upstreamThinkLastPersist    time.Time
@@ -101,6 +111,12 @@ type messageTraceRecorder struct {
 	upstreamThinkPendingReason  map[string]interface{}
 	upstreamThinkBufferedByte   int
 	failed                      bool
+	toolLastLiveFlush           time.Time
+	toolLastPersist             time.Time
+
+	persistQueueMu    sync.Mutex
+	persistQueue      []tracePersistenceJob
+	persistWorkerDone chan struct{}
 }
 
 func formatTraceStep(label string, detail string) string {
@@ -220,26 +236,34 @@ func (r *messageTraceRecorder) ensureDraft(traceType string) *messageTraceDraft 
 			return nil
 		}
 		if r.upstreamThink == nil || r.upstreamThink.status == messageTraceStatusCompleted || r.upstreamThink.status == messageTraceStatusError {
-			r.upstreamThink = r.newTraceDraft(traceType, "think", "模型思考", 3, messageTraceStageThink, r.nextTraceRoundID(), "")
+			previousStartedAt := time.Time{}
+			if r.upstreamThink != nil {
+				previousStartedAt = r.upstreamThink.startedAt
+			}
+			next := r.newTraceDraft(traceType, "think", "模型思考", 3, messageTraceStageThink, r.nextTraceRoundID(), "")
+			if !previousStartedAt.IsZero() && !next.startedAt.After(previousStartedAt) {
+				next.startedAt = previousStartedAt.Add(time.Nanosecond)
+			}
+			r.upstreamThink = next
 		}
 		return r.upstreamThink
-	case messageTraceTypeTools:
-		if r.tools == nil {
-			r.tools = &messageTraceDraft{
-				traceType: traceType,
-				eventType: "tool",
-				stage:     messageTraceStageTool,
-				status:    messageTraceStatusStreaming,
-				title:     "工具",
-				seq:       2,
-				startedAt: time.Now(),
-				payload:   make(map[string]interface{}),
-			}
-		}
-		return r.tools
 	default:
 		return nil
 	}
+}
+
+func (r *messageTraceRecorder) ensureToolDraft(roundID string, parentEventID string) *messageTraceDraft {
+	if !r.enabled() {
+		return nil
+	}
+	roundID = strings.TrimSpace(roundID)
+	if r.tools == nil || r.tools.roundID != roundID {
+		r.tools = r.newTraceDraft(messageTraceTypeTools, "tool", "工具", 2, messageTraceStageTool, roundID, parentEventID)
+		r.toolRoundClosed = false
+	} else if parentEventID = strings.TrimSpace(parentEventID); parentEventID != "" {
+		r.tools.parentEventID = parentEventID
+	}
+	return r.tools
 }
 
 func (r *messageTraceRecorder) newTraceDraft(traceType string, eventType string, title string, blockSeq int, stage string, roundID string, parentEventID string) *messageTraceDraft {
@@ -317,14 +341,11 @@ func (r *messageTraceRecorder) appendToolSection(summary string, markdown string
 		return
 	}
 	r.completeProcess()
-	draft := r.ensureDraft(messageTraceTypeTools)
+	roundID, parentEventID := r.currentToolTraceBinding()
+	draft := r.ensureToolDraft(roundID, parentEventID)
 	if draft == nil {
 		return
 	}
-	roundID, parentEventID := r.currentToolTraceBinding()
-	draft.stage = messageTraceStageTool
-	draft.roundID = roundID
-	draft.parentEventID = parentEventID
 	if isToolTracePayload(payload) {
 		mergeToolTracePayload(draft.payload, payload)
 		if rendered := renderToolTraceMarkdownFromPayload(draft.payload); rendered != "" {
@@ -339,31 +360,19 @@ func (r *messageTraceRecorder) appendToolSection(summary string, markdown string
 		draft.contentMarkdown += value
 		mergeTracePayload(draft.payload, payload)
 	}
-	if strings.TrimSpace(status) != "" {
+	if aggregateStatus := toolTracePayloadStatus(draft.payload); aggregateStatus != "" {
+		draft.status = aggregateStatus
+	} else if strings.TrimSpace(status) != "" {
 		nextStatus := strings.TrimSpace(status)
 		draft.status = nextStatus
-		if nextStatus == messageTraceStatusStreaming {
-			draft.endedAt = nil
-		}
 	}
+	r.updateToolDraftEndTime(draft)
 	if aggregateSummary := summarizeToolTraceDraft(draft); aggregateSummary != "" {
 		draft.summary = aggregateSummary
 	} else if strings.TrimSpace(summary) != "" {
 		draft.summary = strings.TrimSpace(summary)
 	}
-	r.persistDraft(draft, false)
-	event := r.newTraceDraft(messageTraceTypeTools, "tool", "工具", draft.seq, messageTraceStageTool, roundID, parentEventID)
-	event.summary = strings.TrimSpace(summary)
-	if event.summary == "" {
-		event.summary = draft.summary
-	}
-	event.contentMarkdown = value
-	event.payload = cloneTracePayload(payload)
-	event.status = messageTraceStatusCompleted
-	now := time.Now()
-	event.endedAt = &now
-	r.persistTraceEvent(r.ctx, event, false)
-	r.emitToolUpdate()
+	r.flushToolDraft(draft)
 }
 
 func (r *messageTraceRecorder) syncToolSection(summary string, markdown string, payload map[string]interface{}, status string) {
@@ -375,14 +384,11 @@ func (r *messageTraceRecorder) syncToolSection(summary string, markdown string, 
 		return
 	}
 	r.completeProcess()
-	draft := r.ensureDraft(messageTraceTypeTools)
+	roundID, parentEventID := r.currentToolTraceBinding()
+	draft := r.ensureToolDraft(roundID, parentEventID)
 	if draft == nil {
 		return
 	}
-	roundID, parentEventID := r.currentToolTraceBinding()
-	draft.stage = messageTraceStageTool
-	draft.roundID = roundID
-	draft.parentEventID = parentEventID
 	if isToolTracePayload(payload) {
 		mergeToolTracePayload(draft.payload, payload)
 		if rendered := renderToolTraceMarkdownFromPayload(draft.payload); rendered != "" {
@@ -404,15 +410,52 @@ func (r *messageTraceRecorder) syncToolSection(summary string, markdown string, 
 			draft.summary = aggregateSummary
 		}
 	}
-	if strings.TrimSpace(status) != "" {
+	if aggregateStatus := toolTracePayloadStatus(draft.payload); aggregateStatus != "" {
+		draft.status = aggregateStatus
+	} else if strings.TrimSpace(status) != "" {
 		nextStatus := strings.TrimSpace(status)
 		draft.status = nextStatus
-		if nextStatus == messageTraceStatusStreaming {
-			draft.endedAt = nil
-		}
 	}
-	r.persistDraft(draft, false)
-	r.emitToolUpdate()
+	r.updateToolDraftEndTime(draft)
+	r.flushToolDraft(draft)
+}
+
+func (r *messageTraceRecorder) updateToolDraftEndTime(draft *messageTraceDraft) {
+	if draft == nil {
+		return
+	}
+	switch draft.status {
+	case messageTraceStatusStreaming:
+		draft.endedAt = nil
+	case messageTraceStatusCompleted, messageTraceStatusError:
+		now := time.Now()
+		draft.endedAt = &now
+	}
+}
+
+func (r *messageTraceRecorder) flushToolDraft(draft *messageTraceDraft) {
+	if !r.enabled() || draft == nil {
+		return
+	}
+	now := time.Now()
+	payloadJSON := tracePayloadJSON(draft.payload)
+	r.upsertSnapshotEvent(draft, payloadJSON)
+	terminal := draft.status == messageTraceStatusCompleted || draft.status == messageTraceStatusError
+	if terminal {
+		if r.service != nil && r.service.repo != nil {
+			r.enqueueDraftPersistence(draft, payloadJSON)
+		}
+	} else if r.cfg.ProcessTracePersistInflight && (r.toolLastPersist.IsZero() || now.Sub(r.toolLastPersist) >= toolTracePersistInterval) {
+		if r.service != nil && r.service.repo != nil {
+			r.persistMessageTraceRow(r.ctx, draft, payloadJSON)
+			r.persistTraceEventRow(r.ctx, draft, payloadJSON)
+		}
+		r.toolLastPersist = now
+	}
+	if terminal || r.toolLastLiveFlush.IsZero() || now.Sub(r.toolLastLiveFlush) >= toolTraceLiveFlushInterval {
+		r.emitToolUpdate()
+		r.toolLastLiveFlush = now
+	}
 }
 
 func (r *messageTraceRecorder) currentToolTraceBinding() (string, string) {
@@ -425,7 +468,12 @@ func (r *messageTraceRecorder) currentToolTraceBinding() (string, string) {
 			roundID = r.nextTraceRoundID()
 			r.upstreamThink.roundID = roundID
 		}
-		return roundID, strings.TrimSpace(r.upstreamThink.eventID)
+		if r.tools == nil || r.tools.roundID != roundID || !r.toolRoundClosed {
+			return roundID, strings.TrimSpace(r.upstreamThink.eventID)
+		}
+	}
+	if r.tools != nil && !r.toolRoundClosed && strings.TrimSpace(r.tools.roundID) != "" {
+		return strings.TrimSpace(r.tools.roundID), strings.TrimSpace(r.tools.parentEventID)
 	}
 	return r.nextTraceRoundID(), ""
 }
@@ -433,6 +481,10 @@ func (r *messageTraceRecorder) currentToolTraceBinding() (string, string) {
 func (r *messageTraceRecorder) appendUpstreamReasoning(kind string, text string, payload map[string]interface{}) {
 	if !r.enabled() {
 		return
+	}
+	if reasoningItemChanged(r.upstreamThink, payload) {
+		r.completeTools()
+		r.completeUpstreamThink()
 	}
 	draft := r.ensureDraft(messageTraceTypeUpstreamThink)
 	if draft == nil {
@@ -469,6 +521,10 @@ func (r *messageTraceRecorder) syncStructuredThink(content string, summary strin
 		return
 	}
 	r.completeProcess()
+	if reasoningItemChanged(r.upstreamThink, payload) {
+		r.completeTools()
+		r.completeUpstreamThink()
+	}
 	draft := r.ensureDraft(messageTraceTypeUpstreamThink)
 	if draft == nil {
 		return
@@ -492,6 +548,70 @@ func (r *messageTraceRecorder) syncStructuredThink(content string, summary strin
 	mergeUpstreamReasoningPayload(draft, messageTraceThinkKindContent, payload)
 	deltaText, replaceText := diffUpstreamThinkContent(previousContent, draft.contentMarkdown)
 	r.queueUpstreamThinkLiveUpdate(draft, messageTraceThinkKindContent, deltaText, replaceText, payload)
+}
+
+// reconcileStructuredThink updates the canonical reasoning event with the final snapshot.
+func (r *messageTraceRecorder) reconcileStructuredThink(content string, summary string, payload map[string]interface{}) {
+	if !r.enabled() || (content == "" && summary == "") {
+		return
+	}
+	r.completeProcess()
+	draft := r.upstreamThink
+	if reasoningItemChanged(draft, payload) {
+		r.completeTools()
+		r.completeUpstreamThink()
+		draft = nil
+	}
+	if draft == nil {
+		draft = r.ensureDraft(messageTraceTypeUpstreamThink)
+	}
+	if draft == nil {
+		return
+	}
+	terminal := draft.status == messageTraceStatusCompleted || draft.status == messageTraceStatusError
+	r.updateStructuredThinkDraft(draft, content, summary, payload)
+	if terminal {
+		r.commitTerminalDraft(draft)
+		r.flushUpstreamThinkLiveUpdate(draft, true, false)
+	}
+}
+
+func (r *messageTraceRecorder) updateStructuredThinkDraft(draft *messageTraceDraft, content string, summary string, payload map[string]interface{}) {
+	if draft == nil {
+		return
+	}
+	previousContent := draft.contentMarkdown
+	displayContent := strings.TrimSpace(content)
+	if displayContent == "" {
+		displayContent = strings.TrimSpace(summary)
+	}
+	if displayContent != "" {
+		draft.contentMarkdown = displayContent
+	}
+	if strings.TrimSpace(summary) != "" {
+		draft.summary = summarizeThinkText(summary)
+	} else if strings.TrimSpace(draft.summary) == "" {
+		draft.summary = summarizeThinkText(draft.contentMarkdown)
+	}
+	if strings.TrimSpace(draft.status) == "" {
+		draft.status = messageTraceStatusStreaming
+	}
+	mergeUpstreamReasoningPayload(draft, messageTraceThinkKindContent, payload)
+	deltaText, replaceText := diffUpstreamThinkContent(previousContent, draft.contentMarkdown)
+	r.queueUpstreamThinkLiveUpdate(draft, messageTraceThinkKindContent, deltaText, replaceText, payload)
+}
+
+func reasoningItemChanged(draft *messageTraceDraft, payload map[string]interface{}) bool {
+	if draft == nil {
+		return false
+	}
+	nextItemID := strings.TrimSpace(getTraceString(payload["item_id"]))
+	if nextItemID == "" {
+		return false
+	}
+	reasoning, _ := draft.payload["reasoning"].(map[string]interface{})
+	currentItemID := strings.TrimSpace(getTraceString(reasoning["item_id"]))
+	return currentItemID != "" && currentItemID != nextItemID
 }
 
 // recordPromptTrace 把 PromptPlan 摘要合并进处理轨迹，供前端结构化展示。
@@ -523,13 +643,19 @@ func (r *messageTraceRecorder) completeDraft(draft *messageTraceDraft) bool {
 	now := time.Now()
 	draft.status = messageTraceStatusCompleted
 	draft.endedAt = &now
-	if draft.traceType != messageTraceTypeTools {
-		r.upsertSnapshotEvent(draft, tracePayloadJSON(draft.payload))
-	}
-	if r.service != nil && r.service.repo != nil {
-		go r.persistDraftBackground(cloneTraceDraft(draft))
-	}
+	r.commitTerminalDraft(draft)
 	return true
+}
+
+func (r *messageTraceRecorder) commitTerminalDraft(draft *messageTraceDraft) {
+	if !r.enabled() || draft == nil {
+		return
+	}
+	payloadJSON := tracePayloadJSON(draft.payload)
+	r.upsertSnapshotEvent(draft, payloadJSON)
+	if r.service != nil && r.service.repo != nil {
+		r.enqueueDraftPersistence(draft, payloadJSON)
+	}
 }
 
 func (r *messageTraceRecorder) completeProcess() {
@@ -537,7 +663,9 @@ func (r *messageTraceRecorder) completeProcess() {
 }
 
 func (r *messageTraceRecorder) completeTools() {
-	if r.completeDraft(r.tools) {
+	changed := r.completeDraft(r.tools)
+	r.toolRoundClosed = true
+	if changed {
 		r.emitToolUpdate()
 	}
 }
@@ -552,10 +680,15 @@ func (r *messageTraceRecorder) complete() {
 	r.completeProcess()
 	r.completeTools()
 	r.completeUpstreamThink()
+	ctx, cancel := context.WithTimeout(context.Background(), tracePersistenceDrainTimeout)
+	defer cancel()
+	r.waitForPendingPersistence(ctx)
 }
 
 func (r *messageTraceRecorder) fail(err error) {
-	r.failWithContext(r.ctx, err)
+	ctx, cancel := context.WithTimeout(context.Background(), tracePersistenceDrainTimeout)
+	defer cancel()
+	r.failWithContext(ctx, err)
 }
 
 func (r *messageTraceRecorder) failWithContext(ctx context.Context, err error) {
@@ -566,6 +699,7 @@ func (r *messageTraceRecorder) failWithContext(ctx context.Context, err error) {
 		return
 	}
 	r.failed = true
+	r.waitForPendingPersistence(ctx)
 	now := time.Now()
 	summary := traceErrorSummary(err)
 	detail := traceErrorDetail(err)
@@ -638,20 +772,6 @@ func (r *messageTraceRecorder) persistDraft(draft *messageTraceDraft, force bool
 	r.persistDraftCtx(r.ctx, draft, force)
 }
 
-func cloneTraceDraft(draft *messageTraceDraft) *messageTraceDraft {
-	if draft == nil {
-		return nil
-	}
-	cloned := *draft
-	if draft.payload != nil {
-		cloned.payload = make(map[string]interface{}, len(draft.payload))
-		for key, value := range draft.payload {
-			cloned.payload[key] = value
-		}
-	}
-	return &cloned
-}
-
 func cloneTracePayload(payload map[string]interface{}) map[string]interface{} {
 	if payload == nil {
 		return make(map[string]interface{})
@@ -663,19 +783,71 @@ func cloneTracePayload(payload map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
-// persistDraftBackground 使用独立的 background context 持久化 trace，
-// 专供 complete() 的异步 goroutine 调用，避免请求 context 取消后写入失败。
-func (r *messageTraceRecorder) persistDraftBackground(draft *messageTraceDraft) {
+// enqueueDraftPersistence serializes terminal trace writes in event order. The
+// payload is materialized before the worker starts so later reconciliation
+// cannot mutate data already queued for persistence.
+func (r *messageTraceRecorder) enqueueDraftPersistence(draft *messageTraceDraft, payloadJSON string) {
+	if !r.enabled() || draft == nil || r.service == nil || r.service.repo == nil {
+		return
+	}
+	r.persistQueueMu.Lock()
+	snapshot := *draft
+	snapshot.payload = nil
+	r.persistQueue = append(r.persistQueue, tracePersistenceJob{draft: snapshot, payloadJSON: payloadJSON})
+	if r.persistWorkerDone != nil {
+		r.persistQueueMu.Unlock()
+		return
+	}
+	done := make(chan struct{})
+	r.persistWorkerDone = done
+	r.persistQueueMu.Unlock()
+	go r.runPersistenceWorker(done)
+}
+
+func (r *messageTraceRecorder) runPersistenceWorker(done chan struct{}) {
+	for {
+		r.persistQueueMu.Lock()
+		if len(r.persistQueue) == 0 {
+			r.persistWorkerDone = nil
+			close(done)
+			r.persistQueueMu.Unlock()
+			return
+		}
+		job := r.persistQueue[0]
+		r.persistQueue[0] = tracePersistenceJob{}
+		r.persistQueue = r.persistQueue[1:]
+		r.persistQueueMu.Unlock()
+
+		r.persistDraftBackground(&job.draft, job.payloadJSON)
+	}
+}
+
+func (r *messageTraceRecorder) waitForPendingPersistence(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	r.persistQueueMu.Lock()
+	pending := r.persistWorkerDone
+	r.persistQueueMu.Unlock()
+	if pending == nil {
+		return
+	}
+	select {
+	case <-pending:
+	case <-ctx.Done():
+	}
+}
+
+// persistDraftBackground uses a detached timeout because terminal trace
+// durability must not depend on the client request remaining connected.
+func (r *messageTraceRecorder) persistDraftBackground(draft *messageTraceDraft, payloadJSON string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if !r.enabled() || draft == nil {
 		return
 	}
-	payloadJSON := tracePayloadJSON(draft.payload)
 	r.persistMessageTraceRow(ctx, draft, payloadJSON)
-	if draft.traceType != messageTraceTypeTools {
-		r.persistTraceEventRow(ctx, draft, payloadJSON)
-	}
+	r.persistTraceEventRow(ctx, draft, payloadJSON)
 }
 
 func (r *messageTraceRecorder) persistDraftCtx(ctx context.Context, draft *messageTraceDraft, force bool) {
@@ -683,9 +855,7 @@ func (r *messageTraceRecorder) persistDraftCtx(ctx context.Context, draft *messa
 		return
 	}
 	payloadJSON := tracePayloadJSON(draft.payload)
-	if draft.traceType != messageTraceTypeTools {
-		r.upsertSnapshotEvent(draft, payloadJSON)
-	}
+	r.upsertSnapshotEvent(draft, payloadJSON)
 	if !force && !r.cfg.ProcessTracePersistInflight {
 		return
 	}
@@ -693,9 +863,7 @@ func (r *messageTraceRecorder) persistDraftCtx(ctx context.Context, draft *messa
 		return
 	}
 	r.persistMessageTraceRow(ctx, draft, payloadJSON)
-	if draft.traceType != messageTraceTypeTools {
-		r.persistTraceEventRow(ctx, draft, payloadJSON)
-	}
+	r.persistTraceEventRow(ctx, draft, payloadJSON)
 }
 
 type upstreamThinkLiveUpdate struct {
@@ -766,10 +934,6 @@ func (r *messageTraceRecorder) flushUpstreamThinkLiveUpdate(draft *messageTraceD
 	if !r.enabled() || draft == nil {
 		return
 	}
-	if persistSnapshot && r.shouldPersistUpstreamThinkSnapshot() {
-		r.persistDraft(draft, false)
-		r.upstreamThinkLastPersist = time.Now()
-	}
 	update := upstreamThinkLiveUpdate{
 		kind:            r.upstreamThinkPendingKind,
 		delta:           r.upstreamThinkPendingText.String(),
@@ -778,6 +942,13 @@ func (r *messageTraceRecorder) flushUpstreamThinkLiveUpdate(draft *messageTraceD
 	}
 	if !force && update.delta == "" && update.contentMarkdown == "" && len(update.reasoning) == 0 {
 		return
+	}
+	if persistSnapshot {
+		r.refreshSnapshotEvent(draft)
+		if r.shouldPersistUpstreamThinkSnapshot() {
+			r.persistDraft(draft, false)
+			r.upstreamThinkLastPersist = time.Now()
+		}
 	}
 	r.emitUpstreamThinkDelta(update)
 	r.resetUpstreamThinkLiveBuffer()
@@ -894,6 +1065,20 @@ func (r *messageTraceRecorder) persistTraceEventRow(ctx context.Context, draft *
 }
 
 func (r *messageTraceRecorder) upsertSnapshotEvent(draft *messageTraceDraft, payloadJSON string) {
+	r.storeSnapshotEvent(draft, payloadJSON, true)
+}
+
+func (r *messageTraceRecorder) refreshSnapshotEvent(draft *messageTraceDraft) {
+	r.storeSnapshotEvent(draft, "", false)
+}
+
+func (r *messageTraceRecorder) storeSnapshotEvent(draft *messageTraceDraft, payloadJSON string, replacePayload bool) {
+	if draft == nil {
+		return
+	}
+	if payloadJSON == "" {
+		payloadJSON = "{}"
+	}
 	event := model.MessageTraceEvent{
 		EventID:         draft.eventID,
 		EventType:       draft.eventType,
@@ -913,6 +1098,9 @@ func (r *messageTraceRecorder) upsertSnapshotEvent(draft *messageTraceDraft, pay
 	}
 	for idx, item := range r.events {
 		if item.EventID == event.EventID {
+			if !replacePayload {
+				event.PayloadJSON = item.PayloadJSON
+			}
 			r.events[idx] = event
 			return
 		}
@@ -974,6 +1162,7 @@ func traceDraftToBlock(draft *messageTraceDraft) *model.MessageTraceBlock {
 		Stage:           draft.stage,
 		RoundID:         draft.roundID,
 		ParentEventID:   draft.parentEventID,
+		StartedAt:       draft.startedAt,
 		UpdatedAt:       updatedAt,
 		PayloadJSON:     payloadJSON,
 	}
@@ -1192,6 +1381,27 @@ func mergeTraceToolStatus(existing string, incoming string) string {
 		return next
 	}
 	return current
+}
+
+func toolTracePayloadStatus(payload map[string]interface{}) string {
+	calls := normalizeTraceToolCalls(payload["tool_calls"])
+	if len(calls) == 0 {
+		return ""
+	}
+	hasError := false
+	for _, call := range calls {
+		switch strings.TrimSpace(getTraceString(call["status"])) {
+		case "error", "failed":
+			hasError = true
+		case "success", "completed", "reused", "":
+		default:
+			return messageTraceStatusStreaming
+		}
+	}
+	if hasError {
+		return messageTraceStatusError
+	}
+	return messageTraceStatusCompleted
 }
 
 func traceToolStatusRank(status string) int {

@@ -82,6 +82,17 @@ func (ConversationProjectSkill) TableName() string {
 	return "chat_conversation_project_skills"
 }
 
+// ConversationProjectKnowledgeBase records a project's default knowledge bases.
+type ConversationProjectKnowledgeBase struct {
+	ProjectID       uint `gorm:"primaryKey;comment:项目ID"`
+	KnowledgeBaseID uint `gorm:"primaryKey;index:idx_project_knowledge_bases_base;comment:知识库ID"`
+	SortOrder       int  `gorm:"not null;default:0;comment:项目内排序"`
+}
+
+func (ConversationProjectKnowledgeBase) TableName() string {
+	return "chat_conversation_project_knowledge_bases"
+}
+
 // ConversationShare 存储会话公开分享快照。
 type ConversationShare struct {
 	BaseModel
@@ -106,35 +117,37 @@ func (ConversationShare) TableName() string {
 // Message 存储会话内消息。
 type Message struct {
 	BaseModel
-	ConversationID   uint       `gorm:"not null;index:idx_chat_messages_conversation_id;comment:会话ID"`
-	UserID           uint       `gorm:"not null;index:idx_chat_messages_user_id;comment:用户ID"`
-	PublicID         string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_messages_public_id;comment:公开消息ID"`
-	ParentMessageID  *uint      `gorm:"index:idx_chat_messages_parent_message_id;comment:父消息ID"`
-	RunID            string     `gorm:"size:64;not null;default:'';index:idx_chat_messages_run_id;comment:会话运行ID"`
-	Role             string     `gorm:"size:32;not null;default:'';index:idx_chat_messages_role;comment:消息角色(user/assistant/system/tool)"`
-	ContentType      string     `gorm:"size:32;not null;default:'';comment:消息内容类型"`
-	Content          string     `gorm:"type:text;not null;default:'';comment:消息内容"`
-	ReasoningContent string     `gorm:"type:text;not null;default:'';comment:上游推理内容回灌上下文"`
-	BranchReason     string     `gorm:"size:32;not null;default:'default';index:idx_chat_messages_branch_reason;comment:分支来源(default/retry/edit)"`
-	SourceMessageID  *uint      `gorm:"index:idx_chat_messages_source_message_id;comment:来源消息ID(重试/编辑源)"`
-	TokenUsage       int64      `gorm:"not null;default:0;comment:token总消耗"`
-	InputTokens      int64      `gorm:"not null;default:0;comment:输入Token"`
-	OutputTokens     int64      `gorm:"not null;default:0;comment:输出Token"`
-	CacheReadTokens  int64      `gorm:"not null;default:0;comment:缓存读取Token"`
-	CacheWriteTokens int64      `gorm:"not null;default:0;comment:缓存写入Token"`
-	ReasoningTokens  int64      `gorm:"not null;default:0;comment:推理Token"`
-	LatencyMS        int64      `gorm:"not null;default:0;comment:消息处理时长毫秒"`
-	Status           string     `gorm:"size:32;not null;default:'';index:idx_chat_messages_status;comment:消息处理状态"`
-	ErrorCode        string     `gorm:"size:64;not null;default:'';comment:错误码"`
-	ErrorMessage     string     `gorm:"size:255;not null;default:'';comment:错误信息"`
-	IsCompacted      bool       `gorm:"not null;default:false;index:idx_chat_messages_is_compacted;comment:预留未使用(祖先链未按此过滤，无读写方)"`
-	EditedAt         *time.Time `gorm:"index:idx_chat_messages_edited_at;comment:用户编辑时间"`
-	ParentPublicID   string     `gorm:"-"`
-	SourcePublicID   string     `gorm:"-"`
-	Attachments      string     `gorm:"-"`
-	MyFeedback       string     `gorm:"-"`
-	ThumbsUpCount    int64      `gorm:"-"`
-	ThumbsDownCount  int64      `gorm:"-"`
+	ConversationID           uint       `gorm:"not null;index:idx_chat_messages_conversation_id;comment:会话ID"`
+	UserID                   uint       `gorm:"not null;index:idx_chat_messages_user_id;comment:用户ID"`
+	PublicID                 string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_messages_public_id;comment:公开消息ID"`
+	ParentMessageID          *uint      `gorm:"index:idx_chat_messages_parent_message_id;comment:父消息ID"`
+	RunID                    string     `gorm:"size:64;not null;default:'';index:idx_chat_messages_run_id;comment:会话运行ID"`
+	Role                     string     `gorm:"size:32;not null;default:'';index:idx_chat_messages_role;comment:消息角色(user/assistant/system/tool)"`
+	ContentType              string     `gorm:"size:32;not null;default:'';comment:消息内容类型"`
+	Content                  string     `gorm:"type:text;not null;default:'';comment:消息内容"`
+	ReasoningContent         string     `gorm:"type:text;not null;default:'';comment:上游推理内容回灌上下文"`
+	BranchReason             string     `gorm:"size:32;not null;default:'default';index:idx_chat_messages_branch_reason;comment:分支来源(default/retry/edit)"`
+	SourceMessageID          *uint      `gorm:"index:idx_chat_messages_source_message_id;comment:来源消息ID(重试/编辑源)"`
+	TokenUsage               int64      `gorm:"not null;default:0;comment:token总消耗"`
+	InputTokens              int64      `gorm:"not null;default:0;comment:输入Token"`
+	OutputTokens             int64      `gorm:"not null;default:0;comment:输出Token"`
+	CacheReadTokens          int64      `gorm:"not null;default:0;comment:缓存读取Token"`
+	CacheWriteTokens         int64      `gorm:"not null;default:0;comment:缓存写入Token"`
+	ReasoningTokens          int64      `gorm:"not null;default:0;comment:推理Token"`
+	LatencyMS                int64      `gorm:"not null;default:0;comment:消息处理时长毫秒"`
+	Status                   string     `gorm:"size:32;not null;default:'';index:idx_chat_messages_status;comment:消息处理状态"`
+	ErrorCode                string     `gorm:"size:64;not null;default:'';comment:错误码"`
+	ErrorMessage             string     `gorm:"size:255;not null;default:'';comment:错误信息"`
+	ModerationEventID        string     `gorm:"size:40;not null;default:'';index:idx_chat_messages_moderation_event_id;comment:主审核事件编号"`
+	ModerationCategoriesJSON string     `gorm:"type:text;not null;default:'[]';comment:审核命中分类摘要JSON"`
+	IsCompacted              bool       `gorm:"not null;default:false;index:idx_chat_messages_is_compacted;comment:预留未使用(祖先链未按此过滤，无读写方)"`
+	EditedAt                 *time.Time `gorm:"index:idx_chat_messages_edited_at;comment:用户编辑时间"`
+	ParentPublicID           string     `gorm:"-"`
+	SourcePublicID           string     `gorm:"-"`
+	Attachments              string     `gorm:"-"`
+	MyFeedback               string     `gorm:"-"`
+	ThumbsUpCount            int64      `gorm:"-"`
+	ThumbsDownCount          int64      `gorm:"-"`
 }
 
 // TableName 指定表名。
@@ -209,6 +222,7 @@ type FileObject struct {
 	RAGReady               bool       `gorm:"not null;default:false;comment:RAG是否就绪"`
 	RAGReason              string     `gorm:"size:255;not null;default:'';comment:RAG处理说明"`
 	EmbedStatus            string     `gorm:"size:16;not null;default:'none';index:idx_file_objects_embed_status;comment:向量嵌入状态(none/processing/ready/failed)"`
+	EmbedSignature         string     `gorm:"size:64;not null;default:'';index:idx_file_objects_embed_signature;comment:当前向量任务所属空间签名"`
 	EmbedError             string     `gorm:"type:text;not null;default:'';comment:嵌入失败原因"`
 	PageCount              int        `gorm:"not null;default:0;comment:PDF页数"`
 	ChunkCount             int        `gorm:"not null;default:0;comment:分片数量"`
@@ -230,15 +244,16 @@ func (FileObject) TableName() string {
 // 若底层模型维度较小（如 all-MiniLM-L6-v2 的 384），写库前会零填充到统一维度。
 // 通过 applyVectorBaseline 在 schema baseline 阶段用 raw SQL 创建。
 type FileChunk struct {
-	ID         uint      `gorm:"primaryKey;comment:主键ID"`
-	FileObjID  uint      `gorm:"not null;index:idx_file_chunks_file_obj_id;comment:文件对象ID(外键)"`
-	UserID     uint      `gorm:"not null;index:idx_file_chunks_user_id;comment:用户ID"`
-	ChunkIndex int       `gorm:"not null;default:0;comment:分片序号"`
-	PageNum    int       `gorm:"not null;default:0;comment:所在页码"`
-	CharOffset int       `gorm:"not null;default:0;comment:字符偏移量"`
-	Content    string    `gorm:"type:text;not null;comment:分片文本内容"`
-	TokenCount int       `gorm:"not null;default:0;comment:估算token数"`
-	CreatedAt  time.Time `gorm:"comment:创建时间"`
+	ID                 uint      `gorm:"primaryKey;comment:主键ID"`
+	FileObjID          uint      `gorm:"not null;index:idx_file_chunks_file_obj_id;comment:文件对象ID(外键)"`
+	UserID             uint      `gorm:"not null;index:idx_file_chunks_user_id;comment:用户ID"`
+	ChunkIndex         int       `gorm:"not null;default:0;comment:分片序号"`
+	PageNum            int       `gorm:"not null;default:0;comment:所在页码"`
+	CharOffset         int       `gorm:"not null;default:0;comment:字符偏移量"`
+	Content            string    `gorm:"type:text;not null;comment:分片文本内容"`
+	TokenCount         int       `gorm:"not null;default:0;comment:估算token数"`
+	EmbeddingSignature string    `gorm:"size:64;not null;default:'';index:idx_file_chunks_embedding_signature;comment:向量空间签名"`
+	CreatedAt          time.Time `gorm:"comment:创建时间"`
 }
 
 // TableName 指定表名。
@@ -263,39 +278,42 @@ func (UserStorageQuota) TableName() string {
 // ConversationRun 存储每轮对话运行日志。
 type ConversationRun struct {
 	BaseModel
-	RunID               string     `gorm:"size:64;not null;default:'';uniqueIndex:idx_chat_runs_run_id;comment:运行ID"`
-	RequestID           string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_request_id;comment:请求ID"`
-	UserID              uint       `gorm:"not null;default:0;index:idx_chat_runs_user_id;comment:用户ID"`
-	KeyBindingPublicID  string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_key_binding_public_id"`
-	KeyBindingVersion   uint       `gorm:"not null;default:0"`
-	RemoteKeyID         int64      `gorm:"not null;default:0"`
-	ConversationID      uint       `gorm:"not null;default:0;index:idx_chat_runs_conversation_id;comment:会话ID"`
-	TaskType            string     `gorm:"size:32;not null;default:'chat';index:idx_chat_runs_task_type;comment:任务类型"`
-	Endpoint            string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_endpoint;comment:调用端点"`
-	Provider            string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_provider;comment:模型提供商"`
-	ProviderProtocol    string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_provider_protocol;comment:协议适配器快照"`
-	UpstreamID          uint       `gorm:"not null;default:0;index:idx_chat_runs_upstream_id;comment:上游ID"`
-	UpstreamModelID     uint       `gorm:"not null;default:0;index:idx_chat_runs_upstream_model_id;comment:上游真实模型ID"`
-	UpstreamName        string     `gorm:"size:128;not null;default:'';comment:上游名称快照"`
-	RequestedModelName  string     `gorm:"size:128;not null;default:'';index:idx_chat_runs_requested_model_name;comment:请求平台模型名"`
-	PlatformModelName   string     `gorm:"size:128;not null;default:'';index:idx_chat_runs_platform_model_name;comment:路由命中平台模型名"`
-	RoutedBindingCode   string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_routed_binding_code;comment:实际路由上游模型绑定编码"`
-	ModelVendor         string     `gorm:"size:64;not null;default:'';comment:平台模型厂商快照"`
-	ModelIcon           string     `gorm:"size:64;not null;default:'';comment:平台模型图标快照"`
-	UpstreamModelName   string     `gorm:"size:256;not null;default:'';comment:上游真实模型名称"`
-	InputTokens         int64      `gorm:"not null;default:0;comment:输入Token"`
-	OutputTokens        int64      `gorm:"not null;default:0;comment:输出Token"`
-	CacheReadTokens     int64      `gorm:"not null;default:0;comment:缓存读取Token"`
-	CacheWriteTokens    int64      `gorm:"not null;default:0;comment:缓存写入Token"`
-	ReasoningTokens     int64      `gorm:"not null;default:0;comment:推理Token"`
-	ToolCallsCount      int        `gorm:"not null;default:0;comment:工具调用次数"`
-	FirstTokenLatencyMS int64      `gorm:"not null;default:0;comment:首Token时延毫秒"`
-	TotalLatencyMS      int64      `gorm:"not null;default:0;comment:总时长毫秒"`
-	Status              string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_status;comment:运行状态"`
-	ErrorCode           string     `gorm:"size:64;not null;default:'';comment:错误码"`
-	ErrorMessage        string     `gorm:"size:255;not null;default:'';comment:错误信息"`
-	StartedAt           time.Time  `gorm:"not null;comment:开始时间"`
-	EndedAt             *time.Time `gorm:"comment:结束时间"`
+	RunID                    string     `gorm:"size:64;not null;default:'';uniqueIndex:idx_chat_runs_run_id;comment:运行ID"`
+	RequestID                string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_request_id;comment:请求ID"`
+	UserID                   uint       `gorm:"not null;default:0;index:idx_chat_runs_user_id;comment:用户ID"`
+	KeyBindingPublicID       string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_key_binding_public_id"`
+	KeyBindingVersion        uint       `gorm:"not null;default:0"`
+	RemoteKeyID              int64      `gorm:"not null;default:0"`
+	ConversationID           uint       `gorm:"not null;default:0;index:idx_chat_runs_conversation_id;comment:会话ID"`
+	TaskType                 string     `gorm:"size:32;not null;default:'chat';index:idx_chat_runs_task_type;comment:任务类型"`
+	Endpoint                 string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_endpoint;comment:调用端点"`
+	Provider                 string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_provider;comment:模型提供商"`
+	ProviderProtocol         string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_provider_protocol;comment:协议适配器快照"`
+	UpstreamID               uint       `gorm:"not null;default:0;index:idx_chat_runs_upstream_id;comment:上游ID"`
+	UpstreamModelID          uint       `gorm:"not null;default:0;index:idx_chat_runs_upstream_model_id;comment:上游真实模型ID"`
+	UpstreamName             string     `gorm:"size:128;not null;default:'';comment:上游名称快照"`
+	RequestedModelName       string     `gorm:"size:128;not null;default:'';index:idx_chat_runs_requested_model_name;comment:请求平台模型名"`
+	PlatformModelName        string     `gorm:"size:128;not null;default:'';index:idx_chat_runs_platform_model_name;comment:路由命中平台模型名"`
+	RoutedBindingCode        string     `gorm:"size:64;not null;default:'';index:idx_chat_runs_routed_binding_code;comment:实际路由上游模型绑定编码"`
+	ModelVendor              string     `gorm:"size:64;not null;default:'';comment:平台模型厂商快照"`
+	ModelIcon                string     `gorm:"size:64;not null;default:'';comment:平台模型图标快照"`
+	UpstreamModelName        string     `gorm:"size:256;not null;default:'';comment:上游真实模型名称"`
+	InputTokens              int64      `gorm:"not null;default:0;comment:输入Token"`
+	OutputTokens             int64      `gorm:"not null;default:0;comment:输出Token"`
+	CacheReadTokens          int64      `gorm:"not null;default:0;comment:缓存读取Token"`
+	CacheWriteTokens         int64      `gorm:"not null;default:0;comment:缓存写入Token"`
+	ReasoningTokens          int64      `gorm:"not null;default:0;comment:推理Token"`
+	ToolCallsCount           int        `gorm:"not null;default:0;comment:工具调用次数"`
+	FirstTokenLatencyMS      int64      `gorm:"not null;default:0;comment:首Token时延毫秒"`
+	TotalLatencyMS           int64      `gorm:"not null;default:0;comment:总时长毫秒"`
+	Status                   string     `gorm:"size:32;not null;default:'';index:idx_chat_runs_status;comment:运行状态"`
+	ErrorCode                string     `gorm:"size:64;not null;default:'';comment:错误码"`
+	ErrorMessage             string     `gorm:"size:255;not null;default:'';comment:错误信息"`
+	ModerationState          string     `gorm:"size:32;not null;default:'not_required';index:idx_chat_runs_moderation_state;comment:内容审核状态"`
+	ModerationEventID        string     `gorm:"size:40;not null;default:'';index:idx_chat_runs_moderation_event_id;comment:主审核事件编号"`
+	ModerationCategoriesJSON string     `gorm:"type:text;not null;default:'[]';comment:审核命中分类摘要JSON"`
+	StartedAt                time.Time  `gorm:"not null;comment:开始时间"`
+	EndedAt                  *time.Time `gorm:"comment:结束时间"`
 }
 
 // TableName 指定表名。
@@ -341,6 +359,8 @@ type ChatRunEvent struct {
 	Seq              int        `gorm:"not null;default:0;index:idx_chat_run_events_seq;comment:事件顺序"`
 	ToolCallID       string     `gorm:"size:255;not null;default:'';index:idx_chat_run_events_tool_call_id;comment:工具调用ID"`
 	ToolName         string     `gorm:"size:128;not null;default:'';index:idx_chat_run_events_tool_name;comment:工具名称"`
+	MCPServerID      uint       `gorm:"not null;default:0;comment:MCP服务器ID快照"`
+	MCPServerName    string     `gorm:"size:128;not null;default:'';comment:MCP服务器名称快照"`
 	LatencyMS        int64      `gorm:"not null;default:0;comment:调用时长毫秒"`
 	InputJSON        string     `gorm:"type:text;not null;default:'';comment:输入JSON"`
 	OutputJSON       string     `gorm:"type:text;not null;default:'';comment:输出JSON"`
@@ -390,15 +410,16 @@ func (ChatContextRecord) TableName() string {
 // MessageChunk 存储会话消息的 RAG 向量分片，用于历史对话语义检索。
 // embedding 列（vector(1536)）通过 applyVectorBaseline 用 raw SQL 创建。
 type MessageChunk struct {
-	ID             uint      `gorm:"primaryKey;comment:主键ID"`
-	ConversationID uint      `gorm:"not null;index:idx_chat_message_chunks_conversation_id;comment:会话ID"`
-	MessageID      uint      `gorm:"not null;index:idx_chat_message_chunks_message_id;comment:消息ID"`
-	UserID         uint      `gorm:"not null;index:idx_chat_message_chunks_user_id;comment:用户ID"`
-	Role           string    `gorm:"size:32;not null;default:'';index:idx_chat_message_chunks_role;comment:消息角色(user/assistant)"`
-	ChunkIndex     int       `gorm:"not null;default:0;comment:分片序号"`
-	Content        string    `gorm:"type:text;not null;comment:分片文本"`
-	TokenCount     int       `gorm:"not null;default:0;comment:估算Token数"`
-	CreatedAt      time.Time `gorm:"comment:创建时间"`
+	ID                 uint      `gorm:"primaryKey;comment:主键ID"`
+	ConversationID     uint      `gorm:"not null;index:idx_chat_message_chunks_conversation_id;comment:会话ID"`
+	MessageID          uint      `gorm:"not null;index:idx_chat_message_chunks_message_id;comment:消息ID"`
+	UserID             uint      `gorm:"not null;index:idx_chat_message_chunks_user_id;comment:用户ID"`
+	Role               string    `gorm:"size:32;not null;default:'';index:idx_chat_message_chunks_role;comment:消息角色(user/assistant)"`
+	ChunkIndex         int       `gorm:"not null;default:0;comment:分片序号"`
+	Content            string    `gorm:"type:text;not null;comment:分片文本"`
+	TokenCount         int       `gorm:"not null;default:0;comment:估算Token数"`
+	EmbeddingSignature string    `gorm:"size:64;not null;default:'';index:idx_chat_message_chunks_embedding_signature;comment:向量空间签名"`
+	CreatedAt          time.Time `gorm:"comment:创建时间"`
 }
 
 // TableName 指定表名。

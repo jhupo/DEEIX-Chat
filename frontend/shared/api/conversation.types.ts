@@ -24,6 +24,7 @@ import type {
   ConversationInputResourceResponse,
   ConversationPreviewMessageResponse,
   ConversationProjectResponse,
+  ConversationRunStatusResponse,
   ConversationResponse,
   ConversationSearchPageResponse,
   ConversationSearchResultResponse,
@@ -175,6 +176,17 @@ export type MessageDTO = Omit<
 };
 
 export type ConversationRunDTO = Omit<RunResponse, "taskType">;
+
+export type ActiveConversationRunSnapshot = {
+  runID: string;
+  conversationPublicID: string;
+};
+
+export type ActiveConversationRunEvent =
+  | { type: "snapshot"; runs: ActiveConversationRunSnapshot[] }
+  | { type: "started" | "finished"; runID: string; conversationPublicID?: string };
+
+export type ConversationRunStatusDTO = ConversationRunStatusResponse;
 
 export type ConversationExportDTO = Omit<
   ConversationExportResponse,

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { dispatchUserProfileUpdated } from "@/features/settings/events/user-profile-events";
-import { useAppearancePreferencesPersistence } from "@/features/settings/hooks/use-appearance-preferences-persistence";
+import { useSettingsAppearancePersistence } from "@/features/settings/hooks/use-settings-appearance-persistence";
 import {
   type FontSizeOption,
   useFontSizePreference,
@@ -69,7 +69,7 @@ export function SettingsGeneral() {
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unsupported">("unsupported");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
-  const persistAppearancePreferences = useAppearancePreferencesPersistence();
+  const persistAppearancePreferences = useSettingsAppearancePersistence();
 
   React.useEffect(() => {
     if (userStatus === "loading") {

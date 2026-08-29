@@ -5,9 +5,11 @@ export const ADMIN_SECTIONS = [
   { id: "tool-settings", label: "Tools", href: "/tools" },
   { id: "announcements", label: "Announcements", href: "/announcements" },
   { id: "logs", label: "Logs", href: "/logs" },
+  { id: "content-moderation", label: "Content moderation", href: "/content-moderation" },
   { id: "login-settings", label: "Login & auth", href: "/login" },
   { id: "conversation-settings", label: "Conversation", href: "/conversation" },
   { id: "chat-files", label: "Files & retrieval", href: "/chat-files" },
+  { id: "knowledge-bases", label: "Knowledge bases", href: "/knowledge-bases" },
   { id: "about", label: "About", href: "/about" },
 ] as const;
 

@@ -29,7 +29,7 @@ import {
   sharePatchFromDTO,
   type ConversationLabelsTarget,
   useConversationExport,
-  useSidebarConversations,
+  useSidebarConversationField,
 } from "@/entities/conversation";
 import { LoadingReveal } from "@/shared/components/loading-reveal";
 import { SidebarConversationItem } from "@/features/layouts/components/navigation/sidebar-conversation-item";
@@ -41,7 +41,7 @@ import { useSettingsChatPreferences } from "@/features/settings";
 import { useChatSession } from "@/features/chat";
 import { useLayoutActiveConversation } from "@/features/layouts/hooks/use-layout-active-conversation";
 import { useLayoutSidebarListFlip } from "@/features/layouts/hooks/use-layout-sidebar-list-flip";
-import { useSidebarConversationNavigation } from "@/features/layouts/hooks/use-sidebar-conversation-navigation";
+import { useLayoutSidebarNavigation } from "@/features/layouts/hooks/use-layout-sidebar-navigation";
 import { groupConversationsByTime } from "@/features/layouts/model/conversation-time-groups";
 import type {
   SidebarConversationDeleteTarget,
@@ -56,31 +56,29 @@ const RECENTS_OPEN_STORAGE_KEY = "deeix.sidebar.recents.open";
 
 export function NavRecents() {
   const t = useTranslations("recent");
-  const onNavigate = useSidebarConversationNavigation();
+  const onNavigate = useLayoutSidebarNavigation();
   const router = useRouter();
   const { executionMode } = useChatSession();
   const activeConversationID = useLayoutActiveConversation();
   const { deleteFilesByDefault } = useSettingsChatPreferences();
 
-  const {
-    recentItems,
-    hasMore,
-    loadingInitial,
-    loadingMore,
-    loadMoreFailed,
-    loadMore,
-    retryLoadMore,
-    projects,
-    transferringStarPublicID,
-    renameByPublicID,
-    regenerateTitleByPublicID,
-    updateLabelsByPublicID,
-    setStarByPublicID,
-    archiveByPublicID,
-    deleteByPublicID,
-    touchByPublicID,
-    setProjectByPublicID,
-  } = useSidebarConversations();
+  const recentItems = useSidebarConversationField("recentItems");
+  const hasMore = useSidebarConversationField("hasMore");
+  const loadingInitial = useSidebarConversationField("loadingInitial");
+  const loadingMore = useSidebarConversationField("loadingMore");
+  const loadMoreFailed = useSidebarConversationField("loadMoreFailed");
+  const loadMore = useSidebarConversationField("loadMore");
+  const retryLoadMore = useSidebarConversationField("retryLoadMore");
+  const projects = useSidebarConversationField("projects");
+  const transferringStarPublicID = useSidebarConversationField("transferringStarPublicID");
+  const renameByPublicID = useSidebarConversationField("renameByPublicID");
+  const regenerateTitleByPublicID = useSidebarConversationField("regenerateTitleByPublicID");
+  const updateLabelsByPublicID = useSidebarConversationField("updateLabelsByPublicID");
+  const setStarByPublicID = useSidebarConversationField("setStarByPublicID");
+  const archiveByPublicID = useSidebarConversationField("archiveByPublicID");
+  const deleteByPublicID = useSidebarConversationField("deleteByPublicID");
+  const touchByPublicID = useSidebarConversationField("touchByPublicID");
+  const setProjectByPublicID = useSidebarConversationField("setProjectByPublicID");
 
   const [deleteTarget, setDeleteTarget] = React.useState<SidebarConversationDeleteTarget>(null);
   const [deleteFiles, setDeleteFiles] = React.useState(false);

@@ -127,6 +127,47 @@ function buildRequestInit(options: ApiRequestOptions): RequestInit {
   };
 }
 
+export function resolveAbortError(error?: unknown, signal?: AbortSignal): Error | null {
+  if (!signal?.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+    return null;
+  }
+  if (error instanceof Error && error.name === "AbortError") {
+    return error;
+  }
+  return new DOMException("The operation was aborted", "AbortError");
+}
+
+export async function apiFetch(path: string, options: ApiRequestOptions = {}): Promise<Response> {
+  try {
+    const response = await fetch(`${resolveApiBaseURL()}${path}`, buildRequestInit(options));
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      const requestId = response.headers.get("x-request-id") || undefined;
+      if (contentType.includes("application/json")) {
+        const payload = parseApiEnvelope<unknown>(await response.json());
+        throw new ApiError(
+          payload.errorMsg?.trim() || `request failed: ${response.status}`,
+          response.status,
+          payload.details,
+          payload.errorCode,
+          payload.requestId || requestId,
+        );
+      }
+      throw new ApiError(await response.text(), response.status, undefined, undefined, requestId);
+    }
+    return response;
+  } catch (error) {
+    const abortError = resolveAbortError(error, options.signal);
+    if (abortError) {
+      throw abortError;
+    }
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiNetworkError(error);
+  }
+}
+
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const endpoint = `${resolveApiBaseURL()}${path}`;
   let response: Response;

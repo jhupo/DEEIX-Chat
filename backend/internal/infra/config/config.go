@@ -18,6 +18,8 @@ import (
 var regexpRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 const (
+	DefaultContextWindowFallbackTokens  = 128_000
+	DefaultContextCompactTriggerPercent = 80
 	defaultAppName                      = "DEEIX Chat"
 	defaultBrandTitle                   = "DEEIX Chat"
 	defaultBrandShortName               = "DEEIX"
@@ -34,6 +36,7 @@ const (
 	defaultHTTPReadTimeoutSeconds       = 120
 	defaultHTTPIdleTimeoutSeconds       = 120
 	defaultHTTPMaxHeaderBytes           = 1 << 20
+	defaultHTTPShutdownTimeoutSeconds   = 10
 	// DefaultSub2BaseURL 是唯一受信任的 Sub2API 实例。
 	DefaultSub2BaseURL = "https://api.ovload.com"
 	// DefaultFileFullContextMaxBytes 是全文注入的默认提取文本大小上限（2 MiB）。
@@ -118,20 +121,25 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "generationConfig.imageConfig.aspectRatio",
     "generationConfig.imageConfig.imageSize"
   ],
+  "gemini_generate_content": [
+    "generationConfig.temperature",
+    "generationConfig.topP",
+    "generationConfig.maxOutputTokens",
+    "generationConfig.responseMimeType",
+    "generationConfig.thinkingConfig.includeThoughts",
+    "generationConfig.thinkingConfig.thinkingLevel"
+  ],
   "gemini_interactions": [
     "generation_config.temperature",
     "generation_config.top_p",
     "generation_config.max_output_tokens",
     "generation_config.thinking_level",
+    "generation_config.thinking_summaries",
     "response_format.type",
     "response_format.aspect_ratio",
     "response_format.image_size",
     "response_format.mime_type",
-    "responseFormat.type",
-    "responseFormat.aspectRatio",
-    "responseFormat.imageSize",
-    "responseFormat.mimeType",
-    "generationConfig.videoConfig.task",
+    "response_format.schema",
     "generation_config.video_config.task"
   ],
   "anthropic_messages": [
@@ -164,11 +172,8 @@ func DefaultModelOptionAllowedPathsJSON() string {
     "duration",
     "resolution"
   ],
-  "gemini_generate_content": [
-    "generationConfig.temperature",
-    "generationConfig.topP",
-    "generationConfig.maxOutputTokens",
-    "generationConfig.responseMimeType"
+  "xai_video_extensions": [
+    "duration"
   ]
 }`
 }
@@ -225,6 +230,7 @@ type yamlConfig struct {
 		ReadTimeoutSeconds       int    `yaml:"read_timeout_seconds"`
 		IdleTimeoutSeconds       int    `yaml:"idle_timeout_seconds"`
 		MaxHeaderBytes           int    `yaml:"max_header_bytes"`
+		ShutdownTimeoutSeconds   int    `yaml:"shutdown_timeout_seconds"`
 	} `yaml:"server"`
 	Update struct {
 		Repository             string `yaml:"repository"`
@@ -319,6 +325,7 @@ type Config struct {
 	HTTPReadTimeoutSeconds       int
 	HTTPIdleTimeoutSeconds       int
 	HTTPMaxHeaderBytes           int
+	HTTPShutdownTimeoutSeconds   int
 	UpdateRepository             string
 	UpdateProxyURL               string
 	UpdateRuntimeDir             string
@@ -373,22 +380,24 @@ type Config struct {
 	RateLimitRPM           int
 	PublicAuthRateLimitRPM int
 	// 对话配置
-	MaxContextMessages       int
-	ContextMaxTurns          int
-	ContextMaxInputTokens    int
-	ContextCompactEnabled    bool
-	ContextCompactTrigger    int
-	ContextCompactPreserve   int
-	ConversationDefaultModel string
-	ConversationTaskModel    string
-	ConversationTitlePrompt  string
-	ConversationLabelsPrompt string
-	DefaultSystemPrompt      string
-	SkillsPrompt             string
-	ConversationPluginKeys   string
-	ModelOptionPolicyMode    string
-	ModelOptionAllowedPaths  string
-	ModelOptionDeniedPaths   string
+	MaxContextMessages           int
+	ContextMaxTurns              int
+	ContextMaxInputTokens        int
+	ContextCompactEnabled        bool
+	ContextCompactTrigger        int
+	ContextWindowFallbackTokens  int
+	ContextCompactTriggerPercent int
+	ContextCompactPreserve       int
+	ConversationDefaultModel     string
+	ConversationTaskModel        string
+	ConversationTitlePrompt      string
+	ConversationLabelsPrompt     string
+	DefaultSystemPrompt          string
+	SkillsPrompt                 string
+	ConversationPluginKeys       string
+	ModelOptionPolicyMode        string
+	ModelOptionAllowedPaths      string
+	ModelOptionDeniedPaths       string
 	// 存储配置
 	UserStorageQuotaBytes int64
 	MaxUploadFileBytes    int64
@@ -438,6 +447,10 @@ type Config struct {
 	ExtractMinerUFileTypes            string // MinerU 处理的文件类型（逗号分隔）
 	ExtractMinerUTimeoutSeconds       int    // MinerU 请求超时(秒)
 	ExtractMinerUAuthToken            string // MinerU 鉴权 Token
+	ExtractMistralOCRBaseURL          string // Mistral OCR 服务地址
+	ExtractMistralOCRModel            string // Mistral OCR 请求模型
+	ExtractMistralOCRTimeoutSeconds   int    // Mistral OCR 请求超时(秒)
+	ExtractMistralOCRAuthToken        string // Mistral OCR 鉴权 Token
 	ExtractLLMOCRBaseURL              string // LLM OCR 服务地址
 	ExtractLLMOCRModel                string // LLM OCR 请求模型
 	ExtractLLMOCRTimeoutSeconds       int    // LLM OCR 请求超时(秒)
@@ -529,6 +542,7 @@ func Load() Config {
 		HTTPReadTimeoutSeconds:       envOrInt("HTTP_READ_TIMEOUT_SECONDS", yc.Server.ReadTimeoutSeconds, defaultHTTPReadTimeoutSeconds),
 		HTTPIdleTimeoutSeconds:       envOrInt("HTTP_IDLE_TIMEOUT_SECONDS", yc.Server.IdleTimeoutSeconds, defaultHTTPIdleTimeoutSeconds),
 		HTTPMaxHeaderBytes:           envOrInt("HTTP_MAX_HEADER_BYTES", yc.Server.MaxHeaderBytes, defaultHTTPMaxHeaderBytes),
+		HTTPShutdownTimeoutSeconds:   envOrInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS", yc.Server.ShutdownTimeoutSeconds, defaultHTTPShutdownTimeoutSeconds),
 		UpdateRepository:             envOr("UPDATE_REPOSITORY", yc.Update.Repository, "jhupo/DEEIX-Chat"),
 		UpdateProxyURL:               envOr("UPDATE_PROXY_URL", yc.Update.ProxyURL, ""),
 		UpdateRuntimeDir:             absoluteConfigPath(envOrPath("UPDATE_RUNTIME_DIR", yc.Update.RuntimeDir, "./data/runtime", yc.sourceDir)),
@@ -586,6 +600,8 @@ func Load() Config {
 		ContextMaxInputTokens:             32000,
 		ContextCompactEnabled:             false,
 		ContextCompactTrigger:             65536,
+		ContextWindowFallbackTokens:       DefaultContextWindowFallbackTokens,
+		ContextCompactTriggerPercent:      DefaultContextCompactTriggerPercent,
 		ContextCompactPreserve:            8,
 		ConversationDefaultModel:          "",
 		ConversationTaskModel:             "follow",
@@ -644,6 +660,10 @@ func Load() Config {
 		ExtractMinerUFileTypes:            "pdf,word,presentation",
 		ExtractMinerUTimeoutSeconds:       180,
 		ExtractMinerUAuthToken:            "",
+		ExtractMistralOCRBaseURL:          "https://api.mistral.ai/v1/ocr",
+		ExtractMistralOCRModel:            "mistral-ocr-latest",
+		ExtractMistralOCRTimeoutSeconds:   60,
+		ExtractMistralOCRAuthToken:        "",
 		ExtractLLMOCRBaseURL:              "",
 		ExtractLLMOCRModel:                "",
 		ExtractLLMOCRTimeoutSeconds:       60,

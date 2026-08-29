@@ -10,6 +10,7 @@ import (
 )
 
 func TestUserMemoryPostgresVectorLifecycle(t *testing.T) {
+	const embeddingSignature = "test-model@1536"
 	db := testutil.Postgres(t)
 	if err := db.AutoMigrate(&model.UserMemory{}); err != nil {
 		t.Fatalf("migrate user memories: %v", err)
@@ -45,14 +46,14 @@ func TestUserMemoryPostgresVectorLifecycle(t *testing.T) {
 	queryEmbedding[0] = 1
 	otherEmbedding := make([]float32, 1536)
 	otherEmbedding[1] = 1
-	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, target.MemoryKey, target.Value, queryEmbedding); err != nil {
+	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, target.MemoryKey, target.Value, queryEmbedding, embeddingSignature); err != nil {
 		t.Fatalf("embed target memory: %v", err)
 	}
-	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, other.MemoryKey, other.Value, otherEmbedding); err != nil {
+	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, other.MemoryKey, other.Value, otherEmbedding, embeddingSignature); err != nil {
 		t.Fatalf("embed other memory: %v", err)
 	}
 
-	results, err := repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, 2, 0)
+	results, err := repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, embeddingSignature, 2, 0)
 	if err != nil {
 		t.Fatalf("search embedded memories: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestUserMemoryPostgresVectorLifecycle(t *testing.T) {
 	if err := repo.UpsertUserMemory(ctx, target); err != nil {
 		t.Fatalf("update target memory: %v", err)
 	}
-	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, 2, 0.5)
+	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, embeddingSignature, 2, 0.5)
 	if err != nil {
 		t.Fatalf("search after target update: %v", err)
 	}
@@ -74,10 +75,10 @@ func TestUserMemoryPostgresVectorLifecycle(t *testing.T) {
 		}
 	}
 
-	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, target.MemoryKey, target.Value, queryEmbedding); err != nil {
+	if err := repo.UpsertUserMemoryEmbedding(ctx, 1, target.MemoryKey, target.Value, queryEmbedding, embeddingSignature); err != nil {
 		t.Fatalf("re-embed target memory: %v", err)
 	}
-	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, 2, 0)
+	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, embeddingSignature, 2, 0)
 	if err != nil {
 		t.Fatalf("search re-embedded memories: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestUserMemoryPostgresVectorLifecycle(t *testing.T) {
 	if deletedCount != 0 {
 		t.Fatalf("expected physical delete of target memory, found %d rows", deletedCount)
 	}
-	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, 2, 0)
+	results, err = repo.SearchUserMemoriesByEmbedding(ctx, 1, queryEmbedding, embeddingSignature, 2, 0)
 	if err != nil {
 		t.Fatalf("search after target delete: %v", err)
 	}

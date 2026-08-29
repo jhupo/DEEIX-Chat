@@ -26,6 +26,13 @@ export type ChatModelOption = {
   defaultOptions: ConversationOptions;
   optionControls: ModelOptionControl[];
   lockedOptionPaths: string[];
+  videoExtension?: ModelMediaTaskConfig | null;
+};
+
+export type ModelMediaTaskConfig = {
+  enabled: boolean;
+  defaultOptions: ConversationOptions;
+  optionControls: ModelOptionControl[];
 };
 
 export type ModelOptionControlType = "boolean" | "number" | "select" | "text";

@@ -98,7 +98,7 @@ func TestCancelGatewayRunCommitsInterruptedStateWhenRemoteInterruptFails(t *test
 	repo := &cancelGatewayRepoStub{}
 	gateway := &steerGatewayExecutorStub{interruptErr: errors.New("thread not found")}
 	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), defaultGenerationStreamOptions())
-	registry.register(context.Background(), "run_cancel", 7, func() {})
+	registry.register(context.Background(), "run_cancel", 7, "conv_cancel", func() {})
 	service := &Service{repo: repo, gatewayExecutor: gateway, generationStreams: registry}
 
 	if !service.CancelMessageGeneration(context.Background(), 7, "run_cancel") {

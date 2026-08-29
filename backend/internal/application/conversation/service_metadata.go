@@ -10,8 +10,9 @@ import (
 	"time"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/background"
 	"go.uber.org/zap"
 )
 
@@ -85,7 +86,7 @@ func (s *Service) maybeGenerateConversationMetadataAsync(conversation model.Conv
 		return
 	}
 
-	go func() {
+	background.Go(s.logger, "conversation_metadata_generation", func() {
 		asyncCtx, cancel := context.WithTimeout(context.Background(), conversationMetadataGenerationTimeout)
 		defer cancel()
 		plan := s.resolveConversationMetadataGenerationPlan(asyncCtx, conversation)
@@ -110,7 +111,7 @@ func (s *Service) maybeGenerateConversationMetadataAsync(conversation model.Conv
 				zap.Error(err),
 			)
 		}
-	}()
+	})
 }
 
 func (s *Service) generateConversationMetadata(

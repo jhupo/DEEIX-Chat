@@ -88,10 +88,10 @@ export function SubscriptionUsageLog({
           key: "billingType",
           label: t("type"),
           value: billingType,
-          onValueChange: onBillingTypeChange,
+          onValueChange: (value) => onBillingTypeChange(value as BillingUsageType | ""),
           options: billingTypeOptions,
         }]}
-        sort={{ value: sort, onValueChange: onSortChange, options: sortOptions }}
+        sort={{ value: sort, onValueChange: (value) => onSortChange(value as BillingUsageSort), options: sortOptions }}
         loading={loading}
         onRefresh={onRefresh}
       />

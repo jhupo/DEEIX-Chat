@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
@@ -60,6 +61,13 @@ func (c *channelTestCache) ClearModelCircuitKeys(_ context.Context, upstreamID u
 	return nil
 }
 
+func (c *channelTestCache) ResetAllCircuitStates(context.Context) error {
+	clear(c.upstreamOpen)
+	clear(c.modelOpen)
+	clear(c.modelFailures)
+	return nil
+}
+
 func (c *channelTestCache) ReleaseRouteProbes(context.Context, uint, string) error {
 	return nil
 }
@@ -94,11 +102,15 @@ func (c *channelTestCache) QueryModelCircuitStatus(_ context.Context, upstreamID
 	return c.modelOpen[channelTestModelCircuitKey(upstreamID, modelKey)], ""
 }
 
-func (c *channelTestCache) IsRateLimited(context.Context, uint) bool {
-	return false
+func (c *channelTestCache) GetRateLimitBackoff(context.Context, uint, uint) (time.Duration, error) {
+	return 0, nil
 }
 
-func (c *channelTestCache) RecordRateLimitBackoff(context.Context, uint, repository.RateLimitBackoffParams) error {
+func (c *channelTestCache) RecordRateLimitBackoff(context.Context, repository.RateLimitBackoffParams) error {
+	return nil
+}
+
+func (c *channelTestCache) ClearRateLimitBackoff(context.Context, uint, uint) error {
 	return nil
 }
 

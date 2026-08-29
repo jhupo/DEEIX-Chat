@@ -17,10 +17,9 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/userview"
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/geoip"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/token"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 	"github.com/google/uuid"
@@ -32,12 +31,12 @@ const accessTokenSessionClockSkew = 2 * time.Minute
 type Service struct {
 	cfg                 *config.Runtime
 	repo                repository.AuthRepository
-	geoResolver         *geoip.Client
+	geoResolver         geoResolver
 	logger              *zap.Logger
 	storeProvider       appstorage.Provider
 	auditWriter         auditWriter
 	avatarFileValidator avatarFileValidator
-	sub2                *sub2api.Client
+	sub2                sub2api.Client
 	sub2RefreshLocks    sessionKeyedLock
 }
 
@@ -89,6 +88,9 @@ type auditWriter interface {
 type avatarFileValidator interface {
 	ValidateImageFile(context.Context, uint, string) error
 }
+type geoResolver interface {
+	Lookup(context.Context, string) (requestmeta.SessionAuditContext, error)
+}
 type AuditInput struct {
 	UserID                                                       uint
 	RequestID, Action, Resource, ResourceID, ClientIP, UserAgent string
@@ -105,7 +107,7 @@ type issuedTokens struct {
 	ExpiresAt, RefreshExpiresAt          time.Time
 }
 
-func NewServiceWithRuntime(cfg *config.Runtime, repo repository.AuthRepository, geo *geoip.Client, sub2 *sub2api.Client) (*Service, error) {
+func NewServiceWithRuntime(cfg *config.Runtime, repo repository.AuthRepository, geo geoResolver, sub2 sub2api.Client) (*Service, error) {
 	if sub2 == nil || sub2.InstanceID() == "" {
 		return nil, ErrSub2ClientRequired
 	}

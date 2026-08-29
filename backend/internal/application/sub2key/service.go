@@ -12,8 +12,8 @@ import (
 	"time"
 
 	domainsub2key "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/sub2key"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
 	"golang.org/x/sync/singleflight"
@@ -86,7 +86,7 @@ type Execution struct {
 type Service struct {
 	repo          repository.Sub2KeyBindingRepository
 	tokens        TokenResolver
-	client        *sub2api.Client
+	client        sub2api.Client
 	encryptionKey string
 	remoteCacheMu sync.Mutex
 	remoteCache   map[string]remoteKeyCacheEntry
@@ -107,7 +107,7 @@ type groupCacheEntry struct {
 	expiresAt time.Time
 }
 
-func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, client *sub2api.Client, encryptionKey string) *Service {
+func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, client sub2api.Client, encryptionKey string) *Service {
 	return &Service{
 		repo: repo, tokens: tokens, client: client, encryptionKey: encryptionKey,
 		remoteCache: make(map[string]remoteKeyCacheEntry), groupCache: make(map[string]groupCacheEntry),

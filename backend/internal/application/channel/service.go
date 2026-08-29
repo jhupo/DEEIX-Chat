@@ -5,8 +5,10 @@ import (
 	"sync"
 	"time"
 
+	appstorage "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/objectstorage"
+	domainchannel "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/channel"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
-	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/llm"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/llm"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"go.uber.org/zap"
 )
@@ -87,18 +89,33 @@ func (s *Service) isModelAccessible(ctx context.Context, platformModelID uint, u
 
 // Service 封装上游、平台模型与路由绑定业务能力。
 type Service struct {
-	cfg              *config.Runtime
-	repo             repository.ChannelRepository
-	presentationRepo repository.ModelPresentationRepository
-	cache            repository.ChannelCacheRepository
-	llmClient        *llm.Client
-	permGroupRepo    permissionGroupRepo
-	subGroupResolver subscriptionGroupResolver
-	logger           *zap.Logger
+	cfg                 *config.Runtime
+	repo                repository.ChannelRepository
+	presentationRepo    repository.ModelPresentationRepository
+	iconAssetRepo       repository.ModelIconAssetRepository
+	cache               repository.ChannelCacheRepository
+	llmClient           llm.Client
+	permGroupRepo       permissionGroupRepo
+	subGroupResolver    subscriptionGroupResolver
+	logger              *zap.Logger
+	objectStoreProvider appstorage.Provider
 
 	modelCatalogMu         sync.RWMutex
 	modelCatalog           []ModelView
 	modelCatalogValidUntil time.Time
+
+	breakerDefaultsMu         sync.RWMutex
+	breakerDefaults           domainchannel.BreakerDefaults
+	breakerDefaultsLoaded     bool
+	breakerDefaultsValidUntil time.Time
+}
+
+func (s *Service) SetObjectStoreProvider(provider appstorage.Provider) {
+	s.objectStoreProvider = provider
+}
+
+func (s *Service) SetModelIconAssetRepository(repo repository.ModelIconAssetRepository) {
+	s.iconAssetRepo = repo
 }
 
 func (s *Service) llmAttribution() (string, string) {
@@ -167,11 +184,13 @@ type routeCandidate struct {
 type routeFailureClass string
 
 const (
-	routeFailureCircuit   routeFailureClass = "circuit"
-	routeFailureRateLimit routeFailureClass = "rate_limit"
-	routeFailureIgnore    routeFailureClass = "ignore"
-	circuitProbeTTLSec                      = 30
-	modelCatalogCacheTTL                    = 30 * time.Second
+	routeFailureCircuit          routeFailureClass = "circuit"
+	routeFailureRateLimit        routeFailureClass = "rate_limit"
+	routeFailureIgnore           routeFailureClass = "ignore"
+	circuitProbeTTLSec                             = 30
+	modelCatalogCacheTTL                           = 30 * time.Second
+	breakerDefaultsCacheTTL                        = 5 * time.Second
+	breakerDefaultsErrorRetryTTL                   = time.Second
 )
 
 const (
@@ -186,12 +205,12 @@ const (
 var localAPIKeyCounters sync.Map
 
 // NewService 创建服务。
-func NewService(cfg config.Config, repo repository.ChannelRepository, presentationRepo repository.ModelPresentationRepository, cache repository.ChannelCacheRepository, llmClient *llm.Client) *Service {
+func NewService(cfg config.Config, repo repository.ChannelRepository, presentationRepo repository.ModelPresentationRepository, cache repository.ChannelCacheRepository, llmClient llm.Client) *Service {
 	return NewServiceWithRuntime(config.NewRuntime(cfg), repo, presentationRepo, cache, llmClient)
 }
 
 // NewServiceWithRuntime 创建使用运行时配置容器的服务。
-func NewServiceWithRuntime(cfg *config.Runtime, repo repository.ChannelRepository, presentationRepo repository.ModelPresentationRepository, cache repository.ChannelCacheRepository, llmClient *llm.Client) *Service {
+func NewServiceWithRuntime(cfg *config.Runtime, repo repository.ChannelRepository, presentationRepo repository.ModelPresentationRepository, cache repository.ChannelCacheRepository, llmClient llm.Client) *Service {
 	return &Service{
 		cfg:              cfg,
 		repo:             repo,

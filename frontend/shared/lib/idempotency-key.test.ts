@@ -6,8 +6,8 @@ import { createIdempotencyKey } from "./idempotency-key.ts";
 
 test("creates canonical v4 UUIDs with getRandomValues fallback", () => {
   const key = createIdempotencyKey({
-    getRandomValues(bytes) {
-      bytes.fill(0xff);
+    getRandomValues<T extends ArrayBufferView | null>(bytes: T): T {
+      if (bytes instanceof Uint8Array) bytes.fill(0xff);
       return bytes;
     },
   });

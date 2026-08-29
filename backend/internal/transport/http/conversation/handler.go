@@ -14,6 +14,7 @@ import (
 	appconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/conversation"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/lifecycle"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -38,8 +39,9 @@ func bindConversationJSON(c *gin.Context, destination any, limit int64) error {
 
 // Handler 封装会话 HTTP 处理。
 type Handler struct {
-	service *appconversation.Service
-	cfg     *config.Runtime
+	service  *appconversation.Service
+	cfg      *config.Runtime
+	shutdown *lifecycle.Shutdown
 }
 
 func normalizeStreamEventPayload(eventType string, payload map[string]interface{}) map[string]interface{} {
@@ -54,11 +56,47 @@ func normalizeStreamEventPayload(eventType string, payload map[string]interface{
 	return normalized
 }
 
+func moderationBlockedStreamPayload(result *appconversation.SendMessageResult) map[string]interface{} {
+	payload := map[string]interface{}{"type": "moderation_blocked"}
+	if result == nil {
+		return payload
+	}
+	if result.Moderation != nil && result.Moderation.Blocked {
+		payload["eventID"] = result.Moderation.EventID
+		payload["direction"] = result.Moderation.Direction
+		if len(result.Moderation.Categories) > 0 {
+			payload["categories"] = result.Moderation.Categories
+		}
+		return payload
+	}
+	eventID := strings.TrimSpace(result.AssistantMessage.ModerationEventID)
+	if eventID == "" {
+		eventID = strings.TrimSpace(result.UserMessage.ModerationEventID)
+	}
+	direction := "output"
+	if strings.EqualFold(strings.TrimSpace(result.UserMessage.Status), "blocked") {
+		direction = "input"
+	}
+	categoriesJSON := result.AssistantMessage.ModerationCategoriesJSON
+	if strings.TrimSpace(categoriesJSON) == "" || categoriesJSON == "[]" {
+		categoriesJSON = result.UserMessage.ModerationCategoriesJSON
+	}
+	var categories []string
+	_ = json.Unmarshal([]byte(categoriesJSON), &categories)
+	payload["eventID"] = eventID
+	payload["direction"] = direction
+	if len(categories) > 0 {
+		payload["categories"] = categories
+	}
+	return payload
+}
+
 // NewHandler 创建处理器。
-func NewHandler(service *appconversation.Service, cfg *config.Runtime) *Handler {
+func NewHandler(service *appconversation.Service, cfg *config.Runtime, shutdown *lifecycle.Shutdown) *Handler {
 	return &Handler{
-		service: service,
-		cfg:     cfg,
+		service:  service,
+		cfg:      cfg,
+		shutdown: shutdown,
 	}
 }
 

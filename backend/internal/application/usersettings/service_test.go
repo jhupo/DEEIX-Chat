@@ -129,12 +129,14 @@ func TestChatProtocolSettingIsRejected(t *testing.T) {
 	}
 }
 
-func TestPatchSettingsInvalidatesConversationSettingCache(t *testing.T) {
+func TestPatchSettingsRefreshesConversationSettingCache(t *testing.T) {
 	repo := &userSettingsRepoStub{}
 	service := NewService(repo)
-	invalidatedUserID := uint(0)
-	service.SetCacheInvalidator(func(userID uint) {
-		invalidatedUserID = userID
+	refreshedUserID := uint(0)
+	var refreshedKeys []string
+	service.SetCacheRefresher(func(_ context.Context, userID uint, keys []string) {
+		refreshedUserID = userID
+		refreshedKeys = append([]string(nil), keys...)
 	})
 
 	settings, err := service.PatchSettings(t.Context(), 7, map[string]string{
@@ -143,8 +145,8 @@ func TestPatchSettingsInvalidatesConversationSettingCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if invalidatedUserID != 7 {
-		t.Fatalf("cache invalidated for user %d, want 7", invalidatedUserID)
+	if refreshedUserID != 7 || len(refreshedKeys) != 1 || refreshedKeys[0] != "chat.content_width" {
+		t.Fatalf("cache refresh = user %d keys %v, want user 7 and content width", refreshedUserID, refreshedKeys)
 	}
 	if got := settings["chat.content_width"]; got != "wide" {
 		t.Fatalf("saved content width = %q, want wide", got)
@@ -196,5 +198,27 @@ func TestAutoGenerateLabelsSettingIsAllowed(t *testing.T) {
 	}
 	if err := validateValue("chat.auto_generate_labels", "yes"); err == nil {
 		t.Fatal("expected invalid chat.auto_generate_labels to be rejected")
+	}
+}
+
+func TestTraceAutoExpandSettingsAreAllowed(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{
+		"chat.auto_expand_thinking",
+		"chat.auto_expand_tool_calls",
+	}
+	for _, key := range keys {
+		if got := allowedKeys[key]; got != "true" {
+			t.Fatalf("expected %s default to be true, got %q", key, got)
+		}
+		for _, value := range []string{"true", "false"} {
+			if err := validateValue(key, value); err != nil {
+				t.Fatalf("expected %s=%s to be accepted, got %v", key, value, err)
+			}
+		}
+		if err := validateValue(key, "yes"); err == nil {
+			t.Fatalf("expected invalid %s to be rejected", key)
+		}
 	}
 }

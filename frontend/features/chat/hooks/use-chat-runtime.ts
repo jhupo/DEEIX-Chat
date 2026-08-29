@@ -97,6 +97,7 @@ export function useChatRuntime({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedKnowledgeBaseIDs,
   selectedInputResources,
   htmlVisualPromptEnabled,
   options,
@@ -129,6 +130,7 @@ export function useChatRuntime({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
@@ -140,7 +142,7 @@ export function useChatRuntime({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
-  touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
+  touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -203,6 +205,7 @@ export function useChatRuntime({
     modelOptions,
     selectedToolIDs,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedInputResources,
     htmlVisualPromptEnabled,
     options,

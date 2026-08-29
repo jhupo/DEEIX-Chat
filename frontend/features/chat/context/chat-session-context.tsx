@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import { useChatRunState } from "@/features/chat/hooks/use-chat-run-state";
+import type { ConversationRunStore } from "@/features/chat/model/conversation-run-store";
 import { readSessionID } from "@/shared/auth/session";
 
 function executionModeStorageKey() {
@@ -23,15 +25,25 @@ function readStoredExecutionMode(storageKey: string): "cloud" | "gateway" {
 type ChatSessionContextValue = {
   newConversationRevision: number;
   newConversationProjectID: string;
+  detachConversationRun: (runID: string) => void;
+  finishConversationRun: (runID: string) => void;
+  registerConversationRun: (runID: string, conversationPublicID: string) => void;
   requestNewConversation: (options?: { projectID?: string }) => void;
   executionMode: "cloud" | "gateway";
   setExecutionMode: (mode: "cloud" | "gateway") => void;
 };
 
 const ChatSessionContext = React.createContext<ChatSessionContextValue | null>(null);
+const ConversationRunStoreContext = React.createContext<ConversationRunStore | null>(null);
 
 export function ChatSessionProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState({ revision: 0, projectID: "" });
+  const {
+    detachConversationRun,
+    finishConversationRun,
+    registerConversationRun,
+    store,
+  } = useChatRunState();
   const [storageKey] = React.useState(executionModeStorageKey);
   const [executionMode, setExecutionMode] = React.useState<"cloud" | "gateway">(() => readStoredExecutionMode(storageKey));
   const updateExecutionMode = React.useCallback((mode: "cloud" | "gateway") => {
@@ -53,14 +65,30 @@ export function ChatSessionProvider({ children }: { children: React.ReactNode })
     () => ({
       newConversationRevision: state.revision,
       newConversationProjectID: state.projectID,
+      detachConversationRun,
+      finishConversationRun,
+      registerConversationRun,
       requestNewConversation,
       executionMode,
       setExecutionMode: updateExecutionMode,
     }),
-    [executionMode, requestNewConversation, state.projectID, state.revision, updateExecutionMode],
+    [
+      detachConversationRun,
+      executionMode,
+      finishConversationRun,
+      registerConversationRun,
+      requestNewConversation,
+      state.projectID,
+      state.revision,
+      updateExecutionMode,
+    ],
   );
 
-  return <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>;
+  return (
+    <ConversationRunStoreContext.Provider value={store}>
+      <ChatSessionContext.Provider value={value}>{children}</ChatSessionContext.Provider>
+    </ConversationRunStoreContext.Provider>
+  );
 }
 
 export function useChatSession() {
@@ -69,4 +97,21 @@ export function useChatSession() {
     throw new Error("useChatSession must be used within ChatSessionProvider");
   }
   return context;
+}
+
+export function useConversationRunning(conversationPublicID: string): boolean {
+  const store = React.useContext(ConversationRunStoreContext);
+  if (!store) {
+    throw new Error("useConversationRunning must be used within ChatSessionProvider");
+  }
+  const conversationID = conversationPublicID.trim();
+  const subscribe = React.useCallback(
+    (listener: () => void) => store.subscribe(conversationID, listener),
+    [conversationID, store],
+  );
+  const getSnapshot = React.useCallback(
+    () => store.isConversationRunning(conversationID),
+    [conversationID, store],
+  );
+  return React.useSyncExternalStore(subscribe, getSnapshot, () => false);
 }

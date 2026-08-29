@@ -3,7 +3,8 @@
 import { useTranslations } from "next-intl";
 import * as React from "react";
 import { toast } from "sonner";
-import { useHiddenQueuedParentRuns } from "@/features/chat/hooks/use-hidden-queued-parent-runs";
+import { useChatSession } from "@/features/chat/context/chat-session-context";
+import { useChatHiddenRuns } from "@/features/chat/hooks/use-chat-hidden-runs";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import type { ChatSubmitBlockReason } from "@/features/chat/model/chat-task";
 import { resolveChatSubmitDecision } from "@/features/chat/model/chat-task";
@@ -200,6 +201,7 @@ type QueuedChatSubmission = BranchScope & {
   options: ConversationOptions;
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   inputResourceRefs: string[];
   htmlVisualPromptEnabled: boolean;
 };
@@ -416,7 +418,7 @@ async function refreshGeneratedConversationMetadata(
   previous: ConversationDTO | null,
   autoGenerateLabels: boolean,
   fallbackTitle: string,
-  touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void,
+  touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void,
 ): Promise<void> {
   let elapsedMS = 0;
   let delayMS = CONVERSATION_METADATA_REFRESH_INITIAL_DELAY_MS;
@@ -458,6 +460,7 @@ export function useChatMessageSubmit({
   modelOptions,
   selectedToolIDs,
   selectedSkills,
+  selectedKnowledgeBaseIDs,
   selectedInputResources,
   htmlVisualPromptEnabled,
   options,
@@ -504,6 +507,7 @@ export function useChatMessageSubmit({
   modelOptions: ChatModelOption[];
   selectedToolIDs: number[];
   selectedSkills: SkillSummaryDTO[];
+  selectedKnowledgeBaseIDs: string[];
   selectedInputResources: ConversationInputResourceDTO[];
   htmlVisualPromptEnabled: boolean;
   options: ConversationOptions;
@@ -515,7 +519,7 @@ export function useChatMessageSubmit({
   autoGenerateLabels: boolean;
   prependNewConversation: (platformModelName: string) => Promise<ConversationDTO | null | undefined>;
   onConversationCreated?: (conversationPublicID: string) => void;
-  touchByPublicID: (publicID: string, patch?: Partial<ConversationDTO>) => void;
+  touchByPublicID: (publicID: string, patch: Partial<ConversationDTO>) => void;
   reload: () => void;
   replaceMessage: (message: MessageDTO) => void;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -542,6 +546,11 @@ export function useChatMessageSubmit({
   resumeGenerationActive?: boolean;
 }) {
   const t = useTranslations("chat.submit");
+  const {
+    detachConversationRun,
+    finishConversationRun,
+    registerConversationRun,
+  } = useChatSession();
   const [activeRunRevision, setActiveRunRevision] = React.useState(0);
   const activeStreamsRef = React.useRef(new Map<string, ActiveStream>());
   const conversationIDRef = React.useRef(conversationID);
@@ -563,8 +572,7 @@ export function useChatMessageSubmit({
   const {
     getStatus: getHiddenParentRunStatus,
     revision: hiddenParentRunStatusRevision,
-  } = useHiddenQueuedParentRuns({
-    currentConversationScopeKey: conversationScopeKey,
+  } = useChatHiddenRuns({
     queuedParents: queuedSubmissions,
     getPendingExchanges,
     isRunActive,
@@ -768,6 +776,9 @@ export function useChatMessageSubmit({
       const requestSelectedSkills = requestExecutionMode === "cloud"
         ? queuedSubmission?.selectedSkills ?? selectedSkills
         : [];
+      const requestSelectedKnowledgeBaseIDs = requestExecutionMode === "cloud"
+        ? queuedSubmission?.selectedKnowledgeBaseIDs ?? selectedKnowledgeBaseIDs
+        : [];
       const requestSelectedInputResources = queuedSubmission
         ? queuedSubmission.inputResourceRefs.map((resourceRef) => ({ resourceRef }))
         : selectedInputResources;
@@ -896,6 +907,8 @@ export function useChatMessageSubmit({
       let targetConversation = queuedSubmission?.conversation ?? activeConversationRef.current;
       let metadataRefreshInFlight = false;
       let modelRunSequence = 0;
+      let registeredConversationRun = false;
+      let detachedConversationRun = false;
 
       activeGenerationRunsRef?.current.add(clientRunID);
       if (shouldFollowSubmittedBranch) {
@@ -1066,6 +1079,8 @@ export function useChatMessageSubmit({
           }
           syncActiveRuns();
         }
+        registerConversationRun(clientRunID, targetConversationID);
+        registeredConversationRun = true;
         metadataFallbackTitle = conversationTitleFromFirstUserMessage(payloadContent);
         const optimisticTitle = metadataFallbackTitle;
         if (
@@ -1197,6 +1212,7 @@ export function useChatMessageSubmit({
             keyBindingID: requestKeyBindingID,
             selectedToolIDs: requestSelectedToolIDs.length > 0 ? requestSelectedToolIDs : undefined,
             skillIDs: requestSelectedSkills.length > 0 ? requestSelectedSkills.map((skill) => skill.id) : undefined,
+            knowledgeBaseIDs: requestSelectedKnowledgeBaseIDs,
             inputResourceRefs: requestInputResourceRefs.length > 0 ? requestInputResourceRefs : undefined,
             htmlVisualPrompt: requestHTMLVisualPromptEnabled || undefined,
           };
@@ -1411,6 +1427,10 @@ export function useChatMessageSubmit({
         resetStreamBuffer(exchangeKey);
         const streamDisconnected = isConversationStreamDisconnect(error);
         if (streamAbortController.signal.aborted || streamDisconnected) {
+          if (streamDisconnected && !streamAbortController.signal.aborted && registeredConversationRun) {
+            detachConversationRun(clientRunID);
+            detachedConversationRun = true;
+          }
           shouldKeepConversationLayout = true;
           releaseAttachments(effectiveAttachments);
           updatePendingExchange(exchangeKey, (current) => ({
@@ -1481,6 +1501,9 @@ export function useChatMessageSubmit({
         }
         return false;
       } finally {
+        if (registeredConversationRun && !detachedConversationRun) {
+          finishConversationRun(clientRunID);
+        }
         const activeStream = activeStreamsRef.current.get(clientRunID);
         if (activeStream?.controller === streamAbortController) {
           clearCancelSettlementTimer(activeStream);
@@ -1509,7 +1532,9 @@ export function useChatMessageSubmit({
     [
       activeGenerationRunsRef,
       autoGenerateLabels,
+      detachConversationRun,
       failedGenerationRunsRef,
+      finishConversationRun,
       generationSeqByRunRef,
       enqueueStreamText,
       flushStreamTextNow,
@@ -1517,12 +1542,14 @@ export function useChatMessageSubmit({
       onConversationCreated,
       prependNewConversation,
       releaseAttachments,
+      registerConversationRun,
       reload,
       resetStreamBuffer,
       restoreDraftOnFailure,
       modelOptions,
       selectedToolIDs,
       selectedSkills,
+      selectedKnowledgeBaseIDs,
       selectedInputResources,
       executionMode,
       htmlVisualPromptEnabled,
@@ -1625,6 +1652,7 @@ export function useChatMessageSubmit({
           options: sanitizeConversationOptions(options),
           selectedToolIDs: selectedToolIDs.slice(),
           selectedSkills: selectedSkills.slice(),
+          selectedKnowledgeBaseIDs: selectedKnowledgeBaseIDs.slice(),
           inputResourceRefs: selectedInputResources.map((item) => item.resourceRef),
           htmlVisualPromptEnabled,
         },
@@ -1647,6 +1675,7 @@ export function useChatMessageSubmit({
     selectedPlatformModelName,
     selectedKeyBindingID,
     selectedSkills,
+    selectedKnowledgeBaseIDs,
     selectedInputResources,
     selectedToolIDs,
     setAttachments,

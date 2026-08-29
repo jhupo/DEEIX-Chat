@@ -14,6 +14,8 @@ export type ChatSettings = {
   showModelInfo: boolean;
   showLatency: boolean;
   markdownRender: boolean;
+  autoExpandThinking: boolean;
+  autoExpandToolCalls: boolean;
   autoGenerateTitle: boolean;
   autoGenerateLabels: boolean;
   deleteFilesByDefault: boolean;

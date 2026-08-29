@@ -99,6 +99,7 @@ type ModelResponse struct {
 	KindsJSON          string `json:"kindsJSON"`
 	Icon               string `json:"icon"`
 	CapabilitiesJSON   string `json:"capabilitiesJSON"`
+	ContextWindow      int    `json:"contextWindow"`
 	SystemPrompt       string `json:"systemPrompt"`
 	AccessScope        string `json:"accessScope"`
 	Status             string `json:"status"`
@@ -129,6 +130,7 @@ func toModelResponse(v appchannel.ModelView) ModelResponse {
 		KindsJSON:          v.KindsJSON,
 		Icon:               v.Icon,
 		CapabilitiesJSON:   v.CapabilitiesJSON,
+		ContextWindow:      v.ContextWindow,
 		SystemPrompt:       v.SystemPrompt,
 		AccessScope:        v.AccessScope,
 		Status:             v.Status,
@@ -691,6 +693,12 @@ type CreateModelResponseDoc struct {
 
 // UpdateModelResponseDoc 更新模型响应文档。
 type UpdateModelResponseDoc struct {
+	ErrorMsg string            `json:"errorMsg"`
+	Data     ModelDataResponse `json:"data"`
+}
+
+// SetModelProtocolsResponseDoc 平台模型协议集合更新响应文档。
+type SetModelProtocolsResponseDoc struct {
 	ErrorMsg string            `json:"errorMsg"`
 	Data     ModelDataResponse `json:"data"`
 }

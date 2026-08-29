@@ -43,6 +43,7 @@ func TestOutboundHTTPCallSitesAreExplicit(t *testing.T) {
 			files: allowFiles(
 				"internal/agentclient/cloud.go",
 				"internal/infra/embedding/client.go",
+				"internal/infra/extract/ocr/client.go",
 				"internal/infra/extract/mineru/client.go",
 				"internal/infra/geoip/client.go",
 				"internal/infra/llm/client.go",

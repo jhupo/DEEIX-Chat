@@ -26,3 +26,19 @@ func TestConversationResponseIncludesGatewayApprovalSettings(t *testing.T) {
 		t.Fatalf("approval settings were not projected: %#v", response)
 	}
 }
+
+func TestMessageResponseRedactsBlockedAssistantContent(t *testing.T) {
+	response := toMessageResponseWithRun(model.Message{
+		Role: "assistant", Status: "blocked", Content: "sensitive response", Attachments: `[{"file_id":"secret"}]`,
+		ModerationEventID: "event_1", ModerationCategoriesJSON: `["policy"]`,
+		KnowledgeSources: []model.MessageKnowledgeSource{{FileID: "file_1", Preview: "private excerpt"}},
+	}, model.Run{ModerationState: "blocked"})
+
+	if response.Content != "" || response.Attachments != "[]" || len(response.KnowledgeSources) != 0 {
+		t.Fatalf("blocked assistant content was not redacted: %#v", response)
+	}
+	if response.Moderation == nil || response.Moderation.EventID != "event_1" ||
+		len(response.Moderation.Categories) != 1 || response.Moderation.Categories[0] != "policy" {
+		t.Fatalf("moderation metadata was not preserved: %#v", response.Moderation)
+	}
+}
