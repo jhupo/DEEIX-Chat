@@ -50,12 +50,14 @@ func (r *Repo) ProjectExecutionEvent(ctx context.Context, item *domainconversati
 			return repository.ErrConflict
 		}
 		var run model.ConversationRun
-		if err := tx.Select("status").
+		if err := tx.Select("status", "error_code").
 			Where("conversation_id = ? AND user_id = ? AND run_id = ?", item.ConversationID, item.UserID, item.RunID).
 			First(&run).Error; err != nil {
 			return err
 		}
-		if run.Status == "success" || run.Status == "interrupted" || run.Status == "error" {
+		if run.Status == "success" ||
+			((run.Status == "interrupted" || run.Status == "error") &&
+				(item.TerminalStatus == "" || run.ErrorCode != "stream_interrupted")) {
 			return nil
 		}
 
