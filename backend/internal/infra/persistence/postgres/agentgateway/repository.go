@@ -495,11 +495,20 @@ func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after
 }
 
 func (r *Repo) GetCommand(ctx context.Context, userID uint, publicID string) (*domainagent.Command, error) {
-	var row model.AgentCommand
-	if err := r.db.WithContext(ctx).Where("user_id = ? AND public_id = ?", userID, publicID).First(&row).Error; err != nil {
+	type commandRow struct {
+		model.AgentCommand
+		DeviceOnline bool `gorm:"column:device_online"`
+	}
+	var row commandRow
+	now := time.Now().UTC()
+	if err := r.db.WithContext(ctx).Table("agent_commands AS commands").
+		Select("commands.*, EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = commands.device_id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?) AS device_online", domainagent.RuntimeStatusReady, now, now).
+		Where("commands.user_id = ? AND commands.public_id = ?", userID, publicID).First(&row).Error; err != nil {
 		return nil, errFor(err)
 	}
-	return toDomainCommand(row), nil
+	result := toDomainCommand(row.AgentCommand)
+	result.DeviceOnline = row.DeviceOnline
+	return result, nil
 }
 
 func (r *Repo) MarkCommandDelivered(ctx context.Context, deviceID, commandID uint, now time.Time) error {
@@ -2114,7 +2123,7 @@ func codexErrorCode(raw json.RawMessage) string {
 
 func updateAgentTurnTerminal(tx *gorm.DB, turnID uint, status, code, message string, updatedAt time.Time) error {
 	return tx.Model(&model.AgentTurn{}).
-		Where("id = ? AND status NOT IN ?", turnID, []string{"completed", "interrupted", "failed"}).
+		Where("id = ? AND (status NOT IN ? OR (status = ? AND error_code = ?))", turnID, []string{"completed", "interrupted", "failed"}, "interrupted", "stream_interrupted").
 		Updates(map[string]any{
 			"status": status, "error_code": code, "error_message": message, "updated_at": updatedAt,
 		}).Error

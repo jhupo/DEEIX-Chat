@@ -163,8 +163,8 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 	}
 	assistant := tx.Model(&model.Message{}).
 		Where(
-			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status = ? AND error_code = ?))",
-			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", "error", "stream_interrupted",
+			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status IN ? AND error_code = ?))",
+			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", []string{"error", "interrupted"}, "stream_interrupted",
 		).
 		Updates(map[string]any{"status": messageStatus, "error_code": item.ErrorCode, "error_message": normalizedErrorMessage, "latency_ms": item.LatencyMS})
 	if assistant.Error != nil {
@@ -174,7 +174,7 @@ func completeGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) e
 		return repository.ErrConflict
 	}
 	run := tx.Model(&model.ConversationRun{}).
-		Where("conversation_id = ? AND user_id = ? AND run_id = ? AND status IN ?", item.ConversationID, item.UserID, item.RunID, []string{"queued", "running"}).
+		Where("conversation_id = ? AND user_id = ? AND run_id = ? AND (status IN ? OR (status = ? AND error_code = ?))", item.ConversationID, item.UserID, item.RunID, []string{"queued", "running"}, "interrupted", "stream_interrupted").
 		Updates(map[string]any{"status": runStatus, "error_code": item.ErrorCode, "error_message": normalizedErrorMessage, "total_latency_ms": item.LatencyMS, "ended_at": endedAt})
 	if run.Error != nil {
 		return run.Error

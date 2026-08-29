@@ -69,6 +69,7 @@ type Command struct {
 	AckedAt          *time.Time
 	TerminalJSON     string
 	CompletedAt      *time.Time
+	DeviceOnline     bool
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

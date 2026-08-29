@@ -456,7 +456,7 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 		afterSeq,
 	)
 	if !ok {
-		// Resume is an observer; generation execution owns the persisted terminal state.
+		h.service.ReconcileInterruptedMessageGeneration(c.Request.Context(), userID, runID)
 		response.Error(c, http.StatusNotFound, "generation stream not found")
 		return
 	}
@@ -511,8 +511,15 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 	isActive := func() bool {
 		return h.service.HasActiveMessageGeneration(c.Request.Context(), runID)
 	}
-	if !isActive() {
+	writeInterrupted := func() {
+		if h.service.ReconcileInterruptedMessageGeneration(c.Request.Context(), userID, runID) {
+			_ = writeEvent(map[string]interface{}{"type": "gateway_completed"})
+			return
+		}
 		_ = writeEvent(streamErrorPayloadWithCode("conversation_run.stream_interrupted", "generation stream was interrupted; retry this message"))
+	}
+	if !isActive() {
+		writeInterrupted()
 		return
 	}
 	activeTicker := time.NewTicker(resumeActiveCheckInterval)
@@ -526,13 +533,13 @@ func (h *Handler) ResumeMessageGenerationStream(c *gin.Context) {
 			return
 		case <-activeTicker.C:
 			if !isActive() {
-				_ = writeEvent(streamErrorPayloadWithCode("conversation_run.stream_interrupted", "generation stream was interrupted; retry this message"))
+				writeInterrupted()
 				return
 			}
 		case event, ok := <-events:
 			if !ok {
 				if !terminalWritten && !isActive() {
-					_ = writeEvent(streamErrorPayloadWithCode("conversation_run.stream_interrupted", "generation stream was interrupted; retry this message"))
+					writeInterrupted()
 				}
 				return
 			}

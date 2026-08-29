@@ -61,8 +61,7 @@ import {
   listAgentRuntimeProfiles,
   listAgentWorkspaces,
   parseAgentModelsResource,
-  refreshAgentProfileResource,
-  waitForAgentCommand,
+  refreshAgentProfileResourceAndWait,
 } from "@/shared/api/agent-gateway";
 import { getConversation, listConversationInputResources } from "@/shared/api/conversation";
 import type { ConversationDTO, ConversationInputResourceDTO, ConversationOptions } from "@/shared/api/conversation.types";
@@ -671,16 +670,13 @@ export function AppChatArea() {
       const refreshedAt = snapshot ? Date.parse(snapshot.refreshedAt) : Number.NaN;
       const snapshotStale = !Number.isFinite(refreshedAt) || Date.now() - refreshedAt > AGENT_MODELS_STALE_MS;
       if (!snapshot && inputResourceDeviceOnline) {
-        const queued = await refreshAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
-        const completed = await waitForAgentCommand(token, queued.commandId);
+        const completed = await refreshAgentProfileResourceAndWait(token, inputResourceDeviceID, profile.profileId, "models");
         if (!completed || completed.status !== "completed") {
           throw new Error(completed?.errorMessage || t("agent.settings.errors.modelsUnavailable"));
         }
         snapshot = await getAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models");
       } else if (snapshotStale && inputResourceDeviceOnline) {
-        void refreshAgentProfileResource(token, inputResourceDeviceID, profile.profileId, "models")
-          .then((queued) => waitForAgentCommand(token, queued.commandId))
-          .catch(() => undefined);
+        void refreshAgentProfileResourceAndWait(token, inputResourceDeviceID, profile.profileId, "models").catch(() => undefined);
       }
       if (!snapshot) {
         throw new Error(t("agent.settings.errors.modelsUnavailable"));

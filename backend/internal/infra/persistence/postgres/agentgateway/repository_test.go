@@ -30,6 +30,51 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 	}
 }
 
+func TestGetCommandReportsDevicePresence(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentCommand{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	device := model.AgentDevice{
+		PublicID: "agd_command_presence", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte(strings.Repeat("k", 32)), PublicKeyFingerprint: strings.Repeat("c", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 2,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := now.Add(time.Minute)
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-command-presence", UserID: 7, DeviceID: device.ID, Provider: "codex",
+		Status: domainagent.RuntimeStatusReady, LeaseExpiresAt: &expiresAt, PresenceExpiresAt: &expiresAt,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	command := model.AgentCommand{
+		PublicID: "agcmd_command_presence", UserID: 7, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
+		ServerSeq: 1, Kind: "resource.refresh", PayloadJSON: `{}`, State: "acked", AckedAt: &now,
+	}
+	if err := database.Create(&command).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(database)
+	loaded, err := repo.GetCommand(context.Background(), 7, command.PublicID)
+	if err != nil || !loaded.DeviceOnline {
+		t.Fatalf("online command = %#v, %v", loaded, err)
+	}
+
+	expiredAt := now.Add(-time.Minute)
+	if err := database.Model(&profile).Updates(map[string]any{"presence_expires_at": expiredAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = repo.GetCommand(context.Background(), 7, command.PublicID)
+	if err != nil || loaded.DeviceOnline {
+		t.Fatalf("offline command = %#v, %v", loaded, err)
+	}
+}
+
 func TestHistoryMessageMatchesExactProjection(t *testing.T) {
 	content := strings.Repeat("x", 16*1024)
 	if !historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content, RunID: "run_test"}) {

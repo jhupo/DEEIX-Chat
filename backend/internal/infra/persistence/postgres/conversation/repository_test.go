@@ -286,6 +286,84 @@ func TestReconcileOrphanGatewayTurnsRepairsTerminalAndUndispatchedRuns(t *testin
 	}
 }
 
+func TestInterruptPendingGenerationConvergesGatewayRun(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.AgentTurn{}, &model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepo(db)
+	now := time.Now().UTC()
+	old := now.Add(-5 * time.Minute)
+	conversation := model.Conversation{
+		UserID: 1, PublicID: "gateway_lost_generation", Title: "lost generation", LabelsJSON: "[]",
+		ExecutionType: domainconversation.ExecutionTypeGateway, SessionKey: "gateway_lost_generation", Status: "active",
+	}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	run := model.ConversationRun{
+		BaseModel: model.BaseModel{CreatedAt: old}, RunID: "run_gateway_lost_generation", UserID: 1,
+		ConversationID: conversation.ID, TaskType: "agent", Endpoint: "local_gateway",
+		ProviderProtocol: "local_gateway", Status: "running", StartedAt: old,
+	}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatal(err)
+	}
+	messages := []model.Message{
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "lost_generation_user", Role: "user", ContentType: "text", Content: "continue", BranchReason: "default", Status: "pending", RunID: run.RunID},
+		{ConversationID: conversation.ID, UserID: 1, PublicID: "lost_generation_assistant", Role: "assistant", ContentType: "text", Content: "partial", BranchReason: "default", Status: "pending", RunID: run.RunID},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	turn := model.AgentTurn{
+		PublicID: "agturn_lost_generation", UserID: 1, ThreadID: 1, RunID: run.RunID,
+		Status: "running", InputJSON: `[]`, SettingsJSON: `{}`,
+	}
+	if err := db.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := repo.ListStaleGatewayRuns(context.Background(), now.Add(-time.Minute), 10)
+	if err != nil || !reflect.DeepEqual(candidates, []repository.PendingGenerationRun{{UserID: 1, RunID: run.RunID}}) {
+		t.Fatalf("ListStaleGatewayRuns() = %#v, %v", candidates, err)
+	}
+	interrupted, err := repo.InterruptPendingGenerationByRunID(
+		context.Background(), 1, run.RunID, "stream_interrupted", "stream lost", now,
+	)
+	if err != nil || !interrupted {
+		t.Fatalf("InterruptPendingGenerationByRunID() = %v, %v", interrupted, err)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "interrupted" || run.EndedAt == nil {
+		t.Fatalf("interrupted run = %#v, %v", run, err)
+	}
+	if err := db.First(&turn, turn.ID).Error; err != nil || turn.Status != "interrupted" || turn.ErrorCode != "stream_interrupted" {
+		t.Fatalf("interrupted turn = %#v, %v", turn, err)
+	}
+	for index := range messages {
+		if err := db.First(&messages[index], messages[index].ID).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if messages[0].Status != "success" || messages[1].Status != "interrupted" || messages[1].ErrorCode != "stream_interrupted" {
+		t.Fatalf("interrupted messages = %#v", messages)
+	}
+
+	terminal := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: run.RunID, SourceKey: "agent:late-terminal",
+		Kind: "turn/completed", PayloadJSON: `{"turn":{"status":"completed"}}`, TerminalStatus: "completed", OccurredAt: now.Add(time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), terminal); err != nil || !applied {
+		t.Fatalf("late terminal projection: applied=%v err=%v", applied, err)
+	}
+	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.ErrorCode != "" {
+		t.Fatalf("recovered run = %#v, %v", run, err)
+	}
+	if err := db.First(&messages[1], messages[1].ID).Error; err != nil || messages[1].Status != "success" || messages[1].ErrorCode != "" {
+		t.Fatalf("recovered assistant = %#v, %v", messages[1], err)
+	}
+}
+
 func TestAttachmentDurationSecondsFromMetaJSON(t *testing.T) {
 	if got := attachmentDurationSecondsFromMetaJSON(`{"duration_seconds":6}`); got != 6 {
 		t.Fatalf("expected attachment duration 6, got %d", got)

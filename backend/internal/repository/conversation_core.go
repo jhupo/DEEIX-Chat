@@ -17,6 +17,12 @@ type MessageUsageUpdate struct {
 	ReasoningTokens  int64
 }
 
+// PendingGenerationRun identifies a persisted generation that may have lost its live execution lease.
+type PendingGenerationRun struct {
+	UserID uint
+	RunID  string
+}
+
 // AssistantMessageCompletionUpdate 定义助手消息完成态更新字段。
 type AssistantMessageCompletionUpdate struct {
 	ContentType      string
@@ -86,6 +92,7 @@ type MessageRepository interface {
 	GetMessagePairByRunID(ctx context.Context, userID uint, runID string) (*domainconversation.Message, *domainconversation.Message, error)
 	FailGatewayTurn(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string, endedAt time.Time) error
 	ReconcileOrphanGatewayTurns(ctx context.Context, createdBefore time.Time, limit int) ([]string, error)
+	ListStaleGatewayRuns(ctx context.Context, createdBefore time.Time, limit int) ([]PendingGenerationRun, error)
 	CompleteAssistantMessageWithAttachments(ctx context.Context, userMessageID uint, userUsage MessageUsageUpdate, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	CompleteAssistantMessageWithGeneratedAttachments(ctx context.Context, assistantMessageID uint, assistantCompletion AssistantMessageCompletionUpdate, assistantAttachments []domainconversation.Attachment) error
 	GetMessageByPublicID(ctx context.Context, conversationID uint, userID uint, publicID string) (*domainconversation.Message, error)
@@ -94,7 +101,7 @@ type MessageRepository interface {
 	UpdateMessageState(ctx context.Context, messageID uint, status string, errorCode string, errorMessage string) error
 	UpdateAssistantMessageContent(ctx context.Context, userID uint, publicID string, content string, editedAt time.Time) (*domainconversation.Message, error)
 	CancelPendingGenerationMessagesByRunID(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string) (bool, error)
-	InterruptPendingAssistantMessageByRunID(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string) (bool, error)
+	InterruptPendingGenerationByRunID(ctx context.Context, userID uint, runID string, errorCode string, errorMessage string, endedAt time.Time) (bool, error)
 	UpdateAssistantMessageCompletion(ctx context.Context, messageID uint, update AssistantMessageCompletionUpdate) error
 	SumMessageTokens(ctx context.Context, conversationID uint) (int64, error)
 	ListMessages(ctx context.Context, conversationID uint, offset int, limit int) ([]domainconversation.Message, int64, error)

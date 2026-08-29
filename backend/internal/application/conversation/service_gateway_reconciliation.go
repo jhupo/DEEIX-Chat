@@ -52,7 +52,22 @@ func (s *Service) reconcileOrphanGatewayTurns(ctx context.Context) {
 			s.generationStreams.finish(context.Background(), runID)
 		}
 		if len(runIDs) < gatewayDispatchReconcileBatch {
-			return
+			break
 		}
+	}
+
+	reconcileCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	candidates, err := s.repo.ListStaleGatewayRuns(
+		reconcileCtx, time.Now().UTC().Add(-gatewayDispatchGracePeriod), gatewayDispatchReconcileBatch,
+	)
+	if err != nil {
+		if ctx.Err() == nil && s.logger != nil {
+			s.logger.Warn("gateway_generation_reconciliation_failed", zap.Error(err))
+		}
+		return
+	}
+	for _, candidate := range candidates {
+		s.ReconcileInterruptedMessageGeneration(reconcileCtx, candidate.UserID, candidate.RunID)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const (
@@ -130,13 +131,18 @@ func (s *Service) HasActiveMessageGeneration(ctx context.Context, runID string) 
 	if s == nil || s.generationStreams == nil {
 		return false
 	}
-	return s.generationStreams.hasActive(ctx, normalizeRunID(runID))
+	active, _ := s.generationStreams.activeState(ctx, normalizeRunID(runID))
+	return active
 }
 
-// MarkMessageGenerationInterrupted 将无法继续恢复的 pending 生成标记为中断。
-func (s *Service) MarkMessageGenerationInterrupted(ctx context.Context, userID uint, runID string) {
+// ReconcileInterruptedMessageGeneration 收敛已经失去活跃租约的持久化生成状态。
+func (s *Service) ReconcileInterruptedMessageGeneration(ctx context.Context, userID uint, runID string) bool {
 	if s == nil || s.repo == nil {
-		return
+		return false
+	}
+	runID = normalizeRunID(runID)
+	if runID == "" {
+		return false
 	}
 	markCtx := ctx
 	var cancel context.CancelFunc
@@ -144,13 +150,38 @@ func (s *Service) MarkMessageGenerationInterrupted(ctx context.Context, userID u
 		markCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 	}
-	_, _ = s.repo.InterruptPendingAssistantMessageByRunID(
+	active, err := s.generationStreams.activeState(markCtx, runID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("generation_lease_check_failed", zap.String("run_id", runID), zap.Error(err))
+		}
+		return false
+	}
+	if active {
+		return false
+	}
+	interrupted, err := s.repo.InterruptPendingGenerationByRunID(
 		markCtx,
 		userID,
-		normalizeRunID(runID),
+		runID,
 		"stream_interrupted",
 		"generation stream was interrupted; retry this message",
+		time.Now().UTC(),
 	)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("generation_reconciliation_failed", zap.String("run_id", runID), zap.Error(err))
+		}
+		return false
+	}
+	if !interrupted {
+		return false
+	}
+	_ = s.publishMessageGenerationEventReliable(runID, map[string]interface{}{
+		"type": "gateway_completed", "status": "interrupted",
+	})
+	s.generationStreams.finish(context.Background(), runID)
+	return true
 }
 
 func (s *Service) isMessageGenerationCanceled(ctx context.Context, runID string) bool {
@@ -470,16 +501,20 @@ func (r *generationStreamRegistry) deleteActive(userID uint, runID string) (*act
 	return active, true
 }
 
-func (r *generationStreamRegistry) hasActive(ctx context.Context, runID string) bool {
+func (r *generationStreamRegistry) activeState(ctx context.Context, runID string) (bool, error) {
 	if runID == "" {
-		return false
+		return false, nil
+	}
+	r.mu.Lock()
+	_, localActive := r.active[runID]
+	r.mu.Unlock()
+	if localActive {
+		return true, nil
 	}
 	if r.store != nil {
-		if active, err := r.store.IsGenerationStreamActive(ctx, runID); err == nil && active {
-			return true
-		}
+		return r.store.IsGenerationStreamActive(ctx, runID)
 	}
-	return false
+	return false, nil
 }
 
 func (r *generationStreamRegistry) startActiveLease(runID string) context.CancelFunc {

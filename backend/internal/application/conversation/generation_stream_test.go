@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -77,7 +78,7 @@ func TestGenerationStreamRegistryCancelUsesSharedMarker(t *testing.T) {
 	if !registry.isCanceled(ctx, runID) {
 		t.Fatal("expected shared cancel marker to be set")
 	}
-	if registry.hasActive(ctx, runID) {
+	if active, _ := registry.activeState(ctx, runID); active {
 		t.Fatal("expected active lease to be cleared after cancel")
 	}
 	registry.mu.Lock()
@@ -104,12 +105,12 @@ func TestGenerationStreamRegistryActiveLeaseLifecycle(t *testing.T) {
 	runID := EnsureMessageGenerationRunID("")
 	registry.register(ctx, runID, 7, func() {})
 
-	if !registry.hasActive(ctx, runID) {
+	if active, _ := registry.activeState(ctx, runID); !active {
 		t.Fatal("expected active lease after register")
 	}
 
 	registry.finish(ctx, runID)
-	if registry.hasActive(ctx, runID) {
+	if active, _ := registry.activeState(ctx, runID); active {
 		t.Fatal("expected active lease to be cleared after finish")
 	}
 	registry.mu.Lock()
@@ -132,7 +133,8 @@ func TestGenerationStreamRegistryExpiresWithoutCancelFunction(t *testing.T) {
 	registry.mu.Lock()
 	_, tracked := registry.active[runID]
 	registry.mu.Unlock()
-	if tracked || registry.hasActive(context.Background(), runID) {
+	active, _ := registry.activeState(context.Background(), runID)
+	if tracked || active {
 		t.Fatal("nil-cancel generation remained active after its deadline")
 	}
 }
@@ -150,6 +152,15 @@ func TestGenerationStreamStoreActiveLeaseExpires(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if active, err := store.IsGenerationStreamActive(ctx, runID); err != nil || active {
 		t.Fatalf("expected expired active lease, active=%v err=%v", active, err)
+	}
+}
+
+func TestGenerationStreamRegistryPreservesLeaseErrors(t *testing.T) {
+	store := newTestGenerationStreamStore()
+	store.activeErr = errors.New("cache unavailable")
+	registry := newGenerationStreamRegistry(store, generationStreamOptions{})
+	if active, err := registry.activeState(context.Background(), "run_cache_error"); active || !errors.Is(err, store.activeErr) {
+		t.Fatalf("activeState() = %v, %v", active, err)
 	}
 }
 
@@ -222,8 +233,9 @@ func TestGenerationStreamDoesNotCompactOversizedCompletedPayload(t *testing.T) {
 }
 
 type testGenerationStreamStore struct {
-	mu    sync.Mutex
-	items map[string]*testGenerationStream
+	mu        sync.Mutex
+	items     map[string]*testGenerationStream
+	activeErr error
 }
 
 type testGenerationStream struct {
@@ -279,6 +291,9 @@ func (s *testGenerationStreamStore) ClearGenerationStreamActive(_ context.Contex
 func (s *testGenerationStreamStore) IsGenerationStreamActive(_ context.Context, runID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.activeErr != nil {
+		return false, s.activeErr
+	}
 	s.cleanupLocked()
 	item, ok := s.items[runID]
 	return ok && !item.activeUntil.IsZero() && time.Now().Before(item.activeUntil), nil

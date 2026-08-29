@@ -738,6 +738,11 @@ func (s *Service) GetCommand(ctx context.Context, userID uint, commandID string)
 		return nil, mapResourceError(err)
 	}
 	view := &CommandView{CommandID: item.PublicID, Status: item.State}
+	if item.CompletedAt == nil && item.AckedAt != nil && !item.DeviceOnline {
+		view.Status = "error"
+		view.ErrorMessage = "Agent device went offline before completing this command."
+		return view, nil
+	}
 	if item.CompletedAt != nil {
 		var outcome struct {
 			Kind  string `json:"kind"`

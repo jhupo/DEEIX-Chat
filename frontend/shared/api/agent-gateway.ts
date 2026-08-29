@@ -370,17 +370,51 @@ export async function getAgentCommand(
   );
 }
 
+type AgentCommandResult = Awaited<ReturnType<typeof getAgentCommand>>;
+
+const activeCommandWaits = new Map<string, Promise<AgentCommandResult | null>>();
+const activeProfileResourceRefreshes = new Map<string, Promise<AgentCommandResult | null>>();
+
 export async function waitForAgentCommand(
   accessToken: string,
   commandId: string,
-  attempts = 120,
 ): Promise<{ commandId: string; status: string; errorMessage?: string } | null> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const command = await getAgentCommand(accessToken, commandId);
-    if (command.status === "completed" || command.status === "error") {
-      return command;
+  const key = `${accessToken}\u0000${commandId}`;
+  const active = activeCommandWaits.get(key);
+  if (active) return active;
+
+  const wait = (async () => {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const command = await getAgentCommand(accessToken, commandId);
+      if (command.status === "completed" || command.status === "error") return command;
     }
-  }
-  return null;
+    return null;
+  })();
+  activeCommandWaits.set(key, wait);
+  const clear = () => {
+    if (activeCommandWaits.get(key) === wait) activeCommandWaits.delete(key);
+  };
+  wait.then(clear, clear);
+  return wait;
+}
+
+export function refreshAgentProfileResourceAndWait(
+  accessToken: string,
+  deviceId: string,
+  profileId: string,
+  resource: "models" | "skills" | "apps",
+): Promise<AgentCommandResult | null> {
+  const key = `${deviceId}:${profileId}:${resource}`;
+  const active = activeProfileResourceRefreshes.get(key);
+  if (active) return active;
+
+  const refresh = refreshAgentProfileResource(accessToken, deviceId, profileId, resource)
+    .then((queued) => waitForAgentCommand(accessToken, queued.commandId));
+  activeProfileResourceRefreshes.set(key, refresh);
+  refresh.then(
+    () => activeProfileResourceRefreshes.delete(key),
+    () => activeProfileResourceRefreshes.delete(key),
+  );
+  return refresh;
 }

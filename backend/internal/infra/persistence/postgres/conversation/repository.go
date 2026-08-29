@@ -1212,6 +1212,19 @@ func (r *Repo) ReconcileOrphanGatewayTurns(ctx context.Context, createdBefore ti
 	return runIDs, translateError(err)
 }
 
+func (r *Repo) ListStaleGatewayRuns(ctx context.Context, createdBefore time.Time, limit int) ([]repository.PendingGenerationRun, error) {
+	if createdBefore.IsZero() || limit < 1 || limit > 1000 {
+		return nil, repository.ErrInvalidInput
+	}
+	rows := make([]repository.PendingGenerationRun, 0, limit)
+	err := r.db.WithContext(ctx).Table("chat_runs AS runs").
+		Select("runs.user_id, runs.run_id").
+		Where("runs.endpoint = ? AND runs.status IN ? AND runs.created_at < ?", "local_gateway", []string{"queued", "running"}, createdBefore).
+		Where("EXISTS (SELECT 1 FROM agent_turns turns WHERE turns.user_id = runs.user_id AND turns.run_id = runs.run_id AND turns.status IN ?)", []string{"queued", "running"}).
+		Order("runs.id ASC").Limit(limit).Scan(&rows).Error
+	return rows, translateError(err)
+}
+
 // GetMessageByPublicID 查询归属会话的消息。
 func (r *Repo) GetMessageByPublicID(
 	ctx context.Context,
@@ -1395,26 +1408,65 @@ func (r *Repo) CancelPendingGenerationMessagesByRunID(
 	return returnedRows > 0, nil
 }
 
-// InterruptPendingAssistantMessageByRunID 将失去活跃生成流的 pending assistant 标记为错误。
-func (r *Repo) InterruptPendingAssistantMessageByRunID(
+// InterruptPendingGenerationByRunID 原子终结失去活跃生成流的消息、运行和本地 Agent turn。
+func (r *Repo) InterruptPendingGenerationByRunID(
 	ctx context.Context,
 	userID uint,
 	runID string,
 	errorCode string,
 	errorMessage string,
+	endedAt time.Time,
 ) (bool, error) {
-	result := r.db.WithContext(ctx).
-		Model(&models.Message{}).
-		Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, strings.TrimSpace(runID), "assistant", "pending").
-		Updates(map[string]interface{}{
-			"status":        "error",
-			"error_code":    strings.TrimSpace(errorCode),
-			"error_message": truncateText(strings.TrimSpace(errorMessage), 255),
-		})
-	if result.Error != nil {
-		return false, translateError(result.Error)
+	runID = strings.TrimSpace(runID)
+	errorCode = strings.TrimSpace(errorCode)
+	errorMessage = truncateText(strings.TrimSpace(errorMessage), 255)
+	if userID == 0 || runID == "" || endedAt.IsZero() {
+		return false, repository.ErrInvalidInput
 	}
-	return result.RowsAffected > 0, nil
+
+	interrupted := false
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run models.ConversationRun
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND run_id = ? AND status IN ?", userID, runID, []string{"queued", "running"}).
+			First(&run)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+
+		if err := tx.Model(&models.Message{}).
+			Where("user_id = ? AND run_id = ? AND role = ? AND status = ?", userID, runID, "user", "pending").
+			Updates(map[string]any{"status": "success", "error_code": "", "error_message": ""}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.Message{}).
+			Where("user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status = ? AND error_code = ?))", userID, runID, "assistant", "pending", "error", "stream_interrupted").
+			Updates(map[string]any{"status": "interrupted", "error_code": errorCode, "error_message": errorMessage}).Error; err != nil {
+			return err
+		}
+		if run.Endpoint == "local_gateway" {
+			if err := tx.Model(&models.AgentTurn{}).
+				Where("user_id = ? AND run_id = ? AND status IN ?", userID, runID, []string{"queued", "running"}).
+				Updates(map[string]any{"status": "interrupted", "error_code": errorCode, "error_message": errorMessage, "updated_at": endedAt}).Error; err != nil {
+				return err
+			}
+		}
+		updated := tx.Model(&models.ConversationRun{}).
+			Where("id = ? AND status IN ?", run.ID, []string{"queued", "running"}).
+			Updates(map[string]any{"status": "interrupted", "error_code": errorCode, "error_message": errorMessage, "ended_at": endedAt})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return repository.ErrConflict
+		}
+		interrupted = true
+		return nil
+	})
+	return interrupted, translateError(err)
 }
 
 // UpdateAssistantMessageCompletion 回填 assistant 消息正文、用量与状态。
