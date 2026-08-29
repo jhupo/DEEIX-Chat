@@ -61,7 +61,7 @@ export function NavUser({
   const [savingLocale, setSavingLocale] = React.useState<AppLocale | null>(null);
   const [hasUnreadAnnouncement, setHasUnreadAnnouncement] = React.useState(() => getAnnouncementUnread());
   const skipTriggerFocusRef = React.useRef(false);
-  const isAdmin = user.role === "superadmin";
+  const isAdmin = sessionUser?.role === "superadmin" && sessionUser.authProvider === "local";
   const { devices, defaultDeviceId, selectDefaultDevice } = useDevices();
   const { executionMode, requestNewConversation } = useChatSession();
   const activeDevices = devices.filter((item) => item.status === "active");

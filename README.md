@@ -43,8 +43,8 @@ The system is designed around simple deployment, efficient static delivery, and 
 | Tool ecosystem | MCP servers and provider-native official tools with discovery, enablement, user selection, execution limits, result rendering, and tool-call traceability. |
 | Context and memory | Message windows, token budgets, summary compression, conversation memory, long-term memory, and RAG evidence records for controlled-cost continuity. |
 | Sub2 commerce | The subscription page reads balance, subscriptions, plans, usage, checkout, and redemption state through the logged-in user's server-side Sub2 session. DEEIX has no local ledger, settlement, pricing, or payment-provider authority. |
-| Identity and security | Sub2-backed login, registration, password change, and login-time TOTP challenge; role is refreshed from Sub2, while DEEIX keeps resource-owner projections, per-browser sessions, HttpOnly refresh cookies, and encrypted upstream tokens. |
-| Administration and audit | Read-only Sub2 user projections, DEEIX session revocation, upstreams, models, routes, usage logs, audit logs, auth events, and system events. |
+| Identity and security | Relay-backed login, registration, password change, and login-time TOTP challenge; DEEIX also creates one local control-plane superadmin for configuration, while keeping resource-owner projections, per-browser sessions, HttpOnly refresh cookies, and encrypted relay tokens. |
+| Administration and audit | Local superadmin-only relay connector/domain routing, read-only relay user projections, DEEIX session revocation, models, routes, usage logs, audit logs, auth events, and system events. |
 | Deployment and operations | Single-runtime frontend/API serving, Docker deployment with PostgreSQL + pgvector and Redis, S3-compatible storage, Swagger, structured logs, version endpoint, GeoIP, and OpenTelemetry. |
 
 <p align="center">
@@ -195,10 +195,9 @@ To publish the application at a fixed remote listener without editing Compose, c
 ```dotenv
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
-SUB2_BASE_URL=https://api.ovload.com
 ```
 
-`SUB2_BASE_URL` is the sole Sub2 deployment setting. It defaults to `https://api.ovload.com`; override it only when this DEEIX deployment is paired with another compatible Sub2 instance. The backend derives the instance identity from this canonical origin and never accepts an upstream URL from the browser.
+The first startup creates a local control-plane `superadmin` and prints its one-time credentials to the application log. Sign in with that account, open Admin > Relays, create one or more relay connectors, and map each public inbound hostname to a connector. Relay session tokens are encrypted with `DATA_ENCRYPTION_KEY`; they are never returned to the browser. Requests with an unknown Host are rejected instead of falling back to a fixed relay. Relay administrators continue to manage relay-wide settings in the relay service itself; they do not receive DEEIX control-plane access.
 
 #### v0.4 Upgrade Boundary
 
@@ -300,7 +299,7 @@ docker compose -f compose.yaml exec app ls -l /app/config.yaml
 docker compose -f compose.yaml logs app
 ```
 
-Sign in with a user from the configured Sub2 instance. DEEIX verifies every successful login with Sub2 `/api/v1/auth/me`: Sub2 `admin` becomes DEEIX `superadmin`, and Sub2 `user` becomes DEEIX `user`. DEEIX does not create or print a local bootstrap password.
+On the first startup, DEEIX creates one local control-plane `superadmin`. The application log prints its generated email, username, and password once; the database stores only the bcrypt password hash. Use that email and password to open Admin > Relays, add relay connectors, and map each public inbound hostname. Relay users continue to sign in through the connector selected by the current hostname; a relay `admin` projection is not a DEEIX control-plane administrator.
 
 ## Configuration
 
@@ -320,7 +319,7 @@ Static configuration environment variables:
 | Config file | `CONFIG_FILE` | Optional config file path; Docker values should use the container path. |
 | Application | `APP_NAME` | Application name. |
 | Application | `APP_ENV` | Runtime environment: `dev`/`development` or `prod`/`production`; omitted values default to `prod`. |
-| Sub2 | `SUB2_BASE_URL` | Canonical Sub2 origin; defaults to `https://api.ovload.com` and must use HTTPS in production. |
+| Relay control plane | Admin > Relays | Database-backed relay connectors and inbound hostname routes; no fixed relay URL is read from environment variables. |
 | HTTP service | `HTTP_PORT` | API/runtime port. |
 | HTTP service | `CORS_ALLOW_ORIGIN` | Allowed CORS origins, comma-separated. |
 | HTTP service | `TRUSTED_PROXIES` | Trusted proxy CIDR list. |
@@ -373,7 +372,7 @@ Static configuration environment variables:
 
 DEEIX token lifetime, rate limits, the post-login path, conversation settings, the administrator-published model catalog and groups, model option policies, file processing, RAG, embedding, and MCP are runtime business settings. Sub2 controls login, registration, email verification, login factors, user roles, account status, user-visible announcements, billing, and payments; DEEIX does not duplicate those authorities.
 
-When SSRF protection is enabled in production, administrator-saved model, MCP, and Embedding endpoints are authorized locally by exact origin (`scheme + host + port`) and do not require entries in the global allowlist. Public cross-origin redirects are allowed, while private cross-origin redirects must match `SSRF_ALLOWED_HOSTS` or `SSRF_ALLOWED_CIDRS`. Generated media is downloaded, validated, and stored by the backend: a private artifact URL inherits trust only when it has the same origin as the selected model endpoint; public cross-origin artifact URLs remain subject to the strict public-network policy, and private cross-origin artifact URLs are blocked. The configured `SUB2_BASE_URL` is validated separately as a canonical origin and redirects may not change that origin. Link-local, multicast, unspecified, and known metadata targets always remain blocked.
+When SSRF protection is enabled in production, administrator-saved model, MCP, Embedding, and relay connector endpoints are authorized locally by exact origin (`scheme + host + port`) and do not require entries in the global allowlist. Public cross-origin redirects are allowed, while private cross-origin redirects must match `SSRF_ALLOWED_HOSTS` or `SSRF_ALLOWED_CIDRS`. Generated media is downloaded, validated, and stored by the backend: a private artifact URL inherits trust only when it has the same origin as the selected model endpoint; public cross-origin artifact URLs remain subject to the strict public-network policy, and private cross-origin artifact URLs are blocked. Link-local, multicast, unspecified, and known metadata targets always remain blocked.
 
 ## Feature Guides
 

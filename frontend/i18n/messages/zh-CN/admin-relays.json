@@ -1,0 +1,13 @@
+{
+  "pageTitle": "中转连接器",
+  "pageDescription": "为每个入站域名选择中转。中转管理员账号由中转服务自身管理。",
+  "actions": { "refresh": "刷新", "addConnector": "添加连接器", "addRoute": "添加域名", "edit": "编辑", "delete": "删除", "cancel": "取消", "save": "保存", "saving": "保存中", "deleting": "删除中" },
+  "status": { "enabled": "启用", "disabled": "停用" },
+  "fields": { "name": "名称", "protocol": "协议", "accountBaseURL": "账户 API 地址", "modelBaseURL": "模型 API 地址", "sameAsAccount": "与账户地址相同", "enabled": "启用", "enabledDescription": "允许登录和模型请求", "routeEnabledDescription": "允许该域名使用所选连接器", "hostname": "入站域名", "connector": "连接器", "selectConnector": "选择连接器" },
+  "connectors": { "title": "连接器", "name": "名称", "protocol": "协议", "account": "账户地址", "status": "状态", "empty": "尚未配置中转连接器" },
+  "routes": { "title": "入站域名", "hostname": "域名", "connector": "连接器", "status": "状态", "empty": "尚未配置入站域名路由" },
+  "connectorDialog": { "createTitle": "添加中转连接器", "editTitle": "编辑中转连接器", "description": "账户地址用于登录，模型地址用于聊天请求。" },
+  "routeDialog": { "createTitle": "添加入站域名", "editTitle": "编辑入站域名", "description": "带有该 Host 的请求会使用所选连接器。" },
+  "delete": { "connectorTitle": "删除连接器？", "connectorDescription": "仍有域名路由引用的连接器不能删除，请先移除路由。", "routeTitle": "删除域名路由？", "routeDescription": "该域名的请求将不再解析到中转。" },
+  "toast": { "loadFailed": "加载中转配置失败", "saveFailed": "保存中转配置失败", "deleteFailed": "删除中转配置失败", "connectorCreated": "连接器已创建", "connectorUpdated": "连接器已更新", "connectorDeleted": "连接器已删除", "routeCreated": "域名路由已创建", "routeUpdated": "域名路由已更新", "routeDeleted": "域名路由已删除" }
+}

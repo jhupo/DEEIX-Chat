@@ -14,6 +14,8 @@ func Models() []interface{} {
 		&model.User{},
 		&model.UserSession{},
 		&model.UserAuthEvent{},
+		&model.RelayConnector{},
+		&model.RelayIngressRoute{},
 		&model.AgentDevice{},
 		&model.AgentDeviceEnrollmentChallenge{},
 		&model.AgentCredential{},
@@ -131,7 +133,22 @@ func Migrate(db *gorm.DB) error {
 	if err := backfillContextArtifactMessageIDs(db); err != nil {
 		return err
 	}
+	if err := backfillUserAuthProviders(db); err != nil {
+		return err
+	}
 	return nil
+}
+
+// Existing users predate the explicit identity-source column. They are relay
+// identities, never control-plane identities, and must not inherit local-admin
+// privileges from an empty value.
+func backfillUserAuthProviders(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.User{}) {
+		return nil
+	}
+	return db.Model(&model.User{}).
+		Where("auth_provider IS NULL OR auth_provider = ''").
+		Update("auth_provider", "relay").Error
 }
 
 // backfillGatewayConversationSettings restores the latest valid turn approval mode for pre-migration conversations.

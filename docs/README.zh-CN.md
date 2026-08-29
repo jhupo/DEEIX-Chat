@@ -43,8 +43,8 @@ DEEIX Chat 是一款开源可部署的 AI 平台，面向需要长期、稳定�
 | 工具生态 | 同时支持 MCP Server 和厂商官方原生工具，覆盖工具发现、启停、用户选择、执行限制、结果渲染和调用链路追踪。 |
 | 上下文与记忆 | 支持消息窗口、Token 预算、压缩摘要、会话记忆、长期记忆和 RAG 证据记录，在可控成本下维持连续对话体验。 |
 | Sub2 商业能力 | 订阅页通过当前登录用户的服务端 Sub2 session 读取余额、订阅、套餐、用量、支付和兑换状态；DEEIX 不保存本地账本、结算、价格或支付渠道权威数据。 |
-| 身份与安全 | 通过 Sub2 完成登录、注册、改密和登录时 TOTP 验证；角色实时从 Sub2 刷新，DEEIX 仅保存资源归属投影、浏览器会话、HttpOnly Refresh Cookie 和加密的上游令牌。 |
-| 管理与审计 | 后台只读展示 Sub2 用户投影并支持吊销 DEEIX 会话，同时管理上游、模型、路由、调用日志、审计日志、认证事件和系统事件。 |
+| 身份与安全 | 通过当前域名对应的中转完成登录、注册、改密和登录时 TOTP 验证；DEEIX 另外创建一个本地控制面 `superadmin` 用于配置，并保存资源归属投影、浏览器会话、HttpOnly Refresh Cookie 和加密的中转令牌。 |
+| 管理与审计 | 只有本地 `superadmin` 可以配置中转连接器和入站域名，后台只读展示中转用户投影并支持吊销 DEEIX 会话，同时管理模型、路由、调用日志、审计日志、认证事件和系统事件。 |
 | 部署与运维 | 支持单运行时托管前端与 API、Docker 部署、PostgreSQL + pgvector、Redis、S3 兼容存储、Swagger、结构化日志、版本接口、GeoIP 和 OpenTelemetry。 |
 
 <p align="center">
@@ -185,10 +185,9 @@ Compose 可从 `.env` 读取 `DEEIX_BIND_ADDRESS`、`DEEIX_HTTP_PORT`、`POSTGRE
 ```dotenv
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
-SUB2_BASE_URL=https://api.ovload.com
 ```
 
-`SUB2_BASE_URL` 是唯一的 Sub2 部署配置，默认值为 `https://api.ovload.com`。只有在 DEEIX 明确连接另一个兼容 Sub2 实例时才覆盖它；后端从规范化 origin 派生实例标识，浏览器不能提交上游地址。
+首次启动会创建本地控制面 `superadmin`，并将一次性账号密码写入应用日志。使用该账号进入“管理 > 中转连接器”，添加一个或多个中转连接器，再将公开入站域名映射到连接器。中转会话令牌使用 `DATA_ENCRYPTION_KEY` 加密保存，浏览器不会读取密文；未知 Host 会直接拒绝，不会回退到固定中转地址。中转管理员仍在中转服务自身管理全局设置，不会获得 DEEIX 控制面权限。
 
 #### v0.4 升级边界
 
@@ -290,7 +289,7 @@ docker compose -f compose.yaml exec app ls -l /app/config.yaml
 docker compose -f compose.yaml logs app
 ```
 
-使用所配置 Sub2 实例中的用户登录。每次登录成功后，DEEIX 都通过 Sub2 `/api/v1/auth/me` 复核身份：Sub2 `admin` 映射为 DEEIX `superadmin`，Sub2 `user` 映射为 DEEIX `user`。DEEIX 不再创建本地初始管理员，也不会在日志中输出本地初始密码。
+首次启动时，DEEIX 会创建一个本地控制面 `superadmin`。应用日志只在创建时输出一次生成的邮箱、用户名和密码，数据库只保存 bcrypt 密码哈希。使用该邮箱和密码进入“管理 > 中转连接器”，添加中转连接器并将公开入站域名映射到连接器。中转用户仍通过当前域名对应的连接器登录；中转 `admin` 投影不是 DEEIX 控制面管理员。
 
 ## 配置说明
 
@@ -310,7 +309,7 @@ docker compose -f compose.yaml logs app
 | 配置文件 | `CONFIG_FILE` | 可选配置文件路径；Docker 场景应填写容器内路径。 |
 | 应用 | `APP_NAME` | 应用名称。 |
 | 应用 | `APP_ENV` | 运行环境，支持 `dev`/`development` 和 `prod`/`production`；未配置时默认 `prod`。 |
-| Sub2 | `SUB2_BASE_URL` | Sub2 规范 origin；默认 `https://api.ovload.com`，生产环境必须使用 HTTPS。 |
+| 中转控制面 | 管理 > 中转连接器 | 数据库中的中转连接器与入站域名路由；不再通过环境变量设置固定中转地址。 |
 | HTTP 服务 | `HTTP_PORT` | API/运行时端口。 |
 | HTTP 服务 | `CORS_ALLOW_ORIGIN` | 允许跨域访问的来源，多个来源用逗号分隔。 |
 | HTTP 服务 | `TRUSTED_PROXIES` | 可信代理 CIDR 列表。 |
@@ -363,7 +362,7 @@ docker compose -f compose.yaml logs app
 
 DEEIX Token 有效期、限流、登录后路径、会话配置、管理员发布的模型目录与分组、模型参数策略、文件处理、RAG、Embedding 和 MCP 属于运行时业务配置。登录、注册、邮箱验证、登录因子、用户角色、账户状态、用户公告、计费和支付由 Sub2 管理，DEEIX 不再复制这些权威数据。
 
-生产环境启用 SSRF 防护后，管理员保存的模型、MCP 和 Embedding endpoint 按精确 origin（协议、主机和端口）获得局部授权，不需要加入全局白名单。跨 origin 的公网重定向可以继续访问，跨 origin 的私网重定向必须命中 `SSRF_ALLOWED_HOSTS` 或 `SSRF_ALLOWED_CIDRS`。模型生成的图片或视频由后端下载、校验并转存；私网制品 URL 只有与本次选中的模型 endpoint 同 origin 时才继承局部信任。`SUB2_BASE_URL` 独立按规范 origin 校验，且重定向不得改变 origin。链路本地、组播、未指定地址和已知云元数据目标始终禁止。
+生产环境启用 SSRF 防护后，管理员保存的模型、MCP、Embedding 和中转连接器 endpoint 按精确 origin（协议、主机和端口）获得局部授权，不需要加入全局白名单。跨 origin 的公网重定向可以继续访问，跨 origin 的私网重定向必须命中 `SSRF_ALLOWED_HOSTS` 或 `SSRF_ALLOWED_CIDRS`。模型生成的图片或视频由后端下载、校验并转存；私网制品 URL 只有与本次选中的模型 endpoint 同 origin 时才继承局部信任。链路本地、组播、未指定地址和已知云元数据目标始终禁止。
 
 ## 功能指南
 

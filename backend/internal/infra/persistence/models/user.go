@@ -5,6 +5,8 @@ import "time"
 // User is the local projection of a Sub2 principal plus DEEIX-owned preferences.
 type User struct {
 	BaseModel
+	AuthProvider          string     `gorm:"size:16;not null;default:'relay';index:idx_identity_users_auth_provider;comment:身份来源 local 或 relay"`
+	RelayConnectorID      string     `gorm:"size:64;not null;default:'';index:idx_identity_users_relay_connector;comment:所属中转连接器公开 ID"`
 	Sub2InstanceID        string     `gorm:"size:64;not null;uniqueIndex:uk_identity_users_sub2_subject,priority:1;comment:Sub2 instance fingerprint"`
 	Sub2UserID            int64      `gorm:"not null;uniqueIndex:uk_identity_users_sub2_subject,priority:2;comment:Sub2 user ID"`
 	PublicID              string     `gorm:"size:32;not null;uniqueIndex:idx_identity_users_public_id;comment:public user ID"`
@@ -19,6 +21,7 @@ type User struct {
 	ProfilePreferences    string     `gorm:"type:text;not null;default:'';comment:profile preferences"`
 	AppearancePreferences string     `gorm:"type:text;not null;default:'';comment:appearance preferences"`
 	LastLoginAt           *time.Time `gorm:"comment:last login time"`
+	PasswordHash          string     `gorm:"type:text;not null;default:'';comment:本地身份密码 bcrypt 哈希"`
 }
 
 func (User) TableName() string { return "identity_users" }

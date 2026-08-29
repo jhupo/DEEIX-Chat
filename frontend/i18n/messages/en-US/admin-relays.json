@@ -1,0 +1,13 @@
+{
+  "pageTitle": "Relay connectors",
+  "pageDescription": "Select the relay for each inbound hostname. Relay administrators manage their own accounts in the relay service.",
+  "actions": { "refresh": "Refresh", "addConnector": "Add connector", "addRoute": "Add hostname", "edit": "Edit", "delete": "Delete", "cancel": "Cancel", "save": "Save", "saving": "Saving", "deleting": "Deleting" },
+  "status": { "enabled": "Enabled", "disabled": "Disabled" },
+  "fields": { "name": "Name", "protocol": "Protocol", "accountBaseURL": "Account API origin", "modelBaseURL": "Model API origin", "sameAsAccount": "Same as account origin", "enabled": "Enabled", "enabledDescription": "Accept authentication and model traffic", "routeEnabledDescription": "Route this hostname to the selected connector", "hostname": "Inbound hostname", "connector": "Connector", "selectConnector": "Select a connector" },
+  "connectors": { "title": "Connectors", "name": "Name", "protocol": "Protocol", "account": "Account origin", "status": "Status", "empty": "No relay connectors configured" },
+  "routes": { "title": "Inbound hostnames", "hostname": "Hostname", "connector": "Connector", "status": "Status", "empty": "No inbound hostname routes configured" },
+  "connectorDialog": { "createTitle": "Add relay connector", "editTitle": "Edit relay connector", "description": "The account origin is used for sign-in and the model origin for chat requests." },
+  "routeDialog": { "createTitle": "Add inbound hostname", "editTitle": "Edit inbound hostname", "description": "Requests with this Host header use the selected connector." },
+  "delete": { "connectorTitle": "Delete connector?", "connectorDescription": "A connector with hostname routes cannot be deleted. Remove its routes first.", "routeTitle": "Delete hostname route?", "routeDescription": "Requests for this hostname will no longer resolve to a relay." },
+  "toast": { "loadFailed": "Failed to load relay settings", "saveFailed": "Failed to save relay settings", "deleteFailed": "Failed to delete relay setting", "connectorCreated": "Connector created", "connectorUpdated": "Connector updated", "connectorDeleted": "Connector deleted", "routeCreated": "Hostname route created", "routeUpdated": "Hostname route updated", "routeDeleted": "Hostname route deleted" }
+}

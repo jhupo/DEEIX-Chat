@@ -114,7 +114,7 @@ func NewService(repo repository.Sub2KeyBindingRepository, tokens TokenResolver, 
 	}
 }
 
-// MatchRuntimeProof validates a proof against live keys from the fixed Sub2
+// MatchRuntimeProof validates a proof against live keys from the current relay
 // instance. Raw keys and the proof are kept in this call only.
 func (s *Service) MatchRuntimeProof(
 	ctx context.Context,

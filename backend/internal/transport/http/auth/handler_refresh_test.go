@@ -19,6 +19,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const testSub2BaseURL = "http://127.0.0.1:1"
+
 type changePasswordStorageRepo struct {
 	repository.AuthRepository
 	user *domainuser.User
@@ -71,7 +73,7 @@ func TestRefreshTokenInvalidFailureClearsCookie(t *testing.T) {
 
 func TestChangePasswordStorageFailureReturnsInternalServerError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatalf("sub2api.New() error = %v", err)
 	}

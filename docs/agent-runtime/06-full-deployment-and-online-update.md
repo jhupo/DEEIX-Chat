@@ -9,14 +9,13 @@ cp config.example.yaml config.yaml
 cat > .env <<'EOF'
 DEEIX_BIND_ADDRESS=0.0.0.0
 DEEIX_HTTP_PORT=50001
-SUB2_BASE_URL=https://api.ovload.com
 EOF
 docker compose -f compose.yaml up -d
 ```
 
 The application container uses `restart: unless-stopped`. PostgreSQL and Redis must pass their health checks before the application starts.
 
-`SUB2_BASE_URL` is the only Sub2 deployment setting and defaults to `https://api.ovload.com`. It must be a canonical HTTP(S) origin without credentials, path, query, or fragment; production requires HTTPS. The application derives its internal Sub2 instance fingerprint from this origin.
+On first startup the application creates a local control-plane `superadmin` and logs one-time credentials. Configure relay connectors and inbound hostname routes from Admin > Relays. Relay session tokens are encrypted at rest with `DATA_ENCRYPTION_KEY`; relay administrators remain external identities and do not receive DEEIX control-plane access. There is no fixed relay URL or environment fallback.
 
 ## v0.4 Clean-Slate Upgrade
 

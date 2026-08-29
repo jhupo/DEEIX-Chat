@@ -3,14 +3,18 @@ package user
 import "time"
 
 const (
-	RoleSuperAdmin = "superadmin"
-	RoleUser       = "user"
-	StatusActive   = "active"
-	StatusDisabled = "disabled"
+	AuthProviderLocal = "local"
+	AuthProviderRelay = "relay"
+	RoleSuperAdmin    = "superadmin"
+	RoleUser          = "user"
+	StatusActive      = "active"
+	StatusDisabled    = "disabled"
 )
 
 type User struct {
 	ID                    uint
+	AuthProvider          string
+	RelayConnectorID      string
 	Sub2InstanceID        string
 	Sub2UserID            int64
 	PublicID              string
@@ -25,6 +29,7 @@ type User struct {
 	ProfilePreferences    string
 	AppearancePreferences string
 	LastLoginAt           *time.Time
+	PasswordHash          string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }

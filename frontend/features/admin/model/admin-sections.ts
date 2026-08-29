@@ -2,6 +2,7 @@ export const ADMIN_SECTIONS = [
   { id: "accounts", label: "Accounts", href: "/users" },
   { id: "groups", label: "Permission Groups", href: "/groups" },
   { id: "models", label: "Models", href: "/models" },
+  { id: "relays", label: "Relays", href: "/relays" },
   { id: "tool-settings", label: "Tools", href: "/tools" },
   { id: "announcements", label: "Announcements", href: "/announcements" },
   { id: "logs", label: "Logs", href: "/logs" },

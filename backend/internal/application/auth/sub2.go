@@ -144,17 +144,19 @@ func (s *Service) upsertSub2Principal(ctx context.Context, remote *sub2api.User,
 		displayName = "Sub2 User"
 	}
 	return s.repo.UpsertSub2Principal(ctx, &domainuser.User{
-		Sub2InstanceID: s.sub2.InstanceID(),
-		Sub2UserID:     remote.ID,
-		PublicID:       conv.NormalizePublicID(uuid.NewString()),
-		Username:       sub2PrincipalUsername(s.sub2.InstanceID(), remote.ID),
-		DisplayName:    displayName,
-		AvatarURL:      strings.TrimSpace(remote.AvatarURL),
-		Email:          strings.ToLower(strings.TrimSpace(remote.Email)),
-		Role:           role,
-		Status:         status,
-		Timezone:       "Etc/UTC",
-		Locale:         "en-US",
+		AuthProvider:     domainuser.AuthProviderRelay,
+		Sub2InstanceID:   s.sub2InstanceID(ctx),
+		RelayConnectorID: s.sub2InstanceID(ctx),
+		Sub2UserID:       remote.ID,
+		PublicID:         conv.NormalizePublicID(uuid.NewString()),
+		Username:         sub2PrincipalUsername(s.sub2InstanceID(ctx), remote.ID),
+		DisplayName:      displayName,
+		AvatarURL:        strings.TrimSpace(remote.AvatarURL),
+		Email:            strings.ToLower(strings.TrimSpace(remote.Email)),
+		Role:             role,
+		Status:           status,
+		Timezone:         "Etc/UTC",
+		Locale:           "en-US",
 	})
 }
 
@@ -289,7 +291,7 @@ func (s *Service) refreshSub2SessionProfile(
 	principal *domainuser.User,
 	session *domainuser.Session,
 ) (*domainuser.User, error) {
-	if principal == nil || session == nil || principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2.InstanceID() {
+	if principal == nil || session == nil || principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2InstanceID(ctx) {
 		return nil, s.rejectSub2Session(ctx, principal, session, "sub2_principal_required")
 	}
 	refreshToken, err := secretbox.DecryptString(s.cfg.Snapshot().DataEncryptionKey, session.Sub2RefreshTokenEncrypted)
@@ -331,7 +333,7 @@ func (s *Service) sub2AccessTokenForSession(ctx context.Context, userID uint, se
 	if err != nil {
 		return "", err
 	}
-	if principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2.InstanceID() {
+	if principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2InstanceID(ctx) {
 		return "", s.rejectSub2Session(ctx, principal, nil, "sub2_principal_required")
 	}
 	session, err := s.repo.GetSessionByUserAndSessionID(ctx, userID, strings.TrimSpace(sessionID))
@@ -356,7 +358,7 @@ func (s *Service) verifySub2SessionProfile(
 	principal *domainuser.User,
 	session *domainuser.Session,
 ) (*domainuser.User, error) {
-	if principal == nil || session == nil || principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2.InstanceID() {
+	if principal == nil || session == nil || principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2InstanceID(ctx) {
 		return nil, s.rejectSub2Session(ctx, principal, session, "sub2_principal_required")
 	}
 	accessToken, err := secretbox.DecryptString(s.cfg.Snapshot().DataEncryptionKey, session.Sub2AccessTokenEncrypted)
@@ -443,7 +445,7 @@ func (s *Service) ensureSub2Session(ctx context.Context, userID uint, session *d
 	if err != nil {
 		return nil, err
 	}
-	if principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2.InstanceID() || session == nil {
+	if principal.Sub2UserID <= 0 || principal.Sub2InstanceID != s.sub2InstanceID(ctx) || session == nil {
 		return nil, s.rejectSub2Session(ctx, principal, session, "sub2_principal_required")
 	}
 	accessToken, accessErr := secretbox.DecryptString(s.cfg.Snapshot().DataEncryptionKey, session.Sub2AccessTokenEncrypted)

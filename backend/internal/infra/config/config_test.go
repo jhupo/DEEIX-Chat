@@ -24,50 +24,6 @@ func TestLoadDefaultsUseBootstrapAdmin(t *testing.T) {
 	if cfg.SSRFAllowedHosts != "" || cfg.SSRFAllowedCIDRs != "" {
 		t.Fatalf("expected SSRF allowlist to be empty by default, hosts=%q CIDRs=%q", cfg.SSRFAllowedHosts, cfg.SSRFAllowedCIDRs)
 	}
-	if cfg.Sub2BaseURL != DefaultSub2BaseURL {
-		t.Fatalf("expected default Sub2 base URL %q, got %q", DefaultSub2BaseURL, cfg.Sub2BaseURL)
-	}
-}
-
-func TestLoadReadsSub2BaseURL(t *testing.T) {
-	cleanupConfigEnv(t)
-	chdir(t, t.TempDir())
-	t.Setenv("SUB2_BASE_URL", "https://sub2.example.test/")
-
-	cfg := Load()
-	if cfg.Sub2BaseURL != "https://sub2.example.test" {
-		t.Fatalf("unexpected Sub2 base URL %q", cfg.Sub2BaseURL)
-	}
-}
-
-func TestValidateSub2BaseURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		value   string
-		env     string
-		wantErr bool
-	}{
-		{name: "production https", value: "https://sub2.example.test", env: "prod"},
-		{name: "development http", value: "http://127.0.0.1:8080", env: "dev"},
-		{name: "production http", value: "http://sub2.example.test", env: "prod", wantErr: true},
-		{name: "credentials", value: "https://user:pass@sub2.example.test", env: "dev", wantErr: true},
-		{name: "path", value: "https://sub2.example.test/api", env: "dev", wantErr: true},
-		{name: "query", value: "https://sub2.example.test?x=1", env: "dev", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := validConfigForEnv(tt.env)
-			cfg.Sub2BaseURL = tt.value
-			err := cfg.Validate()
-			if tt.wantErr && err == nil {
-				t.Fatal("expected validation error")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("unexpected validation error: %v", err)
-			}
-		})
-	}
 }
 
 func TestLoadTreatsBlankAPPEnvAsUnset(t *testing.T) {
@@ -371,7 +327,6 @@ func validConfigForEnv(env string) Config {
 		PublicWebBaseURL:  "https://example.com",
 		PostgresDSN:       "postgres://deeix:secret@postgres:5432/deeix?sslmode=disable",
 		RedisAddr:         "redis:6379",
-		Sub2BaseURL:       DefaultSub2BaseURL,
 	}
 }
 
@@ -386,7 +341,6 @@ func cleanupConfigEnv(t *testing.T) {
 		"SSRF_ALLOWED_HOSTS",
 		"SSRF_ALLOWED_CIDRS",
 		"POSTGRES_DSN",
-		"SUB2_BASE_URL",
 	}
 	for _, key := range keys {
 		key := key

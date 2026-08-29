@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
+	portsub2api "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 )
@@ -68,7 +70,7 @@ func (s *Service) RuntimeUser(ctx context.Context, userID uint) (string, int64, 
 		return "", 0, err
 	}
 	if user.Status != domainuser.StatusActive || user.Sub2UserID <= 0 ||
-		user.Sub2InstanceID != s.sub2.InstanceID() || user.PublicID == "" {
+		user.Sub2InstanceID != s.sub2InstanceID(ctx) || user.PublicID == "" {
 		return "", 0, repository.ErrNotFound
 	}
 	return user.PublicID, user.Sub2UserID, nil
@@ -82,7 +84,7 @@ func (s *Service) RuntimeUserByPublicID(ctx context.Context, publicID string) (u
 		return 0, "", 0, err
 	}
 	if user.Status != domainuser.StatusActive || user.Sub2UserID <= 0 ||
-		user.Sub2InstanceID != s.sub2.InstanceID() || user.PublicID == "" {
+		user.Sub2InstanceID != s.sub2InstanceID(ctx) || user.PublicID == "" {
 		return 0, "", 0, repository.ErrNotFound
 	}
 	return user.ID, user.PublicID, user.Sub2UserID, nil
@@ -91,6 +93,9 @@ func (s *Service) RuntimeUserByPublicID(ctx context.Context, publicID string) (u
 func (s *Service) GetLoginOptions(ctx context.Context) (*LoginOptions, error) {
 	settings, err := s.sub2.Settings(ctx)
 	if err != nil {
+		if errors.Is(err, portsub2api.ErrConnectorUnavailable) {
+			return &LoginOptions{}, nil
+		}
 		return nil, err
 	}
 	return &LoginOptions{
@@ -118,6 +123,13 @@ func (s *Service) RegisterWithEmail(ctx context.Context, email, password, code, 
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID uint, sessionID, currentPassword, newPassword, requestID string, auditCtx requestmeta.SessionAuditContext) error {
+	if user, err := s.repo.GetByID(ctx, userID); err == nil && isLocalPrincipal(user) {
+		if err = s.changeLocalPassword(ctx, userID, currentPassword, newPassword); err != nil {
+			return err
+		}
+		s.RecordAuthEvent(ctx, userID, requestID, "password_change", "success", "", auditCtx.ClientIP, auditCtx.UserAgent, "")
+		return s.repo.RevokeAllSessions(ctx, userID, "password_changed")
+	}
 	accessToken, err := s.sub2AccessTokenForSession(ctx, userID, sessionID)
 	if err != nil {
 		return err

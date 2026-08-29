@@ -15,7 +15,6 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-deeix_chat_2026}
       REDIS_DB: ${REDIS_DB:-0}
-      SUB2_BASE_URL: ${SUB2_BASE_URL:-https://api.ovload.com}
       UPDATE_REPOSITORY: ${UPDATE_REPOSITORY:-jhupo/DEEIX-Chat}
       UPDATE_PROXY_URL: ${UPDATE_PROXY_URL:-}
       UPDATE_RUNTIME_DIR: /app/runtime

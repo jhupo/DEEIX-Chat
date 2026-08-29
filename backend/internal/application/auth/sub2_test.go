@@ -19,6 +19,8 @@ import (
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
 )
 
+const testSub2BaseURL = "http://127.0.0.1:1"
+
 type sub2PrincipalTestRepo struct {
 	repository.AuthRepository
 	user          *domainuser.User
@@ -212,7 +214,7 @@ func TestSub2SessionNeedsRevalidation(t *testing.T) {
 }
 
 func TestSub2AccessTokensForUserPrefersUnexpiredSession(t *testing.T) {
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +251,7 @@ func TestSub2AccessTokensForUserPrefersUnexpiredSession(t *testing.T) {
 }
 
 func TestEnsureSub2SessionReturnsPostLockPrincipal(t *testing.T) {
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatalf("sub2api.New() error = %v", err)
 	}
@@ -292,7 +294,7 @@ func TestEnsureSub2SessionReturnsPostLockPrincipal(t *testing.T) {
 }
 
 func TestEnsureSub2SessionRejectsDisabledPrincipalOnFreshPaths(t *testing.T) {
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatalf("sub2api.New() error = %v", err)
 	}
@@ -456,7 +458,7 @@ func TestRefreshSub2SessionStagesRotatedTokensBeforeTemporaryProfileFailure(t *t
 }
 
 func TestValidateAccessSessionRejectsAndRevokesMissingSub2Principal(t *testing.T) {
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatalf("sub2api.New() error = %v", err)
 	}
@@ -492,7 +494,7 @@ func TestSessionReadsPreserveStorageFailures(t *testing.T) {
 }
 
 func TestSub2AccessTokenForSessionClassifiesSessionReadErrors(t *testing.T) {
-	client, err := sub2api.New(config.DefaultSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
+	client, err := sub2api.New(testSub2BaseURL, sharedsecurity.NewStrictOutboundPolicy(false))
 	if err != nil {
 		t.Fatalf("sub2api.New() error = %v", err)
 	}

@@ -252,6 +252,8 @@ definitions:
     properties:
       appearancePreferences:
         type: string
+      authProvider:
+        type: string
       avatarURL:
         type: string
       createdAt:
@@ -284,6 +286,7 @@ definitions:
         type: string
     required:
     - appearancePreferences
+    - authProvider
     - avatarURL
     - createdAt
     - displayName
@@ -599,6 +602,8 @@ definitions:
     properties:
       appearancePreferences:
         type: string
+      authProvider:
+        type: string
       avatarURL:
         type: string
       createdAt:
@@ -635,6 +640,7 @@ definitions:
         type: string
     required:
     - appearancePreferences
+    - authProvider
     - avatarURL
     - createdAt
     - displayName
@@ -1023,6 +1029,89 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  ConnectorDataResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/ConnectorResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ConnectorListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/ConnectorResponse'
+        type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  ConnectorRequest:
+    properties:
+      accountBaseURL:
+        maxLength: 512
+        type: string
+      configJSON:
+        maxLength: 65536
+        type: string
+      enabled:
+        type: boolean
+      modelBaseURL:
+        maxLength: 512
+        type: string
+      name:
+        maxLength: 128
+        type: string
+      protocol:
+        enum:
+        - sub2api
+        type: string
+    required:
+    - accountBaseURL
+    - enabled
+    - name
+    - protocol
+    type: object
+  ConnectorResponse:
+    properties:
+      accountBaseURL:
+        type: string
+      createdAt:
+        type: string
+      enabled:
+        type: boolean
+      id:
+        type: integer
+      lastProbeAt:
+        type: string
+      lastProbeError:
+        type: string
+      modelBaseURL:
+        type: string
+      name:
+        type: string
+      protocol:
+        type: string
+      publicID:
+        type: string
+      updatedAt:
+        type: string
+    required:
+    - accountBaseURL
+    - createdAt
+    - enabled
+    - id
+    - modelBaseURL
+    - name
+    - protocol
+    - publicID
+    - updatedAt
     type: object
   ContentModerationCategoryCatalogResponse:
     properties:
@@ -4998,6 +5087,21 @@ definitions:
     - updatedAt
     - upstreamModelName
     type: object
+  RelayDeleteResponseDoc:
+    properties:
+      data:
+        properties:
+          deleted:
+            type: boolean
+        required:
+        - deleted
+        type: object
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
   RenameConversationRequest:
     properties:
       title:
@@ -5140,6 +5244,65 @@ definitions:
     required:
     - data
     - errorMsg
+    type: object
+  RouteDataResponseDoc:
+    properties:
+      data:
+        $ref: '#/definitions/RouteResponse'
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  RouteListResponseDoc:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/RouteResponse'
+        type: array
+      errorMsg:
+        type: string
+    required:
+    - data
+    - errorMsg
+    type: object
+  RouteRequest:
+    properties:
+      connectorID:
+        maxLength: 64
+        type: string
+      enabled:
+        type: boolean
+      hostname:
+        maxLength: 255
+        type: string
+    required:
+    - connectorID
+    - enabled
+    - hostname
+    type: object
+  RouteResponse:
+    properties:
+      connectorID:
+        type: string
+      createdAt:
+        type: string
+      enabled:
+        type: boolean
+      hostname:
+        type: string
+      id:
+        type: integer
+      updatedAt:
+        type: string
+    required:
+    - connectorID
+    - createdAt
+    - enabled
+    - hostname
+    - id
+    - updatedAt
     type: object
   RunResponse:
     properties:
@@ -7843,7 +8006,7 @@ info:
   contact: {}
   description: DEEIX Chat 后端 API 文档
   title: DEEIX Chat API
-  version: "0.4.113"
+  version: "0.4.114"
 paths:
   /admin/announcements:
     get:
@@ -11246,6 +11409,263 @@ paths:
       summary: 管理员更新内置提示词
       tags:
       - admin-prompt-presets
+  /admin/relays/connectors:
+    get:
+      description: Lists database-backed relay protocol connectors.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConnectorListResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: List relay connectors
+      tags:
+      - admin-relays
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Relay connector
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ConnectorRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConnectorDataResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Create a relay connector
+      tags:
+      - admin-relays
+  /admin/relays/connectors/{id}:
+    delete:
+      description: Deletes a connector that is not referenced by an inbound hostname
+        route.
+      parameters:
+      - description: Connector public ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RelayDeleteResponseDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Delete a relay connector
+      tags:
+      - admin-relays
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Connector public ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Relay connector
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ConnectorRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ConnectorDataResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Update a relay connector
+      tags:
+      - admin-relays
+  /admin/relays/routes:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RouteListResponseDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: List relay hostname routes
+      tags:
+      - admin-relays
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Inbound hostname route
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/RouteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RouteDataResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Create a relay hostname route
+      tags:
+      - admin-relays
+  /admin/relays/routes/{id}:
+    delete:
+      parameters:
+      - description: Route ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RelayDeleteResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Delete a relay hostname route
+      tags:
+      - admin-relays
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Route ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Inbound hostname route
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/RouteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/RouteDataResponseDoc'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/SuccessDoc'
+      security:
+      - BearerAuth: []
+      summary: Update a relay hostname route
+      tags:
+      - admin-relays
   /admin/settings:
     get:
       description: 按 namespace 分组返回全部动态配置项

@@ -52,6 +52,10 @@ type sub2ExecutionResolverStub struct {
 	err       error
 }
 
+type sub2EndpointResolverStub struct{ baseURL string }
+
+func (r sub2EndpointResolverStub) ModelBaseURL(context.Context) string { return r.baseURL }
+
 func (r *sub2ExecutionResolverStub) ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error) {
 	r.calls++
 	return r.execution, r.err
@@ -60,7 +64,7 @@ func (r *sub2ExecutionResolverStub) ResolveBinding(context.Context, uint, string
 func TestResolveSub2ChatRouteChecksCatalogBeforeBinding(t *testing.T) {
 	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{APIKey: "secret"}}
 	service := &Service{
-		cfg:           config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		cfg:           config.NewRuntime(config.Config{}),
 		routeResolver: &textTaskRouteResolverStub{chatModelErr: channel.ErrModelAccessDenied},
 		sub2Resolver:  binding,
 	}
@@ -82,7 +86,7 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 		GroupPlatform:   "anthropic",
 	}}
 	service := &Service{
-		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		cfg: config.NewRuntime(config.Config{}),
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			ID:                9,
 			PlatformModelName: "catalog-model",
@@ -91,7 +95,8 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 			KindsJSON:         `["chat"]`,
 			ProtocolsJSON:     `["anthropic_messages"]`,
 		}},
-		sub2Resolver: binding,
+		sub2Resolver:         binding,
+		sub2EndpointResolver: sub2EndpointResolverStub{baseURL: "https://model.example.test"},
 	}
 
 	route, execution, err := service.resolveSub2ChatRoute(t.Context(), 7, "catalog-model", binding.execution.BindingPublicID)
@@ -111,6 +116,28 @@ func TestResolveSub2ChatRoutePinsAdministratorCatalogIdentity(t *testing.T) {
 	}
 }
 
+func TestResolveSub2ChatRouteRejectsMissingInboundRelay(t *testing.T) {
+	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
+		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
+		APIKey:          "secret",
+		GroupPlatform:   "openai",
+	}}
+	service := &Service{
+		cfg: config.NewRuntime(config.Config{}),
+		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
+			PlatformModelName: "catalog-model",
+			KindsJSON:         `["chat"]`,
+			ProtocolsJSON:     `["openai_responses"]`,
+		}},
+		sub2Resolver:         binding,
+		sub2EndpointResolver: sub2EndpointResolverStub{},
+	}
+
+	if _, _, err := service.resolveSub2ChatRoute(t.Context(), 7, "catalog-model", binding.execution.BindingPublicID); !errors.Is(err, ErrModelRouteNotConfigured) {
+		t.Fatalf("resolveSub2ChatRoute() error = %v, want %v", err, ErrModelRouteNotConfigured)
+	}
+}
+
 func TestResolveSub2ChatRouteRejectsNonChatModel(t *testing.T) {
 	binding := &sub2ExecutionResolverStub{execution: &appsub2key.Execution{
 		BindingPublicID: "sub2_0123456789abcdef0123456789abcdef",
@@ -118,7 +145,7 @@ func TestResolveSub2ChatRouteRejectsNonChatModel(t *testing.T) {
 		GroupPlatform:   "anthropic",
 	}}
 	service := &Service{
-		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		cfg: config.NewRuntime(config.Config{}),
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			PlatformModelName: "openai-only-model",
 			KindsJSON:         `["image_gen"]`,
@@ -138,7 +165,7 @@ func TestResolveSub2ChatRouteRejectsModelWithoutKeyGroupProtocol(t *testing.T) {
 		APIKey:          "secret",
 	}}
 	service := &Service{
-		cfg: config.NewRuntime(config.Config{Sub2BaseURL: "https://sub2.example.test"}),
+		cfg: config.NewRuntime(config.Config{}),
 		routeResolver: &textTaskRouteResolverStub{chatModel: &channel.ModelView{
 			PlatformModelName: "messages-only-model",
 			KindsJSON:         `["chat"]`,

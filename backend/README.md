@@ -67,7 +67,7 @@ cp config.example.yaml config.yaml
 关键配置：
 
 - `APP_ENV`：运行环境，支持 `dev`/`development` 和 `prod`/`production`；未配置时默认 `prod`
-- `SUB2_BASE_URL`：唯一的 Sub2 配置，默认 `https://api.ovload.com`；生产环境必须是 HTTPS canonical origin
+- 中转连接器：首次启动后由本地 `superadmin` 在管理后台配置，按入站域名路由到数据库中的连接器；不通过环境变量固定中转地址
 - `HTTP_PORT`：HTTP 端口
 - `JWT_SECRET`：JWT 签名密钥
 - `POSTGRES_DSN`：PostgreSQL DSN
@@ -103,7 +103,7 @@ observability:
 
 ## Sub2 身份与会话
 
-DEEIX 通过 BFF 调用 Sub2 处理登录、邮箱注册、登录 TOTP、refresh、logout、`/me` 和密码修改。Sub2 `admin` 映射为 DEEIX `superadmin`，Sub2 `user` 映射为 DEEIX `user`；不创建本地 bootstrap 管理员。
+DEEIX 通过当前入站域名映射的中转连接器处理登录、邮箱注册、登录 TOTP、refresh、logout、`/me` 和密码修改。首次启动会创建一个本地 bootstrap `superadmin`，仅该本地账号可以进入控制面配置连接器、入站域名和 DEEIX 业务设置；中转 `admin` 只在中转服务自身拥有管理权限。
 
 DEEIX 仅保存稳定的本地 Principal projection、browser session 及 display name、avatar 和本地偏好。Sub2 access/refresh token 只保存在服务端 session 密文列，Browser 永不接收。
 

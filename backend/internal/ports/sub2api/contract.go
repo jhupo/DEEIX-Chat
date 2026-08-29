@@ -11,6 +11,8 @@ import (
 
 var ErrUnauthorized = errors.New("sub2api unauthorized")
 
+var ErrConnectorUnavailable = errors.New("relay connector unavailable")
+
 type Client interface {
 	InstanceID() string
 	Login(context.Context, string, string, string) (*LoginResult, error)

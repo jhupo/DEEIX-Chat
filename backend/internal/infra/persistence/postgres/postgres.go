@@ -112,11 +112,16 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := applySchemaBaseline(db); err != nil {
 		return err
 	}
+	if err := applyIdentityBaselineIndexes(db); err != nil {
+		return err
+	}
 
 	tableComments := map[string]string{
 		"identity_users":                 "用户账户主表",
 		"identity_sessions":              "用户登录会话表",
 		"identity_auth_events":           "用户认证事件表",
+		"relay_connectors":               "中转协议连接器配置表",
+		"relay_ingress_routes":           "入站域名中转路由表",
 		"agent_devices":                  "本地 Agent 设备表",
 		"agent_credentials":              "Agent 一次性凭据哈希表",
 		"agent_commands":                 "Agent 设备下行命令表",
@@ -355,6 +360,14 @@ func tableHasColumn(db *gorm.DB, table, column string) (bool, error) {
 
 func applySchemaBaseline(db *gorm.DB) error {
 	return schema.Migrate(db)
+}
+
+func applyIdentityBaselineIndexes(db *gorm.DB) error {
+	return db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_users_local_superadmin
+		ON "identity_users" ("role")
+		WHERE "auth_provider" = 'local' AND "role" = 'superadmin'
+	`).Error
 }
 
 func escapeSQLLiteral(input string) string {

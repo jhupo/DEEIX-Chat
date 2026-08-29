@@ -37,8 +37,6 @@ const (
 	defaultHTTPIdleTimeoutSeconds       = 120
 	defaultHTTPMaxHeaderBytes           = 1 << 20
 	defaultHTTPShutdownTimeoutSeconds   = 10
-	// DefaultSub2BaseURL 是唯一受信任的 Sub2API 实例。
-	DefaultSub2BaseURL = "https://api.ovload.com"
 	// DefaultFileFullContextMaxBytes 是全文注入的默认提取文本大小上限（2 MiB）。
 	DefaultFileFullContextMaxBytes int64 = 2 * 1024 * 1024
 )
@@ -331,7 +329,6 @@ type Config struct {
 	UpdateRuntimeDir             string
 	UpdateStateFile              string
 	UpdateDownloadTimeoutSeconds int
-	Sub2BaseURL                  string
 	JWTSecret                    string
 	DataEncryptionKey            string
 	SSRFProtectionEnabled        bool
@@ -548,7 +545,6 @@ func Load() Config {
 		UpdateRuntimeDir:             absoluteConfigPath(envOrPath("UPDATE_RUNTIME_DIR", yc.Update.RuntimeDir, "./data/runtime", yc.sourceDir)),
 		UpdateStateFile:              absoluteConfigPath(envOrPath("UPDATE_STATE_FILE", yc.Update.StateFile, "./data/update-journal.json", yc.sourceDir)),
 		UpdateDownloadTimeoutSeconds: envOrInt("UPDATE_DOWNLOAD_TIMEOUT_SECONDS", yc.Update.DownloadTimeoutSeconds, 1800),
-		Sub2BaseURL:                  strings.TrimRight(envOr("SUB2_BASE_URL", "", DefaultSub2BaseURL), "/"),
 		JWTSecret:                    envOr("JWT_SECRET", yc.Security.JWTSecret, defaultJWTSecret),
 		DataEncryptionKey:            envOr("DATA_ENCRYPTION_KEY", yc.Security.DataEncryptionKey, defaultDataEncryptionKey),
 		SSRFProtectionEnabled:        envOrBoolPtr("SSRF_PROTECTION_ENABLED", yc.Security.SSRFProtectionEnabled, false),
@@ -725,9 +721,6 @@ func (c Config) Validate() error {
 			return errors.New("invalid UPDATE_PROXY_URL")
 		}
 	}
-	if err := validateSub2BaseURL(c.Sub2BaseURL, normalizeEnv(c.Env) == "prod"); err != nil {
-		return err
-	}
 	if err := c.validateDatabase(); err != nil {
 		return err
 	}
@@ -808,23 +801,6 @@ func validateHTTPIntegrationURL(raw string, label string) error {
 	}
 	if err := sharedsecurity.ValidateTrustedOutboundHTTPURL(value); err != nil {
 		return fmt.Errorf("invalid config: %s must be an http(s) URL without credentials; metadata and link-local targets are not allowed", label)
-	}
-	return nil
-}
-
-func validateSub2BaseURL(raw string, production bool) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed == nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
-		return errors.New("invalid config: SUB2_BASE_URL must be an http(s) origin without credentials, path, query, or fragment")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("invalid config: SUB2_BASE_URL must use http or https")
-	}
-	if production && parsed.Scheme != "https" {
-		return errors.New("invalid production config: SUB2_BASE_URL must use https")
-	}
-	if err = sharedsecurity.ValidateTrustedOutboundHTTPURL(parsed.String()); err != nil {
-		return errors.New("invalid config: SUB2_BASE_URL contains a blocked target")
 	}
 	return nil
 }

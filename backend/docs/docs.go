@@ -5376,6 +5376,412 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/relays/connectors": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Lists database-backed relay protocol connectors.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "List relay connectors",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConnectorListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Create a relay connector",
+                "parameters": [
+                    {
+                        "description": "Relay connector",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ConnectorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConnectorDataResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/relays/connectors/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a connector that is not referenced by an inbound hostname route.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Delete a relay connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connector public ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RelayDeleteResponseDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Update a relay connector",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Connector public ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Relay connector",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ConnectorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ConnectorDataResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/relays/routes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "List relay hostname routes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RouteListResponseDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Create a relay hostname route",
+                "parameters": [
+                    {
+                        "description": "Inbound hostname route",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/RouteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RouteDataResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/relays/routes/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Delete a relay hostname route",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Route ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RelayDeleteResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-relays"
+                ],
+                "summary": "Update a relay hostname route",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Route ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Inbound hostname route",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/RouteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/RouteDataResponseDoc"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/SuccessDoc"
+                        }
+                    }
+                }
+            }
+        },
         "/admin/settings": {
             "get": {
                 "security": [
@@ -13391,6 +13797,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "appearancePreferences",
+                "authProvider",
                 "avatarURL",
                 "createdAt",
                 "displayName",
@@ -13409,6 +13816,9 @@ const docTemplate = `{
             ],
             "properties": {
                 "appearancePreferences": {
+                    "type": "string"
+                },
+                "authProvider": {
                     "type": "string"
                 },
                 "avatarURL": {
@@ -13878,6 +14288,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "appearancePreferences",
+                "authProvider",
                 "avatarURL",
                 "createdAt",
                 "displayName",
@@ -13896,6 +14307,9 @@ const docTemplate = `{
             ],
             "properties": {
                 "appearancePreferences": {
+                    "type": "string"
+                },
+                "authProvider": {
                     "type": "string"
                 },
                 "avatarURL": {
@@ -14488,6 +14902,124 @@ const docTemplate = `{
                     "$ref": "#/definitions/CommandDoc"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConnectorDataResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/ConnectorResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConnectorListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ConnectorResponse"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "ConnectorRequest": {
+            "type": "object",
+            "required": [
+                "accountBaseURL",
+                "enabled",
+                "name",
+                "protocol"
+            ],
+            "properties": {
+                "accountBaseURL": {
+                    "type": "string",
+                    "maxLength": 512
+                },
+                "configJSON": {
+                    "type": "string",
+                    "maxLength": 65536
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "modelBaseURL": {
+                    "type": "string",
+                    "maxLength": 512
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 128
+                },
+                "protocol": {
+                    "type": "string",
+                    "enum": [
+                        "sub2api"
+                    ]
+                }
+            }
+        },
+        "ConnectorResponse": {
+            "type": "object",
+            "required": [
+                "accountBaseURL",
+                "createdAt",
+                "enabled",
+                "id",
+                "modelBaseURL",
+                "name",
+                "protocol",
+                "publicID",
+                "updatedAt"
+            ],
+            "properties": {
+                "accountBaseURL": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lastProbeAt": {
+                    "type": "string"
+                },
+                "lastProbeError": {
+                    "type": "string"
+                },
+                "modelBaseURL": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "publicID": {
+                    "type": "string"
+                },
+                "updatedAt": {
                     "type": "string"
                 }
             }
@@ -20161,6 +20693,29 @@ const docTemplate = `{
                 }
             }
         },
+        "RelayDeleteResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "required": [
+                        "deleted"
+                    ],
+                    "properties": {
+                        "deleted": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
         "RenameConversationRequest": {
             "type": "object",
             "required": [
@@ -20371,6 +20926,91 @@ const docTemplate = `{
                     "$ref": "#/definitions/RevokeUserSessionsResponse"
                 },
                 "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "RouteDataResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/RouteResponse"
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "RouteListResponseDoc": {
+            "type": "object",
+            "required": [
+                "data",
+                "errorMsg"
+            ],
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/RouteResponse"
+                    }
+                },
+                "errorMsg": {
+                    "type": "string"
+                }
+            }
+        },
+        "RouteRequest": {
+            "type": "object",
+            "required": [
+                "connectorID",
+                "enabled",
+                "hostname"
+            ],
+            "properties": {
+                "connectorID": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "hostname": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
+        "RouteResponse": {
+            "type": "object",
+            "required": [
+                "connectorID",
+                "createdAt",
+                "enabled",
+                "hostname",
+                "id",
+                "updatedAt"
+            ],
+            "properties": {
+                "connectorID": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "hostname": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "updatedAt": {
                     "type": "string"
                 }
             }
@@ -24231,7 +24871,7 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "0.4.113",
+	Version:          "0.4.114",
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},

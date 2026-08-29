@@ -9,6 +9,8 @@ const (
 	ContextKeyUsername = "ctx_username"
 	// ContextKeyUserRole 当前登录用户角色。
 	ContextKeyUserRole = "ctx_user_role"
+	// ContextKeyAuthProvider 当前登录身份来源。
+	ContextKeyAuthProvider = "ctx_auth_provider"
 	// ContextKeySessionID 当前登录会话ID。
 	ContextKeySessionID = "ctx_session_id"
 	// ContextKeyRequestID 请求追踪ID。

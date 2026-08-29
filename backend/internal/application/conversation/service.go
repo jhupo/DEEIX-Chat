@@ -46,6 +46,10 @@ type sub2ExecutionResolver interface {
 	ResolveBinding(context.Context, uint, string) (*appsub2key.Execution, error)
 }
 
+type sub2EndpointResolver interface {
+	ModelBaseURL(context.Context) string
+}
+
 type gatewayExecutor interface {
 	ResolveExecutionTarget(context.Context, uint, string, string, string) (string, error)
 	ListInputResources(context.Context, uint, string, string) (*GatewayInputResourceCatalog, error)
@@ -200,6 +204,7 @@ type Service struct {
 	skillResolver         skillResolver
 	knowledgeBaseResolver knowledgeBaseResolver
 	sub2Resolver          sub2ExecutionResolver
+	sub2EndpointResolver  sub2EndpointResolver
 	gatewayExecutor       gatewayExecutor
 	gatewayProjects       gatewayProjectLister
 	auditWriter           auditWriter
@@ -279,6 +284,14 @@ type SendMessageInput struct {
 // SetSkillResolver 注入会话技能解析器。
 func (s *Service) SetSkillResolver(resolver skillResolver) {
 	s.skillResolver = resolver
+}
+
+func (s *Service) SetSub2EndpointResolver(resolver sub2EndpointResolver) {
+	s.sub2EndpointResolver = resolver
+}
+
+func (s *Service) sub2ModelBaseURL(ctx context.Context) string {
+	return s.sub2EndpointResolver.ModelBaseURL(ctx)
 }
 
 // SetKnowledgeBaseResolver injects knowledge-base file resolution into conversations.

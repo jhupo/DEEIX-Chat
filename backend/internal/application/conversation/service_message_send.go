@@ -93,13 +93,20 @@ func (s *Service) resolveSub2ChatRoute(ctx context.Context, userID uint, modelNa
 	if protocol == "" {
 		return nil, nil, ErrModelAccessDenied
 	}
+	if s.sub2EndpointResolver == nil {
+		return nil, nil, ErrModelRouteNotConfigured
+	}
+	baseURL := s.sub2ModelBaseURL(ctx)
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, nil, ErrModelRouteNotConfigured
+	}
 	return &channel.ResolvedRoute{
 		PlatformModelID:       chatModel.ID,
 		PlatformModelName:     chatModel.PlatformModelName,
 		UpstreamName:          "sub2",
 		BindingCode:           execution.BindingPublicID,
 		Protocol:              protocol,
-		BaseURL:               s.cfg.Snapshot().Sub2BaseURL,
+		BaseURL:               baseURL,
 		APIKey:                execution.APIKey,
 		ModelVendor:           chatModel.Vendor,
 		ModelIcon:             chatModel.Icon,

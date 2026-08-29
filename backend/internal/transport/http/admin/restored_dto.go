@@ -13,6 +13,7 @@ import (
 
 type UserResponse struct {
 	ID                    uint       `json:"id"`
+	AuthProvider          string     `json:"authProvider"`
 	PublicID              string     `json:"publicID"`
 	Username              string     `json:"username"`
 	DisplayName           string     `json:"displayName"`
@@ -172,7 +173,7 @@ type CleanupConversationRunsResponseDoc struct {
 }
 
 func toUserResponse(v userview.UserView) UserResponse {
-	return UserResponse{ID: v.ID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences, AppearancePreferences: v.AppearancePreferences, LastLoginAt: v.LastLoginAt, LastActiveAt: v.LastActiveAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return UserResponse{ID: v.ID, AuthProvider: v.AuthProvider, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences, AppearancePreferences: v.AppearancePreferences, LastLoginAt: v.LastLoginAt, LastActiveAt: v.LastActiveAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 func toAuthEventResponse(v domainuser.AuthEvent, l appadmin.UserLabel) AuthEventResponse {
 	return AuthEventResponse{ID: v.ID, RequestID: v.RequestID, UserID: v.UserID, Username: l.Username, UserDisplayName: l.DisplayName, UserLabel: l.Label, EventType: v.EventType, Result: v.Result, Reason: v.Reason, ClientIP: v.ClientIP, UserAgent: v.UserAgent, DetailJSON: v.DetailJSON, OccurredAt: v.OccurredAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}

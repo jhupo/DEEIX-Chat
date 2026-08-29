@@ -26,10 +26,38 @@ func errFor(err error) error {
 	return err
 }
 func toDomainUser(v model.User) *domainuser.User {
-	return &domainuser.User{ID: v.ID, Sub2InstanceID: v.Sub2InstanceID, Sub2UserID: v.Sub2UserID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences, AppearancePreferences: v.AppearancePreferences, LastLoginAt: v.LastLoginAt, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	return &domainuser.User{ID: v.ID, AuthProvider: v.AuthProvider, RelayConnectorID: v.RelayConnectorID, Sub2InstanceID: v.Sub2InstanceID, Sub2UserID: v.Sub2UserID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences, AppearancePreferences: v.AppearancePreferences, LastLoginAt: v.LastLoginAt, PasswordHash: v.PasswordHash, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 func toModelUser(v *domainuser.User) *model.User {
-	return &model.User{BaseModel: model.BaseModel{ID: v.ID}, Sub2InstanceID: v.Sub2InstanceID, Sub2UserID: v.Sub2UserID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale}
+	return &model.User{BaseModel: model.BaseModel{ID: v.ID}, AuthProvider: v.AuthProvider, RelayConnectorID: v.RelayConnectorID, Sub2InstanceID: v.Sub2InstanceID, Sub2UserID: v.Sub2UserID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName, AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status, Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences, AppearancePreferences: v.AppearancePreferences, PasswordHash: v.PasswordHash}
+}
+
+// FindByLoginIdentifier resolves either the local control-plane email or
+// username without contacting an external relay.
+func (r *Repo) FindByLoginIdentifier(ctx context.Context, identifier string) (*domainuser.User, error) {
+	var v model.User
+	value := strings.ToLower(strings.TrimSpace(identifier))
+	if value == "" {
+		return nil, repository.ErrNotFound
+	}
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = ? OR LOWER(username) = ?", value, value).First(&v).Error; err != nil {
+		return nil, errFor(err)
+	}
+	return toDomainUser(v), nil
+}
+
+func (r *Repo) UpdatePasswordHash(ctx context.Context, id uint, passwordHash string) error {
+	if strings.TrimSpace(passwordHash) == "" {
+		return repository.ErrInvalidInput
+	}
+	q := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("password_hash", passwordHash)
+	if q.Error != nil {
+		return errFor(q.Error)
+	}
+	if q.RowsAffected == 0 {
+		return repository.ErrNotFound
+	}
+	return nil
 }
 func (r *Repo) GetByID(ctx context.Context, id uint) (*domainuser.User, error) {
 	var v model.User
@@ -60,9 +88,11 @@ func (r *Repo) UpsertSub2Principal(ctx context.Context, in *domainuser.User) (*d
 			return err
 		}
 		return tx.Model(&out).Updates(map[string]any{
-			"email":  in.Email,
-			"role":   in.Role,
-			"status": in.Status,
+			"auth_provider":      domainuser.AuthProviderRelay,
+			"relay_connector_id": in.RelayConnectorID,
+			"email":              in.Email,
+			"role":               in.Role,
+			"status":             in.Status,
 		}).Error
 	})
 	if err != nil {

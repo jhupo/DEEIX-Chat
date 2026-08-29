@@ -31,6 +31,7 @@ import (
 	appprocessing "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/processing"
 	apppromptpreset "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/promptpreset"
 	apprag "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/rag"
+	apprelay "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/relay"
 	appruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/runtime"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/settings"
 	appskill "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/skill"
@@ -64,6 +65,7 @@ import (
 	mcprepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/mcp"
 	memoryrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/memory"
 	promptpresetrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/promptpreset"
+	relayrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/relay"
 	settingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/settings"
 	skillrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/skill"
 	sub2commercerepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/sub2commerce"
@@ -71,6 +73,7 @@ import (
 	systemeventrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/systemevent"
 	userrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/user"
 	usersettingsrepo "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/postgres/usersettings"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/schema"
 	platformruntime "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/runtime"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
@@ -88,6 +91,7 @@ import (
 	mcphttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/mcp"
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
+	relayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/relay"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	sub2keyhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/sub2key"
@@ -408,6 +412,12 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	if bootstrap, seedErr := schema.EnsureBootstrapSuperAdmin(db); seedErr != nil {
+		return nil, fmt.Errorf("seed control-plane administrator: %w", seedErr)
+	} else if bootstrap != nil {
+		log.Warn("created initial control-plane administrator; store these credentials securely",
+			zap.String("email", bootstrap.Email), zap.String("username", bootstrap.Username), zap.String("password", bootstrap.Password))
+	}
 
 	redisClient, err := openCache(cfg)
 	if err != nil {
@@ -450,6 +460,9 @@ func NewApp() (*App, error) {
 
 	userRepo := userrepo.NewRepo(db)
 	userService := user.NewService(userRepo)
+	relayRepo := relayrepo.NewRepo(db)
+	relayService := apprelay.NewService(relayRepo)
+	relayModule := relayhttp.NewModule(relayService)
 	agentGatewayService, err := appagentgateway.NewService(agentgatewayrepo.NewRepo(db), cfg.DataEncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("init agent gateway service: %w", err)
@@ -486,10 +499,7 @@ func NewApp() (*App, error) {
 		Builtin: extractengines.Builtin{},
 	})
 	geoResolver := geoip.New(runtimeCfg.Snapshot())
-	sub2Client, err := sub2api.New(cfg.Sub2BaseURL, cfg.StrictOutboundPolicy())
-	if err != nil {
-		return nil, fmt.Errorf("init Sub2API client: %w", err)
-	}
+	sub2Client := sub2api.NewRegistry(relayRepo, cfg.StrictOutboundPolicy())
 	authService, err := auth.NewServiceWithRuntime(
 		runtimeCfg,
 		userRepo,
@@ -558,6 +568,7 @@ func NewApp() (*App, error) {
 		log,
 	)
 	conversationService.SetSub2ExecutionResolver(sub2KeyService)
+	conversationService.SetSub2EndpointResolver(sub2Client)
 	conversationService.SetGatewayExecutor(localGatewayAdapter{service: agentGatewayService})
 	agentGatewayService.SetConversationEventProjector(projectLocalGatewayEvent(conversationService))
 	conversationService.SetAuditWriter(auditService)
@@ -660,6 +671,7 @@ func NewApp() (*App, error) {
 		Settings:          settingsModule,
 		UserSettings:      userSettingsModule,
 		User:              userModule,
+		Relay:             relayModule,
 		Shutdown:          shutdownSignal,
 	}, hc, rateLimiter)
 	if err != nil {

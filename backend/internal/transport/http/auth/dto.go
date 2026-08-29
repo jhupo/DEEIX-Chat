@@ -53,6 +53,7 @@ type UpdateCurrentSessionLocationRequest struct {
 
 type UserResponse struct {
 	ID                    uint       `json:"id"`
+	AuthProvider          string     `json:"authProvider"`
 	PublicID              string     `json:"publicID"`
 	Username              string     `json:"username"`
 	DisplayName           string     `json:"displayName"`
@@ -195,7 +196,7 @@ type ActiveSessionResponseDoc struct {
 
 func toUserResponse(v userview.UserView) UserResponse {
 	return UserResponse{
-		ID: v.ID, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName,
+		ID: v.ID, AuthProvider: v.AuthProvider, PublicID: v.PublicID, Username: v.Username, DisplayName: v.DisplayName,
 		AvatarURL: v.AvatarURL, Email: v.Email, Role: v.Role, Status: v.Status,
 		Timezone: v.Timezone, Locale: v.Locale, ProfilePreferences: v.ProfilePreferences,
 		AppearancePreferences: v.AppearancePreferences, LastLoginAt: v.LastLoginAt,

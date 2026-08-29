@@ -113,6 +113,7 @@ export interface AdminPageDataAdminUserResponse {
 
 export interface AdminUserResponse {
   appearancePreferences: string;
+  authProvider: string;
   avatarURL: string;
   createdAt: string;
   displayName: string;
@@ -261,6 +262,7 @@ export interface AuthEventResponse {
 
 export interface AuthUserResponse {
   appearancePreferences: string;
+  authProvider: string;
   avatarURL: string;
   createdAt: string;
   displayName: string;
@@ -459,6 +461,43 @@ export interface CommandDoc {
 export interface CommandResponseDoc {
   data: CommandDoc;
   errorMsg: string;
+}
+
+export interface ConnectorDataResponseDoc {
+  data: ConnectorResponse;
+  errorMsg: string;
+}
+
+export interface ConnectorListResponseDoc {
+  data: ConnectorResponse[];
+  errorMsg: string;
+}
+
+export interface ConnectorRequest {
+  /** @maxLength 512 */
+  accountBaseURL: string;
+  /** @maxLength 65536 */
+  configJSON?: string;
+  enabled: boolean;
+  /** @maxLength 512 */
+  modelBaseURL?: string;
+  /** @maxLength 128 */
+  name: string;
+  protocol: "sub2api";
+}
+
+export interface ConnectorResponse {
+  accountBaseURL: string;
+  createdAt: string;
+  enabled: boolean;
+  id: number;
+  lastProbeAt?: string;
+  lastProbeError?: string;
+  modelBaseURL: string;
+  name: string;
+  protocol: string;
+  publicID: string;
+  updatedAt: string;
 }
 
 export interface ContentModerationCategoryCatalogResponse {
@@ -2194,6 +2233,13 @@ export interface RegisterWorkspaceRequest {
   profileId: string;
 }
 
+export interface RelayDeleteResponseDoc {
+  data: {
+    deleted: boolean;
+  };
+  errorMsg: string;
+}
+
 export interface RenameConversationRequest {
   /** @maxLength 255 */
   title: string;
@@ -2271,6 +2317,33 @@ export interface RevokeUserSessionsResponse {
 export interface RevokeUserSessionsResponseDoc {
   data: RevokeUserSessionsResponse;
   errorMsg: string;
+}
+
+export interface RouteDataResponseDoc {
+  data: RouteResponse;
+  errorMsg: string;
+}
+
+export interface RouteListResponseDoc {
+  data: RouteResponse[];
+  errorMsg: string;
+}
+
+export interface RouteRequest {
+  /** @maxLength 64 */
+  connectorID: string;
+  enabled: boolean;
+  /** @maxLength 255 */
+  hostname: string;
+}
+
+export interface RouteResponse {
+  connectorID: string;
+  createdAt: string;
+  enabled: boolean;
+  hostname: string;
+  id: number;
+  updatedAt: string;
 }
 
 export interface RunResponse {
@@ -5476,6 +5549,146 @@ export namespace Admin {
     export type RequestBody = PatchPromptPresetRequest;
     export type RequestHeaders = {};
     export type ResponseBody = PromptPresetResponseDoc;
+  }
+
+  /**
+   * @description Lists database-backed relay protocol connectors.
+   * @tags admin-relays
+   * @name RelaysConnectorsList
+   * @summary List relay connectors
+   * @request GET:/admin/relays/connectors
+   * @secure
+   */
+  export namespace RelaysConnectorsList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConnectorListResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysConnectorsCreate
+   * @summary Create a relay connector
+   * @request POST:/admin/relays/connectors
+   * @secure
+   */
+  export namespace RelaysConnectorsCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = ConnectorRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConnectorDataResponseDoc;
+  }
+
+  /**
+   * @description Deletes a connector that is not referenced by an inbound hostname route.
+   * @tags admin-relays
+   * @name RelaysConnectorsDelete
+   * @summary Delete a relay connector
+   * @request DELETE:/admin/relays/connectors/{id}
+   * @secure
+   */
+  export namespace RelaysConnectorsDelete {
+    export type RequestParams = {
+      /** Connector public ID */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = RelayDeleteResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysConnectorsPartialUpdate
+   * @summary Update a relay connector
+   * @request PATCH:/admin/relays/connectors/{id}
+   * @secure
+   */
+  export namespace RelaysConnectorsPartialUpdate {
+    export type RequestParams = {
+      /** Connector public ID */
+      id: string;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = ConnectorRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = ConnectorDataResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysRoutesList
+   * @summary List relay hostname routes
+   * @request GET:/admin/relays/routes
+   * @secure
+   */
+  export namespace RelaysRoutesList {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = RouteListResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysRoutesCreate
+   * @summary Create a relay hostname route
+   * @request POST:/admin/relays/routes
+   * @secure
+   */
+  export namespace RelaysRoutesCreate {
+    export type RequestParams = {};
+    export type RequestQuery = {};
+    export type RequestBody = RouteRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = RouteDataResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysRoutesDelete
+   * @summary Delete a relay hostname route
+   * @request DELETE:/admin/relays/routes/{id}
+   * @secure
+   */
+  export namespace RelaysRoutesDelete {
+    export type RequestParams = {
+      /** Route ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = never;
+    export type RequestHeaders = {};
+    export type ResponseBody = RelayDeleteResponseDoc;
+  }
+
+  /**
+   * No description
+   * @tags admin-relays
+   * @name RelaysRoutesPartialUpdate
+   * @summary Update a relay hostname route
+   * @request PATCH:/admin/relays/routes/{id}
+   * @secure
+   */
+  export namespace RelaysRoutesPartialUpdate {
+    export type RequestParams = {
+      /** Route ID */
+      id: number;
+    };
+    export type RequestQuery = {};
+    export type RequestBody = RouteRequest;
+    export type RequestHeaders = {};
+    export type ResponseBody = RouteDataResponseDoc;
   }
 
   /**

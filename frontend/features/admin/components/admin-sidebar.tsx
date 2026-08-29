@@ -21,6 +21,7 @@ import { useAuthSession } from "@/shared/auth/auth-session-context";
 const ADMIN_SECTION_LABEL_KEYS: Record<AdminSection, string> = {
   accounts: "sections.accounts",
   models: "sections.models",
+  relays: "sections.relays",
   groups: "sections.groups",
   "tool-settings": "sections.toolSettings",
   announcements: "sections.announcements",
@@ -61,10 +62,10 @@ export function AdminSidebar({
   );
   const updateRelease = resolveAvailableRelease(packageMeta.version, cachedLatestRelease);
   const visibleSections = React.useMemo(
-    () => user?.role === "superadmin"
+    () => user?.role === "superadmin" && user.authProvider === "local"
       ? ADMIN_SECTIONS
       : ADMIN_SECTIONS.filter((item) => item.id !== "content-moderation"),
-    [user?.role],
+    [user?.authProvider, user?.role],
   );
   const sectionLabel = React.useCallback(
     (id: AdminSection, fallback: string) => {

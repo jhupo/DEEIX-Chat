@@ -24,6 +24,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const accessTokenSessionClockSkew = 2 * time.Minute
@@ -139,6 +140,22 @@ func (s *Service) warn(msg string, fs ...zap.Field) {
 	}
 }
 func (s *Service) Login(ctx context.Context, email, password, turnstileToken, requestID string, audit requestmeta.SessionAuditContext) (*LoginResult, error) {
+	principal, lookupErr := s.repo.FindByLoginIdentifier(ctx, email)
+	if lookupErr != nil && !errors.Is(lookupErr, repository.ErrNotFound) {
+		return nil, lookupErr
+	}
+	if lookupErr == nil && principal != nil && principal.AuthProvider == domainuser.AuthProviderLocal {
+		if principal.Status != domainuser.StatusActive || bcrypt.CompareHashAndPassword([]byte(principal.PasswordHash), []byte(password)) != nil {
+			s.RecordAuthEvent(ctx, principal.ID, requestID, "login", "failure", "local_rejected", audit.ClientIP, audit.UserAgent, "")
+			return nil, ErrInvalidCredentials
+		}
+		result, issueErr := s.issueLoginResultWithSub2(ctx, principal, s.resolveSessionAuditContext(ctx, audit), time.Now(), nil)
+		if issueErr != nil {
+			return nil, issueErr
+		}
+		s.RecordAuthEvent(ctx, principal.ID, requestID, "login", "success", "", audit.ClientIP, audit.UserAgent, marshalAuthEventDetail(map[string]string{"authority": "local"}))
+		return result, nil
+	}
 	return s.loginWithSub2(ctx, email, password, turnstileToken, requestID, s.resolveSessionAuditContext(ctx, audit))
 }
 func (s *Service) issueLoginResultWithSub2(ctx context.Context, u *domainuser.User, audit requestmeta.SessionAuditContext, now time.Time, creds *sub2SessionCredentials) (*LoginResult, error) {
@@ -196,6 +213,12 @@ func (s *Service) GetVerifiedProfile(ctx context.Context, id uint, sid string) (
 	v, e := s.repo.GetSessionByUserAndSessionID(ctx, id, strings.TrimSpace(sid))
 	if e != nil {
 		return nil, e
+	}
+	if isLocalPrincipal(u) {
+		if !isActiveLocalPrincipal(u) || v.RevokedAt != nil || time.Now().After(v.ExpiresAt) {
+			return nil, ErrSessionRevoked
+		}
+		return u, nil
 	}
 	return s.verifySub2SessionProfile(ctx, u, v)
 }
@@ -311,7 +334,14 @@ func (s *Service) Refresh(ctx context.Context, raw, requestID string, a requestm
 	if e != nil {
 		return nil, e
 	}
-	refreshedUser, e := s.refreshSub2SessionProfile(ctx, u, v)
+	refreshedUser := u
+	if isLocalPrincipal(u) {
+		if !isActiveLocalPrincipal(u) {
+			return nil, ErrSessionRevoked
+		}
+	} else {
+		refreshedUser, e = s.refreshSub2SessionProfile(ctx, u, v)
+	}
 	if e != nil {
 		if errors.Is(e, ErrInvalidRefreshToken) || errors.Is(e, ErrInvalidCredentials) || errors.Is(e, ErrSessionRevoked) {
 			if revokeErr := s.repo.RevokeSession(ctx, u.ID, v.SessionID, "sub2_invalid_identity"); revokeErr != nil && !errors.Is(revokeErr, repository.ErrInvalidInput) {
@@ -352,6 +382,11 @@ func (s *Service) Logout(ctx context.Context, id uint, sid, requestID string, a 
 		return e
 	}
 	if r != "" {
+		if user, userErr := s.repo.GetByID(ctx, id); userErr == nil && isLocalPrincipal(user) {
+			r = ""
+		}
+	}
+	if r != "" {
 		_ = s.sub2.Logout(ctx, r)
 	}
 	s.RecordAuthEvent(ctx, id, requestID, "logout", "success", "", a.ClientIP, a.UserAgent, "")
@@ -372,8 +407,11 @@ func (s *Service) LogoutAll(ctx context.Context, id uint, requestID string, a re
 	if e := s.repo.RevokeAllSessions(ctx, id, "user_logout_all"); e != nil {
 		return e
 	}
-	for _, refreshToken := range refreshTokens {
-		_ = s.sub2.Logout(ctx, refreshToken)
+	user, userErr := s.repo.GetByID(ctx, id)
+	if userErr == nil && !isLocalPrincipal(user) {
+		for _, refreshToken := range refreshTokens {
+			_ = s.sub2.Logout(ctx, refreshToken)
+		}
 	}
 	s.RecordAuthEvent(ctx, id, requestID, "logout_all", "success", "", a.ClientIP, a.UserAgent, "")
 	return nil
@@ -392,7 +430,17 @@ func (s *Service) ValidateAccessSession(ctx context.Context, id uint, sid string
 	if v == nil || v.RevokedAt != nil || time.Now().After(v.ExpiresAt) || issued.Add(accessTokenSessionClockSkew).Before(v.CreatedAt) {
 		return nil, ErrSessionRevoked
 	}
-	u, e := s.ensureSub2Session(ctx, id, v)
+	u, e := s.repo.GetByID(ctx, id)
+	if e != nil {
+		return nil, e
+	}
+	if isLocalPrincipal(u) {
+		if !isActiveLocalPrincipal(u) {
+			return nil, ErrSessionRevoked
+		}
+	} else {
+		u, e = s.ensureSub2Session(ctx, id, v)
+	}
 	if e != nil {
 		return nil, e
 	}

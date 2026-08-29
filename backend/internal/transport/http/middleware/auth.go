@@ -86,6 +86,7 @@ func AuthMiddleware(jwtSecret string, validator SessionValidator) gin.HandlerFun
 			username = principal.Username
 			role = principal.Role
 			c.Set(ContextKeyUserPublicID, principal.PublicID)
+			c.Set(ContextKeyAuthProvider, principal.AuthProvider)
 		}
 		c.Set(ContextKeyUsername, username)
 		c.Set(ContextKeyUserRole, role)
@@ -110,6 +111,13 @@ func AdminOnly() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		provider, exists := c.Get(ContextKeyAuthProvider)
+		providerStr, providerOK := provider.(string)
+		if !exists || !providerOK || providerStr != domainuser.AuthProviderLocal {
+			response.Error(c, http.StatusForbidden, "control-plane administrator required")
+			c.Abort()
+			return
+		}
 
 		c.Next()
 	}
@@ -118,7 +126,7 @@ func AdminOnly() gin.HandlerFunc {
 // SuperAdminOnly restricts a route to the exact superadmin role.
 func SuperAdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if MustUserRole(c) != domainuser.RoleSuperAdmin {
+		if MustUserRole(c) != domainuser.RoleSuperAdmin || c.GetString(ContextKeyAuthProvider) != domainuser.AuthProviderLocal {
 			response.Error(c, http.StatusForbidden, "superadmin permission required")
 			c.Abort()
 			return

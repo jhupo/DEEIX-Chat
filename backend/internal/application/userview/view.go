@@ -8,6 +8,7 @@ import (
 
 type UserView struct {
 	ID                    uint
+	AuthProvider          string
 	PublicID              string
 	Username              string
 	DisplayName           string
@@ -27,7 +28,7 @@ type UserView struct {
 
 func FromUser(item domainuser.User) UserView {
 	return UserView{
-		ID: item.ID, PublicID: item.PublicID, Username: item.Username, DisplayName: item.DisplayName,
+		ID: item.ID, AuthProvider: item.AuthProvider, PublicID: item.PublicID, Username: item.Username, DisplayName: item.DisplayName,
 		AvatarURL: item.AvatarURL, Email: item.Email, Role: item.Role, Status: item.Status,
 		Timezone: item.Timezone, Locale: item.Locale, ProfilePreferences: item.ProfilePreferences,
 		AppearancePreferences: item.AppearancePreferences,

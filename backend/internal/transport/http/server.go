@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
+	portsub2api "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/buildinfo"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/lifecycle"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
@@ -28,6 +29,7 @@ import (
 	memoryhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/memory"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	promptpresethttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/promptpreset"
+	relayhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/relay"
 	settingshttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/settings"
 	skillhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/skill"
 	sub2keyhttp "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/sub2key"
@@ -73,6 +75,7 @@ type Modules struct {
 	Settings          *settingshttp.Module
 	User              *userhttp.Module
 	UserSettings      *usersettingshttp.Module
+	Relay             *relayhttp.Module
 	StartupLog        func(*zap.Logger)
 	Shutdown          *lifecycle.Shutdown
 }
@@ -106,6 +109,10 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	engine.Use(middleware.AccessLog(log))
 	engine.Use(middleware.SecurityHeaders())
 	engine.Use(middleware.CORS(snapshot.CORSAllowOrigin))
+	engine.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(portsub2api.WithRequestHost(c.Request.Context(), c.Request.Host))
+		c.Next()
+	})
 
 	engine.GET("/healthz", func(c *gin.Context) {
 		info := buildinfo.Snapshot()
@@ -194,7 +201,7 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	if modules.Settings != nil {
 		modules.Settings.RegisterRoutes(authRequired)
 	}
-	if modules.Admin != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil || modules.KnowledgeBase != nil || modules.ContentModeration != nil {
+	if modules.Admin != nil || modules.Billing != nil || modules.Channel != nil || modules.MCP != nil || modules.Settings != nil || modules.Announcement != nil || modules.PromptPreset != nil || modules.Skill != nil || modules.KnowledgeBase != nil || modules.ContentModeration != nil || modules.Relay != nil {
 		adminGroup := authRequired.Group("/admin")
 		adminGroup.Use(middleware.AdminOnly())
 		if modules.Admin != nil {
@@ -202,6 +209,9 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		}
 		if modules.ContentModeration != nil {
 			modules.ContentModeration.RegisterRoutes(adminGroup)
+		}
+		if modules.Relay != nil {
+			modules.Relay.RegisterRoutes(adminGroup)
 		}
 		if modules.Billing != nil {
 			modules.Billing.RegisterAdminRoutes(adminGroup)

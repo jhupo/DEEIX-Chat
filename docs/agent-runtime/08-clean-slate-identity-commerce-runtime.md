@@ -2,7 +2,7 @@
 
 > 状态：身份与会话基础、订阅页 commerce BFF、设置页默认 Chat key 与管理员模型目录已实现；Work/Bridge/Codex app-server Runtime 仍按本文后续阶段推进。
 >
-> 本文用于“不保留 DEEIX 本地账号密码、本地套餐、本地余额和本地计费兼容”的重构。
+> 本文用于“不保留 DEEIX 本地商业账户、本地套餐、本地余额和本地计费兼容”的重构；本地控制面 `superadmin` 仅用于部署配置，不是普通用户账户。
 > 它替代 [07-sub2api-account-and-billing.md](./07-sub2api-account-and-billing.md) 中的双 commerce authority 方案；
 > Agent/Bridge/app-server 协议仍以 01-05 文档为准。
 >
@@ -14,8 +14,8 @@
 **保留本地 `User`，删除本地商业账户。**
 
 浏览器 session、Conversation、Sub2 key binding、Agent device、workspace、thread、设置和审计都需要一个稳定的本地所有者 ID。
-这个 ID 只表示“谁可以访问这些资源”，不保存密码、余额、套餐或支付状态。登录由 DEEIX BFF 调用 Sub2 现有 REST auth API
-完成，本地只以 `(sub2_instance_id, sub2_user_id)` 建立或恢复 `User`。
+relay 用户的 ID 只表示“谁可以访问这些资源”，不保存 relay 密码、余额、套餐或支付状态；唯一例外是用于控制面登录的 local bootstrap superadmin bcrypt hash。登录由 DEEIX BFF 调用当前 Host 对应 relay 的 REST auth API
+完成，relay 用户以 `(relay_connector_public_id, sub2_user_id)` 建立或恢复 `User`；本地控制面管理员是独立的 local identity。
 
 **严格 clean-slate gate：** 启动迁移在任何 schema 或数据变更前检查旧本地 identity 数据。旧 `identity_users`、
 `identity_sessions` 缺少 Sub2 必需列但含有数据，或待删除的旧 identity 表含有数据时，迁移必须失败。运营方必须先备份现有
@@ -26,7 +26,7 @@ PostgreSQL，并使用新的 PostgreSQL database 或 volume；系统没有自动
 
 | 概念 | 权威 | 本地保存 |
 | --- | --- | --- |
-| 身份认证 | Sub2 现有 REST auth API | `User`、session、不可变 `(sub2_instance_id, sub2_user_id)`、加密 token ref |
+| 身份认证 | 当前入站域名对应的 relay REST auth API，或本地控制面账号 | `User`、session、不可变 `(relay_connector_public_id, sub2_user_id)`（本地账号除外）、加密 token ref |
 | 余额、冻结余额、订阅、usage、key 配额 | Sub2API | 页面请求时的脱敏 response；不作授权 |
 | Chat 执行资格与扣费 | Sub2 gateway | `Sub2KeyBinding`、Run pin、外部 request ID |
 | Codex model 调用资格与扣费 | 本机现有 Codex auth + Sub2 gateway | challenge proof、匹配的 remote key ID、脱敏 account projection |
@@ -64,7 +64,7 @@ DEEIX 不做额度预授权。
 
 ## 3. 登录与本地 User
 
-DEEIX 实现一个只面向固定 Sub2 实例的 BFF，复用当前版本已经存在的 JSON API：
+DEEIX 实现一个按入站 Host 选择 relay connector 的 BFF，复用当前版本已经存在的 JSON API：
 
 ```text
 POST /api/v1/auth/register
@@ -100,11 +100,8 @@ Sub2 access token调用 `/auth/me`，返回 User projection 与 DEEIX-owned sett
    challenge；Browser 看不到上游 token 明文，提交 TOTP 后由 BFF 调 Sub2 `/auth/login/2fa`。
 3. 成功响应必须同时包含 access token、refresh token 和正数 `expires_in`。DEEIX 随即调用 `/auth/me`，只接受 numeric user ID、
    `active` status 以及已知角色；失败时不创建 User/session，并 best-effort 登出已取得的上游 refresh token。
-4. 本地 natural key 是 `(sha256(canonical SUB2_BASE_URL), Sub2 user.id)`。`SUB2_BASE_URL` 是唯一 Sub2 部署配置，默认值为
-   `https://api.ovload.com`；没有可单独
-   配置的 `sub2_instance_id`、管理员白名单或 refresh TTL。email、头像与显示名只作 projection。
-5. Sub2 `admin` 实时映射为 DEEIX `superadmin`，Sub2 `user` 映射为 DEEIX `user`，未知角色拒绝登录。DEEIX 不创建 bootstrap
-   管理员，本地 admin mutation 也不能成为最终身份权威；middleware 从数据库中的最新 User 读取角色，不信任旧 JWT role claim。
+4. 本地 natural key 是 `(relay_connector_public_id, Sub2 user.id)`。中转连接器及入站域名由本地控制面数据库配置，浏览器不能提交上游地址；没有匹配域名的请求不会回退到默认中转。email、头像与显示名只作 projection。
+5. 首次启动创建本地控制面 `superadmin`，凭据只在启动日志中显示一次并以 bcrypt 哈希保存。中转 `admin` 仍映射为 DEEIX `superadmin` 仅用于用户身份投影，但中转身份不能访问本地控制面；只有本地 `superadmin` 可以变更连接器、域名和模型目录。middleware 从数据库中的最新 User 读取角色，不信任旧 JWT role claim。
 6. 每个 DEEIX browser session 独立保存自己的 Sub2 access/refresh token 密文和 access expiry，不跨设备共享 token family。
    DEEIX refresh 先校验当前本地 refresh hash，再串行调用 Sub2 `/auth/refresh`，持久化新上游 pair 后轮换本地 token。
 7. `/api/v1/me` 每次实时复核 Sub2；其他受保护请求最多使用一分钟的最近复核结果。access 失效时尝试服务端 refresh；Sub2
@@ -112,7 +109,7 @@ Sub2 access token调用 `/auth/me`，返回 User projection 与 DEEIX-owned sett
    Sub2 `/auth/logout`。用户 logout-all 先快照其活跃本地 session，并对快照中的每个 session 执行同一顺序。管理员 session revoke
    只以本地 session 为权威，不声称或尝试安全地撤销未知的上游 session。
 
-BFF 只请求 `SUB2_BASE_URL` 下代码内固定的 allowlisted path，拒绝 Browser 提交 upstream URL。origin 必须是无 credentials、path、
+BFF 只请求当前 Host 映射连接器下代码内固定的 allowlisted path，拒绝 Browser 提交 upstream URL。连接器 origin 必须是无 credentials、path、
 query、fragment 的 HTTP(S) origin，生产环境必须使用 HTTPS；跨 origin redirect 被拒绝，response body 有严格大小上限。
 
 注册页面同样保持现有样式和两步交互：发送验证码时由 DEEIX 转发 `/auth/send-verify-code`，完成注册时转发 `/auth/register`，
@@ -144,30 +141,30 @@ password 登录/注册、登录时的 TOTP challenge、`/me` projection、Sub2 p
 保留 `/setting/account`、`/setting/general` 的 profile、password、active-session、timezone、locale 与 conversation preference 组件。
 页面不是本地账户域的理由：一个页面可以由多个具体 handler 提供数据。不得删除页面或再造 account UI。
 
-| DEEIX surface | 目标实现 | 固定 Sub2 source evidence |
+| DEEIX surface | 目标实现 | relay connector source evidence |
 | --- | --- | --- |
 | `GET /api/v1/me`、profile display | User/session projection 加 server-side `GET /api/v1/auth/me`；同源 BFF DTO 不含 `subscriptionTier`、本地余额和本地 2FA 权威字段 | DEEIX `backend/internal/transport/http/auth/handler.go` |
 | password interaction | password page BFF 到 `PUT /api/v1/me/password`；只映射已验证的 field/DTO，保留现有 validation/error presentation | DEEIX `backend/internal/transport/http/auth/router.go` |
 | login TOTP challenge | 仅在 `/api/v1/auth/login` 返回 challenge 后，由 `POST /api/v1/auth/login/2fa` 完成登录；没有账户内的 TOTP 管理界面或 route | DEEIX `backend/internal/transport/http/auth/router.go` |
-| account credential controls | 没有本地邮箱绑定、WebAuthn、第三方身份、账户初始化或账户删除 flow | DEEIX `backend/internal/transport/http/auth/router.go` |
+| account credential controls | 没有普通用户本地注册、邮箱绑定、WebAuthn、第三方身份或账户删除 flow；bootstrap superadmin 只通过首次启动生成 | DEEIX `backend/internal/transport/http/auth/router.go` |
 | `GET /api/v1/auth/sessions` and session revoke/location UI | DEEIX `identity_sessions` only. These are browser sessions issued by DEEIX, so the current session page/route remains concrete local ownership/security behavior and never becomes a Sub2 credential or admin session | DEEIX `backend/internal/transport/http/auth/router.go` |
 | displayName、timezone、locale、appearance/conversation preferences | 保留 DEEIX-owned User settings 和 `/api/v1/user/settings`; locally write these fields under User ownership, separately from upstream profile mutation | DEEIX `frontend/features/settings/**`, `frontend/shared/api/user-settings.ts` |
 
 `PATCH /api/v1/me` 只写入 DEEIX `displayName`、timezone、locale、appearance/conversation preferences。它不接受
-`subscriptionTier`、balance、credential 或任意 upstream profile patch。当前没有本地 email、TOTP、安全验证、身份提供方、账户初始化或账户删除 repository、DTO、handler 或页面流程。
+`subscriptionTier`、balance、credential 或任意 upstream profile patch。普通用户没有本地 email、TOTP、安全验证、身份提供方、账户创建或账户删除流程；local superadmin 仅保留用于控制面登录和改密的 bcrypt hash。
 
 ## 4. 订阅、充值与记录页面
 
 保留 `/setting/subscription` 路由以及现有 plan cards、`TopUpDialog`、`RedemptionDialog`、余额、用量图表和记录表的视觉实现。页面仍调用
 DEEIX 的 `/api/v1/billing/*`；这些 route 是面向 Web 的 anti-corruption/BFF contract，后端实现改为使用当前 User 的 server-side
-Sub2 access token 调用固定 Sub2 实例。DEEIX 不再保存或计算套餐、余额、订单、兑换、订阅和金融流水。
+Sub2 access token 调用当前 Host 映射的 relay connector。DEEIX 不再保存或计算套餐、余额、订单、兑换、订阅和金融流水。
 
 进入页面立即读取一次，支付/兑换完成后刷新相关区块，用户也可以手动刷新。不运行定时 sync worker，不写数据库/Redis commerce cache，
 也不以本地 snapshot 代替 Sub2 响应。所有读响应带 `observedAt` 并使用 `Cache-Control: no-store`。
 
 ### 4.1 现有 DEEIX API 到 Sub2 的映射
 
-| DEEIX Web API | 固定 Sub2 API | 页面用途 |
+| DEEIX Web API | 当前 relay connector 的 Sub2 API | 页面用途 |
 | --- | --- | --- |
 | `GET /api/v1/billing/config` | `GET /api/v1/payment/checkout-info` | 支付方式、限额、开关和帮助信息；支付方式由响应驱动，不硬编码 provider union |
 | `GET /api/v1/billing/plans` | `GET /api/v1/payment/plans` | 套餐卡；remote `plan.id` 只作购买引用 |
@@ -205,7 +202,7 @@ Sub2 当前创建订单 contract 没有客户端 idempotency key 或 Browser 可
 
 ### 4.3 “账单流水”的准确含义
 
-固定 Sub2 版本没有统一 wallet transaction/ledger 用户 API。页面记录区因此按四类真实来源展示：支付订单
+当前 relay connector 的 Sub2 版本没有统一 wallet transaction/ledger 用户 API。页面记录区因此按四类真实来源展示：支付订单
 `/payment/orders/my`、兑换记录 `/redeem/history`、订阅 `/subscriptions`、模型用量 `/usage`。它们可以共用现有表格样式和筛选器，
 但不合成为一条带推算期初/期末余额的权威钱包流水。余额卡始终读取 `/user/profile`；若以后 Sub2 增加统一 ledger route，再只替换
 BFF mapping。
@@ -278,8 +275,8 @@ known_token_usage
 ```
 
 在设置页切换 key 或 rotate 只影响新 Run。Run 开始时 binding 不属于当前 user、状态失效、remote key 不可用或请求模型不在
-DEEIX 管理员目录/权限范围时 fail closed；不改用另一把 key。Conversation service 从 secret store 解析 key，直接以 deployment-fixed
-Sub2 base URL 请求模型端点。
+DEEIX 管理员目录/权限范围时 fail closed；不改用另一把 key。Conversation service 从 secret store 解析 key，并通过当前入站
+Host 映射的 relay connector 请求模型端点；不存在有效域名路由时直接失败。
 不调用本地 `AuthorizeUsage`，不写本地金融 ledger；Sub2 返回的额度错误是执行结果。
 
 ## 6. 本地连接的 Codex Runtime
@@ -365,7 +362,7 @@ Cloud 收到 proof 后，使用当前 User 的 Sub2 access token 实时读取 `/
 身份鉴权语义的候选项：`active`、`expired`、`quota_exhausted`；`disabled` 与未知状态拒绝。`expired` 和
 `quota_exhausted` 只用于证明 key 归属，实际模型请求仍由 Sub2 返回订阅或额度错误。对每个候选 raw key 计算相同 HMAC，使用常量时间比较并要求恰好一个匹配；随后立即丢弃 response 中的所有 raw keys，
 只保存 matched `remote_key_id`、server-keyed credential fingerprint、challenge hash、验证时间和短时 lease expiry。proof 自身不落库。
-这同时证明本地持有的 key 出现在**当前登录用户、当前固定 Sub2 instance** 的 key 集合中；另一个 Sub2 实例或另一用户的 key
+这同时证明本地持有的 key 出现在**当前登录用户、当前 relay connector** 的 key 集合中；另一个 relay connector 或另一用户的 key
 不会匹配。
 
 该方案依赖本地 DEEIX 客户端能以只读方式取得 Codex 当前 API key。stock app-server 的 `account/read` 不暴露 key，因此 Agent 先用
@@ -392,7 +389,7 @@ clean-slate commerce 侧需要以下事实；不是为“多 provider”预建�
 
 | 表 | 责任与关键约束 |
 | --- | --- |
-| `identity_users` | 复用现有表；`id/public_id`、immutable `sub2_instance_id/sub2_user_id`、display projection、由实时 Sub2 role 映射的 `user/superadmin`、status；unique `(sub2_instance_id, sub2_user_id)`。 |
+| `identity_users` | 复用现有表；relay 用户保存 `id/public_id`、immutable `relay_connector_id/sub2_instance_id/sub2_user_id`、display projection、由实时 relay role 映射的 `user/superadmin`；local bootstrap superadmin 保存 bcrypt hash；relay subject unique `(sub2_instance_id, sub2_user_id)`。 |
 | `identity_sessions` | 复用现有表；DEEIX refresh hash、user、expiry/revocation，以及该 browser session 独占的 encrypted Sub2 access/refresh token、access expiry 和最近身份复核时间。 |
 | `sub2_key_bindings` | **Chat only**；public ID、user/account、remote key ID、encrypted key ref、keyed fingerprint、mask/meta、status/version；unique `(user_id, remote_key_id)`，active fingerprint unique。 |
 | `sub2_payment_operations` | create-order 的非权威 safety/idempotency evidence：opaque operation ID、user、idempotency key/hash、`prepared/send_started/completed_success/outcome_unknown`、记录时间和 optional remote order ID；无金额、余额、provider/paid/ledger 或 response body。 |
@@ -459,19 +456,19 @@ Agent device 离线时历史 projection 仍可读，新 command 显示 `waiting_
   保留为具体 Sub2 commerce BFF；
 - 本地套餐/支付配置管理界面与本地钱包流水语义；现有 plan cards、支付/充值/兑换 dialogs、余额、订阅、用量和记录 UI 保留并改接 BFF；
 - 从本地套餐推导 Chat 模型资格的逻辑，以及按 key 调用 Sub2 `/v1/models` 的目录路径；模型资格只由 DEEIX 管理员发布目录与权限组决定；
-- `User.subscriptionTier`、本地余额、password/2FA/email verification 等本地账户字段和流程；只保留经验证的 Sub2 BFF mapping 与 DEEIX browser-session security。
+- `User.subscriptionTier`、本地余额、普通用户 password/2FA/email verification 等本地账户字段和流程；只保留经验证的 relay BFF mapping、bootstrap control-plane credential 与 DEEIX browser-session security。
 - local TOTP recovery-code issue/regenerate DTO/backend branches，以及 usage 的 `balanceAfter`、local pricing snapshot/tooltips 和本地推算金额；保留 UI shell 时只显示有 Sub2 事实的字段。
 
 保留 Conversation/Message/Run 内容历史、文件/RAG、Chat UI、Agent 全套 projection、admin model presentation allowlist，以及订阅页的
 套餐购买、充值、兑换、余额、订阅、订单/兑换/用量记录入口。保留 DEEIX admin 的 User/session/Agent ownership views，但删除
 本地 balance/plan/payment configuration、refund、redemption-code、password/2FA reset 等管理 mutation。Sub2 的套餐与支付管理仍在
-Sub2 admin；DEEIX 管理端只提供跳转或只读状态，不持有 Sub2 admin credential，也不代理 Sub2 admin mutation。
+relay admin；DEEIX 管理端不持有 relay admin credential，也不代理 relay admin mutation。只有 local bootstrap superadmin 可以变更 DEEIX 控制面配置。
 历史金融数据若无需兼容，仅做一次离线归档后删除，不在运行时代码保留双读。
 
 ## 11. 必须保持的安全与恢复规则
 
 - 所有 Browser public ID 都先做 user ownership 校验；remote key ID 不能作为 ownership 证明。
-- 登录 password、CAPTCHA proof 和 TOTP 只存在于当前请求内，不进日志、DB、Redis、trace、idempotency payload 或 retry queue。
+- relay 登录 password、CAPTCHA proof 和 TOTP 只存在于当前请求内，不进日志、DB、Redis、trace、idempotency payload 或 retry queue；local bootstrap 只保存 bcrypt hash。
 - Sub2 2FA temp token 只以短时加密 challenge 进入 Browser；Sub2 access/refresh pair 只在 `/auth/me` active/role 复核后写入 session 密文列。
 - Browser unsafe request 继续使用短时 DEEIX Bearer access token；refresh cookie 为 `HttpOnly`、`Secure`（生产）和 `SameSite=Lax`，Sub2 bearer 从不进入 Browser。
 - Sub2 account access/refresh token 与被选择的 Chat API key 仅 server-side encrypted storage；三者均不进入 Browser、Bridge、WSS 或日志。
@@ -481,7 +478,7 @@ Sub2 admin；DEEIX 管理端只提供跳转或只读状态，不持有 Sub2 admi
 - checkout 只接受 allowlisted operation/method、有效 plan ref 或通过 decimal 校验的充值金额；return URL 固定同源，支付跳转只允许校验后的 HTTPS URL。
 - 创建订单不做透明网络重试；所有订单查询、取消、退款申请和校验都绑定当前 User 的 Sub2 access token，Browser remote ID 不作 ownership 证明。
 - create-order 使用 `sub2_payment_operations` 的 durable `prepared -> send_started` boundary；仅完整成功 response 的 returned order ID 关联，`send_started` 后的不确定结果不重放也不从订单列表绑定；该 row 不是 commerce cache/authority。
-- 普通 logout 仅处理当前 session；用户 logout-all 先快照活跃 session，并对每个快照 session 先完成本地吊销与 token 密文清理，再 best-effort 调对应的 Sub2 `/auth/logout`。管理员 session revoke 是本地权威操作，不宣称或执行上游 logout；只有 `SUB2_BASE_URL` 一个 Sub2 部署参数。
+- 普通 logout 仅处理当前 session；用户 logout-all 先快照活跃 session，并对每个快照 session 先完成本地吊销与 token 密文清理，再 best-effort 调对应连接器的 Sub2 `/auth/logout`。管理员 session revoke 是本地权威操作，不宣称或执行上游 logout；连接器配置由本地控制面数据库管理。
 - Chat key binding create/delete 使用 `Idempotency-Key` 和 durable operation；runtime auth proof 使用一次性 nonce、canonical encoding、device/profile binding、expiry 和 HMAC 防重放。
 - proof verifier 每次从 Sub2 实时读取当前用户 keys，常量时间比较后立即丢弃 raw keys/proof；DB 只存 matched remote key ID 与 keyed fingerprint。
 - Run 先持久化 binding/version/model pin，再解析 key 并调用 Sub2；AgentTurn 记录有效 runtime auth-proof ref；外部 request ID 用于结果关联。
@@ -508,10 +505,10 @@ code、source request ref 与 auth-proof ref，不保存 Chat binding；两者�
 
 ### Phase 1 - identity foundation（已落地）
 
-已实现固定 Sub2 REST client、login/2FA、注册验证码/complete、refresh/logout/me/password change、Sub2 subject 唯一映射、per-session token 密文、
-实时 role/status 复核以及 `SUB2_BASE_URL` 的 origin/HTTPS/redirect 校验。登录/注册保留原有视觉结构，但删除 DEEIX 本地密码重置、邮箱变更、
+已实现连接器注册表驱动的 Sub2 REST client、login/2FA、注册验证码/complete、refresh/logout/me/password change、Sub2 subject 唯一映射、per-session token 密文、
+实时 role/status 复核以及连接器 origin/HTTPS/redirect 校验。登录/注册保留原有视觉结构；普通 relay 用户不提供 DEEIX 本地密码重置、邮箱变更、
 TOTP 设置、OAuth/provider binding、账户删除和初始安全引导。账户页只保留 Sub2 投影、改密和 DEEIX session 管理；管理端用户页只读展示
-Sub2 投影并可吊销 DEEIX session。生产装配不再执行 bootstrap superadmin；目标 schema 不包含 identity provider/credential/MFA/
+Sub2 投影并可吊销 DEEIX session。生产装配会在首次启动时创建本地 bootstrap superadmin；目标 schema 不包含普通用户 identity provider/MFA/
 verification/trusted-device 表或 `identity_users` 上的旧身份列。验收覆盖 client request/response、跨 origin redirect、配置校验、角色映射、
 2FA challenge 加密、旧路由不可达、旧表清理和现有 session 回归。
 
@@ -561,7 +558,7 @@ create-order 不重放，也不从列表猜测绑定 remote order。
 
 | 结论 | 源码依据 | 目标处理 |
 | --- | --- | --- |
-| DEEIX 现有本地登录、2FA、密码、provider login/session 是完整本地账户域 | DEEIX `backend/internal/transport/http/auth/router.go`、`backend/internal/application/auth/service.go` | clean-slate 删除本地 credential 流程，只保留 User、session 与 ownership |
+| DEEIX 现有本地登录、2FA、密码、provider login/session 是完整本地账户域 | DEEIX `backend/internal/transport/http/auth/router.go`、`backend/internal/application/auth/service.go` | relay 用户继续使用 connector BFF；仅保留首次启动生成的 local bootstrap credential、User、session 与 ownership |
 | DEEIX profile/general/account 页面混合 identity、session、displayName、timezone 和 conversation preferences | DEEIX `frontend/app/(project)/setting/{account,general}/page.tsx`、`frontend/shared/api/auth.ts`、`frontend/shared/api/user-settings.ts` | 保留页面和 components；displayName/avatar/timezone/locale/appearance/notification/conversation preferences 都由 DEEIX User/session/preferences handlers 本地管理，已有值在 Sub2 复核时保留 |
 | DEEIX active-session UI 管理自己的 browser session | DEEIX `backend/internal/transport/http/auth/router.go`: `/auth/sessions*` | `identity_sessions` 继续支持现有 session list/revoke/location interaction；它不代表 Sub2 credential/session |
 | DEEIX provider token DTO 目前只有 access token/token type/id token，不保留 refresh/expiry/scope | DEEIX `backend/internal/application/auth/provider.go` 的 `oauthTokenResponse` | 不复用 provider bridge；实现专用 Sub2 REST auth BFF 与 encrypted token store |
