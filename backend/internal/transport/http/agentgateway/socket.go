@@ -204,13 +204,13 @@ func (h *Handler) connect(w http.ResponseWriter, request *http.Request) {
 				_ = connection.Close()
 				return
 			}
-			h.serveBridge(connection, identity)
+			h.serveBridge(request.Context(), connection, identity)
 		},
 	}
 	server.ServeHTTP(w, request)
 }
 
-func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.ConnectionIdentity) {
+func (h *Handler) serveBridge(baseContext context.Context, connection *websocket.Conn, identity *appagent.ConnectionIdentity) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(bridgeHelloTimeout))
 	var hello bridgeFrame
@@ -220,7 +220,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		_ = connection.Close()
 		return
 	}
-	ctx, cancel := socketRuntimeAuthContext()
+	ctx, cancel := socketRuntimeAuthContext(baseContext)
 	challenge, err := h.service.BeginRuntimeProof(ctx, identity, hello.ProfileID)
 	cancel()
 	if err != nil {
@@ -251,7 +251,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 		h.rejectBridge(connection, identity, "runtime_proof_invalid", "The runtime proof frame is invalid.", err)
 		return
 	}
-	ctx, cancel = socketRuntimeAuthContext()
+	ctx, cancel = socketRuntimeAuthContext(baseContext)
 	leaseExpiresAt, err := h.service.CompleteRuntimeProof(ctx, identity, challenge, proof.Proof, proof.Manifest)
 	cancel()
 	if err != nil {
@@ -269,20 +269,20 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	for _, workspace := range proof.Workspaces {
 		registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Managed, Hidden: workspace.Hidden, Revision: workspace.Revision})
 	}
-	ctx, cancel = socketRuntimeAuthContext()
+	ctx, cancel = socketRuntimeAuthContext(baseContext)
 	err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)
 	cancel()
 	if err != nil {
 		h.rejectBridge(connection, identity, "workspace_sync_rejected", "The local workspace list was rejected.", err)
 		return
 	}
-	ctx, cancel = socketRuntimeAuthContext()
+	ctx, cancel = socketRuntimeAuthContext(baseContext)
 	err = h.service.FlushPendingConversationEvents(ctx, identity)
 	cancel()
 	if err != nil {
 		log.Printf("agent bridge projection deferred device=%s: %v", identity.DeviceID, err)
 	}
-	ctx, cancel = socketRuntimeAuthContext()
+	ctx, cancel = socketRuntimeAuthContext(baseContext)
 	leaseExpiresAt, err = h.service.RenewRuntimeLease(ctx, identity, challenge.Profile.ID)
 	cancel()
 	if err != nil {
@@ -299,7 +299,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	wake, cleanup := h.hub.replace(identity.UserID, identity.DeviceID, connection)
 	defer cleanup()
 
-	ctx, cancel = socketOperationContext()
+	ctx, cancel = socketOperationContext(baseContext)
 	err = h.service.AckServerCommands(ctx, identity, hello.AckServerSeq)
 	cancel()
 	if err != nil {
@@ -316,7 +316,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 	}); err != nil {
 		return
 	}
-	sentThrough, err := h.sendCommands(connection, identity, identity.LastAckedServerSeq)
+	sentThrough, err := h.sendCommands(baseContext, connection, identity, identity.LastAckedServerSeq)
 	if err != nil {
 		return
 	}
@@ -335,7 +335,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				continue
 			}
 			_ = connection.SetDeadline(nextBridgeDeadline(leaseExpiresAt))
-			sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+			sentThrough, err = h.sendCommands(baseContext, connection, identity, sentThrough)
 			if err != nil {
 				return
 			}
@@ -356,7 +356,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				if !validPingFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext()
+				ctx, cancel = socketOperationContext(baseContext)
 				leaseExpiresAt, err = h.service.RenewRuntimeLease(ctx, identity, challenge.Profile.ID)
 				cancel()
 				if err != nil {
@@ -369,7 +369,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					return
 				}
 				if sentThrough == identity.LastAckedServerSeq {
-					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					sentThrough, err = h.sendCommands(baseContext, connection, identity, sentThrough)
 					if err != nil {
 						return
 					}
@@ -378,7 +378,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				if !validServerAckFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext()
+				ctx, cancel = socketOperationContext(baseContext)
 				err = h.service.AckServerCommands(ctx, identity, frame.AckServerSeq)
 				cancel()
 				if frame.AckServerSeq == 0 || err != nil {
@@ -388,7 +388,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					identity.LastAckedServerSeq = frame.AckServerSeq
 				}
 				if identity.LastAckedServerSeq == sentThrough {
-					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					sentThrough, err = h.sendCommands(baseContext, connection, identity, sentThrough)
 					if err != nil {
 						return
 					}
@@ -397,7 +397,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				if !validTerminalFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext()
+				ctx, cancel = socketOperationContext(baseContext)
 				acknowledged, err := h.service.ApplyTerminalFrame(
 					ctx, identity, frame.BridgeSeq, frame.ServerSeq, frame.CommandID, frame.Outcome,
 				)
@@ -415,7 +415,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					return
 				}
 				if sentThrough == identity.LastAckedServerSeq {
-					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					sentThrough, err = h.sendCommands(baseContext, connection, identity, sentThrough)
 					if err != nil {
 						return
 					}
@@ -424,7 +424,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				if !validEventFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext()
+				ctx, cancel = socketOperationContext(baseContext)
 				acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
 				cancel()
 				if err != nil && !errors.Is(err, appagent.ErrProjectionDeferred) {
@@ -447,7 +447,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 				for _, workspace := range frame.Workspaces {
 					registrations = append(registrations, appagent.WorkspaceRegistration{WorkspaceID: workspace.WorkspaceID, Name: workspace.Name, Managed: workspace.Managed, Hidden: workspace.Hidden, Revision: workspace.Revision})
 				}
-				ctx, cancel = socketRuntimeAuthContext()
+				ctx, cancel = socketRuntimeAuthContext(baseContext)
 				err = h.service.SyncWorkspaces(ctx, identity, challenge, registrations)
 				cancel()
 				if err != nil {
@@ -455,7 +455,7 @@ func (h *Handler) serveBridge(connection *websocket.Conn, identity *appagent.Con
 					return
 				}
 				if sentThrough == identity.LastAckedServerSeq {
-					sentThrough, err = h.sendCommands(connection, identity, sentThrough)
+					sentThrough, err = h.sendCommands(baseContext, connection, identity, sentThrough)
 					if err != nil {
 						return
 					}
@@ -635,8 +635,8 @@ func validProfileID(value string) bool {
 	return true
 }
 
-func (h *Handler) sendCommands(connection *websocket.Conn, identity *appagent.ConnectionIdentity, after uint64) (uint64, error) {
-	ctx, cancel := socketOperationContext()
+func (h *Handler) sendCommands(baseContext context.Context, connection *websocket.Conn, identity *appagent.ConnectionIdentity, after uint64) (uint64, error) {
+	ctx, cancel := socketOperationContext(baseContext)
 	defer cancel()
 	items, err := h.service.CommandsForDelivery(ctx, identity, after)
 	if err != nil {
@@ -644,7 +644,7 @@ func (h *Handler) sendCommands(connection *websocket.Conn, identity *appagent.Co
 	}
 	sentThrough := after
 	for _, item := range items {
-		ctx, cancel = socketOperationContext()
+		ctx, cancel = socketOperationContext(baseContext)
 		err = h.service.MarkCommandDelivered(ctx, identity, item.InternalID)
 		cancel()
 		if err != nil {
@@ -669,12 +669,12 @@ func (h *Handler) sendCommands(connection *websocket.Conn, identity *appagent.Co
 	return sentThrough, nil
 }
 
-func socketOperationContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 5*time.Second)
+func socketOperationContext(baseContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(baseContext, 5*time.Second)
 }
 
-func socketRuntimeAuthContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Second)
+func socketRuntimeAuthContext(baseContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(baseContext, 30*time.Second)
 }
 
 func connectionToken(protocols []string) (string, error) {

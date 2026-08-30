@@ -14,6 +14,7 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/secretbox"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/pkg/token"
+	portsub2api "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
@@ -48,6 +49,23 @@ type sessionReadErrorRepo struct {
 	repository.AuthRepository
 	user *domainuser.User
 	err  error
+}
+
+type contextualSub2TestClient struct {
+	portsub2api.Client
+	instanceID   string
+	verifyCalled bool
+}
+
+func (c *contextualSub2TestClient) InstanceID() string { return "registry" }
+
+func (c *contextualSub2TestClient) InstanceIDForContext(context.Context) string {
+	return c.instanceID
+}
+
+func (c *contextualSub2TestClient) VerifyLogin2FA(context.Context, string, string) (*portsub2api.TokenPair, error) {
+	c.verifyCalled = true
+	return nil, errors.New("unexpected upstream verification")
 }
 
 type runtimeAccessTokenRepo struct {
@@ -633,7 +651,7 @@ func TestSessionKeyedLock(t *testing.T) {
 
 func TestSub2ChallengeIsEncryptedAndExpires(t *testing.T) {
 	service := &Service{cfg: config.NewRuntime(config.Config{DataEncryptionKey: "test-data-encryption-key-value-32"})}
-	sealed, err := service.sealSub2Challenge("upstream-temp-token")
+	sealed, err := service.sealSub2Challenge("upstream-temp-token", "relay-1")
 	if err != nil {
 		t.Fatalf("sealSub2Challenge() error = %v", err)
 	}
@@ -647,9 +665,33 @@ func TestSub2ChallengeIsEncryptedAndExpires(t *testing.T) {
 	if opened.TempToken != "upstream-temp-token" {
 		t.Fatalf("openSub2Challenge() temp token = %q", opened.TempToken)
 	}
+	if opened.ConnectorID != "relay-1" {
+		t.Fatalf("openSub2Challenge() connector = %q", opened.ConnectorID)
+	}
 
 	_, err = service.openSub2Challenge("invalid")
 	if !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("openSub2Challenge(invalid) error = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+func TestSub2ChallengeCannotCrossConnectors(t *testing.T) {
+	client := &contextualSub2TestClient{instanceID: "relay-1"}
+	service := &Service{
+		cfg:  config.NewRuntime(config.Config{DataEncryptionKey: "test-data-encryption-key-value-32"}),
+		sub2: client,
+	}
+	sealed, err := service.sealSub2Challenge("upstream-temp-token", "relay-1")
+	if err != nil {
+		t.Fatalf("sealSub2Challenge() error = %v", err)
+	}
+	client.instanceID = "relay-2"
+
+	_, err = service.VerifyLoginTwoFactor(context.Background(), sealed, "123456", "", requestmeta.SessionAuditContext{})
+	if !errors.Is(err, ErrTwoFactorChallengeExpired) {
+		t.Fatalf("VerifyLoginTwoFactor() error = %v, want %v", err, ErrTwoFactorChallengeExpired)
+	}
+	if client.verifyCalled {
+		t.Fatal("VerifyLoginTwoFactor() called the wrong connector")
 	}
 }

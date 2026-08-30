@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
-
-import { useAuthSession } from "@/shared/auth/auth-session-context";
+import {
+  isUsableChatKeyBinding,
+  resolveDefaultChatKeyBinding,
+} from "@/features/chat/hooks/chat-key-binding-validity";
 import {
   createSub2KeyBinding,
   deleteSub2KeyBinding,
@@ -11,10 +13,7 @@ import {
   type Sub2KeyBindingDTO,
   type Sub2RemoteKeyDTO,
 } from "@/shared/api/sub2-key";
-import {
-  isUsableChatKeyBinding,
-  resolveDefaultChatKeyBinding,
-} from "@/features/chat/hooks/chat-key-binding-validity";
+import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { createIdempotencyKey } from "@/shared/lib/idempotency-key";
 import {
   loadUserSettingsSnapshot,
@@ -24,7 +23,8 @@ import {
 const DEFAULT_KEY_SETTING = "chat.default_sub2_key_binding_id";
 
 export function useChatKeyBindings() {
-  const { accessToken } = useAuthSession();
+  const { accessToken, user, userStatus } = useAuthSession();
+  const relayAvailable = userStatus === "ready" && user?.authProvider === "relay";
   const [remoteKeys, setRemoteKeys] = React.useState<Sub2RemoteKeyDTO[]>([]);
   const [bindings, setBindings] = React.useState<Sub2KeyBindingDTO[]>([]);
   const [selectedKeyBindingID, setSelectedKeyBindingID] = React.useState("");
@@ -48,7 +48,7 @@ export function useChatKeyBindings() {
   const refresh = React.useCallback(async () => {
     const requestID = requestRef.current + 1;
     requestRef.current = requestID;
-    if (!accessToken) {
+    if (!accessToken || !relayAvailable) {
       setRemoteKeys([]);
       setBindings([]);
       applySelection("");
@@ -78,12 +78,12 @@ export function useChatKeyBindings() {
     } finally {
       if (requestID === requestRef.current) setLoading(false);
     }
-  }, [accessToken, applySelection, persistSelection]);
+  }, [accessToken, applySelection, persistSelection, relayAvailable]);
 
   React.useEffect(() => { void refresh(); }, [refresh]);
 
   const select = React.useCallback(async (remoteKeyID: number) => {
-    if (!accessToken) return;
+    if (!accessToken || !relayAvailable) return;
     const requestID = requestRef.current + 1;
     requestRef.current = requestID;
     setLoading(true);
@@ -99,10 +99,10 @@ export function useChatKeyBindings() {
     } finally {
       if (requestID === requestRef.current) setLoading(false);
     }
-  }, [accessToken, bindings, persistSelection]);
+  }, [accessToken, bindings, persistSelection, relayAvailable]);
 
   const remove = React.useCallback(async (publicID: string) => {
-    if (!accessToken) return;
+    if (!accessToken || !relayAvailable) return;
     const requestID = requestRef.current + 1;
     requestRef.current = requestID;
     setLoading(true);
@@ -121,7 +121,7 @@ export function useChatKeyBindings() {
     } finally {
       if (requestID === requestRef.current) setLoading(false);
     }
-  }, [accessToken, bindings, persistSelection, refresh]);
+  }, [accessToken, bindings, persistSelection, refresh, relayAvailable]);
 
   const selectedRemoteKey = React.useMemo(() => {
     const remoteKeyID = bindings.find((binding) => binding.publicID === selectedKeyBindingID)?.remoteKeyID;

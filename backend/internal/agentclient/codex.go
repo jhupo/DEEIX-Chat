@@ -351,11 +351,17 @@ func (adapter *CodexAdapter) verifyProjectSessionProtocol(ctx context.Context) e
 	if codexHome == "" || !filepath.IsAbs(codexHome) || strings.ContainsRune(codexHome, 0) {
 		return errors.New("Codex app-server returned an invalid Codex home directory")
 	}
-	_, err := adapter.listSessions(ctx, map[string]any{
-		"limit": 1, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds, "cwd": []string{codexHome},
+	_, err := adapter.requestMap(ctx, "thread/list", map[string]any{
+		"limit": 1, "archived": false, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
 	})
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("Codex app-server project session check timed out for CLI %s: %w", adapter.version, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 	return fmt.Errorf(
 		"Codex CLI project session API is incompatible with DEEIX: detected %s; %v. DEEIX supports %s. Reinstall a supported official Codex CLI or update DEEIX Agent, then rerun the installer",

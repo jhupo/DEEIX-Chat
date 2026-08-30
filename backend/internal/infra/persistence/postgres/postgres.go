@@ -115,6 +115,9 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := applyIdentityBaselineIndexes(db); err != nil {
 		return err
 	}
+	if err := applyRelayBaselineConstraints(db); err != nil {
+		return err
+	}
 
 	tableComments := map[string]string{
 		"identity_users":                 "用户账户主表",
@@ -367,6 +370,24 @@ func applyIdentityBaselineIndexes(db *gorm.DB) error {
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_users_local_superadmin
 		ON "identity_users" ("role")
 		WHERE "auth_provider" = 'local' AND "role" = 'superadmin'
+	`).Error
+}
+
+func applyRelayBaselineConstraints(db *gorm.DB) error {
+	return db.Exec(`
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conname = 'fk_relay_ingress_routes_connector'
+					AND conrelid = 'relay_ingress_routes'::regclass
+			) THEN
+				ALTER TABLE "relay_ingress_routes"
+					ADD CONSTRAINT "fk_relay_ingress_routes_connector"
+					FOREIGN KEY ("connector_id") REFERENCES "relay_connectors" ("public_id")
+					ON UPDATE RESTRICT ON DELETE RESTRICT;
+			END IF;
+		END $$;
 	`).Error
 }
 

@@ -14,11 +14,14 @@ import (
 
 var ErrNoConnector = port.ErrConnectorUnavailable
 
+const maxCachedClients = 64
+
 type Registry struct {
 	connectors connectorResolver
 	policy     sharedsecurity.OutboundPolicy
 	mu         sync.Mutex
 	cache      map[string]cachedClient
+	cacheClock uint64
 }
 
 type connectorResolver interface {
@@ -28,6 +31,7 @@ type connectorResolver interface {
 type cachedClient struct {
 	accountBaseURL string
 	client         *Client
+	lastUsed       uint64
 }
 
 func NewRegistry(connectors connectorResolver, policy sharedsecurity.OutboundPolicy) *Registry {
@@ -38,7 +42,7 @@ func (r *Registry) InstanceID() string { return "registry" }
 
 func (r *Registry) InstanceIDForContext(ctx context.Context) string {
 	connector, err := r.connector(ctx)
-	if err != nil || connector == nil {
+	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(connector.PublicID)
@@ -46,7 +50,7 @@ func (r *Registry) InstanceIDForContext(ctx context.Context) string {
 
 func (r *Registry) ModelBaseURL(ctx context.Context) string {
 	connector, err := r.connector(ctx)
-	if err != nil || connector == nil {
+	if err != nil {
 		return ""
 	}
 	return connector.ModelBaseURL
@@ -62,8 +66,15 @@ func (r *Registry) client(ctx context.Context) (*Client, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.cacheClock++
 	if cached, ok := r.cache[connector.PublicID]; ok && cached.accountBaseURL == connector.AccountBaseURL {
+		cached.lastUsed = r.cacheClock
+		r.cache[connector.PublicID] = cached
 		return cached.client, nil
+	}
+	if cached, ok := r.cache[connector.PublicID]; ok {
+		cached.client.CloseIdleConnections()
+		delete(r.cache, connector.PublicID)
 	}
 	connectorPolicy, err := r.policy.WithTrustedHTTPURLs(connector.AccountBaseURL)
 	if err != nil {
@@ -73,23 +84,37 @@ func (r *Registry) client(ctx context.Context) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.cache[connector.PublicID] = cachedClient{accountBaseURL: connector.AccountBaseURL, client: client}
+	if len(r.cache) >= maxCachedClients {
+		oldestID := ""
+		oldestUse := ^uint64(0)
+		for publicID, cached := range r.cache {
+			if cached.lastUsed < oldestUse {
+				oldestID, oldestUse = publicID, cached.lastUsed
+			}
+		}
+		if cached, ok := r.cache[oldestID]; ok {
+			cached.client.CloseIdleConnections()
+			delete(r.cache, oldestID)
+		}
+	}
+	r.cache[connector.PublicID] = cachedClient{accountBaseURL: connector.AccountBaseURL, client: client, lastUsed: r.cacheClock}
 	return client, nil
 }
 
-func (r *Registry) connector(ctx context.Context) (*domainrelay.Connector, error) {
+func (r *Registry) connector(ctx context.Context) (port.ConnectorEndpoint, error) {
 	if r == nil || r.connectors == nil {
-		return nil, ErrNoConnector
+		return port.ConnectorEndpoint{}, ErrNoConnector
 	}
-	host := strings.TrimSpace(port.RequestHost(ctx))
-	if host == "" {
-		return nil, ErrNoConnector
-	}
-	connector, err := r.connectors.GetConnectorByHostname(ctx, host)
-	if err != nil || connector == nil || !connector.Enabled || strings.TrimSpace(connector.AccountBaseURL) == "" || strings.TrimSpace(connector.ModelBaseURL) == "" {
-		return nil, ErrNoConnector
-	}
-	return connector, nil
+	return port.ResolveRequestConnector(ctx, func(resolveCtx context.Context, host string) (port.ConnectorEndpoint, error) {
+		connector, err := r.connectors.GetConnectorByHostname(resolveCtx, host)
+		if err != nil || connector == nil || !connector.Enabled || strings.TrimSpace(connector.AccountBaseURL) == "" || strings.TrimSpace(connector.ModelBaseURL) == "" {
+			return port.ConnectorEndpoint{}, ErrNoConnector
+		}
+		return port.ConnectorEndpoint{
+			PublicID: connector.PublicID, Protocol: connector.Protocol,
+			AccountBaseURL: connector.AccountBaseURL, ModelBaseURL: connector.ModelBaseURL,
+		}, nil
+	})
 }
 
 func (r *Registry) Login(ctx context.Context, email, password, turnstile string) (*LoginResult, error) {

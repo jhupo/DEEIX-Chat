@@ -32,3 +32,24 @@ func TestSuperAdminOnlyRequiresExactRole(t *testing.T) {
 		}
 	}
 }
+
+func TestRelayIdentityOnlyRejectsLocalAdministrator(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		provider string
+		want     int
+	}{
+		{provider: domainuser.AuthProviderLocal, want: http.StatusForbidden},
+		{provider: domainuser.AuthProviderRelay, want: http.StatusNoContent},
+	} {
+		router := gin.New()
+		router.GET("/", func(c *gin.Context) {
+			c.Set(ContextKeyAuthProvider, test.provider)
+		}, RelayIdentityOnly(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+		if response.Code != test.want {
+			t.Fatalf("provider %q: status = %d, want %d", test.provider, response.Code, test.want)
+		}
+	}
+}

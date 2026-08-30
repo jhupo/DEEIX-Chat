@@ -39,6 +39,7 @@ import {
   writeChatFontWeightPreference,
 } from "@/features/settings/utils/chat-font";
 import { useLocalizedErrorMessage } from "@/i18n/use-localized-error";
+import { useAuthSession } from "@/shared/auth/auth-session-context";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 import { listUserMemories, upsertUserMemory, deleteUserMemory } from "@/shared/api/memory";
 import type { UserMemoryDTO } from "@/shared/api/memory.types";
@@ -424,6 +425,7 @@ function PreferenceMemorySection() {
 
 export function SettingsChat() {
   const t = useTranslations("settings.chatPage");
+  const { user } = useAuthSession();
   const chatKeyBindings = useChatKeyBindings();
   const {
     settings,
@@ -490,6 +492,7 @@ export function SettingsChat() {
       <SettingsSection title={t("defaultModel.sectionTitle")}>
         <SettingsFieldList>
           <SettingsFieldRow
+            className={user?.authProvider === "relay" ? undefined : "hidden"}
             title={t("defaultKey.title")}
             description={chatKeyBindings.error ? t("defaultKey.loadFailed") : t("defaultKey.description")}
           >
@@ -521,24 +524,24 @@ export function SettingsChat() {
               )}
             </div>
           </SettingsFieldRow>
-          <div className="pt-4">
-          <SettingsFieldRow
-            title={t("defaultModel.title")}
-            description={t("defaultModel.description")}
-          >
-            {loading ? (
-              <Skeleton className="h-8 w-full rounded-md" />
-            ) : (
-              <ModelSelect
-                value={settings.defaultModel}
-                fallbackValue={SYSTEM_RECOMMENDED_MODEL}
-                options={modelOptions}
-                contentClassName="min-w-[min(320px,calc(100vw-2rem))]"
-                onChange={handleDefaultModel}
-                disabled={loading}
-              />
-            )}
-          </SettingsFieldRow>
+          <div className={user?.authProvider === "relay" ? "pt-4" : undefined}>
+            <SettingsFieldRow
+              title={t("defaultModel.title")}
+              description={t("defaultModel.description")}
+            >
+              {loading ? (
+                <Skeleton className="h-8 w-full rounded-md" />
+              ) : (
+                <ModelSelect
+                  value={settings.defaultModel}
+                  fallbackValue={SYSTEM_RECOMMENDED_MODEL}
+                  options={modelOptions}
+                  contentClassName="min-w-[min(320px,calc(100vw-2rem))]"
+                  onChange={handleDefaultModel}
+                  disabled={loading}
+                />
+              )}
+            </SettingsFieldRow>
           </div>
           <div className="space-y-4 pt-4">
             <SettingsFieldRow

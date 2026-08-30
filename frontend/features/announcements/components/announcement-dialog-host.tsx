@@ -1,9 +1,9 @@
 "use client";
 
-import * as React from "react";
+import { Pin } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Pin } from "lucide-react";
+import * as React from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,13 +15,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
+import { cn } from "@/lib/utils";
 import { closeAnnouncement, listAnnouncements } from "@/shared/api/announcements";
 import type { AnnouncementDTO } from "@/shared/api/announcements.types";
 import { useAuthSession } from "@/shared/auth/auth-session-context";
+import { StreamdownRender } from "@/shared/components/markdown/streamdown-render";
 import { dispatchAnnouncementUnreadChanged, subscribeOpenAnnouncements } from "@/shared/events/announcement-events";
 import { useDialogSnapshot } from "@/shared/hooks/use-dialog-snapshot";
-import { cn } from "@/lib/utils";
 
 type AnnouncementSortMode = "default" | "type" | "time";
 type AnnouncementDialogMode = "auto" | "manual";
@@ -130,7 +130,7 @@ export function AnnouncementDialogHost() {
   const t = useTranslations("announcements");
   const locale = useLocale();
   const pathname = usePathname();
-  const { accessToken, userStatus } = useAuthSession();
+  const { accessToken, user, userStatus } = useAuthSession();
   const [autoQueue, setAutoQueue] = React.useState<AnnouncementDTO[]>([]);
   const [manualQueue, setManualQueue] = React.useState<AnnouncementDTO[]>([]);
   const [activeIndex, setActiveIndex] = React.useState(0);
@@ -145,7 +145,7 @@ export function AnnouncementDialogHost() {
 
   React.useEffect(() => {
     let cancelled = false;
-    if (userStatus !== "ready" || !accessToken || isSkippedPath(pathname)) {
+    if (userStatus !== "ready" || user?.authProvider !== "relay" || !accessToken || isSkippedPath(pathname)) {
       autoLoadRequestIDRef.current += 1;
       manualLoadRequestIDRef.current += 1;
       setAutoQueue([]);
@@ -182,12 +182,12 @@ export function AnnouncementDialogHost() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, pathname, userStatus]);
+  }, [accessToken, pathname, user?.authProvider, userStatus]);
 
   React.useEffect(() => {
     let cancelled = false;
     const unsubscribe = subscribeOpenAnnouncements(() => {
-      if (userStatus !== "ready" || !accessToken || isSkippedPath(pathname)) {
+      if (userStatus !== "ready" || user?.authProvider !== "relay" || !accessToken || isSkippedPath(pathname)) {
         return;
       }
       const requestID = manualLoadRequestIDRef.current + 1;
@@ -224,7 +224,7 @@ export function AnnouncementDialogHost() {
       cancelled = true;
       unsubscribe();
     };
-  }, [accessToken, pathname, t, userStatus]);
+  }, [accessToken, pathname, t, user?.authProvider, userStatus]);
 
   const autoPopupQueue = React.useMemo(
     () => autoQueue.filter((item) => item.notifyMode === "popup" && !isAnnouncementRead(item)),

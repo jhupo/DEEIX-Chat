@@ -89,6 +89,12 @@ func New(baseURL string, policy sharedsecurity.OutboundPolicy) (*Client, error) 
 	return &Client{baseURL: parsed, http: httpClient}, nil
 }
 
+func (c *Client) CloseIdleConnections() {
+	if c != nil && c.http != nil {
+		c.http.CloseIdleConnections()
+	}
+}
+
 func (c *Client) InstanceID() string {
 	if c == nil || c.baseURL == nil {
 		return ""

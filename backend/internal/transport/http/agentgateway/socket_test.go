@@ -18,6 +18,7 @@ import (
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
+	portsub2api "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"golang.org/x/net/websocket"
 )
@@ -92,7 +93,7 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeAuth := &socketRuntimeAuth{userPublicID: userPublicID, key: runtimeKey}
+	runtimeAuth := &socketRuntimeAuth{userPublicID: userPublicID, key: runtimeKey, expectedHost: "relay.example.com"}
 	service.SetRuntimeAuth(runtimeAuth, runtimeAuth)
 	projectionAttempts := 0
 	service.SetConversationEventProjector(func(context.Context, domainagent.AppliedEventFrame) error {
@@ -100,7 +101,10 @@ func TestBridgeSocketHandshakeAndSingleUseCredential(t *testing.T) {
 		return errors.New("projection unavailable")
 	})
 	handler := NewHandler(service)
-	server := httptest.NewServer(http.HandlerFunc(handler.connect))
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		request = request.WithContext(portsub2api.WithRequestHost(request.Context(), runtimeAuth.expectedHost))
+		handler.connect(writer, request)
+	}))
 	defer server.Close()
 
 	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http"), server.URL)
@@ -566,9 +570,13 @@ func (*socketRepo) RespondInteraction(context.Context, string, string, uint, str
 type socketRuntimeAuth struct {
 	userPublicID string
 	key          string
+	expectedHost string
 }
 
-func (a *socketRuntimeAuth) RuntimeUser(context.Context, uint) (string, int64, error) {
+func (a *socketRuntimeAuth) RuntimeUser(ctx context.Context, _ uint) (string, int64, error) {
+	if portsub2api.RequestHost(ctx) != a.expectedHost {
+		return "", 0, errors.New("relay request host was lost")
+	}
 	return a.userPublicID, 17, nil
 }
 
@@ -576,7 +584,10 @@ func (a *socketRuntimeAuth) RuntimeUserByPublicID(context.Context, string) (uint
 	return 7, a.userPublicID, 17, nil
 }
 
-func (a *socketRuntimeAuth) MatchRuntimeProof(_ context.Context, _ uint, remoteUserID int64, challenge, proof []byte) (int64, string, error) {
+func (a *socketRuntimeAuth) MatchRuntimeProof(ctx context.Context, _ uint, remoteUserID int64, challenge, proof []byte) (int64, string, error) {
+	if portsub2api.RequestHost(ctx) != a.expectedHost {
+		return 0, "", errors.New("relay request host was lost")
+	}
 	mac := hmac.New(sha256.New, []byte(a.key))
 	_, _ = mac.Write(challenge)
 	if remoteUserID != 17 || !hmac.Equal(mac.Sum(nil), proof) {

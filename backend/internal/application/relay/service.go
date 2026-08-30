@@ -22,7 +22,8 @@ var (
 )
 
 type Service struct {
-	repo repository.RelayRepository
+	repo         repository.RelayRepository
+	requireHTTPS bool
 }
 
 type ConnectorInput struct {
@@ -40,8 +41,8 @@ type RouteInput struct {
 	Enabled     bool
 }
 
-func NewService(repo repository.RelayRepository) *Service {
-	return &Service{repo: repo}
+func NewService(repo repository.RelayRepository, requireHTTPS bool) *Service {
+	return &Service{repo: repo, requireHTTPS: requireHTTPS}
 }
 
 func (s *Service) ListConnectors(ctx context.Context) ([]domainrelay.Connector, error) {
@@ -52,7 +53,7 @@ func (s *Service) ListIngressRoutes(ctx context.Context) ([]domainrelay.IngressR
 }
 
 func (s *Service) CreateConnector(ctx context.Context, input ConnectorInput) (*domainrelay.Connector, error) {
-	normalized, err := normalizeConnector(input)
+	normalized, err := normalizeConnector(input, s.requireHTTPS)
 	if err != nil {
 		return nil, err
 	}
@@ -70,9 +71,16 @@ func (s *Service) UpdateConnector(ctx context.Context, publicID string, input Co
 		return nil, ErrInvalidConnector
 	}
 	configProvided := strings.TrimSpace(input.ConfigJSON) != ""
-	normalized, err := normalizeConnector(input)
+	normalized, err := normalizeConnector(input, s.requireHTTPS)
 	if err != nil {
 		return nil, err
+	}
+	existing, err := s.repo.GetConnector(ctx, publicID)
+	if err != nil {
+		return nil, normalizeRepoError(err)
+	}
+	if existing.Protocol != normalized.Protocol || existing.AccountBaseURL != normalized.AccountBaseURL {
+		return nil, ErrResourceConflict
 	}
 	if !configProvided {
 		normalized.ConfigJSON = ""
@@ -89,18 +97,6 @@ func (s *Service) DeleteConnector(ctx context.Context, publicID string) error {
 	publicID = strings.TrimSpace(publicID)
 	if publicID == "" {
 		return ErrInvalidConnector
-	}
-	if _, err := s.repo.GetConnector(ctx, publicID); err != nil {
-		return normalizeRepoError(err)
-	}
-	if routes, err := s.repo.ListIngressRoutes(ctx); err != nil {
-		return normalizeRepoError(err)
-	} else {
-		for _, route := range routes {
-			if route.ConnectorID == publicID {
-				return ErrResourceConflict
-			}
-		}
 	}
 	return normalizeRepoError(s.repo.DeleteConnector(ctx, publicID))
 }
@@ -139,15 +135,15 @@ func (s *Service) DeleteIngressRoute(ctx context.Context, id uint) error {
 	return normalizeRepoError(s.repo.DeleteIngressRoute(ctx, id))
 }
 
-func normalizeConnector(input ConnectorInput) (ConnectorInput, error) {
+func normalizeConnector(input ConnectorInput, requireHTTPS bool) (ConnectorInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Protocol = strings.ToLower(strings.TrimSpace(input.Protocol))
 	var err error
-	input.AccountBaseURL, err = normalizeOrigin(input.AccountBaseURL)
+	input.AccountBaseURL, err = normalizeOrigin(input.AccountBaseURL, requireHTTPS)
 	if err != nil {
 		return ConnectorInput{}, err
 	}
-	modelBaseURL, err := normalizeOrigin(input.ModelBaseURL)
+	modelBaseURL, err := normalizeOrigin(input.ModelBaseURL, requireHTTPS)
 	if err != nil {
 		return ConnectorInput{}, err
 	}
@@ -172,7 +168,7 @@ func normalizeConnector(input ConnectorInput) (ConnectorInput, error) {
 	return input, nil
 }
 
-func normalizeOrigin(raw string) (string, error) {
+func normalizeOrigin(raw string, requireHTTPS bool) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
@@ -186,6 +182,9 @@ func normalizeOrigin(raw string) (string, error) {
 		return "", ErrInvalidConnector
 	}
 	if err = sharedsecurity.ValidateTrustedOutboundHTTPURL(origin); err != nil {
+		return "", ErrInvalidConnector
+	}
+	if requireHTTPS && parsed.Scheme != "https" {
 		return "", ErrInvalidConnector
 	}
 	return strings.TrimRight(origin, "/"), nil
@@ -212,6 +211,9 @@ func normalizeRepoError(err error) error {
 		return ErrResourceNotFound
 	}
 	if errors.Is(err, repository.ErrDuplicate) {
+		return ErrResourceConflict
+	}
+	if errors.Is(err, repository.ErrConflict) {
 		return ErrResourceConflict
 	}
 	return err

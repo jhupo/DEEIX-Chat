@@ -33,3 +33,17 @@ func IsUniqueConstraint(err error) bool {
 		strings.Contains(msg, "unique constraint") ||
 		strings.Contains(msg, "unique constraint failed")
 }
+
+// IsForeignKeyConstraint reports whether a write violates referential integrity.
+func IsForeignKeyConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	var stateErr sqlStateError
+	if errors.As(err, &stateErr) && stateErr.SQLState() == "23503" {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "violates foreign key constraint") ||
+		strings.Contains(msg, "foreign key constraint failed")
+}

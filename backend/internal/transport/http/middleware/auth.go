@@ -134,3 +134,15 @@ func SuperAdminOnly() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RelayIdentityOnly limits relay-backed account and commerce APIs to relay users.
+func RelayIdentityOnly() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.GetString(ContextKeyAuthProvider) != domainuser.AuthProviderRelay {
+			response.Error(c, http.StatusForbidden, "relay identity required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

@@ -59,3 +59,29 @@ func TestIsUniqueConstraint(t *testing.T) {
 		})
 	}
 }
+
+func TestIsForeignKeyConstraint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "postgres sql state", err: sqlStateTestError{state: "23503"}, want: true},
+		{name: "postgres message", err: errors.New(`update or delete violates foreign key constraint "fk_route_connector"`), want: true},
+		{name: "sqlite message", err: errors.New("FOREIGN KEY constraint failed"), want: true},
+		{name: "unique state", err: sqlStateTestError{state: "23505"}, want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsForeignKeyConstraint(tt.err); got != tt.want {
+				t.Fatalf("IsForeignKeyConstraint() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -461,7 +461,7 @@ func NewApp() (*App, error) {
 	userRepo := userrepo.NewRepo(db)
 	userService := user.NewService(userRepo)
 	relayRepo := relayrepo.NewRepo(db)
-	relayService := apprelay.NewService(relayRepo)
+	relayService := apprelay.NewService(relayRepo, strings.EqualFold(cfg.Env, "prod"))
 	relayModule := relayhttp.NewModule(relayService)
 	agentGatewayService, err := appagentgateway.NewService(agentgatewayrepo.NewRepo(db), cfg.DataEncryptionKey)
 	if err != nil {

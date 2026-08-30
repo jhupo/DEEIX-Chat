@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
+import { useAuthSession } from "@/shared/auth/auth-session-context";
 
 export const SETTINGS_SIDEBAR_ITEMS = [
   { id: "general", labelKey: "general", href: "/general" },
@@ -40,7 +41,9 @@ export function SettingsSidebar({
 }) {
   const t = useTranslations("settings");
   const pathname = usePathname();
+  const { user } = useAuthSession();
   const activeSection = resolveActiveSettingsSectionFromPath(pathname, basePath);
+  const items = SETTINGS_SIDEBAR_ITEMS.filter((item) => item.id !== "subscription" || user?.authProvider === "relay");
 
   return (
     <aside className="w-full shrink-0 xl:max-w-64">
@@ -53,7 +56,7 @@ export function SettingsSidebar({
           aria-label={t("navigation")}
           className="flex gap-1.5 overflow-x-auto overscroll-x-contain pb-1 [scrollbar-width:none] [-ms-overflow-style:none] xl:grid xl:gap-1 xl:overflow-visible xl:pb-0 [&::-webkit-scrollbar]:hidden"
         >
-          {SETTINGS_SIDEBAR_ITEMS.map((item) => {
+          {items.map((item) => {
             const active = item.id === activeSection;
 
             return (

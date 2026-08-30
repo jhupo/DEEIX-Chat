@@ -58,7 +58,7 @@ func (r *Repo) CreateConnector(ctx context.Context, in repository.RelayConnector
 }
 
 func (r *Repo) UpdateConnector(ctx context.Context, publicID string, in repository.RelayConnectorInput) (*domainrelay.Connector, error) {
-	updates := map[string]any{"name": in.Name, "protocol": in.Protocol, "account_base_url": in.AccountBaseURL, "model_base_url": in.ModelBaseURL, "config_json": in.ConfigJSON, "enabled": in.Enabled}
+	updates := map[string]any{"name": in.Name, "model_base_url": in.ModelBaseURL, "config_json": in.ConfigJSON, "enabled": in.Enabled}
 	if strings.TrimSpace(in.ConfigJSON) == "" {
 		delete(updates, "config_json")
 	}
@@ -73,8 +73,12 @@ func (r *Repo) UpdateConnector(ctx context.Context, publicID string, in reposito
 }
 
 func (r *Repo) DeleteConnector(ctx context.Context, publicID string) error {
-	if err := r.db.WithContext(ctx).Where("public_id = ?", strings.TrimSpace(publicID)).Delete(&model.RelayConnector{}).Error; err != nil {
-		return normalize(err)
+	q := r.db.WithContext(ctx).Where("public_id = ?", strings.TrimSpace(publicID)).Delete(&model.RelayConnector{})
+	if q.Error != nil {
+		return normalize(q.Error)
+	}
+	if q.RowsAffected == 0 {
+		return repository.ErrNotFound
 	}
 	return nil
 }
@@ -142,6 +146,9 @@ func normalize(err error) error {
 	}
 	if dberror.IsUniqueConstraint(err) {
 		return repository.ErrDuplicate
+	}
+	if dberror.IsForeignKeyConstraint(err) {
+		return repository.ErrConflict
 	}
 	return err
 }

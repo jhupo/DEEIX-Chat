@@ -265,14 +265,15 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 		}
 	}
 	syncSnapshots()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			syncSnapshots()
+			timer.Reset(10 * time.Second)
 		}
 	}
 }

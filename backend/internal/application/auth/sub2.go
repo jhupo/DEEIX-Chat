@@ -29,8 +29,9 @@ type sub2SessionCredentials struct {
 }
 
 type sub2Challenge struct {
-	TempToken string `json:"tempToken"`
-	ExpiresAt int64  `json:"expiresAt"`
+	TempToken   string `json:"tempToken"`
+	ConnectorID string `json:"connectorID"`
+	ExpiresAt   int64  `json:"expiresAt"`
 }
 
 func (s *Service) loginWithSub2(
@@ -47,7 +48,7 @@ func (s *Service) loginWithSub2(
 		return nil, normalizeSub2LoginError(err)
 	}
 	if result.Requires2FA {
-		challengeToken, sealErr := s.sealSub2Challenge(result.TempToken)
+		challengeToken, sealErr := s.sealSub2Challenge(result.TempToken, s.sub2InstanceID(ctx))
 		if sealErr != nil {
 			return nil, sealErr
 		}
@@ -69,6 +70,9 @@ func (s *Service) verifySub2LoginTwoFactor(
 	challenge, err := s.openSub2Challenge(challengeToken)
 	if err != nil {
 		return nil, err
+	}
+	if challenge.ConnectorID != s.sub2InstanceID(ctx) {
+		return nil, ErrTwoFactorChallengeExpired
 	}
 	tokens, err := s.sub2.VerifyLogin2FA(ctx, challenge.TempToken, code)
 	if err != nil {
@@ -206,11 +210,13 @@ func (s *Service) encryptSub2SessionCredentials(tokens sub2api.TokenPair, now ti
 	}, nil
 }
 
-func (s *Service) sealSub2Challenge(tempToken string) (string, error) {
-	if strings.TrimSpace(tempToken) == "" {
+func (s *Service) sealSub2Challenge(tempToken, connectorID string) (string, error) {
+	if strings.TrimSpace(tempToken) == "" || strings.TrimSpace(connectorID) == "" {
 		return "", ErrInvalidCredentials
 	}
-	payload, err := json.Marshal(sub2Challenge{TempToken: tempToken, ExpiresAt: time.Now().Add(sub2ChallengeTTL).Unix()})
+	payload, err := json.Marshal(sub2Challenge{
+		TempToken: tempToken, ConnectorID: connectorID, ExpiresAt: time.Now().Add(sub2ChallengeTTL).Unix(),
+	})
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +229,8 @@ func (s *Service) openSub2Challenge(value string) (*sub2Challenge, error) {
 		return nil, ErrInvalidCredentials
 	}
 	var challenge sub2Challenge
-	if err = json.Unmarshal([]byte(payload), &challenge); err != nil || strings.TrimSpace(challenge.TempToken) == "" {
+	if err = json.Unmarshal([]byte(payload), &challenge); err != nil ||
+		strings.TrimSpace(challenge.TempToken) == "" || strings.TrimSpace(challenge.ConnectorID) == "" {
 		return nil, ErrInvalidCredentials
 	}
 	if time.Now().Unix() >= challenge.ExpiresAt {

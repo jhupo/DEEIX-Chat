@@ -158,6 +158,8 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 	authRequired := api.Group("")
 	authRequired.Use(middleware.AuthMiddleware(snapshot.JWTSecret, modules.AuthService))
 	authRequired.Use(middleware.RateLimit(limiter, cfg))
+	relayIdentityRequired := authRequired.Group("")
+	relayIdentityRequired.Use(middleware.RelayIdentityOnly())
 
 	if modules.AgentGateway != nil {
 		modules.AgentGateway.RegisterRoutes(authRequired)
@@ -178,13 +180,13 @@ func NewEngine(cfg *config.Runtime, log *zap.Logger, modules Modules, hc HealthC
 		modules.MCP.RegisterRoutes(authRequired)
 	}
 	if modules.Billing != nil {
-		modules.Billing.RegisterRoutes(authRequired)
+		modules.Billing.RegisterRoutes(relayIdentityRequired)
 	}
 	if modules.Sub2Key != nil {
-		modules.Sub2Key.RegisterRoutes(authRequired)
+		modules.Sub2Key.RegisterRoutes(relayIdentityRequired)
 	}
 	if modules.Announcement != nil {
-		modules.Announcement.RegisterRoutes(authRequired)
+		modules.Announcement.RegisterRoutes(relayIdentityRequired)
 	}
 	if modules.PromptPreset != nil {
 		modules.PromptPreset.RegisterRoutes(authRequired)
