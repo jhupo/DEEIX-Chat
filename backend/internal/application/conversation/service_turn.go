@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -353,7 +352,6 @@ func (p *cloudExecutionProjection) complete(status string, runErr error, result 
 }
 
 const executionEventPageSize = 500
-const executionHistoryEventsPerRun = 256
 
 type ExecutionEventPage struct {
 	Events  []model.ExecutionEvent
@@ -385,7 +383,7 @@ func (s *Service) ListExecutionEvents(ctx context.Context, userID uint, conversa
 	if len(runIDs) == 0 {
 		return &ExecutionEventPage{Events: []model.ExecutionEvent{}, Cursor: conversation.ExecutionEventSeq}, nil
 	}
-	events, err := s.repo.ListExecutionEventHistory(ctx, userID, conversation.ID, runIDs, executionHistoryEventsPerRun)
+	events, err := s.repo.ListExecutionEventHistory(ctx, userID, conversation.ID, runIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -424,21 +422,11 @@ type compactedTextDelta struct {
 	truncated bool
 }
 
-type compactedTokenUsage struct {
-	event             model.ExecutionEvent
-	inputTokens       int64
-	outputTokens      int64
-	cachedInputTokens int64
-	reasoningTokens   int64
-	totalTokens       int64
-}
-
 func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEvent {
 	retained := make([]model.ExecutionEvent, 0, len(events)/4)
 	latest := make(map[string]model.ExecutionEvent)
 	first := make(map[string]model.ExecutionEvent)
 	deltas := make(map[string]*compactedTextDelta)
-	usage := make(map[string]*compactedTokenUsage)
 	for _, event := range events {
 		itemID, delta, truncated := executionEventDelta(event)
 		key := event.RunID + ":" + itemID
@@ -478,29 +466,7 @@ func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEve
 				first[event.RunID+":"+event.Kind] = event
 			}
 		case "thread/tokenUsage/updated":
-			value, ok := executionEventLastUsage(event)
-			if !ok {
-				latest[event.RunID+":"+event.Kind] = event
-				continue
-			}
-			current := usage[event.RunID]
-			if current == nil {
-				current = &compactedTokenUsage{}
-				usage[event.RunID] = current
-			}
-			if current.inputTokens > math.MaxInt64-value.InputTokens ||
-				current.outputTokens > math.MaxInt64-value.OutputTokens ||
-				current.cachedInputTokens > math.MaxInt64-value.CachedInputTokens ||
-				current.reasoningTokens > math.MaxInt64-value.ReasoningTokens ||
-				current.totalTokens > math.MaxInt64-value.TotalTokens {
-				continue
-			}
-			current.event = event
-			current.inputTokens += value.InputTokens
-			current.outputTokens += value.OutputTokens
-			current.cachedInputTokens += value.CachedInputTokens
-			current.reasoningTokens += value.ReasoningTokens
-			current.totalTokens += value.TotalTokens
+			latest[event.RunID+":"+event.Kind] = event
 		case "turn/completed", "turn/plan/updated", "turn/diff/updated", "model/rerouted":
 			latest[event.RunID+":"+event.Kind] = event
 		case "item/fileChange/patchUpdated":
@@ -529,42 +495,8 @@ func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEve
 		buffer.event.PayloadJSON = string(encoded)
 		retained = append(retained, buffer.event)
 	}
-	for _, item := range usage {
-		payload := map[string]interface{}{"tokenUsage": map[string]interface{}{"last": map[string]int64{
-			"inputTokens": item.inputTokens, "outputTokens": item.outputTokens,
-			"cachedInputTokens": item.cachedInputTokens, "reasoningTokens": item.reasoningTokens,
-			"totalTokens": item.totalTokens,
-		}}}
-		encoded, _ := json.Marshal(payload)
-		item.event.PayloadJSON = string(encoded)
-		retained = append(retained, item.event)
-	}
 	sort.Slice(retained, func(i, j int) bool { return retained[i].Seq < retained[j].Seq })
 	return retained
-}
-
-type executionTokenUsage struct {
-	InputTokens       int64 `json:"inputTokens"`
-	OutputTokens      int64 `json:"outputTokens"`
-	CachedInputTokens int64 `json:"cachedInputTokens"`
-	ReasoningTokens   int64 `json:"reasoningTokens"`
-	TotalTokens       int64 `json:"totalTokens"`
-}
-
-func executionEventLastUsage(event model.ExecutionEvent) (executionTokenUsage, bool) {
-	var payload struct {
-		TokenUsage struct {
-			Last *executionTokenUsage `json:"last"`
-		} `json:"tokenUsage"`
-	}
-	if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil || payload.TokenUsage.Last == nil {
-		return executionTokenUsage{}, false
-	}
-	value := *payload.TokenUsage.Last
-	if value.InputTokens < 0 || value.OutputTokens < 0 || value.CachedInputTokens < 0 || value.ReasoningTokens < 0 || value.TotalTokens < 0 {
-		return executionTokenUsage{}, false
-	}
-	return value, true
 }
 
 const maxExecutionHistoryTextBytes = 256 << 10

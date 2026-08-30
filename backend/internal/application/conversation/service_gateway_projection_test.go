@@ -389,7 +389,7 @@ func TestCompactExecutionHistoryMergesIncrementalText(t *testing.T) {
 	}
 }
 
-func TestCompactExecutionHistoryAggregatesRunTokenUsage(t *testing.T) {
+func TestCompactExecutionHistoryKeepsLatestRunTokenUsageSnapshot(t *testing.T) {
 	events := []model.ExecutionEvent{
 		{RunID: "run_usage", Seq: 1, Kind: "thread/tokenUsage/updated", PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":8,"outputTokens":2,"reasoningTokens":1,"totalTokens":12}}}`},
 		{RunID: "run_usage", Seq: 2, Kind: "thread/tokenUsage/updated", PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":20,"cachedInputTokens":16,"outputTokens":4,"reasoningTokens":2,"totalTokens":24}}}`},
@@ -398,9 +398,8 @@ func TestCompactExecutionHistoryAggregatesRunTokenUsage(t *testing.T) {
 	if len(compacted) != 1 || compacted[0].Seq != 2 {
 		t.Fatalf("compacted token events = %#v", compacted)
 	}
-	usage, ok := executionEventLastUsage(compacted[0])
-	if !ok || usage.InputTokens != 30 || usage.CachedInputTokens != 24 || usage.OutputTokens != 6 || usage.ReasoningTokens != 3 || usage.TotalTokens != 36 {
-		t.Fatalf("compacted token usage = %#v, %v", usage, ok)
+	if compacted[0].PayloadJSON != events[1].PayloadJSON {
+		t.Fatalf("compacted token usage = %s, want latest snapshot %s", compacted[0].PayloadJSON, events[1].PayloadJSON)
 	}
 }
 
@@ -409,7 +408,6 @@ type executionPageRepoStub struct {
 	conversation model.Conversation
 	events       []model.ExecutionEvent
 	history      []model.ExecutionEvent
-	historyLimit int
 }
 
 func (s *executionPageRepoStub) GetConversationByPublicID(context.Context, string, uint) (*model.Conversation, error) {
@@ -421,8 +419,7 @@ func (s *executionPageRepoStub) ListExecutionEvents(context.Context, uint, uint,
 	return append([]model.ExecutionEvent(nil), s.events...), nil
 }
 
-func (s *executionPageRepoStub) ListExecutionEventHistory(_ context.Context, _ uint, _ uint, _ []string, limit int) ([]model.ExecutionEvent, error) {
-	s.historyLimit = limit
+func (s *executionPageRepoStub) ListExecutionEventHistory(_ context.Context, _ uint, _ uint, _ []string) ([]model.ExecutionEvent, error) {
 	return append([]model.ExecutionEvent(nil), s.history...), nil
 }
 
@@ -450,7 +447,7 @@ func TestListExecutionEventsCompactsLivePageWithoutMovingCursorBackward(t *testi
 	}
 }
 
-func TestListExecutionEventsUsesBoundedInitialHistory(t *testing.T) {
+func TestListExecutionEventsUsesCompleteInitialHistory(t *testing.T) {
 	repo := &executionPageRepoStub{
 		conversation: model.Conversation{ID: 11, UserID: 7, ExecutionEventSeq: 900},
 		history: []model.ExecutionEvent{
@@ -462,7 +459,7 @@ func TestListExecutionEventsUsesBoundedInitialHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repo.historyLimit != executionHistoryEventsPerRun || page.Cursor != 901 || page.HasMore || len(page.Events) != 2 {
-		t.Fatalf("history page = limit %d cursor %d hasMore %v events %#v", repo.historyLimit, page.Cursor, page.HasMore, page.Events)
+	if page.Cursor != 901 || page.HasMore || len(page.Events) != 2 {
+		t.Fatalf("history page = cursor %d hasMore %v events %#v", page.Cursor, page.HasMore, page.Events)
 	}
 }

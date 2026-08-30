@@ -506,15 +506,7 @@ function reduceAgentExecutionEvent(
       {
         const usage = usageValue(payload.tokenUsage?.last);
         if (usage) {
-          const current = next.usage;
-          next.usage = {
-            inputTokens: (current?.inputTokens ?? 0) + usage.inputTokens,
-            outputTokens: (current?.outputTokens ?? 0) + usage.outputTokens,
-            cachedInputTokens: (current?.cachedInputTokens ?? 0) + usage.cachedInputTokens,
-            reasoningTokens: (current?.reasoningTokens ?? 0) + usage.reasoningTokens,
-            totalTokens: (current?.totalTokens ?? 0) + usage.totalTokens,
-            scope: "run",
-          };
+          next.usage = usage;
         }
       }
       break;

@@ -124,7 +124,7 @@ pending -- turn terminal/serverRequest resolved -> resolved
 - 命令行默认只展示状态、耗时和命令摘要，悬停展示完整命令与工作目录，点击展开输出。
 - Pending approval 放在匹配的命令或文件事件后；无法匹配时仍放在同一工作日志末尾。
 - Turn 结束后在回答下方展示变更文件摘要；点击后复用右侧工作区的 Monaco Diff，移动端全屏展示。
-- `thread/tokenUsage/updated` 明确按 thread 累计展示，不能冒充本轮用量。
+- `thread/tokenUsage/updated.tokenUsage.total` 是 thread 累计量；消息元数据只能使用最新的 `last` 快照，不能把重复快照相加。
 - `model/rerouted` 更新当前 Turn 实际模型，不修改下一轮 draft。
 - 只有 `turn/completed` 能结束 Turn。
 

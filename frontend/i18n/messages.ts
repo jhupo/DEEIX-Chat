@@ -25,6 +25,32 @@ import enPrompts from "@/i18n/messages/en-US/prompts.json";
 import enRecent from "@/i18n/messages/en-US/recent.json";
 import enSettings from "@/i18n/messages/en-US/settings.json";
 import enShare from "@/i18n/messages/en-US/share.json";
+import zhAdminAnnouncements from "@/i18n/messages/zh-CN/admin-announcements.json";
+import zhAdminContentModeration from "@/i18n/messages/zh-CN/admin-content-moderation.json";
+import zhAdminConversation from "@/i18n/messages/zh-CN/admin-conversation.json";
+import zhAdminFiles from "@/i18n/messages/zh-CN/admin-files.json";
+import zhAdminGroups from "@/i18n/messages/zh-CN/admin-groups.json";
+import zhAdminLogin from "@/i18n/messages/zh-CN/admin-login.json";
+import zhAdminLogs from "@/i18n/messages/zh-CN/admin-logs.json";
+import zhAdminModels from "@/i18n/messages/zh-CN/admin-models.json";
+import zhAdminPrompts from "@/i18n/messages/zh-CN/admin-prompts.json";
+import zhAdminRelays from "@/i18n/messages/zh-CN/admin-relays.json";
+import zhAdminTools from "@/i18n/messages/zh-CN/admin-tools.json";
+import zhAdminUpstreams from "@/i18n/messages/zh-CN/admin-upstreams.json";
+import zhAdminUsers from "@/i18n/messages/zh-CN/admin-users.json";
+import zhAnnouncements from "@/i18n/messages/zh-CN/announcements.json";
+import zhChat from "@/i18n/messages/zh-CN/chat.json";
+import zhCommon from "@/i18n/messages/zh-CN/common.json";
+import zhConversation from "@/i18n/messages/zh-CN/conversation.json";
+import zhErrors from "@/i18n/messages/zh-CN/errors.json";
+import zhFiles from "@/i18n/messages/zh-CN/files.json";
+import zhGuide from "@/i18n/messages/zh-CN/guide.json";
+import zhKnowledgeBases from "@/i18n/messages/zh-CN/knowledge-bases.json";
+import zhLogin from "@/i18n/messages/zh-CN/login.json";
+import zhPrompts from "@/i18n/messages/zh-CN/prompts.json";
+import zhRecent from "@/i18n/messages/zh-CN/recent.json";
+import zhSettings from "@/i18n/messages/zh-CN/settings.json";
+import zhShare from "@/i18n/messages/zh-CN/share.json";
 import { replaceDefaultBrandTitle } from "@/shared/config/branding";
 
 const ENGLISH_MESSAGES = {
@@ -55,6 +81,35 @@ const ENGLISH_MESSAGES = {
   adminUpstreams: enAdminUpstreams,
   adminUsers: enAdminUsers,
 };
+
+const CHINESE_MESSAGES = {
+  common: zhCommon,
+  conversation: zhConversation,
+  errors: zhErrors,
+  login: zhLogin,
+  prompts: zhPrompts,
+  guide: zhGuide,
+  chat: zhChat,
+  announcements: zhAnnouncements,
+  recent: zhRecent,
+  share: zhShare,
+  files: zhFiles,
+  settings: zhSettings,
+  knowledgeBases: zhKnowledgeBases,
+  adminAnnouncements: zhAdminAnnouncements,
+  adminConversation: zhAdminConversation,
+  adminContentModeration: zhAdminContentModeration,
+  adminFiles: zhAdminFiles,
+  adminGroups: zhAdminGroups,
+  adminLogin: zhAdminLogin,
+  adminLogs: zhAdminLogs,
+  adminModels: zhAdminModels,
+  adminPrompts: zhAdminPrompts,
+  adminRelays: zhAdminRelays,
+  adminTools: zhAdminTools,
+  adminUpstreams: zhAdminUpstreams,
+  adminUsers: zhAdminUsers,
+} satisfies typeof ENGLISH_MESSAGES;
 
 export type AppMessages = typeof ENGLISH_MESSAGES;
 
@@ -105,93 +160,6 @@ export function applyBrandingToMessages(messages: AppMessages, brandTitle: strin
 
 export const DEFAULT_MESSAGES: AppMessages = ENGLISH_MESSAGES;
 
-export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages> {
-  if (locale === "en-US") {
-    return DEFAULT_MESSAGES;
-  }
-
-  const [
-    common,
-    conversation,
-    errors,
-    login,
-    prompts,
-    guide,
-    chat,
-    announcements,
-    recent,
-    share,
-    files,
-    settings,
-    knowledgeBases,
-    adminAnnouncements,
-    adminConversation,
-    adminContentModeration,
-    adminFiles,
-    adminGroups,
-    adminLogin,
-    adminLogs,
-    adminModels,
-    adminPrompts,
-    adminRelays,
-    adminTools,
-    adminUpstreams,
-    adminUsers,
-  ] = await Promise.all([
-    import("@/i18n/messages/zh-CN/common.json"),
-    import("@/i18n/messages/zh-CN/conversation.json"),
-    import("@/i18n/messages/zh-CN/errors.json"),
-    import("@/i18n/messages/zh-CN/login.json"),
-    import("@/i18n/messages/zh-CN/prompts.json"),
-    import("@/i18n/messages/zh-CN/guide.json"),
-    import("@/i18n/messages/zh-CN/chat.json"),
-    import("@/i18n/messages/zh-CN/announcements.json"),
-    import("@/i18n/messages/zh-CN/recent.json"),
-    import("@/i18n/messages/zh-CN/share.json"),
-    import("@/i18n/messages/zh-CN/files.json"),
-    import("@/i18n/messages/zh-CN/settings.json"),
-    import("@/i18n/messages/zh-CN/knowledge-bases.json"),
-    import("@/i18n/messages/zh-CN/admin-announcements.json"),
-    import("@/i18n/messages/zh-CN/admin-conversation.json"),
-    import("@/i18n/messages/zh-CN/admin-content-moderation.json"),
-    import("@/i18n/messages/zh-CN/admin-files.json"),
-    import("@/i18n/messages/zh-CN/admin-groups.json"),
-    import("@/i18n/messages/zh-CN/admin-login.json"),
-    import("@/i18n/messages/zh-CN/admin-logs.json"),
-    import("@/i18n/messages/zh-CN/admin-models.json"),
-    import("@/i18n/messages/zh-CN/admin-prompts.json"),
-    import("@/i18n/messages/zh-CN/admin-relays.json"),
-    import("@/i18n/messages/zh-CN/admin-tools.json"),
-    import("@/i18n/messages/zh-CN/admin-upstreams.json"),
-    import("@/i18n/messages/zh-CN/admin-users.json"),
-  ]);
-
-  return {
-    common: common.default,
-    conversation: conversation.default,
-    errors: errors.default,
-    login: login.default,
-    prompts: prompts.default,
-    guide: guide.default,
-    chat: chat.default,
-    announcements: announcements.default,
-    recent: recent.default,
-    share: share.default,
-    files: files.default,
-    settings: settings.default,
-    knowledgeBases: knowledgeBases.default,
-    adminAnnouncements: adminAnnouncements.default,
-    adminConversation: adminConversation.default,
-    adminContentModeration: adminContentModeration.default,
-    adminFiles: adminFiles.default,
-    adminGroups: adminGroups.default,
-    adminLogin: adminLogin.default,
-    adminLogs: adminLogs.default,
-    adminModels: adminModels.default,
-    adminPrompts: adminPrompts.default,
-    adminRelays: adminRelays.default,
-    adminTools: adminTools.default,
-    adminUpstreams: adminUpstreams.default,
-    adminUsers: adminUsers.default,
-  };
+export function loadLocaleMessages(locale: AppLocale): AppMessages {
+  return locale === "zh-CN" ? CHINESE_MESSAGES : DEFAULT_MESSAGES;
 }

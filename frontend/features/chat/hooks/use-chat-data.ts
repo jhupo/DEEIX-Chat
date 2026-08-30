@@ -22,7 +22,7 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 30;
 const HISTORY_POLL_INTERVAL_MS = 500;
-const HISTORY_POLL_ATTEMPTS = 250;
+const HISTORY_POLL_ATTEMPTS = 30;
 const RESUME_TEXT_FLUSH_INTERVAL_MS = 100;
 const RESUME_RETRY_INITIAL_DELAY_MS = 500;
 const RESUME_RETRY_MAX_DELAY_MS = 5_000;
@@ -30,11 +30,24 @@ const RESUME_RETRY_MAX_DELAY_MS = 5_000;
 type ChatDataState = {
   loading: boolean;
   loadingOlder: boolean;
+  olderErrorMsg: string;
   errorMsg: string;
   messages: MessageDTO[];
   total: number;
   hasOlder: boolean;
 };
+
+function initialChatDataState(conversationID: string | null): ChatDataState {
+  return {
+    loading: Boolean(conversationID),
+    loadingOlder: false,
+    olderErrorMsg: "",
+    errorMsg: "",
+    messages: [],
+    total: 0,
+    hasOlder: false,
+  };
+}
 
 type ActiveResumeStream = {
   controller: AbortController;
@@ -102,14 +115,7 @@ export function useChatData(
 ) {
   const t = useTranslations("chat.data");
   const tSubmit = useTranslations("chat.submit");
-  const [state, setState] = React.useState<ChatDataState>({
-    loading: Boolean(conversationID),
-    loadingOlder: false,
-    errorMsg: "",
-    messages: [],
-    total: 0,
-    hasOlder: false,
-  });
+  const [state, setState] = React.useState<ChatDataState>(() => initialChatDataState(conversationID));
   const [reloadToken, setReloadToken] = React.useState(0);
   const [resumingRunID, setResumingRunID] = React.useState("");
   const stateRef = React.useRef(state);
@@ -159,6 +165,7 @@ export function useChatData(
         setState({
           loading: false,
           loadingOlder: false,
+          olderErrorMsg: "",
           errorMsg: "",
           messages: [],
           total: 0,
@@ -173,6 +180,7 @@ export function useChatData(
       setState((prev) => ({
         loading: isConversationSwitch || prev.messages.length === 0,
         loadingOlder: false,
+        olderErrorMsg: "",
         errorMsg: "",
         messages: isConversationSwitch ? [] : prev.messages,
         total: isConversationSwitch ? 0 : prev.total,
@@ -185,6 +193,7 @@ export function useChatData(
             setState({
               loading: false,
               loadingOlder: false,
+              olderErrorMsg: "",
               errorMsg: t("signInRequired"),
               messages: [],
               total: 0,
@@ -212,6 +221,7 @@ export function useChatData(
           return {
             loading: initialData.results.length === 0,
             loadingOlder: false,
+            olderErrorMsg: "",
             errorMsg: "",
             messages,
             total: initialData.total,
@@ -261,6 +271,7 @@ export function useChatData(
           return {
             loading: false,
             loadingOlder: false,
+            olderErrorMsg: "",
             errorMsg: "",
             messages,
             total: data.total,
@@ -273,6 +284,7 @@ export function useChatData(
             ...prev,
             loading: false,
             loadingOlder: false,
+            olderErrorMsg: "",
             errorMsg: shouldSurfaceConversationLoadError(prev.messages.length)
               ? error instanceof Error && error.message
                 ? error.message
@@ -326,12 +338,15 @@ export function useChatData(
     }
 
     setState((prev) => {
-      const next = { ...prev, loadingOlder: true };
+      const next = { ...prev, loadingOlder: true, olderErrorMsg: "" };
       stateRef.current = next;
       return next;
     });
     try {
       const token = await resolveAccessToken();
+      if (previousConversationIDRef.current !== conversationID) {
+        return false;
+      }
       if (!token) {
         setState((prev) => {
           const next = { ...prev, loadingOlder: false, hasOlder: false };
@@ -357,6 +372,7 @@ export function useChatData(
         const next = {
           ...prev,
           loadingOlder: false,
+          olderErrorMsg: "",
           messages,
           total: data.total,
           hasOlder: loaded && messages.length < data.total,
@@ -366,14 +382,17 @@ export function useChatData(
       });
       return loaded;
     } catch {
+      if (previousConversationIDRef.current !== conversationID) {
+        return false;
+      }
       setState((prev) => {
-        const next = { ...prev, loadingOlder: false };
+        const next = { ...prev, loadingOlder: false, olderErrorMsg: t("loadOlderFailed") };
         stateRef.current = next;
         return next;
       });
       return false;
     }
-  }, [conversationID]);
+  }, [conversationID, t]);
 
   const loadAllOlderMessages = React.useCallback(async ({ maxPages = 50 }: { maxPages?: number } = {}) => {
     for (let iteration = 0; iteration < maxPages; iteration += 1) {
@@ -715,8 +734,12 @@ export function useChatData(
     };
   }, [activeGenerationRunsRef, conversationID, failedGenerationRunsRef, pendingAssistant, pendingRunID, reload, resumingRunID]);
 
+  const visibleState = previousConversationIDRef.current === conversationID
+    ? state
+    : initialChatDataState(conversationID);
+
   return {
-    ...state,
+    ...visibleState,
     cancelResumedGeneration,
     loadOlderMessages,
     loadAllOlderMessages,

@@ -25,6 +25,7 @@ import type { PatchSettingItem } from "@/shared/api/settings.types";
 
 export function AdminLoginSettingsPage() {
   const t = useTranslations("adminLogin");
+  const actions = useTranslations("common.actions");
   const loginSettingsGroups = React.useMemo(() => buildLoginSettingsGroups(t), [t]);
   const [settingsMap, setSettingsMap] = React.useState<Record<string, string>>(() => applyLoginDefaults({}));
   const [savedMap, setSavedMap] = React.useState<Record<string, string>>(() => applyLoginDefaults({}));
@@ -94,7 +95,7 @@ export function AdminLoginSettingsPage() {
           <React.Fragment key={group.title}>
             <SettingsSection title={group.title} actions={
               <Button type="button" size="sm" disabled={loading || saving || !dirty} onClick={() => void saveGroup(group.fields)}>
-                {saving ? <SpinnerLabel>{t("actions.saving")}</SpinnerLabel> : <><Save className="size-3.5" />{t("actions.save")}</>}
+                {saving ? <SpinnerLabel>{actions("saving")}</SpinnerLabel> : <><Save className="size-3.5" />{actions("save")}</>}
               </Button>
             }>
               <p className="text-sm text-muted-foreground">{group.description}</p>

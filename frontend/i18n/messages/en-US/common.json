@@ -117,6 +117,7 @@
       "running": "Running",
       "restarting": "Restarting",
       "created": "Created",
+      "available": "Available",
       "paused": "Paused",
       "unhealthy": "Unhealthy",
       "failed": "Failed",

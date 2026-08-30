@@ -117,6 +117,7 @@
       "running": "运行中",
       "restarting": "重启中",
       "created": "已创建",
+      "available": "可用",
       "paused": "已暂停",
       "unhealthy": "异常",
       "failed": "失败",

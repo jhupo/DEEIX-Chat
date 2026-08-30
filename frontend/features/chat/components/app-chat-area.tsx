@@ -300,6 +300,7 @@ export function AppChatArea() {
     cancelResumedGeneration,
     loading,
     loadingOlder,
+    olderErrorMsg,
     errorMsg,
     hasOlder,
     loadOlderMessages,
@@ -1136,6 +1137,7 @@ export function AppChatArea() {
         distanceFromBottom <= TOP_LOAD_OLDER_MESSAGES_THRESHOLD_PX ||
         !hasOlder ||
         loadingOlder ||
+        olderErrorMsg ||
         loadingOlderInFlightRef.current
       ) {
         return;
@@ -1148,7 +1150,7 @@ export function AppChatArea() {
           loadingOlderInFlightRef.current = false;
         });
     },
-    [hasOlder, loadOlderMessages, loadingOlder],
+    [hasOlder, loadOlderMessages, loadingOlder, olderErrorMsg],
   );
 
   const onEditGeneratedImageAttachment = React.useCallback(
@@ -1740,13 +1742,17 @@ export function AppChatArea() {
                 <ChatAreaLoadError onRefresh={reload} onNewConversation={onNewConversationFromLoadError} />
               ) : (
                 <ChatArea
+                  key={conversationID ?? "new-conversation"}
                   title={activeConversationTitle}
                   starred={activeConversationStarred}
                   canOperateConversation={canOperateConversation}
                   messages={messagesWithInlineError}
                   busy={generating}
+                  loadingOlder={loadingOlder}
+                  olderErrorMsg={olderErrorMsg}
                   messageContentRef={messageContentRef}
                   onScroll={onScroll}
+                  onRetryOlder={loadOlderMessages}
                   onRetryUserMessage={onRetryUserMessage}
                   onRetryAssistantMessage={onRetryAssistantMessage}
                   onContinueAssistantMessage={onContinueAssistantMessage}

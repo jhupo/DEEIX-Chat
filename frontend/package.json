@@ -1,6 +1,6 @@
 {
   "name": "@deeix/web",
-  "version": "0.4.119",
+  "version": "0.4.120",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/sync-assets.mjs",
@@ -18,7 +18,8 @@
     "analyze:output": "next experimental-analyze --output",
     "start": "next start",
     "typecheck": "tsc --noEmit --pretty false",
-    "check": "pnpm lint && pnpm typecheck",
+    "check": "pnpm lint && pnpm typecheck && pnpm check:i18n",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
     "clean": "rm -rf .next out"

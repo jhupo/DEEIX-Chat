@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDownToLine, Check } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, Check, RotateCcw } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ChatLabel } from "@/features/chat/components/sections/chat-label";
@@ -19,6 +19,7 @@ import { StreamdownRender } from "@/shared/components/markdown/streamdown-render
 import type { OpenCodeArtifactInput } from "@/features/chat/model/chat-artifacts";
 import { CenteredEmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { ConversationShareExportIconDropdown } from "@/shared/components/conversation-share-export-menu";
 import { ChatScreenshotSelectionBar } from "@/features/chat/components/sections/chat-screenshot-selection-bar";
 import { useCopyAction } from "@/shared/components/copy-action";
@@ -76,8 +77,11 @@ type ChatAreaProps = {
   canOperateConversation: boolean;
   messages: ChatAreaMessage[];
   busy: boolean;
+  loadingOlder: boolean;
+  olderErrorMsg: string;
   messageContentRef: React.RefObject<HTMLDivElement | null>;
   onScroll: (event: React.UIEvent<HTMLDivElement>) => void;
+  onRetryOlder: () => Promise<boolean> | boolean;
   onRetryUserMessage: (message: ChatAreaMessage) => Promise<void> | void;
   onRetryAssistantMessage: (message: ChatAreaMessage) => Promise<void> | void;
   onContinueAssistantMessage?: (message: ChatAreaMessage) => Promise<void> | void;
@@ -401,8 +405,11 @@ export function ChatArea({
   canOperateConversation,
   messages,
   busy,
+  loadingOlder,
+  olderErrorMsg,
   messageContentRef,
   onScroll,
+  onRetryOlder,
   onRetryUserMessage,
   onRetryAssistantMessage,
   onContinueAssistantMessage,
@@ -576,6 +583,25 @@ export function ChatArea({
                 style={{ fontFamily: "var(--font-chat)", fontWeight: "var(--font-chat-weight)" }}
               >
                 <ChatScreenshotBrandMark placement="top" />
+                {loadingOlder || olderErrorMsg ? (
+                  <div
+                    className="mb-3 flex min-h-8 items-center justify-center gap-2 text-xs text-muted-foreground"
+                    role={olderErrorMsg ? "alert" : "status"}
+                  >
+                    {loadingOlder ? <Spinner className="size-3.5" /> : <AlertCircle className="size-3.5" />}
+                    <span>{loadingOlder ? t("data.loadingOlder") : olderErrorMsg}</span>
+                    {olderErrorMsg ? (
+                      <button
+                        type="button"
+                        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                        onClick={() => void onRetryOlder()}
+                      >
+                        <RotateCcw className="size-3" />
+                        {t("data.retryLoadOlder")}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {messages.map((item, index) => {
                   const previousItem = index > 0 ? messages[index - 1] : null;
                   const spacingClass =

@@ -22,13 +22,13 @@ func TestTranslateErrorAllowsNil(t *testing.T) {
 	}
 }
 
-func TestListExecutionEventHistoryLimitsEachRunAndKeepsSequenceOrder(t *testing.T) {
+func TestListExecutionEventHistoryReturnsCompleteSetInSequenceOrder(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	rows := make([]model.ConversationExecutionEvent, 0, 6)
+	rows := make([]model.ConversationExecutionEvent, 0, 8)
 	for seq := uint64(1); seq <= 6; seq++ {
 		runID := "run_one"
 		if seq%2 == 0 {
@@ -39,10 +39,14 @@ func TestListExecutionEventHistoryLimitsEachRunAndKeepsSequenceOrder(t *testing.
 			Seq: seq, Kind: "item/completed", PayloadJSON: `{}`, OccurredAt: now,
 		})
 	}
+	rows = append(rows,
+		model.ConversationExecutionEvent{ConversationID: 12, UserID: 7, RunID: "run_one", SourceKey: "other-conversation", Seq: 7, Kind: "item/completed", PayloadJSON: `{}`, OccurredAt: now},
+		model.ConversationExecutionEvent{ConversationID: 11, UserID: 8, RunID: "run_one", SourceKey: "other-user", Seq: 8, Kind: "item/completed", PayloadJSON: `{}`, OccurredAt: now},
+	)
 	if err := db.Create(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
-	events, err := NewRepo(db).ListExecutionEventHistory(context.Background(), 7, 11, []string{"run_one", "run_two"}, 2)
+	events, err := NewRepo(db).ListExecutionEventHistory(context.Background(), 7, 11, []string{"run_one", " run_two ", "run_one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +54,12 @@ func TestListExecutionEventHistoryLimitsEachRunAndKeepsSequenceOrder(t *testing.
 	for _, event := range events {
 		got = append(got, event.Seq)
 	}
-	want := []uint64{3, 4, 5, 6}
+	want := []uint64{1, 2, 3, 4, 5, 6}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("history sequences = %v, want %v", got, want)
+	}
+	if _, err := NewRepo(db).ListExecutionEventHistory(context.Background(), 7, 11, []string{" "}); !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("blank run ID error = %v, want ErrInvalidInput", err)
 	}
 }
 
@@ -98,6 +105,15 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	if applied, err := repo.ProjectExecutionEvent(context.Background(), usage); err != nil || !applied {
 		t.Fatalf("project gateway usage: applied=%v err=%v", applied, err)
 	}
+	usage = &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:usage-updated", Kind: "thread/tokenUsage/updated",
+		PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":140,"cachedInputTokens":90,"outputTokens":20,"reasoningTokens":6}}}`,
+		HasUsage:    true, InputTokens: 140, CacheReadTokens: 90, OutputTokens: 20, ReasoningTokens: 6,
+		OccurredAt: now.Add(2500 * time.Millisecond),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), usage); err != nil || !applied {
+		t.Fatalf("project updated gateway usage: applied=%v err=%v", applied, err)
+	}
 	terminal := &domainconversation.ExecutionEvent{
 		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:completed", Kind: "turn/completed",
 		PayloadJSON: `{"turn":{"status":"completed"}}`, TerminalStatus: "completed", OccurredAt: now.Add(3 * time.Second),
@@ -110,11 +126,11 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 		t.Fatal(err)
 	}
 	if assistant.Status != "success" || assistant.Content != "partial continued" || assistant.ErrorCode != "" || assistant.ErrorMessage != "" ||
-		assistant.InputTokens != 120 || assistant.CacheReadTokens != 80 || assistant.OutputTokens != 15 || assistant.ReasoningTokens != 4 {
+		assistant.InputTokens != 140 || assistant.CacheReadTokens != 90 || assistant.OutputTokens != 20 || assistant.ReasoningTokens != 6 {
 		t.Fatalf("recovered assistant = %#v", assistant)
 	}
 	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.EndedAt == nil ||
-		run.InputTokens != 120 || run.CacheReadTokens != 80 || run.OutputTokens != 15 || run.ReasoningTokens != 4 {
+		run.InputTokens != 140 || run.CacheReadTokens != 90 || run.OutputTokens != 20 || run.ReasoningTokens != 6 {
 		t.Fatalf("recovered run = %#v, %v", run, err)
 	}
 	late := &domainconversation.ExecutionEvent{

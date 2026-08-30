@@ -110,7 +110,7 @@ export function useLoginPage({ nextPath }: UseLoginPageInput) {
 
   const completeAuth = React.useCallback((accessToken?: string, sessionID?: string) => {
     if (!accessToken || !sessionID) {
-      throw new Error(t("loginRetry"));
+      throw new Error(t("toasts.loginRetry"));
     }
     writeSessionSnapshot({ accessToken, sessionID });
     router.replace(resolvedNextPath);

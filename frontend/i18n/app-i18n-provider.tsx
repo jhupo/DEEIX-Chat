@@ -55,7 +55,7 @@ export function AppI18nProvider({ children }: { children: React.ReactNode }) {
   const [localeMessages, setLocaleMessages] = React.useState<AppMessages>(DEFAULT_MESSAGES);
   const localeRef = React.useRef<AppLocale>(DEFAULT_LOCALE);
 
-  const applyLocale = React.useCallback(async (nextLocale: AppLocale, persist: boolean) => {
+  const applyLocale = React.useCallback((nextLocale: AppLocale, persist: boolean) => {
     const normalized = normalizeAppLocale(nextLocale);
     if (normalized === localeRef.current) {
       if (persist) {
@@ -65,7 +65,7 @@ export function AppI18nProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const nextMessages = await loadLocaleMessages(normalized);
+    const nextMessages = loadLocaleMessages(normalized);
     localeRef.current = normalized;
     setLocaleState(normalized);
     setLocaleMessages(nextMessages);
@@ -76,12 +76,12 @@ export function AppI18nProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setLocale = React.useCallback(async (nextLocale: AppLocale) => {
-    await applyLocale(nextLocale, true);
+    applyLocale(nextLocale, true);
   }, [applyLocale]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     const cookieLocale = readLocaleCookie();
-    void applyLocale(cookieLocale ?? readBrowserLocale(), cookieLocale !== null);
+    applyLocale(cookieLocale ?? readBrowserLocale(), cookieLocale !== null);
   }, [applyLocale]);
 
   const value = React.useMemo<AppI18nContextValue>(
