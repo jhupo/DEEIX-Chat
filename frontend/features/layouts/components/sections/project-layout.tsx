@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl";
 import { SidebarConversationsProvider } from "@/entities/conversation";
 import { AppSidebar } from "@/features/layouts/components/navigation/app-sidebar";
 import { MobileHeader } from "@/features/layouts/components/sections/mobile-header";
+import { LayoutConversationNavigationProvider } from "@/features/layouts/context/layout-conversation-navigation-context";
 import { ChatSessionProvider, useChatSession } from "@/features/chat";
 import { DeviceProvider, ExecutionModeSwitch, useDevices } from "@/features/devices";
 import { AppearancePreferencesSync } from "@/features/settings";
@@ -108,11 +109,13 @@ export function ProjectLayout({
       <AppearancePreferencesSync />
       <AnnouncementDialogHost />
       <SidebarProvider className="h-svh overflow-hidden" defaultOpen={defaultSidebarOpen}>
-        <DeviceProvider>
-          <ChatSessionProvider>
-            <ProjectLayoutShell>{children}</ProjectLayoutShell>
-          </ChatSessionProvider>
-        </DeviceProvider>
+        <LayoutConversationNavigationProvider>
+          <DeviceProvider>
+            <ChatSessionProvider>
+              <ProjectLayoutShell>{children}</ProjectLayoutShell>
+            </ChatSessionProvider>
+          </DeviceProvider>
+        </LayoutConversationNavigationProvider>
       </SidebarProvider>
     </>
   );
