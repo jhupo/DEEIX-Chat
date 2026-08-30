@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	domainconversation "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
@@ -88,6 +89,11 @@ func (r *Repo) ProjectExecutionEvent(ctx context.Context, item *domainconversati
 				return err
 			}
 		}
+		if conversation.ExecutionType == domainconversation.ExecutionTypeGateway && item.HasUsage {
+			if err := applyGatewayUsage(tx, item); err != nil {
+				return err
+			}
+		}
 		if conversation.ExecutionType == domainconversation.ExecutionTypeGateway && item.Kind == "turn/started" {
 			if err := startGatewayTurn(tx, item); err != nil {
 				return err
@@ -105,6 +111,47 @@ func (r *Repo) ProjectExecutionEvent(ctx context.Context, item *domainconversati
 		return nil
 	})
 	return applied, translateError(err)
+}
+
+func applyGatewayUsage(tx *gorm.DB, item *domainconversation.ExecutionEvent) error {
+	usageDelta := item.InputTokens + item.OutputTokens + item.CacheReadTokens + item.ReasoningTokens
+	updates := map[string]interface{}{
+		"token_usage":       gorm.Expr("token_usage + ?", usageDelta),
+		"input_tokens":      gorm.Expr("input_tokens + ?", item.InputTokens),
+		"output_tokens":     gorm.Expr("output_tokens + ?", item.OutputTokens),
+		"cache_read_tokens": gorm.Expr("cache_read_tokens + ?", item.CacheReadTokens),
+		"reasoning_tokens":  gorm.Expr("reasoning_tokens + ?", item.ReasoningTokens),
+	}
+	message := tx.Model(&model.Message{}).
+		Where(
+			"conversation_id = ? AND user_id = ? AND run_id = ? AND role = ? AND (status = ? OR (status IN ? AND error_code = ?))",
+			item.ConversationID, item.UserID, item.RunID, "assistant", "pending", []string{"error", "interrupted"}, "stream_interrupted",
+		).
+		Updates(updates)
+	if message.Error != nil {
+		return message.Error
+	}
+	if message.RowsAffected != 1 {
+		return repository.ErrConflict
+	}
+	run := tx.Model(&model.ConversationRun{}).
+		Where(
+			"conversation_id = ? AND user_id = ? AND run_id = ? AND (status IN ? OR (status = ? AND error_code = ?))",
+			item.ConversationID, item.UserID, item.RunID, []string{"queued", "running"}, "interrupted", "stream_interrupted",
+		).
+		Updates(map[string]interface{}{
+			"input_tokens":      gorm.Expr("input_tokens + ?", item.InputTokens),
+			"output_tokens":     gorm.Expr("output_tokens + ?", item.OutputTokens),
+			"cache_read_tokens": gorm.Expr("cache_read_tokens + ?", item.CacheReadTokens),
+			"reasoning_tokens":  gorm.Expr("reasoning_tokens + ?", item.ReasoningTokens),
+		})
+	if run.Error != nil {
+		return run.Error
+	}
+	if run.RowsAffected != 1 {
+		return repository.ErrConflict
+	}
+	return nil
 }
 
 func startGatewayTurn(tx *gorm.DB, item *domainconversation.ExecutionEvent) error {
@@ -199,6 +246,43 @@ func (r *Repo) ListExecutionEvents(ctx context.Context, userID, conversationID u
 	if err := query.Order("seq ASC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, translateError(err)
 	}
+	result := make([]domainconversation.ExecutionEvent, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, domainconversation.ExecutionEvent{
+			ConversationID: row.ConversationID, UserID: row.UserID, RunID: row.RunID,
+			SourceKey: row.SourceKey, Seq: row.Seq, Kind: row.Kind,
+			PayloadJSON: row.PayloadJSON, OccurredAt: row.OccurredAt,
+		})
+	}
+	return result, nil
+}
+
+func (r *Repo) ListExecutionEventHistory(ctx context.Context, userID, conversationID uint, runIDs []string, perRunLimit int) ([]domainconversation.ExecutionEvent, error) {
+	if userID == 0 || conversationID == 0 || len(runIDs) == 0 || len(runIDs) > 64 || perRunLimit < 1 || perRunLimit > 500 {
+		return nil, repository.ErrInvalidInput
+	}
+	rows := make([]model.ConversationExecutionEvent, 0, len(runIDs)*perRunLimit)
+	for _, runID := range runIDs {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return nil, repository.ErrInvalidInput
+		}
+		var runRows []model.ConversationExecutionEvent
+		if err := r.db.WithContext(ctx).
+			Where("user_id = ? AND conversation_id = ? AND run_id = ? AND kind <> ?", userID, conversationID, runID, "thread/tokenUsage/updated").
+			Order("seq DESC").Limit(perRunLimit).Find(&runRows).Error; err != nil {
+			return nil, translateError(err)
+		}
+		rows = append(rows, runRows...)
+		var usageRows []model.ConversationExecutionEvent
+		if err := r.db.WithContext(ctx).
+			Where("user_id = ? AND conversation_id = ? AND run_id = ? AND kind = ?", userID, conversationID, runID, "thread/tokenUsage/updated").
+			Order("seq ASC").Find(&usageRows).Error; err != nil {
+			return nil, translateError(err)
+		}
+		rows = append(rows, usageRows...)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Seq < rows[j].Seq })
 	result := make([]domainconversation.ExecutionEvent, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, domainconversation.ExecutionEvent{

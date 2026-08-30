@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,14 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 	if err != nil || commentary.TextDelta != "" || gatewayStreamPayload(commentary)["type"] != "execution_event" {
 		t.Fatalf("commentary projection = %#v, %v", commentary, err)
 	}
+	usage, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
+		SourceKey: "agent:agev_usage", UserID: 7, ConversationID: 11, RunID: "run_1",
+		Kind:    "thread/tokenUsage/updated",
+		Payload: []byte(`{"tokenUsage":{"last":{"inputTokens":120,"cachedInputTokens":80,"outputTokens":15,"reasoningTokens":4},"total":{"inputTokens":500}}}`), OccurredAt: now,
+	})
+	if err != nil || !usage.HasUsage || usage.InputTokens != 120 || usage.CacheReadTokens != 80 || usage.OutputTokens != 15 || usage.ReasoningTokens != 4 {
+		t.Fatalf("usage projection = %#v, %v", usage, err)
+	}
 
 	terminal, err := normalizeGatewayExecutionEvent(GatewayExecutionEvent{
 		SourceKey: "agent:agev_2", UserID: 7, ConversationID: 11, RunID: "run_1",
@@ -139,6 +148,17 @@ func TestNormalizeGatewayExecutionEvent(t *testing.T) {
 	})
 	if err != nil || terminal.TerminalStatus != "failed" || terminal.ErrorCode != "conversation.thread_in_use" || terminal.ErrorMessage != "boom" || terminal.LatencyMS != 42 {
 		t.Fatalf("terminal projection = %#v, %v", terminal, err)
+	}
+}
+
+func TestGatewayEventUsageRejectsInvalidCounts(t *testing.T) {
+	hasUsage, input, output, cacheRead, reasoning := gatewayEventUsage(map[string]interface{}{
+		"tokenUsage": map[string]interface{}{"last": map[string]interface{}{
+			"inputTokens": -1.0, "outputTokens": 1.5, "cachedInputTokens": "10", "reasoningTokens": math.Inf(1),
+		}},
+	})
+	if hasUsage || input != 0 || output != 0 || cacheRead != 0 || reasoning != 0 {
+		t.Fatalf("invalid usage accepted: %v %d %d %d %d", hasUsage, input, output, cacheRead, reasoning)
 	}
 }
 
@@ -369,10 +389,27 @@ func TestCompactExecutionHistoryMergesIncrementalText(t *testing.T) {
 	}
 }
 
+func TestCompactExecutionHistoryAggregatesRunTokenUsage(t *testing.T) {
+	events := []model.ExecutionEvent{
+		{RunID: "run_usage", Seq: 1, Kind: "thread/tokenUsage/updated", PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":10,"cachedInputTokens":8,"outputTokens":2,"reasoningTokens":1,"totalTokens":12}}}`},
+		{RunID: "run_usage", Seq: 2, Kind: "thread/tokenUsage/updated", PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":20,"cachedInputTokens":16,"outputTokens":4,"reasoningTokens":2,"totalTokens":24}}}`},
+	}
+	compacted := compactExecutionHistory(events)
+	if len(compacted) != 1 || compacted[0].Seq != 2 {
+		t.Fatalf("compacted token events = %#v", compacted)
+	}
+	usage, ok := executionEventLastUsage(compacted[0])
+	if !ok || usage.InputTokens != 30 || usage.CachedInputTokens != 24 || usage.OutputTokens != 6 || usage.ReasoningTokens != 3 || usage.TotalTokens != 36 {
+		t.Fatalf("compacted token usage = %#v, %v", usage, ok)
+	}
+}
+
 type executionPageRepoStub struct {
 	repository.ConversationRepository
 	conversation model.Conversation
 	events       []model.ExecutionEvent
+	history      []model.ExecutionEvent
+	historyLimit int
 }
 
 func (s *executionPageRepoStub) GetConversationByPublicID(context.Context, string, uint) (*model.Conversation, error) {
@@ -382,6 +419,11 @@ func (s *executionPageRepoStub) GetConversationByPublicID(context.Context, strin
 
 func (s *executionPageRepoStub) ListExecutionEvents(context.Context, uint, uint, uint64, []string, int) ([]model.ExecutionEvent, error) {
 	return append([]model.ExecutionEvent(nil), s.events...), nil
+}
+
+func (s *executionPageRepoStub) ListExecutionEventHistory(_ context.Context, _ uint, _ uint, _ []string, limit int) ([]model.ExecutionEvent, error) {
+	s.historyLimit = limit
+	return append([]model.ExecutionEvent(nil), s.history...), nil
 }
 
 func TestListExecutionEventsCompactsLivePageWithoutMovingCursorBackward(t *testing.T) {
@@ -405,5 +447,22 @@ func TestListExecutionEventsCompactsLivePageWithoutMovingCursorBackward(t *testi
 	}
 	if err := json.Unmarshal([]byte(page.Events[0].PayloadJSON), &delta); err != nil || delta.Output != "first second" {
 		t.Fatalf("compacted live delta = %#v, %v", delta, err)
+	}
+}
+
+func TestListExecutionEventsUsesBoundedInitialHistory(t *testing.T) {
+	repo := &executionPageRepoStub{
+		conversation: model.Conversation{ID: 11, UserID: 7, ExecutionEventSeq: 900},
+		history: []model.ExecutionEvent{
+			{RunID: "run_history", Seq: 899, Kind: "item/completed", PayloadJSON: `{"itemID":"command_1","item":{"kind":"commandExecution","status":"completed"}}`},
+			{RunID: "run_history", Seq: 901, Kind: "turn/completed", PayloadJSON: `{"turn":{"status":"completed"}}`},
+		},
+	}
+	page, err := (&Service{repo: repo}).ListExecutionEvents(context.Background(), 7, "conversation_history", 0, []string{"run_history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyLimit != executionHistoryEventsPerRun || page.Cursor != 901 || page.HasMore || len(page.Events) != 2 {
+		t.Fatalf("history page = limit %d cursor %d hasMore %v events %#v", repo.historyLimit, page.Cursor, page.HasMore, page.Events)
 	}
 }

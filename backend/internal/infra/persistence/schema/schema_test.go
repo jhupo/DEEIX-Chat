@@ -8,10 +8,13 @@ import (
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
-func TestModelsIncludeContentModerationTables(t *testing.T) {
+func TestModelsIncludeFeatureTables(t *testing.T) {
 	want := map[reflect.Type]bool{
-		reflect.TypeOf(&model.ContentModerationEvent{}):     false,
-		reflect.TypeOf(&model.ContentModerationDailyStat{}): false,
+		reflect.TypeOf(&model.ContentModerationEvent{}):           false,
+		reflect.TypeOf(&model.ContentModerationDailyStat{}):       false,
+		reflect.TypeOf(&model.KnowledgeBase{}):                    false,
+		reflect.TypeOf(&model.KnowledgeBaseFile{}):                false,
+		reflect.TypeOf(&model.ConversationProjectKnowledgeBase{}): false,
 	}
 	for _, item := range Models() {
 		if _, ok := want[reflect.TypeOf(item)]; ok {

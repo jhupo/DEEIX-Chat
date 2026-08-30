@@ -57,5 +57,19 @@
     "apiKeyRequired": "启用内容审核前必须配置审核鉴权密钥。",
     "policyRequired": "启用内容审核前至少需要选择一个审核类别。",
     "integerRange": "{field}必须是 {min}–{max} 之间的整数。"
+  },
+  "statistics": {
+    "title": "内容审核",
+    "loadFailed": "加载内容审核统计失败",
+    "trendTitle": "用量趋势",
+    "empty": "暂无内容审核用量",
+    "avgLatencyLabel": "平均延迟",
+    "metrics": {
+      "checks": "检查次数",
+      "hits": "命中次数",
+      "hitRate": "命中率",
+      "failures": "失败次数",
+      "latency": "延迟"
+    }
   }
 }

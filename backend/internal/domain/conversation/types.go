@@ -434,20 +434,25 @@ type RunStatus struct {
 }
 
 type ExecutionEvent struct {
-	ConversationID uint
-	UserID         uint
-	RunID          string
-	SourceKey      string
-	Seq            uint64
-	Kind           string
-	PayloadJSON    string
-	TextDelta      string
-	ReasoningDelta string
-	TerminalStatus string
-	ErrorCode      string
-	ErrorMessage   string
-	LatencyMS      int64
-	OccurredAt     time.Time
+	ConversationID  uint
+	UserID          uint
+	RunID           string
+	SourceKey       string
+	Seq             uint64
+	Kind            string
+	PayloadJSON     string
+	TextDelta       string
+	ReasoningDelta  string
+	HasUsage        bool
+	InputTokens     int64
+	OutputTokens    int64
+	CacheReadTokens int64
+	ReasoningTokens int64
+	TerminalStatus  string
+	ErrorCode       string
+	ErrorMessage    string
+	LatencyMS       int64
+	OccurredAt      time.Time
 }
 
 // MessageTrace 表示消息处理轨迹。

@@ -57,5 +57,19 @@
     "apiKeyRequired": "An API key is required before content moderation can be enabled.",
     "policyRequired": "Select at least one moderation category before enabling content moderation.",
     "integerRange": "{field} must be an integer from {min} to {max}."
+  },
+  "statistics": {
+    "title": "Content moderation",
+    "loadFailed": "Failed to load content moderation statistics",
+    "trendTitle": "Usage trend",
+    "empty": "No moderation usage yet",
+    "avgLatencyLabel": "Average latency",
+    "metrics": {
+      "checks": "Checks",
+      "hits": "Hits",
+      "hitRate": "Hit rate",
+      "failures": "Failures",
+      "latency": "Latency"
+    }
   }
 }

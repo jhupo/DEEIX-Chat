@@ -213,6 +213,35 @@ test("bounds command output accumulated from live events", () => {
   assert.equal(item.outputTruncated, true);
 });
 
+test("accumulates per-call token usage for one run", () => {
+  setAgentRunContext("usage-context", "conversation-usage");
+  applyAgentExecutionEvents([
+    {
+      runID: "run-usage",
+      seq: 1,
+      kind: "thread/tokenUsage/updated",
+      payload: { tokenUsage: { last: { inputTokens: 10, cachedInputTokens: 8, outputTokens: 2, reasoningTokens: 1, totalTokens: 12 } } },
+      occurredAt: "2026-08-27T00:00:01Z",
+    },
+    {
+      runID: "run-usage",
+      seq: 2,
+      kind: "thread/tokenUsage/updated",
+      payload: { tokenUsage: { last: { inputTokens: 20, cachedInputTokens: 16, outputTokens: 4, reasoningTokens: 2, totalTokens: 24 } } },
+      occurredAt: "2026-08-27T00:00:02Z",
+    },
+  ], "conversation-usage");
+
+  assert.deepEqual(getAgentRunSnapshot("run-usage").usage, {
+    inputTokens: 30,
+    cachedInputTokens: 24,
+    outputTokens: 6,
+    reasoningTokens: 3,
+    totalTokens: 36,
+    scope: "run",
+  });
+});
+
 test("normalizes canonical tool items into the shared activity timeline", () => {
   setAgentRunContext("tool-context", "conversation-tool");
   applyAgentExecutionEvents([

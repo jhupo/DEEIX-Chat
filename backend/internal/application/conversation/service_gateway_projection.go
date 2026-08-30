@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -71,10 +72,36 @@ func normalizeGatewayExecutionEvent(input GatewayExecutionEvent) (*model.Executi
 		if index, ok := payload["summaryIndex"].(float64); ok && index > 0 {
 			event.ReasoningDelta = "\n\n"
 		}
+	case "thread/tokenUsage/updated":
+		event.HasUsage, event.InputTokens, event.OutputTokens, event.CacheReadTokens, event.ReasoningTokens = gatewayEventUsage(payload)
 	case "turn/completed":
 		normalizeGatewayTerminal(event, payload)
 	}
 	return event, nil
+}
+
+func gatewayEventUsage(payload map[string]interface{}) (bool, int64, int64, int64, int64) {
+	tokenUsage, _ := payload["tokenUsage"].(map[string]interface{})
+	last, ok := tokenUsage["last"].(map[string]interface{})
+	if !ok {
+		return false, 0, 0, 0, 0
+	}
+	input, inputOK := gatewayTokenCount(last["inputTokens"])
+	output, outputOK := gatewayTokenCount(last["outputTokens"])
+	cacheRead, cacheReadOK := gatewayTokenCount(last["cachedInputTokens"])
+	reasoning, reasoningOK := gatewayTokenCount(last["reasoningTokens"])
+	if input > math.MaxInt64-output || input+output > math.MaxInt64-cacheRead || input+output+cacheRead > math.MaxInt64-reasoning {
+		return false, 0, 0, 0, 0
+	}
+	return inputOK || outputOK || cacheReadOK || reasoningOK, input, output, cacheRead, reasoning
+}
+
+func gatewayTokenCount(value interface{}) (int64, bool) {
+	number, ok := value.(float64)
+	if !ok || number < 0 || number >= math.Pow(2, 63) || math.Trunc(number) != number {
+		return 0, false
+	}
+	return int64(number), true
 }
 
 func normalizeGatewayTerminal(event *model.ExecutionEvent, payload map[string]interface{}) {

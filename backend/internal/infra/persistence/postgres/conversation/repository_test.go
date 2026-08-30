@@ -22,6 +22,40 @@ func TestTranslateErrorAllowsNil(t *testing.T) {
 	}
 }
 
+func TestListExecutionEventHistoryLimitsEachRunAndKeepsSequenceOrder(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	rows := make([]model.ConversationExecutionEvent, 0, 6)
+	for seq := uint64(1); seq <= 6; seq++ {
+		runID := "run_one"
+		if seq%2 == 0 {
+			runID = "run_two"
+		}
+		rows = append(rows, model.ConversationExecutionEvent{
+			ConversationID: 11, UserID: 7, RunID: runID, SourceKey: fmt.Sprintf("event:%d", seq),
+			Seq: seq, Kind: "item/completed", PayloadJSON: `{}`, OccurredAt: now,
+		})
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	events, err := NewRepo(db).ListExecutionEventHistory(context.Background(), 7, 11, []string{"run_one", "run_two"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]uint64, 0, len(events))
+	for _, event := range events {
+		got = append(got, event.Seq)
+	}
+	want := []uint64{3, 4, 5, 6}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("history sequences = %v, want %v", got, want)
+	}
+}
+
 func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	if err := db.AutoMigrate(&model.ConversationExecutionEvent{}); err != nil {
@@ -55,9 +89,18 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	if applied, err := repo.ProjectExecutionEvent(context.Background(), delta); err != nil || !applied {
 		t.Fatalf("project recovery delta: applied=%v err=%v", applied, err)
 	}
+	usage := &domainconversation.ExecutionEvent{
+		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:usage", Kind: "thread/tokenUsage/updated",
+		PayloadJSON: `{"tokenUsage":{"last":{"inputTokens":120,"cachedInputTokens":80,"outputTokens":15,"reasoningTokens":4}}}`,
+		HasUsage:    true, InputTokens: 120, CacheReadTokens: 80, OutputTokens: 15, ReasoningTokens: 4,
+		OccurredAt: now.Add(2 * time.Second),
+	}
+	if applied, err := repo.ProjectExecutionEvent(context.Background(), usage); err != nil || !applied {
+		t.Fatalf("project gateway usage: applied=%v err=%v", applied, err)
+	}
 	terminal := &domainconversation.ExecutionEvent{
 		ConversationID: conversation.ID, UserID: 1, RunID: runID, SourceKey: "agent:completed", Kind: "turn/completed",
-		PayloadJSON: `{"turn":{"status":"completed"}}`, TerminalStatus: "completed", OccurredAt: now.Add(2 * time.Second),
+		PayloadJSON: `{"turn":{"status":"completed"}}`, TerminalStatus: "completed", OccurredAt: now.Add(3 * time.Second),
 	}
 	if applied, err := repo.ProjectExecutionEvent(context.Background(), terminal); err != nil || !applied {
 		t.Fatalf("project recovery terminal: applied=%v err=%v", applied, err)
@@ -66,10 +109,12 @@ func TestGatewayProjectionRecoversInterruptedHTTPStream(t *testing.T) {
 	if err := db.First(&assistant, messages[1].ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if assistant.Status != "success" || assistant.Content != "partial continued" || assistant.ErrorCode != "" || assistant.ErrorMessage != "" {
+	if assistant.Status != "success" || assistant.Content != "partial continued" || assistant.ErrorCode != "" || assistant.ErrorMessage != "" ||
+		assistant.InputTokens != 120 || assistant.CacheReadTokens != 80 || assistant.OutputTokens != 15 || assistant.ReasoningTokens != 4 {
 		t.Fatalf("recovered assistant = %#v", assistant)
 	}
-	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.EndedAt == nil {
+	if err := db.First(&run, run.ID).Error; err != nil || run.Status != "success" || run.EndedAt == nil ||
+		run.InputTokens != 120 || run.CacheReadTokens != 80 || run.OutputTokens != 15 || run.ReasoningTokens != 4 {
 		t.Fatalf("recovered run = %#v, %v", run, err)
 	}
 	late := &domainconversation.ExecutionEvent{

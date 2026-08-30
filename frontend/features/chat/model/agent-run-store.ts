@@ -77,7 +77,7 @@ export type AgentFileActivity = {
   truncated: boolean;
 };
 
-export type AgentUsage = Required<AgentTokenUsageDTO> & { scope: "thread" };
+export type AgentUsage = Required<AgentTokenUsageDTO> & { scope: "run" };
 export type AgentActivityItem = AgentCommandActivity | AgentToolActivity | AgentFileActivity | AgentTextActivity;
 
 export type AgentRunSnapshot = {
@@ -381,7 +381,7 @@ function usageValue(usage: AgentTokenUsageDTO | undefined): AgentUsage | null {
     cachedInputTokens: finiteNumber(usage.cachedInputTokens) ?? 0,
     reasoningTokens: finiteNumber(usage.reasoningTokens) ?? 0,
     totalTokens: finiteNumber(usage.totalTokens) ?? 0,
-    scope: "thread" as const,
+    scope: "run" as const,
   };
   return Object.values(value).some((item) => typeof item === "number" && item > 0) ? value : null;
 }
@@ -503,7 +503,20 @@ function reduceAgentExecutionEvent(
       next.files = normalizeFiles(payload.changes);
       break;
     case "thread/tokenUsage/updated":
-      next.usage = usageValue(payload.tokenUsage?.total);
+      {
+        const usage = usageValue(payload.tokenUsage?.last);
+        if (usage) {
+          const current = next.usage;
+          next.usage = {
+            inputTokens: (current?.inputTokens ?? 0) + usage.inputTokens,
+            outputTokens: (current?.outputTokens ?? 0) + usage.outputTokens,
+            cachedInputTokens: (current?.cachedInputTokens ?? 0) + usage.cachedInputTokens,
+            reasoningTokens: (current?.reasoningTokens ?? 0) + usage.reasoningTokens,
+            totalTokens: (current?.totalTokens ?? 0) + usage.totalTokens,
+            scope: "run",
+          };
+        }
+      }
       break;
     case "model/rerouted":
       next.actualModel = stringValue(payload.toModel);

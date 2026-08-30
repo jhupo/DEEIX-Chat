@@ -368,11 +368,7 @@ function activityTimelineRank(kind: ActivityTimelineEntry["kind"]): number {
 }
 
 function buildActivityTimeline(run: AgentRunSnapshot, showPlan: boolean): ActivityTimelineEntry[] {
-  const nonReasoningItems = run.items.filter((item) => item.kind !== "reasoning");
-  const visibleItems = nonReasoningItems.length > 0
-    ? nonReasoningItems
-    : run.items.filter((item) => item.kind === "reasoning").slice(-1);
-  const entries: ActivityTimelineEntry[] = visibleItems.map((item) => ({ kind: "item", seq: item.seq, item }));
+  const entries: ActivityTimelineEntry[] = run.items.map((item) => ({ kind: "item", seq: item.seq, item }));
   if (showPlan && run.plan.length > 0) {
     entries.push({ kind: "plan", seq: run.planSeq });
   }

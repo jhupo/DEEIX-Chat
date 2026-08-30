@@ -323,11 +323,11 @@ func (ConversationRun) TableName() string {
 
 type ConversationExecutionEvent struct {
 	ControlPlaneModel
-	ConversationID uint      `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:1;index"`
+	ConversationID uint      `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:1;index;index:idx_conversation_execution_events_run_seq,priority:1"`
 	UserID         uint      `gorm:"not null;index"`
-	RunID          string    `gorm:"size:64;not null;index"`
+	RunID          string    `gorm:"size:64;not null;index;index:idx_conversation_execution_events_run_seq,priority:2"`
 	SourceKey      string    `gorm:"size:96;not null;uniqueIndex:uk_conversation_execution_events_source"`
-	Seq            uint64    `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:2"`
+	Seq            uint64    `gorm:"not null;uniqueIndex:uk_conversation_execution_events_seq,priority:2;index:idx_conversation_execution_events_run_seq,priority:3,sort:desc"`
 	Kind           string    `gorm:"size:128;not null;index"`
 	PayloadJSON    string    `gorm:"type:jsonb;not null"`
 	OccurredAt     time.Time `gorm:"not null;index"`

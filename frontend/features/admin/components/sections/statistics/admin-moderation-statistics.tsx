@@ -1,18 +1,18 @@
 "use client";
 
-import * as React from "react";
 import { Activity, AlertTriangle, CheckCircle2, RefreshCw, ShieldAlert, Timer } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
+import * as React from "react";
 import { Area, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
+  type ChartConfig,
   ChartContainer,
   ChartInteractiveLegend,
-  ChartTooltip,
-  type ChartConfig,
   type ChartInteractiveLegendItem,
+  ChartTooltip,
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -132,7 +132,7 @@ function ModerationTooltipContent({
   active?: boolean;
   payload?: Array<{ payload?: DayAggregate & { avgLatencyMS?: number } }>;
 }) {
-  const t = useTranslations("adminStatistics.moderation");
+  const t = useTranslations("adminContentModeration.statistics");
   const locale = useLocale();
   const item = payload?.[0]?.payload;
   if (!active || !item) return null;
@@ -170,8 +170,8 @@ function ModerationTooltipContent({
 }
 
 export function AdminModerationStatisticsSection() {
-  const t = useTranslations("adminStatistics.moderation");
-  const tRoot = useTranslations("adminStatistics");
+  const t = useTranslations("adminContentModeration.statistics");
+  const tActions = useTranslations("common.actions");
   const locale = useLocale();
   const [loading, setLoading] = React.useState(true);
   const [items, setItems] = React.useState<DailyStat[]>([]);
@@ -268,13 +268,13 @@ export function AdminModerationStatisticsSection() {
           className="h-8 shrink-0 gap-1.5 px-2 text-xs font-normal text-muted-foreground shadow-none hover:bg-muted hover:text-foreground"
           onClick={() => void load()}
           disabled={loading}
-          aria-label={tRoot("refresh")}
-          title={tRoot("refresh")}
+          aria-label={tActions("refresh")}
+          title={tActions("refresh")}
         >
           <span className="flex size-3.5 shrink-0 items-center justify-center">
             <RefreshCw className={cn("size-3.5 stroke-1", loading && "animate-spin")} />
           </span>
-          <span>{tRoot("refresh")}</span>
+          <span>{tActions("refresh")}</span>
         </Button>
       </div>
 

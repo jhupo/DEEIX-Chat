@@ -1,4 +1,6 @@
+import type { AppLocale } from "@/i18n/config";
 import enAdminAnnouncements from "@/i18n/messages/en-US/admin-announcements.json";
+import enAdminContentModeration from "@/i18n/messages/en-US/admin-content-moderation.json";
 import enAdminConversation from "@/i18n/messages/en-US/admin-conversation.json";
 import enAdminFiles from "@/i18n/messages/en-US/admin-files.json";
 import enAdminGroups from "@/i18n/messages/en-US/admin-groups.json";
@@ -10,19 +12,19 @@ import enAdminRelays from "@/i18n/messages/en-US/admin-relays.json";
 import enAdminTools from "@/i18n/messages/en-US/admin-tools.json";
 import enAdminUpstreams from "@/i18n/messages/en-US/admin-upstreams.json";
 import enAdminUsers from "@/i18n/messages/en-US/admin-users.json";
-import enChat from "@/i18n/messages/en-US/chat.json";
 import enAnnouncements from "@/i18n/messages/en-US/announcements.json";
+import enChat from "@/i18n/messages/en-US/chat.json";
 import enCommon from "@/i18n/messages/en-US/common.json";
 import enConversation from "@/i18n/messages/en-US/conversation.json";
 import enErrors from "@/i18n/messages/en-US/errors.json";
 import enFiles from "@/i18n/messages/en-US/files.json";
 import enGuide from "@/i18n/messages/en-US/guide.json";
+import enKnowledgeBases from "@/i18n/messages/en-US/knowledge-bases.json";
 import enLogin from "@/i18n/messages/en-US/login.json";
 import enPrompts from "@/i18n/messages/en-US/prompts.json";
 import enRecent from "@/i18n/messages/en-US/recent.json";
 import enSettings from "@/i18n/messages/en-US/settings.json";
 import enShare from "@/i18n/messages/en-US/share.json";
-import type { AppLocale } from "@/i18n/config";
 import { replaceDefaultBrandTitle } from "@/shared/config/branding";
 
 const ENGLISH_MESSAGES = {
@@ -38,8 +40,10 @@ const ENGLISH_MESSAGES = {
   share: enShare,
   files: enFiles,
   settings: enSettings,
+  knowledgeBases: enKnowledgeBases,
   adminAnnouncements: enAdminAnnouncements,
   adminConversation: enAdminConversation,
+  adminContentModeration: enAdminContentModeration,
   adminFiles: enAdminFiles,
   adminGroups: enAdminGroups,
   adminLogin: enAdminLogin,
@@ -119,8 +123,10 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     share,
     files,
     settings,
+    knowledgeBases,
     adminAnnouncements,
     adminConversation,
+    adminContentModeration,
     adminFiles,
     adminGroups,
     adminLogin,
@@ -144,8 +150,10 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     import("@/i18n/messages/zh-CN/share.json"),
     import("@/i18n/messages/zh-CN/files.json"),
     import("@/i18n/messages/zh-CN/settings.json"),
+    import("@/i18n/messages/zh-CN/knowledge-bases.json"),
     import("@/i18n/messages/zh-CN/admin-announcements.json"),
     import("@/i18n/messages/zh-CN/admin-conversation.json"),
+    import("@/i18n/messages/zh-CN/admin-content-moderation.json"),
     import("@/i18n/messages/zh-CN/admin-files.json"),
     import("@/i18n/messages/zh-CN/admin-groups.json"),
     import("@/i18n/messages/zh-CN/admin-login.json"),
@@ -171,8 +179,10 @@ export async function loadLocaleMessages(locale: AppLocale): Promise<AppMessages
     share: share.default,
     files: files.default,
     settings: settings.default,
+    knowledgeBases: knowledgeBases.default,
     adminAnnouncements: adminAnnouncements.default,
     adminConversation: adminConversation.default,
+    adminContentModeration: adminContentModeration.default,
     adminFiles: adminFiles.default,
     adminGroups: adminGroups.default,
     adminLogin: adminLogin.default,
