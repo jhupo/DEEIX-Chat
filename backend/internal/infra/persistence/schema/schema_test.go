@@ -1,11 +1,29 @@
 package schema
 
 import (
+	"reflect"
 	"testing"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
+
+func TestModelsIncludeContentModerationTables(t *testing.T) {
+	want := map[reflect.Type]bool{
+		reflect.TypeOf(&model.ContentModerationEvent{}):     false,
+		reflect.TypeOf(&model.ContentModerationDailyStat{}): false,
+	}
+	for _, item := range Models() {
+		if _, ok := want[reflect.TypeOf(item)]; ok {
+			want[reflect.TypeOf(item)] = true
+		}
+	}
+	for modelType, found := range want {
+		if !found {
+			t.Errorf("Models() does not include %v", modelType)
+		}
+	}
+}
 
 func TestBackfillGatewayConversationSettingsUsesLatestValidTurn(t *testing.T) {
 	db := testutil.Postgres(t)

@@ -12,6 +12,7 @@ import (
 	domainuser "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/user"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/config"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/sub2api"
+	portsub2api "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/ports/sub2api"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/requestmeta"
 	sharedsecurity "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/security"
@@ -21,10 +22,44 @@ import (
 
 const testSub2BaseURL = "http://127.0.0.1:1"
 
+type requestHostClient struct {
+	portsub2api.Client
+	host string
+}
+
+func (c *requestHostClient) InstanceID() string { return "request-host-test" }
+
+func (c *requestHostClient) Settings(ctx context.Context) (*portsub2api.PublicSettings, error) {
+	c.host = portsub2api.RequestHost(ctx)
+	return &portsub2api.PublicSettings{RegistrationEnabled: true}, nil
+}
+
 type changePasswordStorageRepo struct {
 	repository.AuthRepository
 	user *domainuser.User
 	err  error
+}
+
+func TestLoginOptionsForwardsRequestHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	client := &requestHostClient{}
+	service, err := appauth.NewServiceWithRuntime(config.NewRuntime(config.Config{}), nil, nil, client)
+	if err != nil {
+		t.Fatalf("NewServiceWithRuntime() error = %v", err)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login-options", nil)
+	ctx.Request = request.WithContext(portsub2api.WithRequestHost(request.Context(), "chat.example.test"))
+
+	NewHandler(service).LoginOptions(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("LoginOptions() status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if client.host != "chat.example.test" {
+		t.Fatalf("request host = %q, want %q", client.host, "chat.example.test")
+	}
 }
 
 func (r changePasswordStorageRepo) GetByID(context.Context, uint) (*domainuser.User, error) {

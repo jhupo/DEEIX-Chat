@@ -55,6 +55,8 @@ func Models() []interface{} {
 		&model.ConversationExecutionEvent{},
 		&model.ChatRunEvent{},
 		&model.ChatContextRecord{},
+		&model.ContentModerationEvent{},
+		&model.ContentModerationDailyStat{},
 		&model.UserMemory{},
 		&model.AuditLog{},
 		&model.SystemEvent{},

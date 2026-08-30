@@ -47,7 +47,7 @@ func (h *Handler) clear(c *gin.Context) {
 // @Failure 502 {object} ErrorDoc
 // @Router /auth/login-options [get]
 func (h *Handler) LoginOptions(c *gin.Context) {
-	v, e := h.service.GetLoginOptions(c)
+	v, e := h.service.GetLoginOptions(c.Request.Context())
 	if e != nil {
 		response.Error(c, http.StatusBadGateway, appauth.ErrSub2Unavailable.Error())
 		return
@@ -72,7 +72,7 @@ func (h *Handler) StartEmailRegistration(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.RequestEmailRegistration(c, r.Email, r.TurnstileToken)
+	v, e := h.service.RequestEmailRegistration(c.Request.Context(), r.Email, r.TurnstileToken)
 	if e != nil {
 		if errors.Is(e, appauth.ErrSub2Unavailable) {
 			response.Error(c, http.StatusBadGateway, e.Error())
@@ -101,7 +101,7 @@ func (h *Handler) CompleteEmailRegistration(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.RegisterWithEmail(c, r.Email, r.Password, r.Code, r.TurnstileToken, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	v, e := h.service.RegisterWithEmail(c.Request.Context(), r.Email, r.Password, r.Code, r.TurnstileToken, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		if errors.Is(e, appauth.ErrSub2Unavailable) {
 			response.Error(c, http.StatusBadGateway, e.Error())
@@ -132,7 +132,7 @@ func (h *Handler) Login(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.Login(c, r.Email, r.Password, r.TurnstileToken, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	v, e := h.service.Login(c.Request.Context(), r.Email, r.Password, r.TurnstileToken, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		if errors.Is(e, appauth.ErrSub2Unavailable) {
 			response.Error(c, http.StatusBadGateway, e.Error())
@@ -165,7 +165,7 @@ func (h *Handler) VerifyTwoFactorLogin(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.VerifyLoginTwoFactor(c, r.ChallengeToken, r.Code, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	v, e := h.service.VerifyLoginTwoFactor(c.Request.Context(), r.ChallengeToken, r.Code, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		if errors.Is(e, appauth.ErrSub2Unavailable) {
 			response.Error(c, http.StatusBadGateway, e.Error())
@@ -190,7 +190,7 @@ func (h *Handler) VerifyTwoFactorLogin(c *gin.Context) {
 // @Router /auth/refresh [post]
 func (h *Handler) RefreshToken(c *gin.Context) {
 	raw, _ := c.Cookie(refreshTokenCookieName)
-	v, e := h.refresh(c, raw, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	v, e := h.refresh(c.Request.Context(), raw, middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		if errors.Is(e, appauth.ErrInvalidRefreshToken) || errors.Is(e, appauth.ErrSessionRevoked) || errors.Is(e, appauth.ErrInvalidCredentials) {
 			h.clear(c)
@@ -220,7 +220,7 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /me [get]
 func (h *Handler) Me(c *gin.Context) {
-	v, e := h.service.GetVerifiedProfile(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	v, e := h.service.GetVerifiedProfile(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if e != nil {
 		if errors.Is(e, appauth.ErrInvalidRefreshToken) || errors.Is(e, appauth.ErrSessionRevoked) || errors.Is(e, appauth.ErrInvalidCredentials) {
 			response.Error(c, http.StatusUnauthorized, "unauthorized")
@@ -233,7 +233,7 @@ func (h *Handler) Me(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "profile failed")
 		return
 	}
-	u, e := h.service.BuildUserView(c, *v)
+	u, e := h.service.BuildUserView(c.Request.Context(), *v)
 	if e != nil {
 		response.Error(c, 500, "profile failed")
 		return
@@ -259,12 +259,12 @@ func (h *Handler) PatchMe(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.UpdateProfile(c, middleware.MustUserID(c), appauth.UpdateProfileInput{AvatarURL: r.AvatarURL, DisplayName: r.DisplayName, Timezone: r.Timezone, Locale: r.Locale, ProfilePreferences: r.ProfilePreferences, AppearancePreferences: r.AppearancePreferences})
+	v, e := h.service.UpdateProfile(c.Request.Context(), middleware.MustUserID(c), appauth.UpdateProfileInput{AvatarURL: r.AvatarURL, DisplayName: r.DisplayName, Timezone: r.Timezone, Locale: r.Locale, ProfilePreferences: r.ProfilePreferences, AppearancePreferences: r.AppearancePreferences})
 	if e != nil {
 		response.ErrorFrom(c, 400, e)
 		return
 	}
-	u, e := h.service.BuildUserView(c, *v)
+	u, e := h.service.BuildUserView(c.Request.Context(), *v)
 	if e != nil {
 		response.Error(c, http.StatusInternalServerError, "profile failed")
 		return
@@ -293,7 +293,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 	e := h.service.ChangePassword(
-		c,
+		c.Request.Context(),
 		middleware.MustUserID(c),
 		middleware.MustSessionID(c),
 		r.CurrentPassword,
@@ -329,7 +329,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /auth/sessions [get]
 func (h *Handler) CurrentSessions(c *gin.Context) {
-	v, e := h.service.ListCurrentActiveSessions(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	v, e := h.service.ListCurrentActiveSessions(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if e != nil {
 		response.Error(c, 500, "sessions failed")
 		return
@@ -359,7 +359,7 @@ func (h *Handler) UpdateCurrentSessionLocation(c *gin.Context) {
 		response.InvalidRequestBody(c, errors.New("invalid request"))
 		return
 	}
-	v, e := h.service.UpdateCurrentSessionLocation(c, middleware.MustUserID(c), middleware.MustSessionID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c), appauth.UpdateCurrentSessionLocationInput{Latitude: r.Latitude, Longitude: r.Longitude, AccuracyMeters: r.AccuracyMeters, Timezone: r.Timezone})
+	v, e := h.service.UpdateCurrentSessionLocation(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c), appauth.UpdateCurrentSessionLocationInput{Latitude: r.Latitude, Longitude: r.Longitude, AccuracyMeters: r.AccuracyMeters, Timezone: r.Timezone})
 	if e != nil {
 		response.ErrorFrom(c, 400, e)
 		return
@@ -379,7 +379,7 @@ func (h *Handler) UpdateCurrentSessionLocation(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /auth/sessions/{session_id}/logout [post]
 func (h *Handler) LogoutSession(c *gin.Context) {
-	e := h.service.Logout(c, middleware.MustUserID(c), c.Param("session_id"), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	e := h.service.Logout(c.Request.Context(), middleware.MustUserID(c), c.Param("session_id"), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		response.Error(c, 500, "logout failed")
 		return
@@ -398,7 +398,7 @@ func (h *Handler) LogoutSession(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /auth/logout [post]
 func (h *Handler) Logout(c *gin.Context) {
-	e := h.service.Logout(c, middleware.MustUserID(c), middleware.MustSessionID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
+	e := h.service.Logout(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c))
 	if e != nil {
 		response.Error(c, http.StatusInternalServerError, "logout failed")
 		return
@@ -418,7 +418,7 @@ func (h *Handler) Logout(c *gin.Context) {
 // @Failure 500 {object} ErrorDoc
 // @Router /auth/logout-all [post]
 func (h *Handler) LogoutAll(c *gin.Context) {
-	if h.service.LogoutAll(c, middleware.MustUserID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c)) != nil {
+	if h.service.LogoutAll(c.Request.Context(), middleware.MustUserID(c), middleware.MustRequestID(c), middleware.ResolveSessionAuditContext(c)) != nil {
 		response.Error(c, 500, "logout failed")
 		return
 	}

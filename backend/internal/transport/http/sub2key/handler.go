@@ -66,7 +66,7 @@ func NewHandler(service *app.Service) *Handler { return &Handler{service: servic
 func noStore(c *gin.Context)                   { c.Header("Cache-Control", "no-store") }
 func (h *Handler) ListRemote(c *gin.Context) {
 	noStore(c)
-	items, err := h.service.ListRemote(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	items, err := h.service.ListRemote(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -75,7 +75,7 @@ func (h *Handler) ListRemote(c *gin.Context) {
 }
 func (h *Handler) ListGroups(c *gin.Context) {
 	noStore(c)
-	items, err := h.service.ListGroups(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	items, err := h.service.ListGroups(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -99,7 +99,7 @@ func (h *Handler) CreateRemote(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "idempotency key must be a UUID")
 		return
 	}
-	item, err := h.service.CreateRemote(c, middleware.MustUserID(c), middleware.MustSessionID(c), req.Name, req.GroupID, idempotencyKey)
+	item, err := h.service.CreateRemote(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), req.Name, req.GroupID, idempotencyKey)
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -108,7 +108,7 @@ func (h *Handler) CreateRemote(c *gin.Context) {
 }
 func (h *Handler) ListBindings(c *gin.Context) {
 	noStore(c)
-	items, err := h.service.List(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	items, err := h.service.List(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -128,7 +128,7 @@ func (h *Handler) Bind(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "idempotency key must be a UUID")
 		return
 	}
-	item, err := h.service.Bind(c, middleware.MustUserID(c), middleware.MustSessionID(c), req.RemoteKeyID, idempotencyKey)
+	item, err := h.service.Bind(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), req.RemoteKeyID, idempotencyKey)
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -137,7 +137,7 @@ func (h *Handler) Bind(c *gin.Context) {
 }
 func (h *Handler) Delete(c *gin.Context) {
 	noStore(c)
-	err := h.service.Delete(c, middleware.MustUserID(c), c.Param("public_id"))
+	err := h.service.Delete(c.Request.Context(), middleware.MustUserID(c), c.Param("public_id"))
 	if err != nil {
 		h.writeError(c, err)
 		return

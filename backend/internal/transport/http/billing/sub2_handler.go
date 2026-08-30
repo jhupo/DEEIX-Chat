@@ -93,7 +93,7 @@ func (h *Sub2Handler) write(c *gin.Context, fn func() (any, error)) {
 // @Router /billing/config [get]
 func (h *Sub2Handler) Config(c *gin.Context) {
 	h.write(c, func() (any, error) {
-		data, err := h.service.Config(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+		data, err := h.service.Config(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +111,7 @@ func (h *Sub2Handler) Config(c *gin.Context) {
 // @Router /billing/account [get]
 func (h *Sub2Handler) Account(c *gin.Context) {
 	h.write(c, func() (any, error) {
-		data, err := h.service.Account(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+		data, err := h.service.Account(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +129,7 @@ func (h *Sub2Handler) Account(c *gin.Context) {
 // @Router /billing/overview [get]
 func (h *Sub2Handler) Overview(c *gin.Context) {
 	h.write(c, func() (any, error) {
-		data, err := h.service.Overview(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+		data, err := h.service.Overview(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +147,7 @@ func (h *Sub2Handler) Overview(c *gin.Context) {
 // @Router /billing/plans [get]
 func (h *Sub2Handler) Plans(c *gin.Context) {
 	h.write(c, func() (any, error) {
-		data, err := h.service.Plans(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+		data, err := h.service.Plans(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +174,7 @@ func (h *Sub2Handler) Usage(c *gin.Context) {
 		return
 	}
 	h.write(c, func() (any, error) {
-		data, err := h.service.Usage(c, middleware.MustUserID(c), middleware.MustSessionID(c), input)
+		data, err := h.service.Usage(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), input)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +199,7 @@ func (h *Sub2Handler) Daily(c *gin.Context) {
 		return
 	}
 	h.write(c, func() (any, error) {
-		data, err := h.service.Trend(c, middleware.MustUserID(c), middleware.MustSessionID(c), start, end, "day")
+		data, err := h.service.Trend(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), start, end, "day")
 		if err != nil {
 			return nil, err
 		}
@@ -224,7 +224,7 @@ func (h *Sub2Handler) Hourly(c *gin.Context) {
 		return
 	}
 	h.write(c, func() (any, error) {
-		data, err := h.service.Trend(c, middleware.MustUserID(c), middleware.MustSessionID(c), start, end, "hour")
+		data, err := h.service.Trend(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), start, end, "hour")
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +254,7 @@ func (h *Sub2Handler) Monthly(c *gin.Context) {
 		return
 	}
 	h.write(c, func() (any, error) {
-		data, err := h.service.MonthlyTrend(c, middleware.MustUserID(c), middleware.MustSessionID(c), months)
+		data, err := h.service.MonthlyTrend(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), months)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +301,7 @@ func (h *Sub2Handler) Orders(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid order query")
 		return
 	}
-	data, err := h.service.Orders(c, middleware.MustUserID(c), middleware.MustSessionID(c), app.OrdersInput{Page: page, PageSize: pageSize, Status: strings.TrimSpace(c.Query("status")), OrderType: strings.TrimSpace(c.Query("order_type")), PaymentType: strings.TrimSpace(c.Query("payment_type"))})
+	data, err := h.service.Orders(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), app.OrdersInput{Page: page, PageSize: pageSize, Status: strings.TrimSpace(c.Query("status")), OrderType: strings.TrimSpace(c.Query("order_type")), PaymentType: strings.TrimSpace(c.Query("payment_type"))})
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -326,7 +326,7 @@ func (h *Sub2Handler) Order(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid order id")
 		return
 	}
-	data, err := h.service.Order(c, middleware.MustUserID(c), middleware.MustSessionID(c), id)
+	data, err := h.service.Order(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), id)
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -352,7 +352,7 @@ func (h *Sub2Handler) VerifyOrder(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid order verification")
 		return
 	}
-	data, err := h.service.VerifyOrder(c, middleware.MustUserID(c), middleware.MustSessionID(c), req.OperationID)
+	data, err := h.service.VerifyOrder(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), req.OperationID)
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -377,7 +377,7 @@ func (h *Sub2Handler) CancelOrder(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid order id")
 		return
 	}
-	if err = h.service.CancelOrder(c, middleware.MustUserID(c), middleware.MustSessionID(c), id); err != nil {
+	if err = h.service.CancelOrder(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), id); err != nil {
 		h.writeWriteError(c, err)
 		return
 	}
@@ -404,7 +404,7 @@ func (h *Sub2Handler) RequestRefund(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid refund request")
 		return
 	}
-	if err = h.service.RequestRefund(c, middleware.MustUserID(c), middleware.MustSessionID(c), id, req.Reason); err != nil {
+	if err = h.service.RequestRefund(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), id, req.Reason); err != nil {
 		h.writeWriteError(c, err)
 		return
 	}
@@ -421,7 +421,7 @@ func (h *Sub2Handler) RequestRefund(c *gin.Context) {
 // @Failure 502 {object} ErrorDoc
 // @Router /billing/redemptions [get]
 func (h *Sub2Handler) RedemptionHistory(c *gin.Context) {
-	data, err := h.service.RedemptionHistory(c, middleware.MustUserID(c), middleware.MustSessionID(c))
+	data, err := h.service.RedemptionHistory(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c))
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -450,7 +450,7 @@ func (h *Sub2Handler) Checkout(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid checkout request")
 		return
 	}
-	result, err := h.service.Checkout(c, middleware.MustUserID(c), middleware.MustSessionID(c), strings.TrimSpace(c.GetHeader("Idempotency-Key")), app.CheckoutInput{OrderType: req.OrderType, PriceID: req.PriceID, AmountMinorUnits: req.AmountMinorUnits, PaymentProvider: req.PaymentProvider})
+	result, err := h.service.Checkout(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), strings.TrimSpace(c.GetHeader("Idempotency-Key")), app.CheckoutInput{OrderType: req.OrderType, PriceID: req.PriceID, AmountMinorUnits: req.AmountMinorUnits, PaymentProvider: req.PaymentProvider})
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
@@ -476,7 +476,7 @@ func (h *Sub2Handler) Redeem(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "invalid redemption code")
 		return
 	}
-	result, err := h.service.Redeem(c, middleware.MustUserID(c), middleware.MustSessionID(c), req.Code)
+	result, err := h.service.Redeem(c.Request.Context(), middleware.MustUserID(c), middleware.MustSessionID(c), req.Code)
 	if err != nil {
 		h.writeWriteError(c, err)
 		return
