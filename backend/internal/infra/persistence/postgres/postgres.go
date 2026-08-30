@@ -115,6 +115,9 @@ func migrate(db *gorm.DB, cfg config.Config) error {
 	if err := applyIdentityBaselineIndexes(db); err != nil {
 		return err
 	}
+	if err := migrateLegacyRelayPrincipals(db); err != nil {
+		return err
+	}
 	if err := applyRelayBaselineConstraints(db); err != nil {
 		return err
 	}
