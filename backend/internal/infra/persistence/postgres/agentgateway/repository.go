@@ -598,7 +598,7 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 		}
 		frame := model.AgentBridgeFrame{
 			DeviceID: deviceID, BridgeSeq: bridgeSeq, Kind: "terminal", CommandID: &command.ID,
-			PayloadHash: payloadHash, PayloadJSON: payloadJSON, ReceivedAt: now,
+			PayloadHash: payloadHash, PayloadJSON: "{}", ReceivedAt: now,
 		}
 		if err := tx.Create(&frame).Error; err != nil {
 			return err
@@ -613,14 +613,21 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 					return projectionErr
 				}
 			}
-			updates := map[string]any{"state": "completed", "terminal_json": payloadJSON, "completed_at": now}
+			terminalJSON := payloadJSON
+			var terminal struct {
+				Kind string `json:"kind"`
+			}
+			if json.Unmarshal([]byte(payloadJSON), &terminal) == nil && terminal.Kind == "result" {
+				terminalJSON = `{"kind":"result"}`
+			}
+			updates := map[string]any{"state": "completed", "terminal_json": terminalJSON, "completed_at": now}
 			if command.Kind == "workspace.register" {
 				updates["payload_json"] = `{"kind":"workspace.register"}`
 			}
 			if err := tx.Model(&command).Updates(updates).Error; err != nil {
 				return err
 			}
-		} else if command.TerminalJSON != payloadJSON {
+		} else {
 			return repository.ErrConflict
 		}
 		if err := tx.Model(&device).Update("last_acked_bridge_seq", bridgeSeq).Error; err != nil {
@@ -1020,6 +1027,7 @@ type workspaceSessionUpdate struct {
 
 const (
 	maxWorkspaceSessionMessages = 4096
+	maxWorkspaceSessionEvents   = 4096
 	maxWorkspaceSessionBytes    = 48 << 20
 )
 
@@ -1132,7 +1140,7 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 		if len(message.Attachments) > 32 {
 			return false
 		}
-		if !validRepoRef(message.SourceTurnRef) || len(message.ExecutionEvents) > 1024 ||
+		if !validRepoRef(message.SourceTurnRef) || len(message.ExecutionEvents) > maxWorkspaceSessionEvents ||
 			(message.Role != "assistant" && len(message.ExecutionEvents) > 0) {
 			return false
 		}

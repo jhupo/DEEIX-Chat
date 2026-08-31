@@ -1353,7 +1353,10 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 		hex.EncodeToString(payloadHash[:]), string(normalized), s.now().UTC(),
 	)
 	if err != nil {
-		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
+		if errors.Is(err, repository.ErrConflict) {
+			return 0, ErrStateConflict
+		}
+		if errors.Is(err, repository.ErrNotFound) {
 			return 0, ErrCredential
 		}
 		return 0, err

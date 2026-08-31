@@ -2,6 +2,7 @@ package agentclient
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -243,13 +244,22 @@ func (client *CloudClient) UploadTerminalOutcome(ctx context.Context, config Con
 	if err != nil {
 		return 0, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/terminal-outcomes", bytes.NewReader(frame.Outcome))
+	var compressed bytes.Buffer
+	compressor := gzip.NewWriter(&compressed)
+	if _, err = compressor.Write(frame.Outcome); err != nil {
+		return 0, err
+	}
+	if err = compressor.Close(); err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/terminal-outcomes", bytes.NewReader(compressed.Bytes()))
 	if err != nil {
 		return 0, err
 	}
-	request.ContentLength = int64(len(frame.Outcome))
+	request.ContentLength = int64(compressed.Len())
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Encoding", "gzip")
 	request.Header.Set("X-DEEIX-Bridge-Seq", strconv.FormatUint(frame.BridgeSeq, 10))
 	request.Header.Set("X-DEEIX-Server-Seq", strconv.FormatUint(frame.ServerSeq, 10))
 	request.Header.Set("X-DEEIX-Command-ID", frame.CommandID)

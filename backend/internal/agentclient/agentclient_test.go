@@ -3,6 +3,7 @@ package agentclient
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -1067,14 +1068,20 @@ func TestUploadTerminalOutcomeUsesAuthenticatedBulkEndpoint(t *testing.T) {
 				"expiresAt":       time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
 			}})
 		case "/api/v1/agent/bridge/terminal-outcomes":
-			body, readErr := io.ReadAll(request.Body)
+			compressed, gzipErr := gzip.NewReader(request.Body)
+			if gzipErr != nil {
+				t.Errorf("open terminal upload: %v", gzipErr)
+				return
+			}
+			body, readErr := io.ReadAll(compressed)
 			if readErr != nil {
 				t.Errorf("read upload: %v", readErr)
 			}
 			if request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer deeix_connection_terminal_upload" ||
+				request.Header.Get("Content-Encoding") != "gzip" ||
 				request.Header.Get("X-DEEIX-Bridge-Seq") != "3" || request.Header.Get("X-DEEIX-Server-Seq") != "2" ||
 				request.Header.Get("X-DEEIX-Command-ID") != "agcmd_0123456789abcdef0123456789abcdef" ||
-				request.ContentLength != int64(len(outcome)) || !bytes.Equal(body, outcome) {
+				request.ContentLength <= 0 || !bytes.Equal(body, outcome) {
 				t.Errorf("unexpected terminal upload: headers=%v length=%d body=%s", request.Header, request.ContentLength, body)
 			}
 			uploaded = true
@@ -1131,7 +1138,7 @@ func TestFlushOutgoingWaitsForWebSocketAckBeforeBulkUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateway := &Gateway{ctx: context.Background(), state: store}
-	sentThrough, err := gateway.flushOutgoing(&socketWriter{connection: connection}, 0)
+	sentThrough, err := gateway.flushOutgoing(context.Background(), &socketWriter{connection: connection}, 0)
 	if err != nil || sentThrough != event.BridgeSeq {
 		t.Fatalf("flushOutgoing() = %d, %v", sentThrough, err)
 	}

@@ -2,7 +2,11 @@ package agentgateway
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +16,7 @@ import (
 	"time"
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
+	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -98,13 +103,16 @@ func TestBindStrictJSON(t *testing.T) {
 func TestUploadTerminalOutcomeRejectsInvalidFraming(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
-		name          string
-		contentLength int64
-		bridgeSeq     string
+		name            string
+		contentLength   int64
+		bridgeSeq       string
+		contentEncoding string
 	}{
-		{name: "streamed body", contentLength: -1, bridgeSeq: "1"},
-		{name: "oversized body", contentLength: terminalOutcomeBodyLimit + 1, bridgeSeq: "1"},
-		{name: "invalid sequence", contentLength: 2, bridgeSeq: "invalid"},
+		{name: "streamed body", contentLength: -1, bridgeSeq: "1", contentEncoding: "gzip"},
+		{name: "oversized body", contentLength: terminalOutcomeBodyLimit + 1, bridgeSeq: "1", contentEncoding: "gzip"},
+		{name: "invalid sequence", contentLength: 2, bridgeSeq: "invalid", contentEncoding: "gzip"},
+		{name: "uncompressed body", contentLength: 2, bridgeSeq: "1"},
+		{name: "invalid gzip", contentLength: 2, bridgeSeq: "1", contentEncoding: "gzip"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -113,6 +121,7 @@ func TestUploadTerminalOutcomeRejectsInvalidFraming(t *testing.T) {
 			context.Request = httptest.NewRequest(http.MethodPost, "/agent/bridge/terminal-outcomes", strings.NewReader("{}"))
 			context.Request.ContentLength = test.contentLength
 			context.Request.Header.Set("Authorization", "Bearer deeix_connection_test")
+			context.Request.Header.Set("Content-Encoding", test.contentEncoding)
 			context.Request.Header.Set("X-DEEIX-Bridge-Seq", test.bridgeSeq)
 			context.Request.Header.Set("X-DEEIX-Server-Seq", "1")
 			context.Request.Header.Set("X-DEEIX-Command-ID", "agcmd_0123456789abcdef0123456789abcdef")
@@ -121,6 +130,51 @@ func TestUploadTerminalOutcomeRejectsInvalidFraming(t *testing.T) {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestUploadTerminalOutcomeAcknowledgesDeferredProjection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const token = "deeix_connection_terminal_upload"
+	hash := sha256.Sum256([]byte(token))
+	repo := &socketRepo{
+		tokenHash: hex.EncodeToString(hash[:]),
+		device: domainagent.Device{ID: 3, PublicID: "agd_0123456789abcdef0123456789abcdef", UserID: 7,
+			Status: domainagent.DeviceStatusActive, CredentialVersion: 1},
+		commands: []domainagent.Command{{ID: 11, PublicID: "agcmd_0123456789abcdef0123456789abcdef", ServerSeq: 1}},
+		pending: []domainagent.AppliedEventFrame{{ConversationID: 17, RunID: "run_projection_retry",
+			Event: domainagent.Event{ID: 19, PublicID: "agev_projection_retry", UserID: 7, Kind: "turn/completed", PayloadJSON: `{}`, OccurredAt: time.Now().UTC()}}},
+	}
+	service, err := appagent.NewService(repo, "01234567890123456789012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetConversationEventProjector(func(context.Context, domainagent.AppliedEventFrame) error {
+		return errors.New("projection unavailable")
+	})
+	payload := []byte(`{"kind":"result","result":{"kind":"accepted"}}`)
+	var body bytes.Buffer
+	compressed := gzip.NewWriter(&body)
+	if _, err = compressed.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err = compressed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/agent/bridge/terminal-outcomes", &body)
+	context.Request.Header.Set("Authorization", "Bearer "+token)
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Request.Header.Set("Content-Encoding", "gzip")
+	context.Request.Header.Set("X-DEEIX-Bridge-Seq", "1")
+	context.Request.Header.Set("X-DEEIX-Server-Seq", "1")
+	context.Request.Header.Set("X-DEEIX-Command-ID", repo.commands[0].PublicID)
+
+	(&Handler{service: service}).UploadTerminalOutcome(context)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"ackBridgeSeq":1`) {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -1,6 +1,7 @@
 package agentgateway
 
 import (
+	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -551,18 +552,24 @@ func (h *Handler) UploadTerminalOutcome(c *gin.Context) {
 	serverSeq, serverErr := strconv.ParseUint(strings.TrimSpace(c.GetHeader("X-DEEIX-Server-Seq")), 10, 64)
 	commandID := strings.TrimSpace(c.GetHeader("X-DEEIX-Command-ID"))
 	if token == authorization || bridgeErr != nil || serverErr != nil || bridgeSeq == 0 || serverSeq == 0 ||
-		c.Request.ContentLength <= 0 || c.Request.ContentLength > terminalOutcomeBodyLimit {
+		c.Request.ContentLength <= 0 || c.Request.ContentLength > terminalOutcomeBodyLimit || c.GetHeader("Content-Encoding") != "gzip" {
 		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, terminalOutcomeBodyLimit)
-	outcome, err := io.ReadAll(c.Request.Body)
-	if err != nil || int64(len(outcome)) != c.Request.ContentLength {
+	compressed, err := gzip.NewReader(c.Request.Body)
+	if err != nil {
+		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
+		return
+	}
+	outcome, readErr := io.ReadAll(io.LimitReader(compressed, terminalOutcomeBodyLimit+1))
+	closeErr := compressed.Close()
+	if readErr != nil || closeErr != nil || len(outcome) == 0 || int64(len(outcome)) > terminalOutcomeBodyLimit {
 		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
 		return
 	}
 	acknowledged, err := h.service.ApplyTerminalUpload(c.Request.Context(), token, bridgeSeq, serverSeq, commandID, outcome)
-	if err != nil {
+	if err != nil && !errors.Is(err, appagent.ErrProjectionDeferred) {
 		writeError(c, err, "upload terminal outcome failed")
 		return
 	}

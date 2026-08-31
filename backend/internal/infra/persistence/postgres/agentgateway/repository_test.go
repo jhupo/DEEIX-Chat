@@ -30,6 +30,23 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 	}
 }
 
+func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
+	events := make([]workspaceSessionEvent, 1509)
+	for index := range events {
+		events[index] = workspaceSessionEvent{Kind: "item/completed", Payload: json.RawMessage(`{}`)}
+	}
+	session := workspaceSession{SourceThreadRef: "thread_source", HistoryLoaded: true, Messages: []workspaceSessionMessage{{
+		Role: "assistant", Content: "done", SourceTurnRef: "turn_source", ExecutionEvents: events,
+	}}}
+	if !validWorkspaceSession(session, false) {
+		t.Fatal("valid Codex turn exceeded the session projection limit")
+	}
+	session.Messages[0].ExecutionEvents = make([]workspaceSessionEvent, maxWorkspaceSessionEvents+1)
+	if validWorkspaceSession(session, false) {
+		t.Fatal("unbounded Codex turn was accepted")
+	}
+}
+
 func TestGetCommandReportsDevicePresence(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentCommand{}); err != nil {
@@ -528,6 +545,14 @@ func TestThreadLifecycleProjectsDeleteAndArchiveStates(t *testing.T) {
 	accepted := `{"kind":"result","result":{"kind":"accepted"}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 1, command.ServerSeq, command.PublicID, strings.Repeat("2", 64), accepted, now.Add(time.Second)); err != nil || ack != 1 {
 		t.Fatalf("apply delete terminal: ack=%d err=%v", ack, err)
+	}
+	var storedCommand model.AgentCommand
+	if err := database.First(&storedCommand, command.ID).Error; err != nil || !jsonEqual(storedCommand.TerminalJSON, `{"kind":"result"}`) {
+		t.Fatalf("successful terminal was not compacted: %#v %v", storedCommand, err)
+	}
+	var storedFrame model.AgentBridgeFrame
+	if err := database.Where("device_id = ? AND bridge_seq = ?", device.ID, 1).First(&storedFrame).Error; err != nil || storedFrame.PayloadJSON != "{}" {
+		t.Fatalf("terminal bridge payload was retained: %#v %v", storedFrame, err)
 	}
 	var deletedThread model.AgentThread
 	if err := database.First(&deletedThread, thread.ID).Error; err != nil || deletedThread.Status != "deleted" {

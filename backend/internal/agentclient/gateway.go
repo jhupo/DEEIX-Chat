@@ -513,9 +513,25 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 	if sentThrough < ackBridge {
 		sentThrough = ackBridge
 	}
-	if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
-		return err
+	flushContext, cancelFlush := context.WithCancel(ctx)
+	defer cancelFlush()
+	flushes := make(chan outgoingFlushResult, 1)
+	flushing := false
+	flushRequested := false
+	startFlush := func() {
+		if flushing {
+			flushRequested = true
+			return
+		}
+		flushing = true
+		flushRequested = false
+		startedAfter := sentThrough
+		go func() {
+			through, flushErr := gateway.flushOutgoing(flushContext, writer, startedAfter)
+			flushes <- outgoingFlushResult{startedAfter: startedAfter, sentThrough: through, err: flushErr}
+		}()
 	}
+	startFlush()
 	gateway.socketReady = true
 	for {
 		select {
@@ -529,12 +545,28 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 			}
 			_ = gateway.writeStatus("connected", "")
 		case <-gateway.wake:
-			_, acknowledged := gateway.state.Cursors()
-			if sentThrough != acknowledged {
+			if flushing {
+				flushRequested = true
 				continue
 			}
-			if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
-				return err
+			_, acknowledged := gateway.state.Cursors()
+			if sentThrough != acknowledged {
+				flushRequested = true
+				continue
+			}
+			startFlush()
+		case flushed := <-flushes:
+			flushing = false
+			if flushed.err != nil {
+				return flushed.err
+			}
+			sentThrough = flushed.sentThrough
+			if updateSeq := gateway.updateBridgeSeq.Load(); updateSeq > 0 && sentThrough >= updateSeq {
+				return ErrUpdateScheduled
+			}
+			_, acknowledged := gateway.state.Cursors()
+			if sentThrough == acknowledged && (flushRequested || sentThrough > flushed.startedAfter) {
+				startFlush()
 			}
 		case workspaces := <-gateway.workspaceUpdates:
 			registrations := make([]bridgeWorkspace, 0, len(workspaces))
@@ -568,10 +600,8 @@ func (gateway *Gateway) runSocket(ctx context.Context, token string) error {
 				if updateSeq := gateway.updateBridgeSeq.Load(); updateSeq > 0 && frame.AckBridgeSeq >= updateSeq {
 					return ErrUpdateScheduled
 				}
-				if sentThrough == frame.AckBridgeSeq {
-					if sentThrough, err = gateway.flushOutgoing(writer, sentThrough); err != nil {
-						return err
-					}
+				if !flushing && sentThrough == frame.AckBridgeSeq {
+					startFlush()
 				}
 			case "command":
 				if frame.ServerSeq == 0 || !validRef(frame.CommandID, 256) || frame.Artifacts == nil || len(*frame.Artifacts) > 16 {
@@ -1123,7 +1153,13 @@ func concurrentCommand(kind string) bool {
 	return kind == "interaction.respond" || kind == "workspace.register" || kind == "workspace.rename" || kind == "workspace.unregister"
 }
 
-func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint64, error) {
+type outgoingFlushResult struct {
+	startedAfter uint64
+	sentThrough  uint64
+	err          error
+}
+
+func (gateway *Gateway) flushOutgoing(ctx context.Context, writer *socketWriter, after uint64) (uint64, error) {
 	pending := outgoingBatch(gateway.state.PendingOutgoing(after))
 	if len(pending) == 0 {
 		return after, nil
@@ -1134,7 +1170,7 @@ func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint6
 			if sentThrough != after {
 				break
 			}
-			acknowledged, err := gateway.cloud.UploadTerminalOutcome(gateway.ctx, gateway.config, gateway.identity, outgoing)
+			acknowledged, err := gateway.cloud.UploadTerminalOutcome(ctx, gateway.config, gateway.identity, outgoing)
 			if err != nil {
 				return sentThrough, err
 			}
