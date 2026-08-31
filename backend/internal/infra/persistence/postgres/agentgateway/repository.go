@@ -1832,12 +1832,25 @@ func (r *Repo) ListPendingConversationEvents(ctx context.Context, deviceID uint,
 		RunID          string
 	}
 	rows := make([]row, 0)
-	err := r.db.WithContext(ctx).Table("agent_events AS events").
-		Select("events.*, threads.conversation_id, turns.run_id").
-		Joins("JOIN agent_threads AS threads ON threads.id = events.thread_id").
-		Joins("JOIN agent_turns AS turns ON turns.id = events.turn_id").
-		Where("events.device_id = ? AND events.conversation_projected_at IS NULL AND events.thread_id IS NOT NULL AND events.turn_id IS NOT NULL AND threads.conversation_id > 0 AND turns.run_id <> ''", deviceID).
-		Order("events.id ASC").Limit(limit).Scan(&rows).Error
+	err := r.db.WithContext(ctx).Raw(`
+		WITH pending_event_ids AS MATERIALIZED (
+			SELECT id
+			FROM agent_events
+			WHERE device_id = ?
+				AND conversation_projected_at IS NULL
+				AND thread_id IS NOT NULL
+				AND turn_id IS NOT NULL
+			ORDER BY id ASC
+		)
+		SELECT events.*, threads.conversation_id, turns.run_id
+		FROM pending_event_ids AS pending
+		JOIN agent_events AS events ON events.id = pending.id
+		JOIN agent_threads AS threads ON threads.id = events.thread_id
+		JOIN agent_turns AS turns ON turns.id = events.turn_id
+		WHERE threads.conversation_id > 0 AND turns.run_id <> ''
+		ORDER BY events.id ASC
+		LIMIT ?
+	`, deviceID, limit).Scan(&rows).Error
 	if err != nil {
 		return nil, errFor(err)
 	}
