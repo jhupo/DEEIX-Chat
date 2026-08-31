@@ -1065,7 +1065,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		importedConversation.Model != "gpt-test" || importedConversation.ReasoningEffort != "high" {
 		t.Fatalf("blank history settings replaced known values: %#v %v", importedConversation, err)
 	}
-	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615320,"recencyAt":1786615360,"historyLoaded":false}]}}}`
+	updatedResourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-2","name":"Renamed imported session","modelProvider":"openai","status":"active","createdAt":1786615200,"updatedAt":1786615420,"recencyAt":1786615360,"historyLoaded":false}]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &model.AgentCommand{
 		UserID: 7, RuntimeProfileID: &profile.ID, WorkspaceID: &workspace.ID, Kind: "resource.refresh",
 		PayloadJSON: `{"resource":{"name":"sessions"}}`,

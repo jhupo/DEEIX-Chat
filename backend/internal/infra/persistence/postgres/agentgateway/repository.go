@@ -1552,15 +1552,10 @@ func validSessionTime(seconds int64, fallback time.Time) time.Time {
 }
 
 func workspaceSessionActivityTime(session workspaceSession, fallback time.Time) time.Time {
-	updatedAt := validSessionTime(session.UpdatedAt, fallback)
-	if session.RecencyAt <= 0 {
-		return updatedAt
+	if session.RecencyAt > 0 {
+		return validSessionTime(session.RecencyAt, fallback)
 	}
-	recencyAt := validSessionTime(session.RecencyAt, updatedAt)
-	if recencyAt.After(updatedAt) {
-		return recencyAt
-	}
-	return updatedAt
+	return validSessionTime(session.UpdatedAt, fallback)
 }
 
 func enqueueInitialTurn(tx *gorm.DB, device *model.AgentDevice, thread *model.AgentThread, createCommand *model.AgentCommand, now time.Time) error {
