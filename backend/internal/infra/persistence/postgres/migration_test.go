@@ -28,6 +28,9 @@ func TestMigrateCreatesCleanSub2Schema(t *testing.T) {
 			t.Fatalf("required table %q was not created", table)
 		}
 	}
+	if !database.Migrator().HasIndex(&model.AgentEvent{}, "idx_agent_events_pending_conversation") {
+		t.Fatal("pending conversation event index was not created")
+	}
 
 	for _, table := range []string{
 		"identity_credentials",

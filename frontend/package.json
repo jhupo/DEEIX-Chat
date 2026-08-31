@@ -1,6 +1,6 @@
 {
   "name": "@deeix/web",
-  "version": "0.4.124",
+  "version": "0.4.125",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/sync-assets.mjs",

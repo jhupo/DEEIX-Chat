@@ -534,6 +534,9 @@ func applyConversationBaselineIndexes(db *gorm.DB) error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS uk_file_objects_active_user_content
 		ON "file_objects" ("user_id", "sha256", "size_bytes")
 		WHERE status = 'active' AND deleted_at IS NULL AND sha256 <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_events_pending_conversation
+		ON "agent_events" ("device_id", "id")
+		WHERE "conversation_projected_at" IS NULL AND "thread_id" IS NOT NULL AND "turn_id" IS NOT NULL`,
 	}
 
 	for _, statement := range statements {

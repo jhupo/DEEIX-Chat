@@ -1836,7 +1836,7 @@ func (r *Repo) ListPendingConversationEvents(ctx context.Context, deviceID uint,
 		Select("events.*, threads.conversation_id, turns.run_id").
 		Joins("JOIN agent_threads AS threads ON threads.id = events.thread_id").
 		Joins("JOIN agent_turns AS turns ON turns.id = events.turn_id").
-		Where("events.device_id = ? AND events.conversation_projected_at IS NULL AND threads.conversation_id > 0 AND turns.run_id <> ''", deviceID).
+		Where("events.device_id = ? AND events.conversation_projected_at IS NULL AND events.thread_id IS NOT NULL AND events.turn_id IS NOT NULL AND threads.conversation_id > 0 AND turns.run_id <> ''", deviceID).
 		Order("events.id ASC").Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return nil, errFor(err)
