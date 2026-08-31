@@ -58,24 +58,23 @@ func TestResolveCodexEnforcesSupportedVersionRangeBeforeAppServer(t *testing.T) 
 	}{
 		{name: "minimum version", version: minimumCodexVersion, wantAccept: true},
 		{
-			name: "immediately older version", version: "0.146.0",
+			name: "immediately older version", version: "0.150.99",
 			wantError: []string{
-				"Codex CLI is too old", "detected 0.146.0", "supports 0.147.0 through 0.149.x",
+				"Codex CLI is too old", "detected 0.150.99", "supports 0.151.0 through 0.151.x",
 				"powershell -ExecutionPolicy ByPass", "https://chatgpt.com/codex/install.ps1",
 				"curl -fsSL https://chatgpt.com/codex/install.sh | sh", "rerun the DEEIX Agent installer",
 			},
 		},
 		{
-			name: "minimum prerelease", version: "0.147.0-rc.1",
-			wantError: []string{"Codex CLI is too old", "detected 0.147.0-rc.1", "supports 0.147.0 through 0.149.x"},
+			name: "minimum prerelease", version: "0.151.0-rc.1",
+			wantError: []string{"Codex CLI is too old", "detected 0.151.0-rc.1", "supports 0.151.0 through 0.151.x"},
 		},
-		{name: "newer patch", version: "0.147.1", wantAccept: true},
-		{name: "newer prerelease", version: "0.148.0-alpha.1", wantAccept: true},
-		{name: "newer minor", version: "0.148.0", wantAccept: true},
-		{name: "maximum minor", version: "0.149.1", wantAccept: true},
-		{name: "next minor prerelease", version: "0.150.0-alpha.1", wantError: []string{"Codex CLI is too new", "detected 0.150.0-alpha.1", "supports 0.147.0 through 0.149.x"}},
-		{name: "next minor", version: "0.150.0", wantError: []string{"Codex CLI is too new", "detected 0.150.0", "supports 0.147.0 through 0.149.x"}},
-		{name: "invalid semver", version: "0.147.0-alpha..1", wantError: []string{"version \"0.147.0-alpha..1\" is invalid"}},
+		{name: "newer patch", version: "0.151.1", wantAccept: true},
+		{name: "newer prerelease", version: "0.151.1-alpha.1", wantAccept: true},
+		{name: "maximum minor", version: "0.151.99", wantAccept: true},
+		{name: "next minor prerelease", version: "0.152.0-alpha.1", wantError: []string{"Codex CLI is too new", "detected 0.152.0-alpha.1", "supports 0.151.0 through 0.151.x"}},
+		{name: "next minor", version: "0.152.0", wantError: []string{"Codex CLI is too new", "detected 0.152.0", "supports 0.151.0 through 0.151.x"}},
+		{name: "invalid semver", version: "0.151.0-alpha..1", wantError: []string{"version \"0.151.0-alpha..1\" is invalid"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1210,6 +1209,61 @@ func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {
 	}
 }
 
+func TestRequestAllPagesRejectsInvalidContinuation(t *testing.T) {
+	tests := []struct {
+		name      string
+		pages     []map[string]any
+		wantError string
+	}{
+		{
+			name: "repeated cursor",
+			pages: []map[string]any{
+				{"data": []any{"one"}, "nextCursor": "same"},
+				{"data": []any{"two"}, "nextCursor": "same"},
+			},
+			wantError: "cursor did not advance",
+		},
+		{
+			name: "empty continuation page",
+			pages: []map[string]any{
+				{"data": []any{"one"}, "nextCursor": "next"},
+				{"data": []any{}, "nextCursor": "another"},
+			},
+			wantError: "cursor is invalid",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			serverReads, clientWrites := io.Pipe()
+			clientReads, serverWrites := io.Pipe()
+			client := NewRPCClient(clientWrites, clientReads)
+			defer client.Close()
+			go func() {
+				defer serverWrites.Close()
+				scanner := bufio.NewScanner(serverReads)
+				encoder := json.NewEncoder(serverWrites)
+				for _, page := range test.pages {
+					if !scanner.Scan() {
+						return
+					}
+					var request map[string]any
+					if json.Unmarshal(scanner.Bytes(), &request) != nil {
+						return
+					}
+					_ = encoder.Encode(map[string]any{"id": request["id"], "result": page})
+				}
+			}()
+			adapter := &CodexAdapter{rpc: client}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := adapter.requestAllPages(ctx, "thread/turns/list", map[string]any{"threadId": "thread-1"}, 10)
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("requestAllPages() error = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestUploadHistoryImagesUsesBoundedConcurrencyAndPreservesOrder(t *testing.T) {
 	var active atomic.Int32
 	var maximum atomic.Int32
@@ -1335,7 +1389,7 @@ func TestWorkspaceRevisionTracksDesktopMembership(t *testing.T) {
 }
 
 func TestLockedAppServerContractMatchesNativeRegistry(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "docs", "agent-runtime", "codex-app-server-v0.147.0.lock.json")
+	path := filepath.Join("..", "..", "..", "docs", "agent-runtime", "codex-app-server-v0.151.0.lock.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -2040,29 +2094,58 @@ func runFakeAppServer() {
 				IncludeTurns bool   `json:"includeTurns"`
 			}
 			_ = json.Unmarshal(request["params"], &params)
-			if !params.IncludeTurns {
-				status := "idle"
-				if params.ThreadID == "thread-1" {
-					status = "notLoaded"
-				}
-				result = map[string]any{"thread": map[string]any{"id": params.ThreadID, "status": map[string]any{"type": status}}}
-				break
-			}
-			if params.ThreadID != "thread-1" {
+			if params.IncludeTurns {
 				var id any
 				_ = json.Unmarshal(request["id"], &id)
 				_ = encoder.Encode(map[string]any{"id": id, "error": map[string]any{
-					"code": -32602, "message": "thread/read requires threadId and includeTurns",
+					"code": -32602, "message": "legacy full-history reads are disabled",
 				}})
 				continue
 			}
+			status := "idle"
+			if params.ThreadID == "thread-1" {
+				status = "notLoaded"
+			}
 			result = map[string]any{"thread": map[string]any{
-				"id": "thread-1", "name": "First thread", "preview": "first",
-				"turns": []any{map[string]any{"startedAt": 1, "completedAt": 2, "items": []any{
-					map[string]any{"type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}}},
-					map[string]any{"type": "agentMessage", "text": "world"},
-				}}},
+				"id": params.ThreadID, "name": "First thread", "preview": "first", "status": map[string]any{"type": status},
 			}}
+		case "thread/turns/list":
+			var params map[string]any
+			_ = json.Unmarshal(request["params"], &params)
+			if params["threadId"] != "thread-1" || params["sortDirection"] != "asc" ||
+				params["itemsView"] != "notLoaded" || fmt.Sprint(params["limit"]) != "100" {
+				result = map[string]any{"data": []any{}, "nextCursor": nil}
+				break
+			}
+			if params["cursor"] == "turn-next" {
+				result = map[string]any{"data": []any{map[string]any{
+					"id": "turn-2", "startedAt": 3, "completedAt": 4,
+				}}, "nextCursor": nil}
+			} else {
+				result = map[string]any{"data": []any{map[string]any{
+					"id": "turn-1", "startedAt": 1, "completedAt": 2,
+				}}, "nextCursor": "turn-next"}
+			}
+		case "thread/items/list":
+			var params map[string]any
+			_ = json.Unmarshal(request["params"], &params)
+			if params["threadId"] != "thread-1" || params["turnId"] != nil ||
+				params["sortDirection"] != "asc" || fmt.Sprint(params["limit"]) != "100" {
+				result = map[string]any{"data": []any{}, "nextCursor": nil}
+				break
+			}
+			switch {
+			case params["cursor"] == "item-next":
+				result = map[string]any{"data": []any{map[string]any{
+					"turnId": "turn-1", "item": map[string]any{"id": "agent-1", "type": "agentMessage", "text": "world"},
+				}}, "nextCursor": nil}
+			default:
+				result = map[string]any{"data": []any{map[string]any{
+					"turnId": "turn-1", "item": map[string]any{
+						"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}},
+					},
+				}}, "nextCursor": "item-next"}
+			}
 		}
 		var id any
 		_ = json.Unmarshal(request["id"], &id)

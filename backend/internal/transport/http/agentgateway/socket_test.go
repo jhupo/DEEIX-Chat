@@ -23,7 +23,7 @@ import (
 	"golang.org/x/net/websocket"
 )
 
-const testProviderManifest = `{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update","thread.create"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]},"interactionKinds":["command_approval"]}`
+const testProviderManifest = `{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.151.0","protocolVersion":"0.151.0/stable","schemaHash":"424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541","commands":["agent.update","thread.create"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]},"interactionKinds":["command_approval"]}`
 
 func TestConnectionTokenProtocols(t *testing.T) {
 	token, err := connectionToken([]string{bridgeProtocol, authProtocolPrefix + "deeix_connection_value"})

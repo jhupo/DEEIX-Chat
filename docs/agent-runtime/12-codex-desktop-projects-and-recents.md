@@ -1,6 +1,6 @@
 # Codex Desktop 项目、最近与归档边界
 
-> 本文是 DEEIX 工作导航分组的当前实现依据。Codex app-server 版本锁为 `0.147.0`。
+> 本文是 DEEIX 工作导航分组的当前实现依据。Codex app-server 版本锁为 `0.151.0`。
 
 ## 1. 实测结论
 
@@ -21,7 +21,7 @@
 
 | 数据 | 权威来源 | DEEIX 用途 |
 | --- | --- | --- |
-| 活动/归档、标题、预览、`cwd`、详情、消息与模型设置 | app-server `thread/list` / `thread/resume` | Conversation 目录、历史、模型与推理等级 |
+| 活动/归档、标题、预览、`cwd`、详情与消息 | app-server `thread/list` / `thread/read` / `thread/turns/list` / `thread/items/list` | Conversation 目录与历史 |
 | Desktop 项目名称和根目录 | `.codex-global-state.json` 的 `local-projects` | Agent 同步可见 Workspace |
 | Desktop 项目顺序/置顶 | Desktop 状态中的 `project-order`、`pinned-project-ids` | 仅属于 Desktop UI 元数据；当前不作为运行时 Workspace 排序依据 |
 | 项目会话范围 | `local-projects.rootPaths` 与 app-server `thread/list` 的 cwd 过滤 | thread 进入一个项目 |
@@ -63,4 +63,4 @@ Web 添加的本地文件夹使用同一个 Workspace 投影，但额外标记�
 
 最小回归需要覆盖：当前 Desktop 状态解析、projectless 精确过滤、活动/归档分页、hidden Workspace 不进入项目列表、Gateway `project=unassigned` 仅返回 Recent、继续 projectless thread 时沿用其真实 `cwd`，以及 managed Workspace 重命名/移除后本地目录保持不变。
 
-官方协议参考：[Codex app-server](https://developers.openai.com/codex/app-server/)；仓库锁定证据见 [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json)。
+官方协议参考：[Codex app-server](https://developers.openai.com/codex/app-server/)；仓库锁定证据见 [codex-app-server-v0.151.0.lock.json](./codex-app-server-v0.151.0.lock.json)。

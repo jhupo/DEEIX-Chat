@@ -2,8 +2,8 @@
 
 > 状态：本次实施与逐项验收合同。
 >
-> 协议基线：Codex app-server `rust-v0.147.0`，以
-> [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) 为最终字段依据。
+> 协议基线：Codex app-server `rust-v0.151.0`，以
+> [codex-app-server-v0.151.0.lock.json](./codex-app-server-v0.151.0.lock.json) 为最终字段依据。
 > 官方协议说明：https://developers.openai.com/codex/app-server/
 
 ## 1. 目标与边界
@@ -22,7 +22,7 @@ Frontend
   -> Backend 严格校验、持久化、设备路由
   -> authenticated Agent Bridge
   -> deeix-agent 映射 app-server JSON-RPC
-  -> Codex app-server >= 0.147.0 (0.147.0 stable schema contract)
+  -> Codex app-server 0.151.x (0.151.0 stable schema contract)
 
 Codex notifications/server requests
   -> deeix-agent typed projection + opaque refs

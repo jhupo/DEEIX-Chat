@@ -168,16 +168,16 @@ func TestMCPElicitationResponseAcceptsSchemaScalarsOnly(t *testing.T) {
 }
 
 func TestProviderManifestValidation(t *testing.T) {
-	valid := json.RawMessage(`{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update","thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]},"interactionKinds":["command_approval"]}`)
+	valid := json.RawMessage(`{"agentVersion":"0.4.57","provider":"codex","runtimeVersion":"0.151.0","protocolVersion":"0.151.0/stable","schemaHash":"424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541","commands":["agent.update","thread.create","turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user","auto_review"],"sandboxPolicy":["workspace-write","danger-full-access"]},"interactionKinds":["command_approval"]}`)
 	if !validProviderManifest(valid, "codex") {
 		t.Fatal("valid provider manifest rejected")
 	}
 	for _, value := range []json.RawMessage{
 		json.RawMessage(`{"provider":"claude","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 		json.RawMessage(`{"provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"bad","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
-		json.RawMessage(`{"provider":"codex","runtimeVersion":"0.146.0","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
-		json.RawMessage(`{"provider":"codex","runtimeVersion":"not-semver","protocolVersion":"0.147.0/stable","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
-		json.RawMessage(`{"provider":"codex","runtimeVersion":"0.147.0","protocolVersion":"0.147.0/stable","schemaHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
+		json.RawMessage(`{"provider":"codex","runtimeVersion":"0.150.99","protocolVersion":"0.151.0/stable","schemaHash":"424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
+		json.RawMessage(`{"provider":"codex","runtimeVersion":"not-semver","protocolVersion":"0.151.0/stable","schemaHash":"424b204943b18e5ffa52667a2aa397c9950730ec1e49ad767e2a016743990541","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
+		json.RawMessage(`{"provider":"codex","runtimeVersion":"0.151.0","protocolVersion":"0.151.0/stable","schemaHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","commands":["turn.start"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 		json.RawMessage(`{"provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["raw.command"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 		json.RawMessage(`{"agentVersion":"0.4.x","provider":"codex","runtimeVersion":"1","protocolVersion":"1","schemaHash":"f72b2caa3cbfa4298de9e85c62dda6dfbaf2266ffeb916fed30615ca69ff8c74","commands":["agent.update"],"resources":{"profile":["models"],"workspace":["sessions"]},"inputKinds":["text"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"sandboxPolicy":["workspace-write"]},"interactionKinds":["command_approval"]}`),
 	} {
@@ -188,12 +188,12 @@ func TestProviderManifestValidation(t *testing.T) {
 }
 
 func TestCodexRuntimeVersionRange(t *testing.T) {
-	for _, version := range []string{"0.147.0", "0.148.0-alpha.1", "0.149.1", "0.149.99"} {
+	for _, version := range []string{"0.151.0", "0.151.1-alpha.1", "0.151.1", "0.151.99"} {
 		if !validCodexRuntimeVersion(version) {
 			t.Fatalf("supported Codex runtime version rejected: %s", version)
 		}
 	}
-	for _, version := range []string{"0.146.99", "0.147.0-rc.1", "0.150.0-alpha.1", "0.150.0", "invalid"} {
+	for _, version := range []string{"0.150.99", "0.151.0-rc.1", "0.152.0-alpha.1", "0.152.0", "invalid"} {
 		if validCodexRuntimeVersion(version) {
 			t.Fatalf("unsupported Codex runtime version accepted: %s", version)
 		}

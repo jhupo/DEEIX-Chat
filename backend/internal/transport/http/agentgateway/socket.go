@@ -21,7 +21,7 @@ const (
 	bridgeProtocol     = "deeix.bridge.v2"
 	authProtocolPrefix = "deeix.auth."
 	bridgeVersion      = 2
-	// thread/read(includeTurns=true) carries the complete local transcript.
+	// Keep bridge frames bounded even when a paged transcript contains large projected items.
 	bridgeMaxPayload   = 64 << 20
 	bridgeHelloTimeout = 10 * time.Second
 	bridgeHeartbeat    = 30 * time.Second

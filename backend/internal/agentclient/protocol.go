@@ -15,7 +15,7 @@ import (
 const (
 	bridgeVersion  = 2
 	bridgeProtocol = "deeix.bridge.v2"
-	// thread/read(includeTurns=true) carries the complete local transcript.
+	// A paged local transcript is projected before it crosses the bridge.
 	bridgeMaxPayload = 64 << 20
 )
 

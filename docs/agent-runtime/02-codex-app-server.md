@@ -8,9 +8,9 @@
 
 The native `deeix-agent` launches the user-installed `codex app-server` with stdio JSONL. The provider protocol is JSON-RPC 2.0 without a header; each line is one object. WebSocket and Unix transports exist upstream, but the Agent uses stdio because it binds process lifecycle locally and keeps app-server off the network. Upstream WebSocket transport is not the DEEIX transport.
 
-The initial production adapter is pinned to official OpenAI Codex `rust-v0.147.0`, commit `be6e8eac029b183056b7e4402879f15d2c85f61b` (2026-08-07). Its reproducible authority is [codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions.
+The production adapter is pinned to official OpenAI Codex `rust-v0.151.0`, commit `78c290807ce710180111df227df3b7a4fe845452` (2026-08-29). Its reproducible authority is [codex-app-server-v0.151.0.lock.json](./codex-app-server-v0.151.0.lock.json): stable/non-experimental `codex app-server generate-ts --out ...` and `generate-json-schema --out ...`, release asset digest, generated artifact hashes, exhaustive union members and dispositions.
 
-The runtime accepts official Codex CLI versions from `0.147.0` through `0.149.x`. The Agent always advertises the reviewed `0.147.0/stable` protocol and exact locked schema hash; Cloud rejects runtimes outside the supported range and any other protocol/hash pair. Startup also probes `thread/list` with `sortKey: "recency_at"` before enrollment.
+The runtime accepts official Codex CLI versions in the reviewed `0.151.x` line, starting at `0.151.0`. The Agent always advertises the reviewed `0.151.0/stable` protocol and exact locked schema hash; Cloud rejects runtimes outside the supported range and any other protocol/hash pair. Startup also probes `thread/list` with `sortKey: "recency_at"` before enrollment.
 
 Adapter startup follows this procedure:
 
@@ -23,7 +23,7 @@ The lock file and its exact generated schema are implementation authority. The t
 
 ### JSONL frame and process lifecycle
 
-The local RPC reader is line-oriented but bounded: incoming app-server lines are capped at 64 MiB and outgoing requests at 4 MiB. The larger incoming limit is intentional because `thread/resume` returns a complete local history and its active model settings, while ordinary resource and command payloads remain small. The reader rejects a line that exceeds the cap without allocating an unbounded buffer. A frame overflow, malformed JSON, EOF, or a dead stdio pipe closes the RPC client and terminates the associated app-server process. The Agent runtime supervisor then cancels the old runtime scope and restarts a fresh app-server with jittered backoff; it does not keep a dead RPC process behind a reconnecting WSS socket.
+The local RPC reader is line-oriented but bounded: incoming app-server lines are capped at 64 MiB and outgoing requests at 4 MiB. Thread history is read through bounded turn and item pages, while the larger incoming limit still accommodates provider resource and lifecycle responses. The reader rejects a line that exceeds the cap without allocating an unbounded buffer. A frame overflow, malformed JSON, EOF, or a dead stdio pipe closes the RPC client and terminates the associated app-server process. The Agent runtime supervisor then cancels the old runtime scope and restarts a fresh app-server with jittered backoff; it does not keep a dead RPC process behind a reconnecting WSS socket.
 
 The WSS bridge keeps the same 64 MiB bounded frame budget for thread history terminal results. History projection does not take a tail window: it preserves all user, assistant, and reasoning messages in the app-server snapshot, subject to the explicit 4096-message/48 MiB server-side validation budget. The Web API still reads messages in pages, so large conversations remain bounded in the browser without losing older history at import time. Existing projections from an earlier history shape are rehydrated once through the history projection version marker.
 
@@ -36,7 +36,7 @@ Official references: [app-server documentation](https://developers.openai.com/co
 下面的类型片段是边界设计草图，不是编译后的当前合同。当前合同直接查看 `backend/internal/agentclient/protocol.go`、`codex.go` 和 `gateway.go`。
 
 ```ts
-import type { ThreadMetadataUpdateParams as CodexThreadMetadataUpdateParams } from "./generated/codex-app-server-v0.147.0/v2";
+import type { ThreadMetadataUpdateParams as CodexThreadMetadataUpdateParams } from "./generated/codex-app-server-v0.151.0/v2";
 
 type AgentResource =
   | { scope: "profile"; resource: ProfileResource }
@@ -166,8 +166,8 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 ```json
 {
   "provider": "codex",
-  "runtimeVersion": "0.147.0",
-  "protocolVersion": "0.147.0/stable",
+  "runtimeVersion": "0.151.0",
+  "protocolVersion": "0.151.0/stable",
   "schemaHash": "<64-char sha256>",
   "commands": ["thread.create", "turn.start", "interaction.respond"],
   "resources": { "profile": ["models"], "workspace": ["sessions"] },
@@ -207,7 +207,7 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 ### 3.1 Stable lock coverage
 
-[codex-app-server-v0.147.0.lock.json](./codex-app-server-v0.147.0.lock.json) is the exhaustive authority for the four generated stable unions. A method enters execution only when the lock, manifest and local policy all declare it.
+[codex-app-server-v0.151.0.lock.json](./codex-app-server-v0.151.0.lock.json) is the exhaustive authority for the four generated stable unions. A method enters execution only when the lock, manifest and local policy all declare it.
 
 `thread/section/move` and `threadSection/*` remain separately locked extensions with no first-release control.
 
@@ -216,11 +216,11 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 | `ClientRequest` | 98 | mapped 25, extension 54, disabled 19 | mapped 与实际 dispatch registry 严格相等 |
 | `ClientNotification` | 1 | mapped 1 | `initialized` mapped |
 | `ServerRequest` | 10 | mapped 6, extension 1, disabled 3 | `attestation/generate` disabled |
-| `ServerNotification` | 72 | mapped 42, extension 19, disabled 11 | `item/fileChange/patchUpdated` mapped; `item/commandExecution/terminalInteraction` extension |
+| `ServerNotification` | 79 | mapped 41, extension 23, disabled 15 | `item/fileChange/patchUpdated` mapped; `item/commandExecution/terminalInteraction` extension |
 
 `mapped` ClientRequest 必须同时出现在实际 dispatch registry 并具有验收；`extension` 保留在锁中但没有 AgentCommand；`disabled` 没有 dispatch。ServerRequest 与 notification 的 disposition 由完整 policy object 校验。
 
-`collaborationMode/list`, `environment/info`, process client requests, `thread/turns/list`, `thread/items/list`, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.147.0` schema.
+`collaborationMode/list`, `environment/info`, process client requests, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.151.0` schema. Stable `thread/turns/list` and `thread/items/list` are mapped for bounded history hydration.
 
 ## 4. Native actions and Conversation ownership
 

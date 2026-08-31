@@ -19,7 +19,7 @@
 
 “最近”在工作模式中按最近活动时间聚合当前设备未归属项目的未归档、未置顶线程；项目会话只显示在所属项目节点。聊天模式维持原有未分配项目规则，全局“置顶”继续单独聚合已置顶会话。
 
-Gateway 连接或刷新 `sessions` 资源时，Bridge 消费 `thread/list` 的 opaque cursor，分别读取最多 500 个活动会话和 500 个归档会话，并只上传裁剪后的目录摘要。新投影的 AgentThread 历史状态为 `unloaded`；用户打开会话时，Conversation API 排队一次强类型 `thread.read` 内部命令，Bridge 调用 `thread/resume`，一次取得完整消息、模型和推理等级并投影到统一 Conversation。Web 归档/恢复通过持久化 `thread.lifecycle` 命令调用本机 `thread/archive`/`thread/unarchive`；本机 Codex 发出的 `thread/archived`/`thread/unarchived` 通知也会反向更新 Web Conversation。命令失败时回滚 AgentThread 与 Conversation 状态。
+Gateway 连接或刷新 `sessions` 资源时，Bridge 消费 `thread/list` 的 opaque cursor，分别读取最多 500 个活动会话和 500 个归档会话，并只上传裁剪后的目录摘要。新投影的 AgentThread 历史状态为 `unloaded`；用户打开会话时，Conversation API 排队一次强类型 `thread.read` 内部命令，Bridge 通过 `thread/read(includeTurns=false)`、`thread/turns/list` 和 `thread/items/list` 分页取得完整消息并投影到统一 Conversation。Web 归档/恢复通过持久化 `thread.lifecycle` 命令调用本机 `thread/archive`/`thread/unarchive`；本机 Codex 发出的 `thread/archived`/`thread/unarchived` 通知也会反向更新 Web Conversation。命令失败时回滚 AgentThread 与 Conversation 状态。
 
 主输入框保留两个显式触发器：`/` 只打开当前 Workspace Skill，`@` 只打开可 mention 的 Profile App/Plugin。模型与推理等级继续使用输入框右下角现有选择器，文件继续使用附件入口，Prompt 不再混入触发菜单。Cloud 将“插件”能力投影到可执行 MCP 工具；Gateway 从 Conversation Resource API 读取 Workspace Skill 与 Profile App，并只提交 opaque ref。页面不直接读取 `/agent/*`，只读 `plugin/list` 包也不伪装成 App mention。
 

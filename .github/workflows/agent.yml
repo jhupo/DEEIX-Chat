@@ -7,7 +7,7 @@ on:
       - "backend/cmd/deeix-agent/**"
       - "backend/internal/agentclient/**"
       - "frontend/public/agent/**"
-      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - "docs/agent-runtime/codex-app-server-v0.151.0.lock.json"
       - ".github/workflows/agent.yml"
   pull_request:
     branches: [main, dev]
@@ -15,7 +15,7 @@ on:
       - "backend/cmd/deeix-agent/**"
       - "backend/internal/agentclient/**"
       - "frontend/public/agent/**"
-      - "docs/agent-runtime/codex-app-server-v0.147.0.lock.json"
+      - "docs/agent-runtime/codex-app-server-v0.151.0.lock.json"
       - ".github/workflows/agent.yml"
   workflow_dispatch:
 
