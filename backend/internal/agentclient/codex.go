@@ -45,9 +45,8 @@ const maxExecutionTextBytes = 1 << 20
 const maxCommandExecutionOutputBytes = 256 << 10
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
-const codexHistoryPageSize = 100
+const codexHistoryPageSize = 8
 const maxCodexHistoryTurns = 4096
-const maxCodexHistoryItems = 65536
 
 // Decline before app-server's five-minute MCP timeout so it can finish the turn normally.
 const defaultMCPElicitationTimeout = 4*time.Minute + 30*time.Second
@@ -80,8 +79,8 @@ var dispatchedClientRequests = map[string]bool{
 	"initialize": true, "thread/start": true, "thread/resume": true, "thread/fork": true,
 	"thread/archive": true, "thread/delete": true, "thread/name/set": true, "thread/metadata/update": true,
 	"thread/unarchive": true, "thread/compact/start": true, "thread/list": true, "thread/read": true,
-	"thread/turns/list": true, "thread/items/list": true,
-	"skills/list": true, "hooks/list": true, "plugin/list": true, "app/list": true, "turn/start": true,
+	"thread/turns/list": true,
+	"skills/list":       true, "hooks/list": true, "plugin/list": true, "app/list": true, "turn/start": true,
 	"turn/steer": true, "turn/interrupt": true, "review/start": true, "model/list": true,
 	"modelProvider/capabilities/read": true, "permissionProfile/list": true, "mcpServerStatus/list": true,
 	"account/read": true,
@@ -1387,84 +1386,67 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 	if !ok || strings.TrimSpace(stringField(thread, "id")) != providerThreadID {
 		return nil, errors.New("Codex thread detail does not match the requested thread")
 	}
-	turns, err := adapter.requestAllPages(ctx, "thread/turns/list", map[string]any{
-		"threadId": providerThreadID, "limit": codexHistoryPageSize, "sortDirection": "asc", "itemsView": "notLoaded",
-	}, maxCodexHistoryTurns)
-	if err != nil {
-		return nil, err
-	}
-	seenTurnIDs := make(map[string]struct{}, len(turns))
-	for _, rawTurn := range turns {
-		turn, ok := rawTurn.(map[string]any)
-		rawTurnID := stringField(turn, "id")
-		turnID := strings.TrimSpace(rawTurnID)
-		if !ok || turnID == "" || turnID != rawTurnID || len(turnID) > 4096 {
-			return nil, errors.New("Codex thread turn history is invalid")
+	messages := make([]any, 0, 64)
+	seenTurnIDs := make(map[string]struct{})
+	err = adapter.requestPages(ctx, "thread/turns/list", map[string]any{
+		"threadId": providerThreadID, "limit": codexHistoryPageSize, "sortDirection": "asc", "itemsView": "full",
+	}, maxCodexHistoryTurns, func(turns []any) error {
+		for _, rawTurn := range turns {
+			turn, ok := rawTurn.(map[string]any)
+			rawTurnID := stringField(turn, "id")
+			turnID := strings.TrimSpace(rawTurnID)
+			_, itemsOK := turn["items"].([]any)
+			if !ok || turnID == "" || turnID != rawTurnID || len(turnID) > 4096 ||
+				stringField(turn, "itemsView") != "full" || !itemsOK {
+				return errors.New("Codex thread turn history is invalid")
+			}
+			if _, duplicate := seenTurnIDs[turnID]; duplicate {
+				return errors.New("Codex thread turn history contains duplicate turns")
+			}
+			seenTurnIDs[turnID] = struct{}{}
 		}
-		if _, duplicate := seenTurnIDs[turnID]; duplicate {
-			return nil, errors.New("Codex thread turn history contains duplicate turns")
-		}
-		seenTurnIDs[turnID] = struct{}{}
-	}
-	entries, err := adapter.requestAllPages(ctx, "thread/items/list", map[string]any{
-		"threadId": providerThreadID, "limit": codexHistoryPageSize, "sortDirection": "asc",
-	}, maxCodexHistoryItems)
-	if err != nil {
-		return nil, err
-	}
-	itemsByTurn := make(map[string][]any, len(turns))
-	for _, rawEntry := range entries {
-		entry, entryOK := rawEntry.(map[string]any)
-		item, itemOK := entry["item"].(map[string]any)
-		rawTurnID := stringField(entry, "turnId")
-		turnID := strings.TrimSpace(rawTurnID)
-		if !entryOK || !itemOK || turnID == "" || turnID != rawTurnID {
-			return nil, errors.New("Codex thread item history is invalid")
-		}
-		if _, exists := seenTurnIDs[turnID]; !exists {
-			return nil, errors.New("Codex thread item history references an unknown turn")
-		}
-		itemsByTurn[turnID] = append(itemsByTurn[turnID], item)
-	}
-	messages := make([]any, 0, len(turns)*2)
-	for _, rawTurn := range turns {
-		turn := rawTurn.(map[string]any)
-		turn["items"] = itemsByTurn[stringField(turn, "id")]
-		turnDetail := map[string]any{"thread": map[string]any{
-			"id": providerThreadID, "turns": []any{turn},
+		pageDetail := map[string]any{"thread": map[string]any{
+			"id": providerThreadID, "turns": turns,
 		}}
-		messages = append(messages, adapter.projectSessionMessages(turnDetail)...)
+		messages = append(messages, adapter.projectSessionMessages(pageDetail)...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return adapter.projectSessionDetailWithMessages(detail, providerThreadID, messages)
 }
 
-func (adapter *CodexAdapter) requestAllPages(ctx context.Context, method string, params map[string]any, maxItems int) ([]any, error) {
+func (adapter *CodexAdapter) requestPages(ctx context.Context, method string, params map[string]any, maxItems int, consume func([]any) error) error {
 	if maxItems < 0 {
-		return nil, errors.New("Codex thread history exceeds the item limit")
+		return errors.New("Codex thread history exceeds the item limit")
 	}
-	items := make([]any, 0, min(maxItems, codexHistoryPageSize))
+	total := 0
 	seenCursors := make(map[string]struct{})
 	for {
 		page, err := adapter.requestMap(ctx, method, params)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		data, ok := page["data"].([]any)
-		if !ok || len(items)+len(data) > maxItems {
-			return nil, errors.New("Codex thread history page is invalid or exceeds the item limit")
+		if !ok || total+len(data) > maxItems {
+			return errors.New("Codex thread history page is invalid or exceeds the item limit")
 		}
-		items = append(items, data...)
+		if err = consume(data); err != nil {
+			return err
+		}
+		total += len(data)
 		rawCursor, hasCursor := page["nextCursor"]
 		if !hasCursor || rawCursor == nil {
-			return items, nil
+			return nil
 		}
 		nextCursor, ok := rawCursor.(string)
 		nextCursor = strings.TrimSpace(nextCursor)
 		if !ok || nextCursor == "" || len(data) == 0 {
-			return nil, errors.New("Codex thread history cursor is invalid")
+			return errors.New("Codex thread history cursor is invalid")
 		}
 		if _, duplicate := seenCursors[nextCursor]; duplicate {
-			return nil, errors.New("Codex thread history cursor did not advance")
+			return errors.New("Codex thread history cursor did not advance")
 		}
 		seenCursors[nextCursor] = struct{}{}
 		params["cursor"] = nextCursor

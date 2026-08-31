@@ -1356,7 +1356,7 @@ func TestRPCClientAcceptsLargeThreadReadResponse(t *testing.T) {
 	}
 }
 
-func TestRequestAllPagesRejectsInvalidContinuation(t *testing.T) {
+func TestRequestPagesRejectsInvalidContinuation(t *testing.T) {
 	tests := []struct {
 		name      string
 		pages     []map[string]any
@@ -1403,9 +1403,9 @@ func TestRequestAllPagesRejectsInvalidContinuation(t *testing.T) {
 			adapter := &CodexAdapter{rpc: client}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			_, err := adapter.requestAllPages(ctx, "thread/turns/list", map[string]any{"threadId": "thread-1"}, 10)
+			err := adapter.requestPages(ctx, "thread/turns/list", map[string]any{"threadId": "thread-1"}, 10, func([]any) error { return nil })
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("requestAllPages() error = %v, want %q", err, test.wantError)
+				t.Fatalf("requestPages() error = %v, want %q", err, test.wantError)
 			}
 		})
 	}
@@ -2260,38 +2260,22 @@ func runFakeAppServer() {
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)
 			if params["threadId"] != "thread-1" || params["sortDirection"] != "asc" ||
-				params["itemsView"] != "notLoaded" || fmt.Sprint(params["limit"]) != "100" {
+				params["itemsView"] != "full" || fmt.Sprint(params["limit"]) != "8" {
 				result = map[string]any{"data": []any{}, "nextCursor": nil}
 				break
 			}
 			if params["cursor"] == "turn-next" {
 				result = map[string]any{"data": []any{map[string]any{
-					"id": "turn-2", "startedAt": 3, "completedAt": 4,
+					"id": "turn-2", "items": []any{}, "itemsView": "full", "startedAt": 3, "completedAt": 4,
 				}}, "nextCursor": nil}
 			} else {
 				result = map[string]any{"data": []any{map[string]any{
-					"id": "turn-1", "startedAt": 1, "completedAt": 2,
-				}}, "nextCursor": "turn-next"}
-			}
-		case "thread/items/list":
-			var params map[string]any
-			_ = json.Unmarshal(request["params"], &params)
-			if params["threadId"] != "thread-1" || params["turnId"] != nil ||
-				params["sortDirection"] != "asc" || fmt.Sprint(params["limit"]) != "100" {
-				result = map[string]any{"data": []any{}, "nextCursor": nil}
-				break
-			}
-			switch {
-			case params["cursor"] == "item-next":
-				result = map[string]any{"data": []any{map[string]any{
-					"turnId": "turn-1", "item": map[string]any{"id": "agent-1", "type": "agentMessage", "text": "world"},
-				}}, "nextCursor": nil}
-			default:
-				result = map[string]any{"data": []any{map[string]any{
-					"turnId": "turn-1", "item": map[string]any{
-						"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}},
+					"id": "turn-1", "itemsView": "full", "startedAt": 1, "completedAt": 2,
+					"items": []any{
+						map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "hello"}}},
+						map[string]any{"id": "agent-1", "type": "agentMessage", "text": "world"},
 					},
-				}}, "nextCursor": "item-next"}
+				}}, "nextCursor": "turn-next"}
 			}
 		}
 		var id any

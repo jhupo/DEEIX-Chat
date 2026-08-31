@@ -21,7 +21,7 @@
 
 | 数据 | 权威来源 | DEEIX 用途 |
 | --- | --- | --- |
-| 活动/归档、标题、预览、`cwd`、详情与消息 | app-server `thread/list` / `thread/read` / `thread/turns/list` / `thread/items/list` | Conversation 目录与历史 |
+| 活动/归档、标题、预览、`cwd`、详情与消息 | app-server `thread/list` / `thread/read` / `thread/turns/list(itemsView="full")` | Conversation 目录与历史 |
 | Desktop 项目名称和根目录 | `.codex-global-state.json` 的 `local-projects` | Agent 同步可见 Workspace |
 | Desktop 项目顺序/置顶 | Desktop 状态中的 `project-order`、`pinned-project-ids` | 仅属于 Desktop UI 元数据；当前不作为运行时 Workspace 排序依据 |
 | 项目会话范围 | `local-projects.rootPaths` 与 app-server `thread/list` 的 cwd 过滤 | thread 进入一个项目 |

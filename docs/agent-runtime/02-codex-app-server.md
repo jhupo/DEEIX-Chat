@@ -220,7 +220,7 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 `mapped` ClientRequest 必须同时出现在实际 dispatch registry 并具有验收；`extension` 保留在锁中但没有 AgentCommand；`disabled` 没有 dispatch。ServerRequest 与 notification 的 disposition 由完整 policy object 校验。
 
-`collaborationMode/list`, `environment/info`, process client requests, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.151.0` schema. Stable `thread/turns/list` and `thread/items/list` are mapped for bounded history hydration.
+`collaborationMode/list`, `environment/info`, process client requests, backgroundTerminal client requests, `currentTime/read`, and `tool/requestUserInput` are unpinned experimental candidates. They are disabled until a separate generated, hashed and exhaustive experimental lock exists; they do not follow or extend this stable `v0.151.0` schema. `thread/turns/list` is mapped for bounded history hydration with `itemsView: "full"`. Although the generated stable union contains `thread/items/list`, the released `0.151.0` runtime returns JSON-RPC `-32601`, so the audited lock disables it.
 
 ## 4. Native actions and Conversation ownership
 

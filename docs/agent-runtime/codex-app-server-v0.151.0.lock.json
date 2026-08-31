@@ -570,7 +570,7 @@
         },
         {
           "name": "thread/items/list",
-          "disposition": "mapped"
+          "disposition": "disabled"
         },
         {
           "name": "thread/inject_items",
