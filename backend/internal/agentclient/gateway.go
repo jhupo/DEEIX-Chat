@@ -38,6 +38,7 @@ type RuntimeStatus struct {
 const (
 	artifactStagingTimeout        = 35 * time.Second
 	gatewayOutgoingBatchSize      = 32
+	gatewayInlineTerminalBytes    = 512 << 10
 	historyImageUploadConcurrency = 4
 )
 
@@ -52,6 +53,7 @@ type Gateway struct {
 	agentVersion     string
 	logger           *log.Logger
 	wake             chan struct{}
+	sessionUpdates   chan struct{}
 	workspaceUpdates chan []Workspace
 	commands         chan queuedCommand
 	activeMu         sync.Mutex
@@ -117,7 +119,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	gateway := &Gateway{
 		ctx: runtimeContext, config: config, dataDir: dataDir, identity: identity, state: state, cloud: NewCloudClient(config.CloudURL), logger: logger,
 		agentVersion: strings.TrimSpace(agentVersion),
-		wake:         make(chan struct{}, 1), workspaceUpdates: make(chan []Workspace, 1),
+		wake:         make(chan struct{}, 1), sessionUpdates: make(chan struct{}, 1), workspaceUpdates: make(chan []Workspace, 1),
 		commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
 	}
 	for _, workspace := range config.Workspaces {
@@ -130,6 +132,9 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 			return appendErr
 		}
 		gateway.signalWake()
+		if sessionSnapshotTrigger(event) {
+			gateway.signalSessionUpdate()
+		}
 		return nil
 	})
 	if err != nil {
@@ -239,9 +244,13 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 			}
 			return
 		}
+		pendingWorkspaces := gateway.state.PendingSessionSnapshotWorkspaces()
 		appended := false
 		for _, snapshot := range snapshots {
 			if revisions[snapshot.WorkspaceID] == snapshot.Revision {
+				continue
+			}
+			if _, pending := pendingWorkspaces[snapshot.WorkspaceID]; pending {
 				continue
 			}
 			event, marshalErr := json.Marshal(map[string]any{
@@ -265,16 +274,47 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 		}
 	}
 	syncSnapshots()
-	timer := time.NewTimer(10 * time.Second)
-	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-ticker.C:
 			syncSnapshots()
-			timer.Reset(10 * time.Second)
+		case <-gateway.sessionUpdates:
+			timer := time.NewTimer(250 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			draining := true
+			for draining {
+				select {
+				case <-gateway.sessionUpdates:
+				default:
+					draining = false
+				}
+			}
+			syncSnapshots()
 		}
+	}
+}
+
+func sessionSnapshotTrigger(event json.RawMessage) bool {
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(event, &envelope) != nil {
+		return false
+	}
+	switch envelope.Kind {
+	case "thread/started", "thread/status/changed", "thread/archived", "thread/deleted", "thread/unarchived", "thread/closed", "thread/name/updated", "turn/completed":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1090,6 +1130,20 @@ func (gateway *Gateway) flushOutgoing(writer *socketWriter, after uint64) (uint6
 	}
 	sentThrough := after
 	for _, outgoing := range pending {
+		if outgoing.Type == "terminal" && len(outgoing.Outcome) > gatewayInlineTerminalBytes {
+			if sentThrough != after {
+				break
+			}
+			acknowledged, err := gateway.cloud.UploadTerminalOutcome(gateway.ctx, gateway.config, gateway.identity, outgoing)
+			if err != nil {
+				return sentThrough, err
+			}
+			if err = gateway.state.AcknowledgeBridge(acknowledged); err != nil {
+				return sentThrough, err
+			}
+			sentThrough = acknowledged
+			continue
+		}
 		frame := bridgeFrame{Version: bridgeVersion, Type: outgoing.Type, BridgeSeq: outgoing.BridgeSeq, ServerSeq: outgoing.ServerSeq, CommandID: outgoing.CommandID, Outcome: outgoing.Outcome, Event: outgoing.Event}
 		if err := writer.send(frame); err != nil {
 			return sentThrough, err
@@ -1109,6 +1163,13 @@ func outgoingBatch(pending []outgoingFrame) []outgoingFrame {
 func (gateway *Gateway) signalWake() {
 	select {
 	case gateway.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (gateway *Gateway) signalSessionUpdate() {
+	select {
+	case gateway.sessionUpdates <- struct{}{}:
 	default:
 	}
 }

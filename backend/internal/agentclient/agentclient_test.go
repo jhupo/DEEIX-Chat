@@ -2,6 +2,7 @@ package agentclient
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
+	"golang.org/x/net/websocket"
 )
 
 func TestMain(m *testing.M) {
@@ -1002,6 +1004,144 @@ func TestStatePersistsCommandOutcomeAndSourceMapping(t *testing.T) {
 	}
 	if pending := reopened.PendingOutgoing(0); len(pending) != 0 {
 		t.Fatalf("acknowledged frames were retained: %#v", pending)
+	}
+}
+
+func TestPendingSessionSnapshotWorkspacesClearsAfterAcknowledgment(t *testing.T) {
+	store, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := json.RawMessage(`{"kind":"workspace/sessions/updated","occurredAt":"2026-08-31T00:00:00Z","payload":{"workspaceId":"workspace-one","revision":"revision-one","data":[]}}`)
+	frame, err := store.AppendEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := store.PendingSessionSnapshotWorkspaces()["workspace-one"]; !pending {
+		t.Fatal("pending session snapshot workspace was not detected")
+	}
+	if err = store.AcknowledgeBridge(frame.BridgeSeq); err != nil {
+		t.Fatal(err)
+	}
+	if pending := store.PendingSessionSnapshotWorkspaces(); len(pending) != 0 {
+		t.Fatalf("acknowledged session snapshot remained pending: %#v", pending)
+	}
+}
+
+func TestSessionSnapshotTriggerUsesCatalogBoundaries(t *testing.T) {
+	for _, kind := range []string{"thread/started", "thread/name/updated", "thread/archived", "turn/completed"} {
+		if !sessionSnapshotTrigger(json.RawMessage(`{"kind":"` + kind + `"}`)) {
+			t.Fatalf("%s did not trigger a session snapshot", kind)
+		}
+	}
+	for _, event := range []json.RawMessage{
+		json.RawMessage(`{"kind":"item/agentMessage/delta"}`),
+		json.RawMessage(`{"kind":"thread/tokenUsage/updated"}`),
+		json.RawMessage(`not-json`),
+	} {
+		if sessionSnapshotTrigger(event) {
+			t.Fatalf("high-frequency event triggered a session snapshot: %s", event)
+		}
+	}
+}
+
+func TestUploadTerminalOutcomeUsesAuthenticatedBulkEndpoint(t *testing.T) {
+	identity, err := LoadOrCreateIdentity(filepath.Join(t.TempDir(), "identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := json.RawMessage(`{"kind":"result","result":{"kind":"accepted"}}`)
+	var uploaded bool
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/v1/agent/bridge/token-challenges":
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{
+				"challengeId": "agc_0123456789abcdef0123456789abcdef",
+				"challenge":   "deeix_challenge_terminal_upload",
+				"expiresAt":   time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+			}})
+		case "/api/v1/agent/bridge/tokens":
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{
+				"connectionToken": "deeix_connection_terminal_upload",
+				"expiresAt":       time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+			}})
+		case "/api/v1/agent/bridge/terminal-outcomes":
+			body, readErr := io.ReadAll(request.Body)
+			if readErr != nil {
+				t.Errorf("read upload: %v", readErr)
+			}
+			if request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer deeix_connection_terminal_upload" ||
+				request.Header.Get("X-DEEIX-Bridge-Seq") != "3" || request.Header.Get("X-DEEIX-Server-Seq") != "2" ||
+				request.Header.Get("X-DEEIX-Command-ID") != "agcmd_0123456789abcdef0123456789abcdef" ||
+				request.ContentLength != int64(len(outcome)) || !bytes.Equal(body, outcome) {
+				t.Errorf("unexpected terminal upload: headers=%v length=%d body=%s", request.Header, request.ContentLength, body)
+			}
+			uploaded = true
+			_ = json.NewEncoder(response).Encode(map[string]any{"data": map[string]any{"ackBridgeSeq": 3}})
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewCloudClient(server.URL)
+	acknowledged, err := client.UploadTerminalOutcome(context.Background(), Config{DeviceID: "agd_0123456789abcdef0123456789abcdef"}, identity, outgoingFrame{
+		Type: "terminal", BridgeSeq: 3, ServerSeq: 2, CommandID: "agcmd_0123456789abcdef0123456789abcdef", Outcome: outcome,
+	})
+	if err != nil || acknowledged != 3 || !uploaded {
+		t.Fatalf("UploadTerminalOutcome() = %d, %v, uploaded=%v", acknowledged, err, uploaded)
+	}
+}
+
+func TestFlushOutgoingWaitsForWebSocketAckBeforeBulkUpload(t *testing.T) {
+	received := make(chan bridgeFrame, 1)
+	server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
+		var frame bridgeFrame
+		if err := websocket.JSON.Receive(connection, &frame); err == nil {
+			received <- frame
+		}
+	}))
+	defer server.Close()
+	config, err := websocket.NewConfig("ws"+strings.TrimPrefix(server.URL, "http"), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := websocket.DialConfig(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+
+	store, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := store.AppendEvent(json.RawMessage(`{"kind":"turn/completed","occurredAt":"2026-08-31T00:00:00Z","payload":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "agcmd_0123456789abcdef0123456789abcdef"
+	command := json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"models"}}`)
+	if _, created, receiveErr := store.Receive(1, commandID, command, nil); receiveErr != nil || !created {
+		t.Fatalf("Receive() created=%v err=%v", created, receiveErr)
+	}
+	largeOutcome := json.RawMessage(`{"kind":"result","result":{"data":"` + strings.Repeat("x", gatewayInlineTerminalBytes) + `"}}`)
+	if _, err = store.AppendTerminal(commandID, largeOutcome); err != nil {
+		t.Fatal(err)
+	}
+	gateway := &Gateway{ctx: context.Background(), state: store}
+	sentThrough, err := gateway.flushOutgoing(&socketWriter{connection: connection}, 0)
+	if err != nil || sentThrough != event.BridgeSeq {
+		t.Fatalf("flushOutgoing() = %d, %v", sentThrough, err)
+	}
+	select {
+	case frame := <-received:
+		if frame.Type != "event" || frame.BridgeSeq != event.BridgeSeq {
+			t.Fatalf("unexpected WebSocket frame: %#v", frame)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("WebSocket frame was not sent")
 	}
 }
 

@@ -95,6 +95,35 @@ func TestBindStrictJSON(t *testing.T) {
 	}
 }
 
+func TestUploadTerminalOutcomeRejectsInvalidFraming(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name          string
+		contentLength int64
+		bridgeSeq     string
+	}{
+		{name: "streamed body", contentLength: -1, bridgeSeq: "1"},
+		{name: "oversized body", contentLength: terminalOutcomeBodyLimit + 1, bridgeSeq: "1"},
+		{name: "invalid sequence", contentLength: 2, bridgeSeq: "invalid"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, "/agent/bridge/terminal-outcomes", strings.NewReader("{}"))
+			context.Request.ContentLength = test.contentLength
+			context.Request.Header.Set("Authorization", "Bearer deeix_connection_test")
+			context.Request.Header.Set("X-DEEIX-Bridge-Seq", test.bridgeSeq)
+			context.Request.Header.Set("X-DEEIX-Server-Seq", "1")
+			context.Request.Header.Set("X-DEEIX-Command-ID", "agcmd_0123456789abcdef0123456789abcdef")
+			(&Handler{}).UploadTerminalOutcome(context)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestWriteErrorExplainsRuntimeKeyMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

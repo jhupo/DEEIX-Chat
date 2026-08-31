@@ -23,6 +23,18 @@ func TestProductionGORMLoggerIgnoresRecordNotFound(t *testing.T) {
 	}
 }
 
+func TestProductionGORMLoggerFiltersQueryParameters(t *testing.T) {
+	logger := productionGORMLogger()
+	filter, ok := logger.(gorm.ParamsFilter)
+	if !ok {
+		t.Fatal("production GORM logger does not filter query parameters")
+	}
+	sql, params := filter.ParamsFilter(context.Background(), "SELECT * FROM messages WHERE content = ?", "private conversation")
+	if sql != "SELECT * FROM messages WHERE content = ?" || len(params) != 0 {
+		t.Fatalf("filtered query = %q, %#v", sql, params)
+	}
+}
+
 func captureProductionGORMTrace(t *testing.T, traceErr error) string {
 	t.Helper()
 

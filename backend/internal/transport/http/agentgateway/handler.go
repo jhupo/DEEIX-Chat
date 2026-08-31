@@ -136,9 +136,10 @@ type renameWorkspaceRequest struct {
 }
 
 const (
-	smallJSONBodyLimit = int64(8 * 1024)
-	agentJSONBodyLimit = int64(1024*1024 + 128*1024)
-	timeLayout         = "2006-01-02T15:04:05.000Z07:00"
+	smallJSONBodyLimit       = int64(8 * 1024)
+	agentJSONBodyLimit       = int64(1024*1024 + 128*1024)
+	terminalOutcomeBodyLimit = int64(64 << 20)
+	timeLayout               = "2006-01-02T15:04:05.000Z07:00"
 )
 
 func bindStrictJSON(c *gin.Context, destination any, limit int64) error {
@@ -541,6 +542,31 @@ func (h *Handler) UploadHistoryAttachment(c *gin.Context) {
 		return
 	}
 	response.Success(c, gin.H{"fileId": item.FileID})
+}
+
+func (h *Handler) UploadTerminalOutcome(c *gin.Context) {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	token := strings.TrimPrefix(authorization, "Bearer ")
+	bridgeSeq, bridgeErr := strconv.ParseUint(strings.TrimSpace(c.GetHeader("X-DEEIX-Bridge-Seq")), 10, 64)
+	serverSeq, serverErr := strconv.ParseUint(strings.TrimSpace(c.GetHeader("X-DEEIX-Server-Seq")), 10, 64)
+	commandID := strings.TrimSpace(c.GetHeader("X-DEEIX-Command-ID"))
+	if token == authorization || bridgeErr != nil || serverErr != nil || bridgeSeq == 0 || serverSeq == 0 ||
+		c.Request.ContentLength <= 0 || c.Request.ContentLength > terminalOutcomeBodyLimit {
+		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, terminalOutcomeBodyLimit)
+	outcome, err := io.ReadAll(c.Request.Body)
+	if err != nil || int64(len(outcome)) != c.Request.ContentLength {
+		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
+		return
+	}
+	acknowledged, err := h.service.ApplyTerminalUpload(c.Request.Context(), token, bridgeSeq, serverSeq, commandID, outcome)
+	if err != nil {
+		writeError(c, err, "upload terminal outcome failed")
+		return
+	}
+	response.Success(c, gin.H{"ackBridgeSeq": acknowledged})
 }
 
 func (h *Handler) CreateChallenge(c *gin.Context) {

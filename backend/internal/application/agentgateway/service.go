@@ -1365,6 +1365,14 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 	return acknowledged, nil
 }
 
+func (s *Service) ApplyTerminalUpload(ctx context.Context, token string, bridgeSeq, serverSeq uint64, commandID string, outcome json.RawMessage) (uint64, error) {
+	identity, err := s.AuthenticateConnection(ctx, token)
+	if err != nil {
+		return 0, err
+	}
+	return s.ApplyTerminalFrame(ctx, identity, bridgeSeq, serverSeq, commandID, outcome)
+}
+
 func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdentity, runtimeProfileID uint, bridgeSeq uint64, event json.RawMessage) (uint64, error) {
 	if identity == nil || identity.InternalDeviceID == 0 || runtimeProfileID == 0 || bridgeSeq == 0 ||
 		len(event) == 0 || len(event) > agentprotocol.MaxProviderEventBytes {

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 type CloudClient struct {
 	baseURL string
 	http    *http.Client
+	bulk    *http.Client
 }
 
 const maxHistoryImageBytes = int64(20 << 20)
@@ -30,7 +32,9 @@ const maxHistoryImageBytes = int64(20 << 20)
 var errHistoryImageUnavailable = errors.New("history image is unavailable")
 
 func NewCloudClient(baseURL string) *CloudClient {
-	return &CloudClient{baseURL: strings.TrimRight(baseURL, "/"), http: newAgentHTTPClient()}
+	bulk := newAgentHTTPClient()
+	bulk.Timeout = 2 * time.Minute
+	return &CloudClient{baseURL: strings.TrimRight(baseURL, "/"), http: newAgentHTTPClient(), bulk: bulk}
 }
 
 func newAgentHTTPClient() *http.Client {
@@ -228,6 +232,56 @@ func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config
 		return "", errors.New("history attachment server response is invalid")
 	}
 	return envelope.Data.FileID, nil
+}
+
+func (client *CloudClient) UploadTerminalOutcome(ctx context.Context, config Config, identity *DeviceIdentity, frame outgoingFrame) (uint64, error) {
+	if frame.Type != "terminal" || frame.BridgeSeq == 0 || frame.ServerSeq == 0 ||
+		!validPublicID(frame.CommandID, "agcmd") || len(frame.Outcome) == 0 || len(frame.Outcome) > bridgeMaxPayload {
+		return 0, errors.New("terminal outcome upload is invalid")
+	}
+	token, err := client.ConnectionToken(ctx, config, identity)
+	if err != nil {
+		return 0, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/terminal-outcomes", bytes.NewReader(frame.Outcome))
+	if err != nil {
+		return 0, err
+	}
+	request.ContentLength = int64(len(frame.Outcome))
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-DEEIX-Bridge-Seq", strconv.FormatUint(frame.BridgeSeq, 10))
+	request.Header.Set("X-DEEIX-Server-Seq", strconv.FormatUint(frame.ServerSeq, 10))
+	request.Header.Set("X-DEEIX-Command-ID", frame.CommandID)
+	response, err := client.bulk.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return 0, err
+	}
+	var envelope struct {
+		ErrorMsg string `json:"errorMsg"`
+		Data     struct {
+			AckBridgeSeq uint64 `json:"ackBridgeSeq"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(body, &envelope) != nil {
+		return 0, fmt.Errorf("terminal outcome server response is invalid (%d)", response.StatusCode)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.ErrorMsg != "" {
+		message := strings.TrimSpace(envelope.ErrorMsg)
+		if message == "" {
+			message = response.Status
+		}
+		return 0, fmt.Errorf("terminal outcome upload failed: %s", message)
+	}
+	if envelope.Data.AckBridgeSeq != frame.BridgeSeq {
+		return 0, errors.New("terminal outcome acknowledgment is invalid")
+	}
+	return envelope.Data.AckBridgeSeq, nil
 }
 
 func openHistoryImage(path string) (*os.File, string, string, int64, error) {

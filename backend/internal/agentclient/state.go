@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 )
 
 type durableState struct {
@@ -302,6 +304,27 @@ func (store *StateStore) PendingOutgoing(after uint64) []outgoingFrame {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].BridgeSeq < result[j].BridgeSeq })
+	return result
+}
+
+func (store *StateStore) PendingSessionSnapshotWorkspaces() map[string]struct{} {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	result := make(map[string]struct{})
+	for _, frame := range store.state.Outgoing {
+		if frame.Type != "event" {
+			continue
+		}
+		var envelope struct {
+			Kind    string `json:"kind"`
+			Payload struct {
+				WorkspaceID string `json:"workspaceId"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(frame.Event, &envelope) == nil && envelope.Kind == agentprotocol.SessionSnapshotEventKind && envelope.Payload.WorkspaceID != "" {
+			result[envelope.Payload.WorkspaceID] = struct{}{}
+		}
+	}
 	return result
 }
 
