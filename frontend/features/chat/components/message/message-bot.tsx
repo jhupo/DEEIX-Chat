@@ -17,12 +17,12 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { MessageAgentRun } from "@/features/chat/components/message/message-agent-run";
 import { MessageAttachmentRow } from "@/features/chat/components/message/message-attachment";
 import type { AssistantReaction } from "@/features/chat/components/message/message-meta";
 import { AssistantMessageMeta } from "@/features/chat/components/message/message-meta";
-import { MessageAgentRun } from "@/features/chat/components/message/message-agent-run";
-import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
 import { useAgentRunSnapshot } from "@/features/chat/model/agent-run-store";
+import { resolveLeadingImagePreview } from "@/features/chat/model/media-image-preview";
 import type {
   ChatAreaMessage,
   ChatInlineAlert,
@@ -270,6 +270,8 @@ export function ChatMessageBot({
     onEditImageAttachment,
     readOnly,
   ]);
+  const processAutoCollapseReady = Boolean(hasStreamdownContent || item.inlineAlert);
+
   if (!readOnly && isEditing) {
     const nextContent = editingValue.trim();
     const unchanged = nextContent === item.content.trim();
@@ -308,7 +310,7 @@ export function ChatMessageBot({
 
   return (
     <div className="group/assistant-message flex w-full flex-col items-start">
-      <MessageAgentRun agentRun={agentRun} />
+      <MessageAgentRun agentRun={agentRun} autoCollapseReady={processAutoCollapseReady} />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"
