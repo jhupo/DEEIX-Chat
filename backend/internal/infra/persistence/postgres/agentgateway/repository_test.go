@@ -88,6 +88,39 @@ func TestSyncWorkspaceSessionExecutionEventsReplacesDerivedHistory(t *testing.T)
 	}
 }
 
+func TestSyncWorkspaceSessionExecutionEventsScopesKeysToConversation(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.Conversation{}, &model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	conversations := []model.Conversation{
+		{PublicID: "conversation_history_scope_a", UserID: 7, Title: "Original"},
+		{PublicID: "conversation_history_scope_b", UserID: 7, Title: "Fork"},
+	}
+	if err := database.Create(&conversations).Error; err != nil {
+		t.Fatal(err)
+	}
+	messages := []workspaceSessionMessage{{
+		Role: "assistant", Status: "success", RunID: "run_shared_turn", CreatedAt: 1,
+		ExecutionEvents: []workspaceSessionEvent{{
+			Kind: "item/completed", SourceEventRef: "item-shared",
+			Payload: json.RawMessage(`{"itemID":"shared","item":{"kind":"reasoning","status":"completed"}}`),
+		}},
+	}}
+	for index := range conversations {
+		if err := syncWorkspaceSessionExecutionEvents(database, &conversations[index], messages, true, time.Now().UTC()); err != nil {
+			t.Fatalf("project conversation %d: %v", index, err)
+		}
+	}
+	var events []model.ConversationExecutionEvent
+	if err := database.Order("id ASC").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].SourceKey == events[1].SourceKey {
+		t.Fatalf("conversation-scoped event keys = %#v", events)
+	}
+}
+
 func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
@@ -358,9 +391,9 @@ func TestWorkspaceSessionProjectionTracksActiveAssistantAndEventRevisions(t *tes
 	if status := workspaceSessionMessageStatus(completed); status != "success" {
 		t.Fatalf("completed assistant status = %q", status)
 	}
-	first := workspaceSessionEventSourceKey("run_test", active.ExecutionEvents[0])
-	replayed := workspaceSessionEventSourceKey("run_test", active.ExecutionEvents[0])
-	revised := workspaceSessionEventSourceKey("run_test", workspaceSessionEvent{
+	first := workspaceSessionEventSourceKey("conversation_test", "run_test", active.ExecutionEvents[0])
+	replayed := workspaceSessionEventSourceKey("conversation_test", "run_test", active.ExecutionEvents[0])
+	revised := workspaceSessionEventSourceKey("conversation_test", "run_test", workspaceSessionEvent{
 		Kind: "turn/started", SourceEventRef: "turn-started", Payload: json.RawMessage(`{"turn":{"status":"running","progress":1}}`),
 	})
 	if first != replayed || first == revised {

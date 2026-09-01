@@ -28,7 +28,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 7
+	historyProjectionVersion     = 8
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -1543,7 +1543,7 @@ func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conver
 		occurredAt := validSessionTime(message.CreatedAt, now)
 		rows := make([]model.ConversationExecutionEvent, 0, len(message.ExecutionEvents))
 		for _, event := range message.ExecutionEvents {
-			sourceKey := workspaceSessionEventSourceKey(message.RunID, event)
+			sourceKey := workspaceSessionEventSourceKey(conversation.PublicID, message.RunID, event)
 			if _, exists := existing[sourceKey]; exists {
 				continue
 			}
@@ -1568,8 +1568,8 @@ func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conver
 	return tx.Model(conversation).Update("execution_event_seq", sequence).Error
 }
 
-func workspaceSessionEventSourceKey(runID string, event workspaceSessionEvent) string {
-	digest := sha256.Sum256([]byte(runID + "\n" + event.SourceEventRef + "\n" + event.Kind + "\n" + string(event.Payload)))
+func workspaceSessionEventSourceKey(conversationRef, runID string, event workspaceSessionEvent) string {
+	digest := sha256.Sum256([]byte(conversationRef + "\n" + runID + "\n" + event.SourceEventRef + "\n" + event.Kind + "\n" + string(event.Payload)))
 	return "history:" + hex.EncodeToString(digest[:])
 }
 
