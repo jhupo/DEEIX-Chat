@@ -47,6 +47,41 @@ func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
 	}
 }
 
+func TestSyncWorkspaceSessionExecutionEventsReplacesDerivedHistory(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(&model.Conversation{}, &model.ConversationExecutionEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.Conversation{
+		PublicID: "conversation_history_reprojection", UserID: 7, Title: "History", ExecutionEventSeq: 2,
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.ConversationExecutionEvent{
+		{ConversationID: conversation.ID, UserID: 7, RunID: "run_history", SourceKey: "history:run_history:0", Seq: 1, Kind: "turn/started", PayloadJSON: `{}`},
+		{ConversationID: conversation.ID, UserID: 7, RunID: "run_live", SourceKey: "event:run_live:0", Seq: 2, Kind: "turn/started", PayloadJSON: `{}`},
+	}
+	if err := database.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	messages := []workspaceSessionMessage{{
+		Role: "assistant", RunID: "run_history", CreatedAt: 1,
+		ExecutionEvents: []workspaceSessionEvent{{Kind: "item/completed", Payload: json.RawMessage(`{"itemID":"compact","item":{"kind":"contextCompaction","status":"completed"}}`)}},
+	}}
+	if err := syncWorkspaceSessionExecutionEvents(database, &conversation, messages, true, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var events []model.ConversationExecutionEvent
+	if err := database.Where("conversation_id = ?", conversation.ID).Order("seq ASC").Find(&events).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].RunID != "run_live" || events[1].RunID != "run_history" ||
+		events[1].Seq != 3 || events[1].Kind != "item/completed" {
+		t.Fatalf("reprojected execution events = %#v", events)
+	}
+}
+
 func TestGetCommandReportsDevicePresence(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentCommand{}); err != nil {

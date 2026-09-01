@@ -160,15 +160,29 @@ test("keeps activity items in their first event order while applying later updat
       runID: "run-timeline",
       seq: 6,
       kind: "item/completed",
-      payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", command: "pnpm test", status: "completed" } },
+      payload: { itemID: "commentary-1", item: { itemID: "commentary-1", kind: "agentMessage", phase: "commentary", text: "Tests passed" } },
       occurredAt: "2026-08-25T00:00:06Z",
     },
     {
       runID: "run-timeline",
       seq: 7,
+      kind: "item/completed",
+      payload: { itemID: "compaction-1", item: { itemID: "compaction-1", kind: "contextCompaction" } },
+      occurredAt: "2026-08-25T00:00:07Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 8,
+      kind: "item/completed",
+      payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", command: "pnpm test", status: "completed" } },
+      occurredAt: "2026-08-25T00:00:08Z",
+    },
+    {
+      runID: "run-timeline",
+      seq: 9,
       kind: "turn/plan/updated",
       payload: { plan: [{ step: "Inspect", status: "completed" }] },
-      occurredAt: "2026-08-25T00:00:07Z",
+      occurredAt: "2026-08-25T00:00:09Z",
     },
   ], "conversation-timeline");
 
@@ -178,6 +192,8 @@ test("keeps activity items in their first event order while applying later updat
     "command:command-1:3",
     "file:file-1:4",
     "reasoning:reasoning-2:5",
+    "commentary:commentary-1:6",
+    "context_compaction:compaction-1:7",
   ]);
   assert.equal(run.planSeq, 1);
 });

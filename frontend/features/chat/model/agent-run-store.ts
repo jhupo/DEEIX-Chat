@@ -77,8 +77,15 @@ export type AgentFileActivity = {
   truncated: boolean;
 };
 
+export type AgentContextCompactionActivity = {
+  itemID: string;
+  seq: number;
+  kind: "context_compaction";
+  status: AgentActivityStatus;
+};
+
 export type AgentUsage = Required<AgentTokenUsageDTO> & { scope: "run" };
-export type AgentActivityItem = AgentCommandActivity | AgentToolActivity | AgentFileActivity | AgentTextActivity;
+export type AgentActivityItem = AgentCommandActivity | AgentToolActivity | AgentFileActivity | AgentTextActivity | AgentContextCompactionActivity;
 
 export type AgentRunSnapshot = {
   runID: string;
@@ -231,8 +238,11 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
   const id = itemID(payload);
   if (!id) return null;
   const kind = stringValue(item.kind);
-  const status = activityStatus(item.status);
+  const status = activityStatus(item.status) ?? (terminal ? "completed" : null);
   if (!status || terminal && status === "running") return null;
+  if (kind === "contextCompaction") {
+    return { itemID: id, seq, kind: "context_compaction", status };
+  }
   if (kind === "agentMessage") {
     if (stringValue(item.phase) !== "commentary") return null;
     return {

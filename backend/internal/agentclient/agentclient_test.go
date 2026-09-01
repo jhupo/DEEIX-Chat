@@ -1574,6 +1574,7 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 			"items":[
 				{"type":"userMessage","content":[{"type":"text","text":"inspect"}]},
 				{"type":"reasoning","summary":["checked configuration","validated settings"],"content":["confirmed result"]},
+				{"id":"compact-1","type":"contextCompaction"},
 				{"type":"agentMessage","text":"first paragraph"},
 				{"type":"agentMessage","text":"second paragraph"}
 			]
@@ -1590,8 +1591,14 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 	executionEvents, _ := assistant["executionEvents"].([]any)
 	if !ok || assistant["content"] != "first paragraph\n\nsecond paragraph" ||
 		assistant["reasoningContent"] != "checked configuration\n\nvalidated settings\n\nconfirmed result" ||
-		assistant["sourceTurnRef"] == "" || assistant["sourceTurnRef"] != user["sourceTurnRef"] || len(executionEvents) != 3 {
+		assistant["sourceTurnRef"] == "" || assistant["sourceTurnRef"] != user["sourceTurnRef"] || len(executionEvents) != 4 {
 		t.Fatalf("projected assistant message = %#v", messages[1])
+	}
+	compaction, _ := executionEvents[2].(map[string]any)
+	payload, _ := compaction["payload"].(map[string]any)
+	projectedItem, _ := payload["item"].(map[string]any)
+	if projectedItem["kind"] != "contextCompaction" || projectedItem["status"] != "completed" {
+		t.Fatalf("projected context compaction = %#v", compaction)
 	}
 }
 

@@ -2963,7 +2963,7 @@ func (adapter *CodexAdapter) projectSessionExecutionItem(item map[string]any, pr
 	if kind == "agentMessage" && agentMessagePhase(item["phase"]) != "commentary" {
 		return nil
 	}
-	if kind != "reasoning" && kind != "agentMessage" && !strings.Contains(strings.ToLower(kind), "command") && !strings.Contains(strings.ToLower(kind), "file") {
+	if kind != "reasoning" && kind != "agentMessage" && kind != "contextCompaction" && !strings.Contains(strings.ToLower(kind), "command") && !strings.Contains(strings.ToLower(kind), "file") {
 		return nil
 	}
 	providerItemID, _ := item["id"].(string)
@@ -2972,11 +2972,15 @@ func (adapter *CodexAdapter) projectSessionExecutionItem(item map[string]any, pr
 		providerItemID = fmt.Sprintf("history:%s:%d", providerTurnID, index)
 	}
 	sourceItemRef := stableSessionSourceRef("item", adapter.profileID, providerTurnID, providerItemID)
+	projected := adapter.projectExecutionItem(item, sourceItemRef)
+	if stringField(projected, "status") == "" {
+		projected["status"] = "completed"
+	}
 	return map[string]any{
 		"kind": "item/completed",
 		"payload": map[string]any{
 			"itemID": sourceItemRef,
-			"item":   adapter.projectExecutionItem(item, sourceItemRef),
+			"item":   projected,
 		},
 	}
 }

@@ -219,7 +219,7 @@ export type AgentFileChangeDTO = {
 export type AgentExecutionItemDTO = {
   itemID: string;
   kind: string;
-  status: string;
+  status?: string;
   command?: string;
   cwd?: string;
   durationMs?: number;

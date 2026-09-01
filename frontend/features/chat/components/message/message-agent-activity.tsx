@@ -8,11 +8,12 @@ import {
   FileCode2,
   GitCompareArrows,
   ListChecks,
+  Minimize2,
   Route,
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import * as React from "react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -39,17 +40,28 @@ function statusKey(status: string): "running" | "completed" | "failed" | "interr
   return "running";
 }
 
-function formatDuration(durationMS: number | null): string {
-  if (durationMS === null) return "";
-  if (durationMS < 1000) return `${Math.round(durationMS)}ms`;
+function formatDuration(durationMS: number | null, locale: string): string {
+  if (durationMS === null || durationMS < 0) return "";
+  const formatUnit = (value: number, unit: Intl.NumberFormatOptions["unit"]) =>
+    new Intl.NumberFormat(locale, { style: "unit", unit, unitDisplay: "short" }).format(value);
+  if (durationMS < 1000) return formatUnit(Math.round(durationMS), "millisecond");
   const seconds = Math.round(durationMS / 1000);
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return formatUnit(seconds, "second");
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  if (minutes < 60) return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  const separator = locale.toLowerCase().startsWith("zh") ? "" : " ";
+  if (minutes < 60) {
+    return [formatUnit(minutes, "minute"), remainingSeconds > 0 ? formatUnit(remainingSeconds, "second") : ""]
+      .filter(Boolean)
+      .join(separator);
+  }
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  return [
+    formatUnit(hours, "hour"),
+    remainingMinutes > 0 ? formatUnit(remainingMinutes, "minute") : "",
+    remainingSeconds > 0 ? formatUnit(remainingSeconds, "second") : "",
+  ].filter(Boolean).join(separator);
 }
 
 function ActivityStatus({ status }: { status: string }) {
@@ -66,9 +78,10 @@ function ActivityStatus({ status }: { status: string }) {
 
 function CommandRow({ item }: { item: AgentCommandActivity }) {
   const t = useTranslations("chat.agent");
+  const locale = useLocale();
   const [open, setOpen] = React.useState(false);
   const hasDetails = Boolean(item.output || item.cwd || item.exitCode !== null || item.durationMS !== null);
-  const duration = formatDuration(item.durationMS);
+  const duration = formatDuration(item.durationMS, locale);
 
   return (
     <div className="border-t border-border/25 py-1.5 first:border-t-0">
@@ -110,9 +123,10 @@ function CommandRow({ item }: { item: AgentCommandActivity }) {
 }
 
 function ToolRow({ item }: { item: AgentToolActivity }) {
+  const locale = useLocale();
   const [open, setOpen] = React.useState(false);
   const hasDetails = Boolean(item.input || item.output || item.error || item.durationMS !== null);
-  const duration = formatDuration(item.durationMS);
+  const duration = formatDuration(item.durationMS, locale);
 
   return (
     <div className="border-t border-border/25 py-1.5 first:border-t-0">
@@ -157,10 +171,19 @@ function interactionMatchesItem(interaction: ConversationInteractionDTO, item: A
 
 function ActivityItemRow({ item }: { item: AgentActivityItem }) {
   const t = useTranslations("chat.agent");
+  const tMessages = useTranslations("chat.messages");
   if (item.kind === "command") return <CommandRow item={item} />;
   if (item.kind === "tool") return <ToolRow item={item} />;
   if (item.kind === "file") {
     return <FileChangesRow files={item.files} fallbackDiff={item.diff} fallbackTruncated={item.truncated} status={item.status} />;
+  }
+  if (item.kind === "context_compaction") {
+    return (
+      <div className="flex items-center gap-2 border-t border-border/25 py-2 text-[12px] text-muted-foreground/72 first:border-t-0">
+        <Minimize2 className="size-3.5 shrink-0" />
+        <span>{tMessages("contextCompressed")}</span>
+      </div>
+    );
   }
   if (!item.text.trim()) return null;
   if (item.kind === "reasoning") {
@@ -561,6 +584,6 @@ function FileChangesRow({
   );
 }
 
-export function formatAgentRunDuration(durationMS: number | null): string {
-  return formatDuration(durationMS);
+export function formatAgentRunDuration(durationMS: number | null, locale: string): string {
+  return formatDuration(durationMS, locale);
 }

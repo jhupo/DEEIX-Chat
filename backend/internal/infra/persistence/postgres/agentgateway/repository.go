@@ -29,7 +29,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 4
+	historyProjectionVersion     = 5
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -1327,7 +1327,7 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		parentID = &message.ID
 	}
-	if err := syncWorkspaceSessionExecutionEvents(tx, &conversation, session.Messages, now); err != nil {
+	if err := syncWorkspaceSessionExecutionEvents(tx, &conversation, session.Messages, thread.HistoryVersion < historyProjectionVersion, now); err != nil {
 		return false, err
 	}
 	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "history_version": historyProjectionVersion, "updated_at": now}).Error; err != nil {
@@ -1450,7 +1450,12 @@ func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messa
 	return nil
 }
 
-func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conversation, messages []workspaceSessionMessage, now time.Time) error {
+func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conversation, messages []workspaceSessionMessage, replaceHistory bool, now time.Time) error {
+	if replaceHistory {
+		if err := tx.Where("conversation_id = ? AND source_key LIKE ?", conversation.ID, "history:%").Delete(&model.ConversationExecutionEvent{}).Error; err != nil {
+			return err
+		}
+	}
 	runIDs := make([]string, 0, len(messages)/2)
 	seenRunIDs := make(map[string]struct{}, len(messages)/2)
 	for _, message := range messages {
