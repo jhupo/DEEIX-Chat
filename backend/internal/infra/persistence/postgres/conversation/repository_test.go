@@ -1836,6 +1836,9 @@ func TestListLatestBranchPreviewMessagesReturnsLatestVisibleWindow(t *testing.T)
 		if item.Role != "user" && item.Role != "assistant" {
 			t.Fatalf("items[%d].Role = %q, want visible role", i, item.Role)
 		}
+		if item.Status != "success" {
+			t.Fatalf("items[%d].Status = %q, want success", i, item.Status)
+		}
 	}
 }
 

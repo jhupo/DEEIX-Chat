@@ -1,6 +1,6 @@
 {
   "name": "@deeix/chat-monorepo",
-  "version": "0.4.129",
+  "version": "0.4.130",
   "private": true,
   "packageManager": "pnpm@10.17.0",
   "scripts": {

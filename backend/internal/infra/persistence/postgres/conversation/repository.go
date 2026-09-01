@@ -2441,12 +2441,13 @@ func (r *Repo) ListLatestBranchPreviewMessages(
 		PublicID     string `gorm:"column:public_id"`
 		Role         string `gorm:"column:role"`
 		Content      string `gorm:"column:content"`
+		Status       string `gorm:"column:status"`
 		ErrorMessage string `gorm:"column:error_message"`
 	}
 	rows := make([]previewMessageRow, 0, limit)
 	const previewSQL = `
 WITH RECURSIVE ancestors AS (
-    SELECT id, conversation_id, parent_message_id, public_id, role, content, error_message, 1 AS depth
+    SELECT id, conversation_id, parent_message_id, public_id, role, content, status, error_message, 1 AS depth
     FROM chat_messages
     WHERE id = (
         SELECT id
@@ -2458,7 +2459,7 @@ WITH RECURSIVE ancestors AS (
       AND conversation_id = ?
       AND deleted_at IS NULL
     UNION ALL
-    SELECT m.id, m.conversation_id, m.parent_message_id, m.public_id, m.role, m.content, m.error_message, a.depth + 1
+    SELECT m.id, m.conversation_id, m.parent_message_id, m.public_id, m.role, m.content, m.status, m.error_message, a.depth + 1
     FROM chat_messages AS m
     INNER JOIN ancestors AS a ON m.id = a.parent_message_id
     WHERE a.parent_message_id IS NOT NULL
@@ -2466,13 +2467,13 @@ WITH RECURSIVE ancestors AS (
       AND m.conversation_id = ?
       AND m.deleted_at IS NULL
 ), visible_messages AS (
-    SELECT id, public_id, role, content, error_message, depth
+    SELECT id, public_id, role, content, status, error_message, depth
     FROM ancestors
     WHERE role IN ('user', 'assistant')
     ORDER BY depth ASC
     LIMIT ?
 )
-SELECT id, public_id, role, content, error_message
+SELECT id, public_id, role, content, status, error_message
 FROM visible_messages
 ORDER BY depth DESC`
 	if err := r.db.WithContext(ctx).
@@ -2489,6 +2490,7 @@ ORDER BY depth DESC`
 			PublicID:       row.PublicID,
 			Role:           row.Role,
 			Content:        row.Content,
+			Status:         row.Status,
 			ErrorMessage:   row.ErrorMessage,
 		})
 	}
