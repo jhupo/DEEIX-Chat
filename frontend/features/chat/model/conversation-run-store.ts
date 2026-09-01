@@ -19,6 +19,7 @@ type Listener = () => void;
 export class ConversationRunStore {
   private readonly records = new Map<string, ConversationRunRecord>();
   private readonly listeners = new Map<string, Set<Listener>>();
+  private readonly runListeners = new Map<string, Set<Listener>>();
 
   subscribe(conversationPublicID: string, listener: Listener): () => void {
     const conversationID = conversationPublicID.trim();
@@ -39,6 +40,25 @@ export class ConversationRunStore {
     };
   }
 
+  subscribeRun(runID: string, listener: Listener): () => void {
+    const normalizedRunID = runID.trim();
+    if (!normalizedRunID) {
+      return () => undefined;
+    }
+    let listeners = this.runListeners.get(normalizedRunID);
+    if (!listeners) {
+      listeners = new Set();
+      this.runListeners.set(normalizedRunID, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        this.runListeners.delete(normalizedRunID);
+      }
+    };
+  }
+
   isConversationRunning(conversationPublicID: string): boolean {
     const conversationID = conversationPublicID.trim();
     if (!conversationID) {
@@ -50,6 +70,16 @@ export class ConversationRunStore {
       }
     }
     return false;
+  }
+
+  isServerRunActive(runID: string, conversationPublicID: string): boolean {
+    const normalizedRunID = runID.trim();
+    const conversationID = conversationPublicID.trim();
+    if (!normalizedRunID || !conversationID) {
+      return false;
+    }
+    const record = this.records.get(normalizedRunID);
+    return record?.conversationPublicID === conversationID && record.status === "server";
   }
 
   register(runID: string, conversationPublicID: string): void {
@@ -184,12 +214,10 @@ export class ConversationRunStore {
         }
         if (record.status === "local") {
           if (serverOwner) {
-            if (record.missingFromSnapshotSince !== undefined) {
-              this.records.set(runID, {
-                conversationPublicID: record.conversationPublicID,
-                status: "local",
-              });
-            }
+            this.records.set(runID, {
+              conversationPublicID: record.conversationPublicID,
+              status: "server",
+            });
             continue;
           }
           // 服务端从未登记该运行（提交失败、流挂死等）时，本地记录会持续缺席快照。
@@ -238,11 +266,24 @@ export class ConversationRunStore {
 
   private mutate(update: () => void): void {
     const previous = this.activeConversationIDs();
+    const previousServerRuns = new Set(
+      [...this.records].filter(([, record]) => record.status === "server").map(([runID]) => runID),
+    );
     update();
     const next = this.activeConversationIDs();
     for (const conversationID of new Set([...previous, ...next])) {
       if (previous.has(conversationID) !== next.has(conversationID)) {
         for (const listener of this.listeners.get(conversationID) ?? []) {
+          listener();
+        }
+      }
+    }
+    const nextServerRuns = new Set(
+      [...this.records].filter(([, record]) => record.status === "server").map(([runID]) => runID),
+    );
+    for (const runID of new Set([...previousServerRuns, ...nextServerRuns])) {
+      if (previousServerRuns.has(runID) !== nextServerRuns.has(runID)) {
+        for (const listener of this.runListeners.get(runID) ?? []) {
           listener();
         }
       }

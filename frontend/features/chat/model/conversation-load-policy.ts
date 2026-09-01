@@ -38,5 +38,5 @@ export function shouldRetryConversationStream(error: unknown): boolean {
   }
   const status = "status" in error && typeof error.status === "number" ? error.status : 0;
   const errorCode = "errorCode" in error && typeof error.errorCode === "string" ? error.errorCode : "";
-  return [404, 409, 429, 502, 503, 504].includes(status) || errorCode === "conversation_run.stream_interrupted";
+  return [409, 429, 502, 503, 504].includes(status) || errorCode === "conversation_run.stream_interrupted";
 }

@@ -115,3 +115,24 @@ export function useConversationRunning(conversationPublicID: string): boolean {
   );
   return React.useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
+
+export function useServerConversationRunActive(
+  runID: string,
+  conversationPublicID: string,
+): boolean {
+  const store = React.useContext(ConversationRunStoreContext);
+  if (!store) {
+    throw new Error("useServerConversationRunActive must be used within ChatSessionProvider");
+  }
+  const normalizedRunID = runID.trim();
+  const conversationID = conversationPublicID.trim();
+  const subscribe = React.useCallback(
+    (listener: () => void) => store.subscribeRun(normalizedRunID, listener),
+    [normalizedRunID, store],
+  );
+  const getSnapshot = React.useCallback(
+    () => store.isServerRunActive(normalizedRunID, conversationID),
+    [conversationID, normalizedRunID, store],
+  );
+  return React.useSyncExternalStore(subscribe, getSnapshot, () => false);
+}

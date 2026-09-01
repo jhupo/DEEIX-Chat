@@ -2,10 +2,11 @@
 
 import { useTranslations } from "next-intl";
 import * as React from "react";
+import { useServerConversationRunActive } from "@/features/chat/context/chat-session-context";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import {
-  shouldRetryConversationStream,
   shouldRefreshMessagesAfterHistory,
+  shouldRetryConversationStream,
   shouldSurfaceConversationLoadError,
 } from "@/features/chat/model/conversation-load-policy";
 import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-image-preview";
@@ -439,6 +440,10 @@ export function useChatData(
   }, [state.messages]);
 
   const pendingRunID = pendingAssistant?.runID?.trim() || "";
+  const pendingServerRunActive = useServerConversationRunActive(
+    pendingRunID,
+    conversationID ?? "",
+  );
 
   React.useEffect(() => {
     pendingAssistantContentRef.current = pendingAssistant?.content ?? "";
@@ -448,6 +453,7 @@ export function useChatData(
     if (
       !conversationID ||
       !pendingRunID ||
+      !pendingServerRunActive ||
       activeGenerationRunsRef?.current.has(pendingRunID) ||
       failedGenerationRunsRef?.current.has(pendingRunID)
     ) {
@@ -696,6 +702,7 @@ export function useChatData(
     failedGenerationRunsRef,
     generationSeqByRunRef,
     pendingRunID,
+    pendingServerRunActive,
     reload,
     tSubmit,
   ]);

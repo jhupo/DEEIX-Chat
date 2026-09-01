@@ -29,7 +29,7 @@ test("reconnects recoverable conversation stream failures without surfacing an i
   assert.equal(isConversationStreamDisconnect({ name: "ApiNetworkError" }), false);
   assert.equal(isConversationStreamDisconnect(new TypeError("render failed")), false);
   assert.equal(shouldRetryConversationStream({ name: "ApiNetworkError" }), true);
-  assert.equal(shouldRetryConversationStream({ name: "ApiError", status: 404 }), true);
+  assert.equal(shouldRetryConversationStream({ name: "ApiError", status: 404 }), false);
   assert.equal(
     shouldRetryConversationStream({
       name: "ApiError",
