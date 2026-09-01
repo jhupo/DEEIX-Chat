@@ -32,6 +32,14 @@ const maxHistoryImageBytes = int64(20 << 20)
 
 var errHistoryImageUnavailable = errors.New("history image is unavailable")
 
+type historyImage struct {
+	Path      string
+	FileName  string
+	MimeType  string
+	SHA256    string
+	SizeBytes int64
+}
+
 func NewCloudClient(baseURL string) *CloudClient {
 	bulk := newAgentHTTPClient()
 	bulk.Timeout = 2 * time.Minute
@@ -186,12 +194,86 @@ func (client *CloudClient) DownloadArtifacts(ctx context.Context, commandID stri
 	return result, nil
 }
 
-func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config, identity *DeviceIdentity, path string) (string, error) {
-	file, fileName, mimeType, sizeBytes, err := openHistoryImage(path)
+func (client *CloudClient) ResolveHistoryImages(ctx context.Context, config Config, identity *DeviceIdentity, images []historyImage) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(images) == 0 {
+		return result, nil
+	}
+	attachments := make([]map[string]any, 0, len(images))
+	seen := make(map[string]struct{}, len(images))
+	for _, image := range images {
+		key := historyImageKey(image.SHA256, image.SizeBytes)
+		if !validHistoryAttachmentKey(key) {
+			return nil, errors.New("history attachment identity is invalid")
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		attachments = append(attachments, map[string]any{"sha256": image.SHA256, "sizeBytes": image.SizeBytes})
+	}
+	body, err := json.Marshal(map[string]any{"attachments": attachments})
+	if err != nil {
+		return nil, err
+	}
+	token, err := client.ConnectionToken(ctx, config, identity)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/history-attachments/resolve", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		ErrorMsg string `json:"errorMsg"`
+		Data     struct {
+			Attachments []struct {
+				FileID    string `json:"fileId"`
+				SHA256    string `json:"sha256"`
+				SizeBytes int64  `json:"sizeBytes"`
+			} `json:"attachments"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(responseBody, &envelope) != nil {
+		return nil, fmt.Errorf("history attachment resolution response is invalid (%d)", response.StatusCode)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 || envelope.ErrorMsg != "" {
+		message := strings.TrimSpace(envelope.ErrorMsg)
+		if message == "" {
+			message = response.Status
+		}
+		return nil, fmt.Errorf("history attachment resolution failed: %s", message)
+	}
+	for _, attachment := range envelope.Data.Attachments {
+		key := historyImageKey(attachment.SHA256, attachment.SizeBytes)
+		if _, requested := seen[key]; !requested || !validPublicID(attachment.FileID, "file") {
+			return nil, errors.New("history attachment resolution response is invalid")
+		}
+		result[key] = attachment.FileID
+	}
+	return result, nil
+}
+
+func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config, identity *DeviceIdentity, image historyImage) (string, error) {
+	file, current, err := openHistoryImage(image.Path)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
+	if current.SHA256 != image.SHA256 || current.SizeBytes != image.SizeBytes {
+		return "", fmt.Errorf("%w: attachment changed while synchronizing", errHistoryImageUnavailable)
+	}
 	token, err := client.ConnectionToken(ctx, config, identity)
 	if err != nil {
 		return "", err
@@ -200,10 +282,11 @@ func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config
 	if err != nil {
 		return "", err
 	}
-	request.ContentLength = sizeBytes
+	request.ContentLength = image.SizeBytes
 	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("Content-Type", mimeType)
-	request.Header.Set("X-DEEIX-File-Name", base64.RawURLEncoding.EncodeToString([]byte(fileName)))
+	request.Header.Set("Content-Type", image.MimeType)
+	request.Header.Set("X-DEEIX-File-Name", base64.RawURLEncoding.EncodeToString([]byte(image.FileName)))
+	request.Header.Set("X-DEEIX-Content-SHA256", image.SHA256)
 	response, err := client.http.Do(request)
 	if err != nil {
 		return "", err
@@ -216,7 +299,9 @@ func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config
 	var envelope struct {
 		ErrorMsg string `json:"errorMsg"`
 		Data     struct {
-			FileID string `json:"fileId"`
+			FileID    string `json:"fileId"`
+			SHA256    string `json:"sha256"`
+			SizeBytes int64  `json:"sizeBytes"`
 		} `json:"data"`
 	}
 	if json.Unmarshal(body, &envelope) != nil {
@@ -229,7 +314,7 @@ func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config
 		}
 		return "", fmt.Errorf("history attachment upload failed: %s", message)
 	}
-	if !validPublicID(envelope.Data.FileID, "file") {
+	if !validPublicID(envelope.Data.FileID, "file") || envelope.Data.SHA256 != image.SHA256 || envelope.Data.SizeBytes != image.SizeBytes {
 		return "", errors.New("history attachment server response is invalid")
 	}
 	return envelope.Data.FileID, nil
@@ -294,35 +379,59 @@ func (client *CloudClient) UploadTerminalOutcome(ctx context.Context, config Con
 	return envelope.Data.AckBridgeSeq, nil
 }
 
-func openHistoryImage(path string) (*os.File, string, string, int64, error) {
+func openHistoryImage(path string) (*os.File, historyImage, error) {
 	path = strings.TrimSpace(path)
 	if path == "" || len(path) > 4096 || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) {
-		return nil, "", "", 0, fmt.Errorf("%w: path is invalid", errHistoryImageUnavailable)
+		return nil, historyImage{}, fmt.Errorf("%w: path is invalid", errHistoryImageUnavailable)
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() <= 0 || info.Size() > maxHistoryImageBytes {
-		return nil, "", "", 0, errHistoryImageUnavailable
+		return nil, historyImage{}, errHistoryImageUnavailable
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, "", "", 0, errHistoryImageUnavailable
+		return nil, historyImage{}, errHistoryImageUnavailable
 	}
 	header := make([]byte, 512)
 	read, readErr := io.ReadFull(file, header)
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
 		file.Close()
-		return nil, "", "", 0, errHistoryImageUnavailable
+		return nil, historyImage{}, errHistoryImageUnavailable
 	}
 	mimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(header[:read])))
 	if !strings.HasPrefix(mimeType, "image/") || mimeType == "image/svg+xml" {
 		file.Close()
-		return nil, "", "", 0, fmt.Errorf("%w: attachment is not a supported image", errHistoryImageUnavailable)
+		return nil, historyImage{}, fmt.Errorf("%w: attachment is not a supported image", errHistoryImageUnavailable)
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		file.Close()
-		return nil, "", "", 0, errHistoryImageUnavailable
+		return nil, historyImage{}, errHistoryImageUnavailable
 	}
-	return file, filepath.Base(path), mimeType, info.Size(), nil
+	hash := sha256.New()
+	if _, err = io.Copy(hash, file); err != nil {
+		file.Close()
+		return nil, historyImage{}, errHistoryImageUnavailable
+	}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, historyImage{}, errHistoryImageUnavailable
+	}
+	return file, historyImage{
+		Path: path, FileName: filepath.Base(path), MimeType: mimeType,
+		SHA256: hex.EncodeToString(hash.Sum(nil)), SizeBytes: info.Size(),
+	}, nil
+}
+
+func describeHistoryImage(path string) (historyImage, error) {
+	file, image, err := openHistoryImage(path)
+	if file != nil {
+		_ = file.Close()
+	}
+	return image, err
+}
+
+func historyImageKey(shaValue string, sizeBytes int64) string {
+	return fmt.Sprintf("%s:%d", strings.ToLower(strings.TrimSpace(shaValue)), sizeBytes)
 }
 
 func artifactFileMatches(path string, grant ArtifactGrant) (bool, error) {

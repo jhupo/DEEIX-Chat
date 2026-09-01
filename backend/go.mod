@@ -11,6 +11,7 @@ require (
 	github.com/aws/smithy-go v1.27.2
 	github.com/coregx/gxpdf v0.8.2
 	github.com/extrame/xls v0.0.1
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/go-redis/redis/extra/redisotel/v8 v8.11.5

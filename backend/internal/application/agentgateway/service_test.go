@@ -253,3 +253,18 @@ func TestSessionSnapshotPayloadValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestThreadHistoryTerminalTargetsItsConversation(t *testing.T) {
+	threadID := uint(3)
+	change := terminalChangeNotification(
+		&ConnectionIdentity{UserID: 7, DeviceID: "agd_0123456789abcdef0123456789abcdef"},
+		&domainagent.Command{Kind: "thread.read", ThreadID: &threadID, ConversationPublicID: "conversation_1"},
+	)
+	if change == nil || change.UserID != 7 || change.DeviceID != "agd_0123456789abcdef0123456789abcdef" ||
+		change.Kind != "thread/history/updated" || len(change.ConversationPublicIDs) != 1 || change.ConversationPublicIDs[0] != "conversation_1" {
+		t.Fatalf("history change notification = %#v", change)
+	}
+	if terminalChangeNotification(&ConnectionIdentity{UserID: 7}, &domainagent.Command{Kind: "turn.start"}) != nil {
+		t.Fatal("non-history terminal produced a conversation invalidation")
+	}
+}

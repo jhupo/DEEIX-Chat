@@ -497,17 +497,21 @@ func (r *Repo) ListCommandsForDelivery(ctx context.Context, deviceID uint, after
 func (r *Repo) GetCommand(ctx context.Context, userID uint, publicID string) (*domainagent.Command, error) {
 	type commandRow struct {
 		model.AgentCommand
-		DeviceOnline bool `gorm:"column:device_online"`
+		DeviceOnline         bool   `gorm:"column:device_online"`
+		ConversationPublicID string `gorm:"column:conversation_public_id"`
 	}
 	var row commandRow
 	now := time.Now().UTC()
 	if err := r.db.WithContext(ctx).Table("agent_commands AS commands").
-		Select("commands.*, EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = commands.device_id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?) AS device_online", domainagent.RuntimeStatusReady, now, now).
+		Select("commands.*, COALESCE(conversations.public_id, '') AS conversation_public_id, EXISTS (SELECT 1 FROM agent_runtime_profiles profiles WHERE profiles.device_id = commands.device_id AND profiles.status = ? AND profiles.lease_expires_at > ? AND profiles.presence_expires_at > ?) AS device_online", domainagent.RuntimeStatusReady, now, now).
+		Joins("LEFT JOIN agent_threads AS threads ON threads.id = commands.thread_id").
+		Joins("LEFT JOIN chat_conversations AS conversations ON conversations.id = threads.conversation_id").
 		Where("commands.user_id = ? AND commands.public_id = ?", userID, publicID).First(&row).Error; err != nil {
 		return nil, errFor(err)
 	}
 	result := toDomainCommand(row.AgentCommand)
 	result.DeviceOnline = row.DeviceOnline
+	result.ConversationPublicID = row.ConversationPublicID
 	return result, nil
 }
 

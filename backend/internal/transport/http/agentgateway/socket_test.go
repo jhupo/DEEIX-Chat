@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -329,12 +330,42 @@ func TestBridgeHubWakesEveryDeviceForTheUser(t *testing.T) {
 		if event.Type != "change" {
 			t.Fatalf("browser event = %#v", event)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("browser subscriber did not receive the user wake")
 	}
 	hub.disconnect("device-a")
 	if hub.connected("device-a") {
 		t.Fatal("disconnected device remained registered in the bridge hub")
+	}
+}
+
+func TestBridgeHubCoalescesBrowserBurstsWithoutLosingConversationIDs(t *testing.T) {
+	hub := newBridgeHub()
+	browser, cleanup := hub.subscribeUser(7)
+	defer cleanup()
+
+	const total = 200
+	for index := range total {
+		hub.notify(appagent.ChangeNotification{
+			UserID: 7, DeviceID: "device-a", Kind: "thread/history/updated",
+			ConversationPublicIDs: []string{fmt.Sprintf("conversation_%03d", index)},
+		})
+	}
+
+	received := make(map[string]struct{}, total)
+	deadline := time.After(2 * time.Second)
+	for len(received) < total {
+		select {
+		case event := <-browser:
+			if event.Kind != "thread/history/updated" || event.DeviceID != "device-a" {
+				t.Fatalf("unexpected browser event: %#v", event)
+			}
+			for _, conversationID := range event.ConversationIDs {
+				received[conversationID] = struct{}{}
+			}
+		case <-deadline:
+			t.Fatalf("browser burst delivered %d/%d conversation IDs", len(received), total)
+		}
 	}
 }
 

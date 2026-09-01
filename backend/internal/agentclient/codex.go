@@ -45,6 +45,7 @@ const maxExecutionTextBytes = 1 << 20
 const maxCommandExecutionOutputBytes = 256 << 10
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
+const codexSessionPageSize = 1000
 const codexHistoryPageSize = 8
 const maxCodexHistoryTurns = 4096
 
@@ -356,6 +357,7 @@ func (adapter *CodexAdapter) verifyProjectSessionProtocol(ctx context.Context) e
 	}
 	_, err := adapter.requestMap(ctx, "thread/list", map[string]any{
 		"limit": 1, "archived": false, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
+		"useStateDbOnly": true,
 	})
 	if err == nil {
 		return nil
@@ -1080,25 +1082,21 @@ func (adapter *CodexAdapter) listApps(ctx context.Context) (any, error) {
 }
 
 func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string]any) (any, error) {
-	const maxSessionsPerStatus = 500
-	items := make([]any, 0, 200)
+	items := make([]any, 0, codexSessionPageSize)
 	for _, archived := range []bool{false, true} {
 		status := "active"
 		if archived {
 			status = "archived"
 		}
-		cursor := ""
+		request := make(map[string]any, len(params)+3)
+		for key, value := range params {
+			request[key] = value
+		}
+		request["archived"] = archived
+		request["limit"] = codexSessionPageSize
+		request["useStateDbOnly"] = true
 		seenCursors := make(map[string]struct{})
-		count := 0
-		for count < maxSessionsPerStatus {
-			request := make(map[string]any, len(params)+1)
-			for key, value := range params {
-				request[key] = value
-			}
-			request["archived"] = archived
-			if cursor != "" {
-				request["cursor"] = cursor
-			}
+		for {
 			page, err := adapter.requestMap(ctx, "thread/list", request)
 			if err != nil {
 				return nil, err
@@ -1108,9 +1106,6 @@ func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string
 				return nil, errors.New("Codex session catalog is invalid")
 			}
 			for _, raw := range pageItems {
-				if count == maxSessionsPerStatus {
-					break
-				}
 				thread, ok := raw.(map[string]any)
 				if !ok {
 					continue
@@ -1124,18 +1119,21 @@ func (adapter *CodexAdapter) listSessions(ctx context.Context, params map[string
 					}
 				}
 				items = append(items, thread)
-				count++
 			}
-			nextCursor, _ := page["nextCursor"].(string)
-			nextCursor = strings.TrimSpace(nextCursor)
-			if nextCursor == "" || count == maxSessionsPerStatus {
+			rawCursor, hasCursor := page["nextCursor"]
+			if !hasCursor || rawCursor == nil {
 				break
 			}
+			nextCursor, ok := rawCursor.(string)
+			nextCursor = strings.TrimSpace(nextCursor)
+			if !ok || nextCursor == "" || len(pageItems) == 0 {
+				return nil, errors.New("Codex session catalog cursor is invalid")
+			}
 			if _, duplicate := seenCursors[nextCursor]; duplicate {
-				return nil, errors.New("Codex session catalog cursor repeated")
+				return nil, errors.New("Codex session catalog cursor did not advance")
 			}
 			seenCursors[nextCursor] = struct{}{}
-			cursor = nextCursor
+			request["cursor"] = nextCursor
 		}
 	}
 	return map[string]any{"data": items}, nil
@@ -1171,7 +1169,7 @@ func (adapter *CodexAdapter) projectSessions(data any, workspace Workspace) (any
 
 func (adapter *CodexAdapter) SessionSnapshots(ctx context.Context) ([]workspaceSessionSnapshot, error) {
 	data, err := adapter.listSessions(ctx, map[string]any{
-		"limit": 100, "sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
+		"sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
 	})
 	if err != nil {
 		return nil, err
@@ -1196,19 +1194,39 @@ func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Work
 	})
 	root, _ := data.(map[string]any)
 	items, _ := root["data"].([]any)
-	sessionsByWorkspace := make([][]map[string]any, len(workspaces))
+	type assignedSession struct {
+		thread         map[string]any
+		workspaceIndex int
+	}
+	assigned := make([]assignedSession, 0, len(items))
+	providerIDs := make([]string, 0, len(items))
 	for _, raw := range items {
 		thread, _ := raw.(map[string]any)
 		workspaceIndex := sessionWorkspaceIndex(thread, workspaces)
 		if workspaceIndex < 0 {
 			continue
 		}
-		session, err := adapter.projectSessionSummary(thread)
+		id, _ := thread["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		assigned = append(assigned, assignedSession{thread: thread, workspaceIndex: workspaceIndex})
+		providerIDs = append(providerIDs, id)
+	}
+	sourceRefs, err := adapter.state.PublishSources(adapter.profileID, "thread", providerIDs)
+	if err != nil {
+		return nil, err
+	}
+	sessionsByWorkspace := make([][]map[string]any, len(workspaces))
+	for _, item := range assigned {
+		id := strings.TrimSpace(item.thread["id"].(string))
+		session, err := adapter.projectSessionSummaryWithRef(item.thread, sourceRefs[id])
 		if err != nil {
 			return nil, err
 		}
 		if session != nil {
-			sessionsByWorkspace[workspaceIndex] = append(sessionsByWorkspace[workspaceIndex], session)
+			sessionsByWorkspace[item.workspaceIndex] = append(sessionsByWorkspace[item.workspaceIndex], session)
 		}
 	}
 	snapshots := make([]workspaceSessionSnapshot, 0, len(workspaces))
@@ -1243,6 +1261,18 @@ func (adapter *CodexAdapter) projectSessionSummary(thread map[string]any) (map[s
 	sourceRef, err := adapter.state.PublishSource(adapter.profileID, "thread", id)
 	if err != nil {
 		return nil, err
+	}
+	return adapter.projectSessionSummaryWithRef(thread, sourceRef)
+}
+
+func (adapter *CodexAdapter) projectSessionSummaryWithRef(thread map[string]any, sourceRef string) (map[string]any, error) {
+	id, _ := thread["id"].(string)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, nil
+	}
+	if strings.TrimSpace(sourceRef) == "" {
+		return nil, errors.New("Codex session source reference is invalid")
 	}
 	status := sessionText(thread["status"], 32)
 	if status != "active" && status != "archived" {

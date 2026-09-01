@@ -74,7 +74,7 @@ type bridgeArtifactGrant struct {
 type bridgeHub struct {
 	mu          sync.Mutex
 	connections map[string]*bridgeConnection
-	subscribers map[uint]map[chan browserEvent]struct{}
+	subscribers map[uint]map[*browserSubscriber]struct{}
 }
 
 type browserEvent struct {
@@ -82,6 +82,15 @@ type browserEvent struct {
 	DeviceID        string   `json:"deviceID,omitempty"`
 	ConversationIDs []string `json:"conversationIDs,omitempty"`
 	Kind            string   `json:"kind,omitempty"`
+}
+
+type browserSubscriber struct {
+	events  chan browserEvent
+	wake    chan struct{}
+	done    chan struct{}
+	mu      sync.Mutex
+	pending map[string]browserEvent
+	order   []string
 }
 
 type bridgeConnection struct {
@@ -93,7 +102,70 @@ type bridgeConnection struct {
 func newBridgeHub() *bridgeHub {
 	return &bridgeHub{
 		connections: make(map[string]*bridgeConnection),
-		subscribers: make(map[uint]map[chan browserEvent]struct{}),
+		subscribers: make(map[uint]map[*browserSubscriber]struct{}),
+	}
+}
+
+func newBrowserSubscriber() *browserSubscriber {
+	subscriber := &browserSubscriber{
+		events: make(chan browserEvent, 1), wake: make(chan struct{}, 1), done: make(chan struct{}),
+		pending: make(map[string]browserEvent),
+	}
+	go subscriber.run()
+	return subscriber
+}
+
+func (s *browserSubscriber) publish(event browserEvent) {
+	key := event.DeviceID + "\x00" + event.Kind
+	s.mu.Lock()
+	if current, exists := s.pending[key]; exists {
+		seen := make(map[string]struct{}, len(current.ConversationIDs)+len(event.ConversationIDs))
+		for _, conversationID := range current.ConversationIDs {
+			seen[conversationID] = struct{}{}
+		}
+		for _, conversationID := range event.ConversationIDs {
+			if _, exists := seen[conversationID]; !exists {
+				current.ConversationIDs = append(current.ConversationIDs, conversationID)
+				seen[conversationID] = struct{}{}
+			}
+		}
+		s.pending[key] = current
+	} else {
+		event.ConversationIDs = append([]string(nil), event.ConversationIDs...)
+		s.pending[key] = event
+		s.order = append(s.order, key)
+	}
+	s.mu.Unlock()
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *browserSubscriber) run() {
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-s.wake:
+		}
+		for {
+			s.mu.Lock()
+			if len(s.order) == 0 {
+				s.mu.Unlock()
+				break
+			}
+			key := s.order[0]
+			s.order = s.order[1:]
+			event := s.pending[key]
+			delete(s.pending, key)
+			s.mu.Unlock()
+			select {
+			case <-s.done:
+				return
+			case s.events <- event:
+			}
+		}
 	}
 }
 
@@ -134,10 +206,7 @@ func (h *bridgeHub) notify(change appagent.ChangeNotification) {
 		Kind:            change.Kind,
 	}
 	for subscriber := range h.subscribers[change.UserID] {
-		select {
-		case subscriber <- event:
-		default:
-		}
+		subscriber.publish(event)
 	}
 }
 
@@ -159,20 +228,21 @@ func (h *bridgeHub) disconnect(deviceID string) {
 }
 
 func (h *bridgeHub) subscribeUser(userID uint) (<-chan browserEvent, func()) {
-	subscriber := make(chan browserEvent, 1)
+	subscriber := newBrowserSubscriber()
 	h.mu.Lock()
 	if h.subscribers[userID] == nil {
-		h.subscribers[userID] = make(map[chan browserEvent]struct{})
+		h.subscribers[userID] = make(map[*browserSubscriber]struct{})
 	}
 	h.subscribers[userID][subscriber] = struct{}{}
 	h.mu.Unlock()
-	return subscriber, func() {
+	return subscriber.events, func() {
 		h.mu.Lock()
 		delete(h.subscribers[userID], subscriber)
 		if len(h.subscribers[userID]) == 0 {
 			delete(h.subscribers, userID)
 		}
 		h.mu.Unlock()
+		close(subscriber.done)
 	}
 }
 

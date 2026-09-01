@@ -19,14 +19,17 @@ import (
 )
 
 type durableState struct {
-	Version       int                      `json:"version"`
-	AckServerSeq  uint64                   `json:"ackServerSeq"`
-	AckBridgeSeq  uint64                   `json:"ackBridgeSeq"`
-	NextBridgeSeq uint64                   `json:"nextBridgeSeq"`
-	Commands      map[string]commandRecord `json:"commands"`
-	Outgoing      []outgoingFrame          `json:"outgoing"`
-	Sources       []sourceMapping          `json:"sources"`
+	Version            int                      `json:"version"`
+	AckServerSeq       uint64                   `json:"ackServerSeq"`
+	AckBridgeSeq       uint64                   `json:"ackBridgeSeq"`
+	NextBridgeSeq      uint64                   `json:"nextBridgeSeq"`
+	Commands           map[string]commandRecord `json:"commands"`
+	Outgoing           []outgoingFrame          `json:"outgoing"`
+	Sources            []sourceMapping          `json:"sources"`
+	HistoryAttachments map[string]string        `json:"historyAttachments,omitempty"`
 }
+
+const maxHistoryAttachmentMappings = 4096
 
 type commandRecord struct {
 	ServerSeq uint64          `json:"serverSeq"`
@@ -61,7 +64,9 @@ type StateStore struct {
 }
 
 func OpenStateStore(path string) (*StateStore, error) {
-	store := &StateStore{path: path, state: durableState{Version: 1, Commands: make(map[string]commandRecord)}}
+	store := &StateStore{path: path, state: durableState{
+		Version: 1, Commands: make(map[string]commandRecord), HistoryAttachments: make(map[string]string),
+	}}
 	data, err := readFileAtomic(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if err = store.persistLocked(); err != nil {
@@ -74,6 +79,9 @@ func OpenStateStore(path string) (*StateStore, error) {
 	}
 	if err = json.Unmarshal(data, &store.state); err != nil {
 		return nil, fmt.Errorf("read agent state: %w", err)
+	}
+	if store.state.HistoryAttachments == nil {
+		store.state.HistoryAttachments = make(map[string]string)
 	}
 	if err = store.validateLocked(); err != nil {
 		return nil, err
@@ -395,28 +403,61 @@ func (store *StateStore) ResolveSource(profileID, kind, sourceRef string) (strin
 }
 
 func (store *StateStore) PublishSource(profileID, kind, providerID string) (string, error) {
+	mappings, err := store.PublishSources(profileID, kind, []string{providerID})
+	if err != nil {
+		return "", err
+	}
+	return mappings[providerID], nil
+}
+
+func (store *StateStore) PublishSources(profileID, kind string, providerIDs []string) (map[string]string, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if !validRef(profileID, 64) || !validSourceKind(kind) || providerID == "" || len(providerID) > 4096 {
-		return "", errors.New("source mapping is invalid")
+	if !validRef(profileID, 64) || !validSourceKind(kind) {
+		return nil, errors.New("source mapping is invalid")
 	}
+	existing := make(map[string]string)
 	for _, mapping := range store.state.Sources {
-		if mapping.ProfileID == profileID && mapping.Kind == kind && mapping.ProviderID == providerID {
-			return mapping.SourceRef, nil
+		if mapping.ProfileID == profileID && mapping.Kind == kind {
+			existing[mapping.ProviderID] = mapping.SourceRef
 		}
 	}
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return "", err
+	result := make(map[string]string, len(providerIDs))
+	missing := make([]string, 0, len(providerIDs))
+	for _, providerID := range providerIDs {
+		if providerID == "" || len(providerID) > 4096 {
+			return nil, errors.New("source mapping is invalid")
+		}
+		if sourceRef, exists := existing[providerID]; exists {
+			result[providerID] = sourceRef
+			continue
+		}
+		if _, duplicate := result[providerID]; duplicate {
+			continue
+		}
+		result[providerID] = ""
+		missing = append(missing, providerID)
 	}
-	sourceRef := kind + "_" + hex.EncodeToString(random)
+	if len(missing) == 0 {
+		return result, nil
+	}
+	newMappings := make([]sourceMapping, 0, len(missing))
+	for _, providerID := range missing {
+		random := make([]byte, 16)
+		if _, err := rand.Read(random); err != nil {
+			return nil, err
+		}
+		sourceRef := kind + "_" + hex.EncodeToString(random)
+		result[providerID] = sourceRef
+		newMappings = append(newMappings, sourceMapping{ProfileID: profileID, Kind: kind, SourceRef: sourceRef, ProviderID: providerID})
+	}
 	previous := cloneDurableState(store.state)
-	store.state.Sources = append(store.state.Sources, sourceMapping{ProfileID: profileID, Kind: kind, SourceRef: sourceRef, ProviderID: providerID})
+	store.state.Sources = append(store.state.Sources, newMappings...)
 	if err := store.persistLocked(); err != nil {
 		store.state = previous
-		return "", err
+		return nil, err
 	}
-	return sourceRef, nil
+	return result, nil
 }
 
 func (store *StateStore) PublishedSource(profileID, kind, providerID string) (string, bool) {
@@ -428,6 +469,49 @@ func (store *StateStore) PublishedSource(profileID, kind, providerID string) (st
 		}
 	}
 	return "", false
+}
+
+func (store *StateStore) HistoryAttachment(contentKey string) (string, bool) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	fileID, ok := store.state.HistoryAttachments[contentKey]
+	return fileID, ok
+}
+
+func (store *StateStore) RememberHistoryAttachments(items map[string]string) error {
+	if len(items) == 0 {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	keys := make([]string, 0, len(items))
+	for key, fileID := range items {
+		if !validHistoryAttachmentKey(key) || !validPublicID(fileID, "file") {
+			return errors.New("history attachment mapping is invalid")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	previous := cloneDurableState(store.state)
+	changed := false
+	for _, key := range keys {
+		if _, exists := store.state.HistoryAttachments[key]; !exists && len(store.state.HistoryAttachments) >= maxHistoryAttachmentMappings {
+			break
+		}
+		if store.state.HistoryAttachments[key] == items[key] {
+			continue
+		}
+		store.state.HistoryAttachments[key] = items[key]
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if err := store.persistLocked(); err != nil {
+		store.state = previous
+		return err
+	}
+	return nil
 }
 
 func (store *StateStore) validateLocked() error {
@@ -470,7 +554,30 @@ func (store *StateStore) validateLocked() error {
 			return errors.New("agent source state is invalid")
 		}
 	}
+	if len(store.state.HistoryAttachments) > maxHistoryAttachmentMappings {
+		return errors.New("agent history attachment state is invalid")
+	}
+	for key, fileID := range store.state.HistoryAttachments {
+		if !validHistoryAttachmentKey(key) || !validPublicID(fileID, "file") {
+			return errors.New("agent history attachment state is invalid")
+		}
+	}
 	return nil
+}
+
+func validHistoryAttachmentKey(value string) bool {
+	delimiter := strings.LastIndexByte(value, ':')
+	if delimiter != sha256.Size*2 || delimiter == len(value)-1 {
+		return false
+	}
+	if _, err := hex.DecodeString(value[:delimiter]); err != nil {
+		return false
+	}
+	var sizeBytes int64
+	if _, err := fmt.Sscanf(value[delimiter+1:], "%d", &sizeBytes); err != nil || sizeBytes <= 0 || fmt.Sprintf("%d", sizeBytes) != value[delimiter+1:] {
+		return false
+	}
+	return true
 }
 
 func (store *StateStore) persistLocked() error {
@@ -527,5 +634,9 @@ func cloneDurableState(value durableState) durableState {
 		result.Outgoing[index] = cloneOutgoingFrame(frame)
 	}
 	result.Sources = append([]sourceMapping(nil), value.Sources...)
+	result.HistoryAttachments = make(map[string]string, len(value.HistoryAttachments))
+	for key, fileID := range value.HistoryAttachments {
+		result.HistoryAttachments[key] = fileID
+	}
 	return result
 }

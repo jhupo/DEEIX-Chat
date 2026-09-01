@@ -64,6 +64,7 @@ type ArtifactContentStore interface {
 }
 
 type HistoryAttachmentStore interface {
+	ResolveAgentHistoryAttachments(context.Context, uint, []HistoryAttachmentReference) (map[string]HistoryAttachment, error)
 	UploadAgentHistoryAttachment(context.Context, uint, HistoryAttachmentUpload) (*HistoryAttachment, error)
 }
 
@@ -85,11 +86,19 @@ type ArtifactContent struct {
 type HistoryAttachmentUpload struct {
 	FileName, MimeType string
 	SizeBytes          int64
+	SHA256             string
 	Reader             io.Reader
 }
 
+type HistoryAttachmentReference struct {
+	SHA256    string
+	SizeBytes int64
+}
+
 type HistoryAttachment struct {
-	FileID string
+	FileID    string
+	SHA256    string
+	SizeBytes int64
 }
 
 type Service struct {
@@ -397,9 +406,10 @@ func (s *Service) OpenArtifact(ctx context.Context, artifactID, commandID, expir
 func (s *Service) UploadHistoryAttachment(ctx context.Context, token string, input HistoryAttachmentUpload) (*HistoryAttachment, error) {
 	input.FileName = strings.TrimSpace(input.FileName)
 	input.MimeType = strings.ToLower(strings.TrimSpace(input.MimeType))
+	input.SHA256 = strings.ToLower(strings.TrimSpace(input.SHA256))
 	if s.history == nil || input.Reader == nil || input.FileName == "" || !utf8.ValidString(input.FileName) || utf8.RuneCountInString(input.FileName) > 255 ||
 		strings.ContainsRune(input.FileName, 0) || !strings.HasPrefix(input.MimeType, "image/") || input.MimeType == "image/svg+xml" ||
-		input.SizeBytes <= 0 || input.SizeBytes > 20<<20 {
+		input.SizeBytes <= 0 || input.SizeBytes > 20<<20 || !validSHA256(input.SHA256) {
 		return nil, ErrInvalidInput
 	}
 	identity, err := s.AuthenticateConnection(ctx, token)
@@ -410,10 +420,56 @@ func (s *Service) UploadHistoryAttachment(ctx context.Context, token string, inp
 	if err != nil {
 		return nil, err
 	}
-	if item == nil || !validPublicID(item.FileID, "file") {
+	if item == nil || !validPublicID(item.FileID, "file") || item.SHA256 != input.SHA256 || item.SizeBytes != input.SizeBytes {
 		return nil, ErrStateConflict
 	}
 	return item, nil
+}
+
+func (s *Service) ResolveHistoryAttachments(ctx context.Context, token string, references []HistoryAttachmentReference) (map[string]HistoryAttachment, error) {
+	if s.history == nil || len(references) > 256 {
+		return nil, ErrInvalidInput
+	}
+	normalized := make([]HistoryAttachmentReference, 0, len(references))
+	seen := make(map[string]struct{}, len(references))
+	for _, reference := range references {
+		reference.SHA256 = strings.ToLower(strings.TrimSpace(reference.SHA256))
+		if !validSHA256(reference.SHA256) || reference.SizeBytes <= 0 || reference.SizeBytes > 20<<20 {
+			return nil, ErrInvalidInput
+		}
+		key := historyAttachmentKey(reference.SHA256, reference.SizeBytes)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, reference)
+	}
+	identity, err := s.AuthenticateConnection(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.history.ResolveAgentHistoryAttachments(ctx, identity.UserID, normalized)
+	if err != nil {
+		return nil, err
+	}
+	for key, item := range items {
+		if key != historyAttachmentKey(item.SHA256, item.SizeBytes) || !validPublicID(item.FileID, "file") || !validSHA256(item.SHA256) || item.SizeBytes <= 0 {
+			return nil, ErrStateConflict
+		}
+	}
+	return items, nil
+}
+
+func historyAttachmentKey(shaValue string, sizeBytes int64) string {
+	return fmt.Sprintf("%s:%d", shaValue, sizeBytes)
+}
+
+func validSHA256(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func (s *Service) BeginRuntimeProof(ctx context.Context, identity *ConnectionIdentity, profilePublicID string) (*RuntimeChallengeResult, error) {
@@ -1364,8 +1420,23 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 	if err := s.flushPendingConversationEvents(ctx, identity.InternalDeviceID); err != nil {
 		return acknowledged, fmt.Errorf("%w: %v", ErrProjectionDeferred, err)
 	}
-	s.notifyUser(identity.UserID)
+	command, _ := s.repo.GetCommand(ctx, identity.UserID, commandID)
+	if change := terminalChangeNotification(identity, command); change != nil && s.notify != nil {
+		s.notify(*change)
+	} else {
+		s.notifyUser(identity.UserID)
+	}
 	return acknowledged, nil
+}
+
+func terminalChangeNotification(identity *ConnectionIdentity, command *domainagent.Command) *ChangeNotification {
+	if identity == nil || command == nil || command.Kind != "thread.read" || strings.TrimSpace(command.ConversationPublicID) == "" {
+		return nil
+	}
+	return &ChangeNotification{
+		UserID: identity.UserID, DeviceID: identity.DeviceID,
+		ConversationPublicIDs: []string{command.ConversationPublicID}, Kind: "thread/history/updated",
+	}
 }
 
 func (s *Service) ApplyTerminalUpload(ctx context.Context, token string, bridgeSeq, serverSeq uint64, commandID string, outcome json.RawMessage) (uint64, error) {

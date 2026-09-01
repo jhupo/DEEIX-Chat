@@ -33,6 +33,7 @@ func (m *Module) RegisterBridgeRoutes(group *gin.RouterGroup) {
 	group.POST("/agent/bridge/tokens", m.Handler.IssueConnection)
 	group.GET("/agent/bridge/connect", m.Handler.ConnectBridge)
 	group.GET("/agent/bridge/artifacts/:artifact_id/content", m.Handler.GetArtifactContent)
+	group.POST("/agent/bridge/history-attachments/resolve", m.Handler.ResolveHistoryAttachments)
 	group.POST("/agent/bridge/history-attachments", m.Handler.UploadHistoryAttachment)
 	group.POST("/agent/bridge/terminal-outcomes", m.Handler.UploadTerminalOutcome)
 }

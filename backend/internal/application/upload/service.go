@@ -100,6 +100,12 @@ type UploadFileResult struct {
 	Reused bool
 }
 
+// ExistingFileReference identifies content that may already be stored for a user.
+type ExistingFileReference struct {
+	SHA256    string
+	SizeBytes int64
+}
+
 // DeleteFileResult 定义文件删除结果。
 type DeleteFileResult struct {
 	Deleted bool
@@ -379,6 +385,37 @@ func (s *Service) UploadFile(ctx context.Context, input UploadFileInput) (*Uploa
 		Quota:  *quota,
 		Reused: false,
 	}, nil
+}
+
+// ResolveExistingFiles returns active files matching the requested content identities.
+// The lookup is intentionally metadata-only: callers use it to avoid uploading bytes
+// that the server has already accepted and indexed.
+func (s *Service) ResolveExistingFiles(ctx context.Context, userID uint, references []ExistingFileReference) (map[string]domainconversation.FileObject, error) {
+	if userID == 0 || len(references) > 256 {
+		return nil, s.errInvalidFileReference()
+	}
+	result := make(map[string]domainconversation.FileObject, len(references))
+	for _, reference := range references {
+		shaValue := strings.ToLower(strings.TrimSpace(reference.SHA256))
+		if len(shaValue) != sha256.Size*2 || reference.SizeBytes <= 0 {
+			return nil, s.errInvalidFileReference()
+		}
+		if _, err := hex.DecodeString(shaValue); err != nil {
+			return nil, s.errInvalidFileReference()
+		}
+		key := fmt.Sprintf("%s:%d", shaValue, reference.SizeBytes)
+		if _, exists := result[key]; exists {
+			continue
+		}
+		file, err := s.repo.GetLatestActiveFileObjectBySHA(ctx, userID, shaValue, reference.SizeBytes)
+		if err != nil {
+			return nil, err
+		}
+		if file != nil {
+			result[key] = *file
+		}
+	}
+	return result, nil
 }
 
 // acquireUploadGate 获取同一内容的上传互斥许可，保证相同内容的并发上传串行执行；

@@ -57,6 +57,11 @@ func (s *Service) UploadFile(ctx context.Context, input appupload.UploadFileInpu
 	return s.uploadSvc.UploadFile(ctx, input)
 }
 
+// ResolveExistingFiles resolves user-owned files by their content identity.
+func (s *Service) ResolveExistingFiles(ctx context.Context, userID uint, references []appupload.ExistingFileReference) (map[string]model.FileObject, error) {
+	return s.uploadSvc.ResolveExistingFiles(ctx, userID, references)
+}
+
 // DeleteFile 删除文件并回收配额。
 func (s *Service) DeleteFile(ctx context.Context, userID uint, fileID string) (*appupload.DeleteFileResult, error) {
 	return s.uploadSvc.DeleteFile(ctx, userID, fileID)

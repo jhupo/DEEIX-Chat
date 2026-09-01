@@ -366,7 +366,30 @@ func (s agentHistoryAttachmentStore) UploadAgentHistoryAttachment(ctx context.Co
 	if err != nil {
 		return nil, errors.Join(appagentgateway.ErrStateConflict, err)
 	}
-	return &appagentgateway.HistoryAttachment{FileID: result.File.FileID}, nil
+	if !strings.EqualFold(result.File.SHA256, input.SHA256) || result.File.SizeBytes != input.SizeBytes {
+		return nil, appagentgateway.ErrStateConflict
+	}
+	return &appagentgateway.HistoryAttachment{
+		FileID: result.File.FileID, SHA256: strings.ToLower(result.File.SHA256), SizeBytes: result.File.SizeBytes,
+	}, nil
+}
+
+func (s agentHistoryAttachmentStore) ResolveAgentHistoryAttachments(ctx context.Context, userID uint, references []appagentgateway.HistoryAttachmentReference) (map[string]appagentgateway.HistoryAttachment, error) {
+	inputs := make([]appupload.ExistingFileReference, 0, len(references))
+	for _, reference := range references {
+		inputs = append(inputs, appupload.ExistingFileReference{SHA256: reference.SHA256, SizeBytes: reference.SizeBytes})
+	}
+	files, err := s.conversationService.ResolveExistingFiles(ctx, userID, inputs)
+	if err != nil {
+		return nil, errors.Join(appagentgateway.ErrStateConflict, err)
+	}
+	result := make(map[string]appagentgateway.HistoryAttachment, len(files))
+	for key, file := range files {
+		result[key] = appagentgateway.HistoryAttachment{
+			FileID: file.FileID, SHA256: strings.ToLower(file.SHA256), SizeBytes: file.SizeBytes,
+		}
+	}
+	return result, nil
 }
 
 func (o avatarContentOpener) OpenAvatarFileContent(ctx context.Context, userID uint, fileID string) (*user.AvatarFileContent, error) {

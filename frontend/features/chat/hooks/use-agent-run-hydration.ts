@@ -17,6 +17,7 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 const EXECUTION_EVENT_RETRY_MAX_MS = 15_000;
 const INTERACTION_RETRY_MAX_MS = 15_000;
 const SESSION_SNAPSHOT_EVENT_KIND = "workspace/sessions/updated";
+const THREAD_HISTORY_EVENT_KIND = "thread/history/updated";
 
 type AgentRunHydrationScope = {
   conversationID: string | null;
@@ -203,7 +204,7 @@ export function useAgentRunHydration({
     requestLatestSyncRef.current?.();
     if (
       agentEvent.type === "change" &&
-      agentEvent.kind === SESSION_SNAPSHOT_EVENT_KIND &&
+      (agentEvent.kind === SESSION_SNAPSHOT_EVENT_KIND || agentEvent.kind === THREAD_HISTORY_EVENT_KIND) &&
       agentEvent.deviceID === deviceID.trim() &&
       agentEvent.conversationIDs.includes(normalizedConversationID)
     ) {

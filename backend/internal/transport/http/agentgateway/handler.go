@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -130,6 +131,21 @@ type registerWorkspaceRequest struct {
 	ProfileID string `json:"profileId"`
 	Path      string `json:"path"`
 	Create    bool   `json:"create"`
+}
+
+type historyAttachmentReferenceRequest struct {
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"sizeBytes"`
+}
+
+type resolveHistoryAttachmentsRequest struct {
+	Attachments []historyAttachmentReferenceRequest `json:"attachments"`
+}
+
+type historyAttachmentResponse struct {
+	FileID    string `json:"fileId"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"sizeBytes"`
 }
 
 type renameWorkspaceRequest struct {
@@ -536,13 +552,48 @@ func (h *Handler) UploadHistoryAttachment(c *gin.Context) {
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 20<<20)
 	item, err := h.service.UploadHistoryAttachment(c.Request.Context(), token, appagent.HistoryAttachmentUpload{
-		FileName: string(fileName), MimeType: c.GetHeader("Content-Type"), SizeBytes: c.Request.ContentLength, Reader: c.Request.Body,
+		FileName: string(fileName), MimeType: c.GetHeader("Content-Type"), SizeBytes: c.Request.ContentLength,
+		SHA256: c.GetHeader("X-DEEIX-Content-SHA256"), Reader: c.Request.Body,
 	})
 	if err != nil {
 		writeError(c, err, "upload history attachment failed")
 		return
 	}
-	response.Success(c, gin.H{"fileId": item.FileID})
+	response.Success(c, historyAttachmentResponse{FileID: item.FileID, SHA256: item.SHA256, SizeBytes: item.SizeBytes})
+}
+
+func (h *Handler) ResolveHistoryAttachments(c *gin.Context) {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	token := strings.TrimPrefix(authorization, "Bearer ")
+	if token == authorization {
+		writeError(c, appagent.ErrCredential, "resolve history attachments failed")
+		return
+	}
+	var request resolveHistoryAttachmentsRequest
+	if err := bindStrictJSON(c, &request, agentJSONBodyLimit); err != nil {
+		response.InvalidRequestBody(c, err)
+		return
+	}
+	references := make([]appagent.HistoryAttachmentReference, 0, len(request.Attachments))
+	for _, item := range request.Attachments {
+		references = append(references, appagent.HistoryAttachmentReference{SHA256: item.SHA256, SizeBytes: item.SizeBytes})
+	}
+	items, err := h.service.ResolveHistoryAttachments(c.Request.Context(), token, references)
+	if err != nil {
+		writeError(c, err, "resolve history attachments failed")
+		return
+	}
+	result := make([]historyAttachmentResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, historyAttachmentResponse{FileID: item.FileID, SHA256: item.SHA256, SizeBytes: item.SizeBytes})
+	}
+	sort.Slice(result, func(left, right int) bool {
+		if result[left].SHA256 == result[right].SHA256 {
+			return result[left].SizeBytes < result[right].SizeBytes
+		}
+		return result[left].SHA256 < result[right].SHA256
+	})
+	response.Success(c, gin.H{"attachments": result})
 }
 
 func (h *Handler) UploadTerminalOutcome(c *gin.Context) {

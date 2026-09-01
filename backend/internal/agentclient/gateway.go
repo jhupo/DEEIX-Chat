@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
+	"github.com/fsnotify/fsnotify"
 	"golang.org/x/net/websocket"
 )
 
@@ -40,6 +41,7 @@ const (
 	gatewayOutgoingBatchSize      = 32
 	gatewayInlineTerminalBytes    = 512 << 10
 	historyImageUploadConcurrency = 4
+	historyImageSyncBudget        = 30 * time.Second
 )
 
 type Gateway struct {
@@ -145,6 +147,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	defer func() { _ = gateway.writeStatus("stopped", "") }()
 	go gateway.commandWorker(runtimeContext)
 	go gateway.refreshWorkspaceLoop(runtimeContext)
+	go gateway.watchSessionStateLoop(runtimeContext)
 	go gateway.sessionSnapshotLoop(runtimeContext)
 	if err = gateway.recoverCommands(); err != nil {
 		return err
@@ -274,7 +277,7 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 		}
 	}
 	syncSnapshots()
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -301,6 +304,50 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 			syncSnapshots()
 		}
 	}
+}
+
+func (gateway *Gateway) watchSessionStateLoop(ctx context.Context) {
+	codexHome := filepath.Clean(strings.TrimSpace(gateway.adapter.codexHome))
+	if codexHome == "." || !filepath.IsAbs(codexHome) {
+		gateway.logger.Printf("watch Codex session state: Codex home is invalid")
+		return
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		gateway.logger.Printf("watch Codex session state: %s", publicMessage(err))
+		return
+	}
+	defer watcher.Close()
+	if err = runAsConfiguredUser(func() error { return watcher.Add(codexHome) }); err != nil {
+		gateway.logger.Printf("watch Codex session state: %s", publicMessage(err))
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if codexSessionStateEvent(event) {
+				gateway.signalSessionUpdate()
+			}
+		case watchErr, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			gateway.logger.Printf("watch Codex session state: %s", publicMessage(watchErr))
+		}
+	}
+}
+
+func codexSessionStateEvent(event fsnotify.Event) bool {
+	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
+		return false
+	}
+	name := strings.ToLower(filepath.Base(strings.TrimSpace(event.Name)))
+	return name == ".codex-global-state.json" || strings.HasPrefix(name, "state_") && strings.Contains(name, ".sqlite")
 }
 
 func sessionSnapshotTrigger(event json.RawMessage) bool {
@@ -800,7 +847,7 @@ func (gateway *Gateway) executeCommand(parent context.Context, item queuedComman
 		} else {
 			result, err = gateway.adapter.Execute(ctx, command, artifacts)
 			if err == nil && command.Kind == "thread.read" {
-				err = gateway.uploadHistoryImages(ctx, result)
+				gateway.hydrateHistoryImages(ctx, result)
 			}
 		}
 	}
@@ -840,62 +887,142 @@ func (gateway *Gateway) downloadCommandArtifacts(ctx context.Context, commandID 
 	return artifacts, err
 }
 
-func (gateway *Gateway) uploadHistoryImages(ctx context.Context, result map[string]any) error {
-	type imageUpload struct {
-		path   string
-		fileID string
-		err    error
+func (gateway *Gateway) hydrateHistoryImages(ctx context.Context, result map[string]any) {
+	type imageReference struct {
+		path, key string
+		err       error
 	}
 	type messageUpload struct {
 		message map[string]any
-		images  []imageUpload
+		images  []imageReference
 	}
 
 	session, _ := result["session"].(map[string]any)
 	messages, _ := session["messages"].([]any)
 	work := make([]messageUpload, 0)
-	totalImages := 0
+	imagesByKey := make(map[string]historyImage)
+	paths := make(map[string]struct{})
 	for _, rawMessage := range messages {
 		message, _ := rawMessage.(map[string]any)
 		localImages, _ := message["localAttachments"].([]any)
 		if len(localImages) == 0 {
 			continue
 		}
-		item := messageUpload{message: message, images: make([]imageUpload, len(localImages))}
+		item := messageUpload{message: message, images: make([]imageReference, len(localImages))}
 		for index, rawImage := range localImages {
 			image, _ := rawImage.(map[string]any)
 			item.images[index].path, _ = image["path"].(string)
+			paths[item.images[index].path] = struct{}{}
 		}
-		totalImages += len(item.images)
 		work = append(work, item)
 	}
-	if totalImages == 0 {
-		return nil
+	if len(paths) == 0 {
+		return
 	}
 
-	tasks := make(chan *imageUpload)
-	var uploads sync.WaitGroup
-	workerCount := min(historyImageUploadConcurrency, totalImages)
-	uploads.Add(workerCount)
-	for range workerCount {
-		go func() {
-			defer uploads.Done()
-			for image := range tasks {
-				image.err = runAsConfiguredUser(func() error {
-					var uploadErr error
-					image.fileID, uploadErr = gateway.cloud.UploadHistoryImage(ctx, gateway.config, gateway.identity, image.path)
-					return uploadErr
-				})
-			}
-		}()
+	described := make(map[string]historyImage, len(paths))
+	descriptionErrors := make(map[string]error)
+	for path := range paths {
+		var image historyImage
+		err := runAsConfiguredUser(func() error {
+			var describeErr error
+			image, describeErr = describeHistoryImage(path)
+			return describeErr
+		})
+		if err != nil {
+			descriptionErrors[path] = err
+			continue
+		}
+		described[path] = image
+		imagesByKey[historyImageKey(image.SHA256, image.SizeBytes)] = image
 	}
-	for index := range work {
-		for imageIndex := range work[index].images {
-			tasks <- &work[index].images[imageIndex]
+	for workIndex := range work {
+		for imageIndex := range work[workIndex].images {
+			reference := &work[workIndex].images[imageIndex]
+			if err := descriptionErrors[reference.path]; err != nil {
+				reference.err = err
+				continue
+			}
+			image := described[reference.path]
+			reference.key = historyImageKey(image.SHA256, image.SizeBytes)
 		}
 	}
-	close(tasks)
-	uploads.Wait()
+
+	fileIDs := make(map[string]string, len(imagesByKey))
+	missing := make([]historyImage, 0, len(imagesByKey))
+	for key, image := range imagesByKey {
+		if gateway.state != nil {
+			if fileID, ok := gateway.state.HistoryAttachment(key); ok {
+				fileIDs[key] = fileID
+				continue
+			}
+		}
+		missing = append(missing, image)
+	}
+	sort.Slice(missing, func(left, right int) bool {
+		return historyImageKey(missing[left].SHA256, missing[left].SizeBytes) < historyImageKey(missing[right].SHA256, missing[right].SizeBytes)
+	})
+
+	syncContext, cancel := context.WithTimeout(ctx, historyImageSyncBudget)
+	defer cancel()
+	if len(missing) > 0 {
+		resolved, err := gateway.cloud.ResolveHistoryImages(syncContext, gateway.config, gateway.identity, missing)
+		if err != nil {
+			gateway.logger.Printf("resolve history images: %s", publicMessage(err))
+		} else {
+			for key, fileID := range resolved {
+				fileIDs[key] = fileID
+			}
+		}
+	}
+
+	type imageUpload struct {
+		image  historyImage
+		fileID string
+		err    error
+	}
+	pending := make([]*imageUpload, 0, len(missing))
+	for _, image := range missing {
+		if fileIDs[historyImageKey(image.SHA256, image.SizeBytes)] == "" {
+			pending = append(pending, &imageUpload{image: image})
+		}
+	}
+	if len(pending) > 0 {
+		tasks := make(chan *imageUpload, len(pending))
+		for _, upload := range pending {
+			tasks <- upload
+		}
+		close(tasks)
+		var uploads sync.WaitGroup
+		workerCount := min(historyImageUploadConcurrency, len(pending))
+		uploads.Add(workerCount)
+		for range workerCount {
+			go func() {
+				defer uploads.Done()
+				for upload := range tasks {
+					upload.err = runAsConfiguredUser(func() error {
+						var uploadErr error
+						upload.fileID, uploadErr = gateway.cloud.UploadHistoryImage(syncContext, gateway.config, gateway.identity, upload.image)
+						return uploadErr
+					})
+				}
+			}()
+		}
+		uploads.Wait()
+		for _, upload := range pending {
+			key := historyImageKey(upload.image.SHA256, upload.image.SizeBytes)
+			if upload.err != nil {
+				gateway.logger.Printf("history image unavailable: %s", publicMessage(upload.err))
+				continue
+			}
+			fileIDs[key] = upload.fileID
+		}
+	}
+	if gateway.state != nil {
+		if err := gateway.state.RememberHistoryAttachments(fileIDs); err != nil {
+			gateway.logger.Printf("persist history image mappings: %s", publicMessage(err))
+		}
+	}
 
 	for _, item := range work {
 		message := item.message
@@ -903,15 +1030,15 @@ func (gateway *Gateway) uploadHistoryImages(ctx context.Context, result map[stri
 		attachments := make([]any, 0, len(item.images))
 		unavailable := 0
 		for _, image := range item.images {
-			if image.err != nil {
-				if !errors.Is(image.err, errHistoryImageUnavailable) {
-					return image.err
-				}
+			fileID := fileIDs[image.key]
+			if image.err != nil || fileID == "" {
 				unavailable++
-				gateway.logger.Printf("history image unavailable: %s", publicMessage(image.err))
+				if image.err != nil {
+					gateway.logger.Printf("history image unavailable: %s", publicMessage(image.err))
+				}
 				continue
 			}
-			attachments = append(attachments, map[string]any{"fileID": image.fileID})
+			attachments = append(attachments, map[string]any{"fileID": fileID})
 		}
 		if len(attachments) > 0 {
 			message["attachments"] = attachments
@@ -925,7 +1052,6 @@ func (gateway *Gateway) uploadHistoryImages(ctx context.Context, result map[stri
 		}
 		message["content"] = content
 	}
-	return nil
 }
 
 func stripSyntheticFileMentions(content string) string {

@@ -52,26 +52,27 @@ type DeviceEnrollmentChallenge struct {
 }
 
 type Command struct {
-	ID               uint
-	PublicID         string
-	UserID           uint
-	DeviceID         uint
-	RuntimeProfileID *uint
-	WorkspaceID      *uint
-	ThreadID         *uint
-	TurnID           *uint
-	InteractionID    *uint
-	ServerSeq        uint64
-	Kind             string
-	PayloadJSON      string
-	State            string
-	DeliveredAt      *time.Time
-	AckedAt          *time.Time
-	TerminalJSON     string
-	CompletedAt      *time.Time
-	DeviceOnline     bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                   uint
+	PublicID             string
+	ConversationPublicID string
+	UserID               uint
+	DeviceID             uint
+	RuntimeProfileID     *uint
+	WorkspaceID          *uint
+	ThreadID             *uint
+	TurnID               *uint
+	InteractionID        *uint
+	ServerSeq            uint64
+	Kind                 string
+	PayloadJSON          string
+	State                string
+	DeliveredAt          *time.Time
+	AckedAt              *time.Time
+	TerminalJSON         string
+	CompletedAt          *time.Time
+	DeviceOnline         bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 type Workspace struct {

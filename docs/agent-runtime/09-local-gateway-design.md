@@ -43,7 +43,11 @@ Workspace 的 `sessions` 刷新在 Bridge 内部消费 `thread/list` cursor，�
 
 每次完成 Runtime proof 与 Workspace 同步后，Cloud 按设备、Profile/Workspace 和小时桶幂等下发 `apps`、`skills` 与 `sessions` 刷新。首次连接会自动导入历史和输入资源；同一小时内的 WSS 重连复用原命令，不重复扫描。
 
-本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server thread API，不是 rollout 文件数量。`thread/list` 必须显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer` 以及旧目录中未分类的 `unknown`，避免 app-server 的默认过滤漏掉桌面端、程序化入口和旧版创建的顶层会话，同时不把明确的 `subAgent*` 子线程混入主导航。省略 `useStateDbOnly` 让 app-server 执行默认的 state DB + rollout 扫描修复。项目会话只进入所属 Workspace，projectless 会话只进入隐藏 Recent；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
+本地会话的权威来源是当前登录用户、当前 `codexHome` 下的 app-server thread API，不是 rollout 文件数量。`thread/list` 必须设置 `useStateDbOnly: true`，显式分页到 `nextCursor` 为空，并分别读取活动和归档目录；state DB 提供用于高频目录对账的权威索引，具体会话历史仍在用户打开会话时通过 thread API 按需读取。`sourceKinds` 固定为可由用户恢复的 `cli`、`vscode`、`exec`、`appServer` 以及旧目录中未分类的 `unknown`，避免 app-server 的默认过滤漏掉桌面端、程序化入口和旧版创建的顶层会话，同时不把明确的 `subAgent*` 子线程混入主导航。项目会话只进入所属 Workspace，projectless 会话只进入隐藏 Recent；归档会话只进入“所有对话”的归档筛选，不进入“最近”或项目树。项目树中的 Conversation 继续使用统一 Conversation 菜单：置顶、重命名、归档、分享、导出和删除；工作 Workspace 本身不伪装成可编辑的 Cloud Project，改名或删除本地项目必须走明确的 workspace 配置能力。
+
+Agent 监听 `codexHome` 中的 state SQLite/WAL 与 Desktop project state 文件，文件事件经 250ms 合并后立即执行完整 cursor 对账；五分钟定时任务只负责低频一致性校验，不承担实时消息传递。Agent 到 Cloud 使用持久 WSS，Cloud 到 Web 使用长连接 NDJSON 事件流；浏览器失效事件按设备和事件类型合并 conversation ID，慢消费者不会阻塞投影事务，也不会因固定小缓冲而静默丢事件。
+
+历史正文与附件传输彼此隔离。Agent 先按 `SHA-256 + size` 批量解析 Cloud 已有文件并持久复用映射，只上传缺失内容；同一内容在消息之间去重，上传具有独立时间预算。任意本地图片缺失、解析失败或网络超时只生成附件不可用占位，不能使 `thread.read` 正文投影失败，也不能把 Conversation history 标记为错误。
 
 stdio JSONL 的输入帧使用有界读取：单行最多 64 MiB，输出请求最多 4 MiB。历史按 8 个完整 turn 分页读取，每页立即投影并释放原始数据，不再请求可能超过单帧上限的完整 `thread/read`。超过 64 MiB、EOF 或 JSON 解码错误会关闭当前 app-server；运行时监督器随即终止残留进程、取消旧 runtime 的 worker/刷新协程，并按 1--30 秒抖动退避重建。WSS runtime lease 与 presence 由心跳在原连接上原子续期，健康连接不因租约计时器主动关闭；连接恢复后先冲刷未投影事件，再发送新命令。
 
