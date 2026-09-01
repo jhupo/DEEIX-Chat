@@ -74,7 +74,7 @@ export function mapServerMessage(
   const runID = item.runID?.trim() || "";
   const role = item.role === "assistant" ? "assistant" : item.role === "system" ? "system" : "user";
   const msg: ChatAreaMessage = {
-    key: chatMessageKey(role, `server-${publicID}`, runID),
+    key: chatMessageKey(role, publicID || String(item.id)),
     publicID,
     parentPublicID: item.parentPublicID?.trim() || null,
     sourcePublicID: item.sourcePublicID?.trim() || null,
@@ -150,13 +150,9 @@ export function mapServerMessage(
 
 export function chatMessageKey(
   role: ChatAreaMessage["role"],
-  fallbackKey: string,
-  runID?: string | null,
+  messageID: string,
 ) {
-  const normalizedRunID = runID?.trim() || "";
-  return normalizedRunID && role !== "system"
-    ? `${role}-run-${normalizedRunID}`
-    : fallbackKey;
+  return `${role}-message-${messageID}`;
 }
 
 export function toBranchKey(publicID?: string | null): string {

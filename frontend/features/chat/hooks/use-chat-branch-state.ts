@@ -64,7 +64,7 @@ function appendPendingExchangeMessages({
           }))
         : undefined;
     nextMessages.push({
-      key: chatMessageKey("user", `${pendingExchange.key}-user`, pendingRunID),
+      key: chatMessageKey("user", userPublicID),
       publicID: userPublicID,
       parentPublicID: pendingExchange.parentPublicID,
       sourcePublicID: pendingExchange.sourcePublicID,
@@ -90,7 +90,7 @@ function appendPendingExchangeMessages({
         ? pendingExchange.assistantAttachments
         : undefined;
     nextMessages.push({
-      key: chatMessageKey("assistant", `${pendingExchange.key}-assistant`, pendingRunID),
+      key: chatMessageKey("assistant", assistantPublicID),
       publicID: assistantPublicID,
       parentPublicID: userPublicID,
       sourcePublicID: pendingExchange.reuseUserMessage ? pendingExchange.sourcePublicID : null,
