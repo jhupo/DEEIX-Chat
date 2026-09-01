@@ -265,7 +265,7 @@ deeix-agent doctor
 
 已完成：Bridge 在单次 `sessions` 命令内消费 app-server opaque cursor，活动与归档目录各最多读取 500 条。目录只上传经过长度限制的 summary，不再逐条执行 `thread/read`。新导入 AgentThread 标记为 `unloaded`；Web 打开会话时只调用 Conversation history API，由后端在 capability 门控后排队唯一在途 `thread.read`。成功后增量投影消息并标记 `loaded`，失败记录错误且下次打开可重试。Cloud Conversation 直接视为 `loaded`。
 
-当前边界：每种状态超过 500 条时只保留 app-server 最近的 500 条；`thread/unsubscribe` 仍待确认读取详情是否建立持续订阅后再接入。
+当前边界：每种状态超过 500 条时只保留 app-server 最近的 500 条。完成且未归档的会话通过 `thread/resume(excludeTurns: true)` 读取官方设置后立即 `thread/unsubscribe`；活动 writer 和归档会话不执行临时 resume。
 
 验收：原生 Adapter fixture 覆盖 cursor 翻页、摘要不含消息和按需读取详情；repository 测试覆盖 summary 创建、唯一读取命令、消息投影与 loaded 状态。归档筛选继续使用 Conversation 状态。
 

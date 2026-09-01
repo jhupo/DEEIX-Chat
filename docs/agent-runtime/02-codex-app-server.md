@@ -213,7 +213,7 @@ Cloud `AgentCommand` has opaque public/source refs and allowlisted discriminants
 
 | Union | Members | Dispositions | Labeled examples |
 | --- | ---: | --- | --- |
-| `ClientRequest` | 98 | mapped 25, extension 54, disabled 19 | mapped 与实际 dispatch registry 严格相等 |
+| `ClientRequest` | 98 | mapped 26, extension 53, disabled 19 | mapped 与实际 dispatch registry 严格相等 |
 | `ClientNotification` | 1 | mapped 1 | `initialized` mapped |
 | `ServerRequest` | 10 | mapped 6, extension 1, disabled 3 | `attestation/generate` disabled |
 | `ServerNotification` | 79 | mapped 41, extension 23, disabled 15 | `item/fileChange/patchUpdated` mapped; `item/commandExecution/terminalInteraction` extension |

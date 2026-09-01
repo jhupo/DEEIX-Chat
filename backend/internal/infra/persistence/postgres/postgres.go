@@ -499,6 +499,12 @@ func applyConversationBaselineIndexes(db *gorm.DB) error {
 		`COMMENT ON COLUMN "chat_messages"."edited_at" IS '用户编辑时间'`,
 		`CREATE INDEX IF NOT EXISTS idx_chat_messages_edited_at
 		ON "chat_messages" ("edited_at")`,
+		`ALTER TABLE "chat_messages"
+		ADD COLUMN IF NOT EXISTS "source_ref" varchar(96) NOT NULL DEFAULT ''`,
+		`COMMENT ON COLUMN "chat_messages"."source_ref" IS '外部会话消息稳定来源引用'`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_messages_conversation_source_ref
+		ON "chat_messages" ("conversation_id", "source_ref")
+		WHERE "source_ref" <> ''`,
 		`ALTER TABLE "chat_runs"
 		ADD COLUMN IF NOT EXISTS "task_type" varchar(32) NOT NULL DEFAULT 'chat'`,
 		`COMMENT ON COLUMN "chat_runs"."task_type" IS '任务类型'`,

@@ -16,7 +16,8 @@ import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const EXECUTION_EVENT_RETRY_MAX_MS = 15_000;
 const INTERACTION_RETRY_MAX_MS = 15_000;
-const SESSION_SNAPSHOT_EVENT_KIND = "workspace/sessions/updated";
+const LATEST_SYNC_DEBOUNCE_MS = 100;
+const HISTORY_INVALIDATION_DEBOUNCE_MS = 100;
 const THREAD_HISTORY_EVENT_KIND = "thread/history/updated";
 
 type AgentRunHydrationScope = {
@@ -52,6 +53,7 @@ export function useAgentRunHydration({
   const requestLatestSyncRef = React.useRef<(() => void) | null>(null);
   const onExecutionBoundaryRef = React.useRef(onExecutionBoundary);
   const onConversationInvalidatedRef = React.useRef(onConversationInvalidated);
+  const invalidationTimerRef = React.useRef<number | null>(null);
   React.useLayoutEffect(() => {
     onExecutionBoundaryRef.current = onExecutionBoundary;
     onConversationInvalidatedRef.current = onConversationInvalidated;
@@ -73,6 +75,7 @@ export function useAgentRunHydration({
     let executionCursor = 0;
     let interactionRetryTimer: number | null = null;
     let interactionRetryDelay = 1_000;
+    let latestSyncTimer: number | null = null;
 
     const syncEvents = () => {
       eventSyncRequested = true;
@@ -175,7 +178,14 @@ export function useAgentRunHydration({
       requestExecutionSync();
       requestInteractionSync();
     };
-    requestLatestSyncRef.current = syncLatest;
+    const requestLatestSync = () => {
+      if (latestSyncTimer !== null) return;
+      latestSyncTimer = window.setTimeout(() => {
+        latestSyncTimer = null;
+        syncLatest();
+      }, LATEST_SYNC_DEBOUNCE_MS);
+    };
+    requestLatestSyncRef.current = requestLatestSync;
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") syncLatest();
@@ -196,19 +206,36 @@ export function useAgentRunHydration({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (eventRetryTimer !== null) window.clearTimeout(eventRetryTimer);
       if (interactionRetryTimer !== null) window.clearTimeout(interactionRetryTimer);
+      if (latestSyncTimer !== null) window.clearTimeout(latestSyncTimer);
     };
   }, [contextKey, normalizedConversationID, runIDKey]);
 
+  React.useEffect(() => () => {
+    if (invalidationTimerRef.current !== null) {
+      window.clearTimeout(invalidationTimerRef.current);
+      invalidationTimerRef.current = null;
+    }
+  }, [normalizedConversationID]);
+
   React.useEffect(() => {
     if (!agentEvent || !normalizedConversationID) return;
+    const normalizedDeviceID = deviceID.trim();
+    const targetsCurrentConversation = agentEvent.type === "change" &&
+      agentEvent.conversationIDs.includes(normalizedConversationID);
+    if (agentEvent.type !== "ready" && !targetsCurrentConversation) {
+      return;
+    }
     requestLatestSyncRef.current?.();
-    if (
-      agentEvent.type === "change" &&
-      (agentEvent.kind === SESSION_SNAPSHOT_EVENT_KIND || agentEvent.kind === THREAD_HISTORY_EVENT_KIND) &&
-      agentEvent.deviceID === deviceID.trim() &&
-      agentEvent.conversationIDs.includes(normalizedConversationID)
-    ) {
-      onConversationInvalidatedRef.current?.();
+    const shouldRestoreConversationSnapshot = agentEvent.type === "ready" || (
+      agentEvent.kind === THREAD_HISTORY_EVENT_KIND &&
+      (!normalizedDeviceID || agentEvent.deviceID === normalizedDeviceID) &&
+      targetsCurrentConversation
+    );
+    if (shouldRestoreConversationSnapshot && invalidationTimerRef.current === null) {
+      invalidationTimerRef.current = window.setTimeout(() => {
+        invalidationTimerRef.current = null;
+        onConversationInvalidatedRef.current?.();
+      }, HISTORY_INVALIDATION_DEBOUNCE_MS);
     }
   }, [agentEvent, deviceID, normalizedConversationID]);
 }

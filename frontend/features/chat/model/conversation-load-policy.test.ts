@@ -2,23 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error Node's TypeScript runner requires an explicit extension.
-import { isConversationStreamDisconnect, shouldPollConversationHistory, shouldRefreshMessagesAfterHistory, shouldReloadMessagesForExecutionBoundary, shouldRetryConversationStream, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
+import { isConversationStreamDisconnect, shouldRefreshMessagesAfterHistory, shouldReloadMessagesForExecutionBoundary, shouldRetryConversationStream, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
 
 test("keeps persisted messages visible when gateway history synchronization fails", () => {
   assert.equal(shouldSurfaceConversationLoadError(12), false);
   assert.equal(shouldSurfaceConversationLoadError(0), true);
 });
 
-test("refreshes messages only when history could add the initial page", () => {
-  assert.equal(shouldRefreshMessagesAfterHistory(12), false);
-  assert.equal(shouldRefreshMessagesAfterHistory(0), true);
-});
-
-test("polls gateway history only while an empty conversation is being hydrated", () => {
-  assert.equal(shouldPollConversationHistory(12, "syncing"), false);
-  assert.equal(shouldPollConversationHistory(0, "syncing"), true);
-  assert.equal(shouldPollConversationHistory(0, "loaded"), false);
-  assert.equal(shouldPollConversationHistory(0, "error"), false);
+test("refreshes the tail after history synchronization while retaining persisted messages", () => {
+  assert.equal(shouldRefreshMessagesAfterHistory(12, "syncing"), true);
+  assert.equal(shouldRefreshMessagesAfterHistory(12, "loaded"), false);
+  assert.equal(shouldRefreshMessagesAfterHistory(0, "loaded"), true);
 });
 
 test("reloads messages only when a gateway turn crosses the local message boundary", () => {

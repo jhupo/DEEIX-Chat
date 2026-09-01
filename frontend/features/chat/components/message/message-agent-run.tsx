@@ -26,10 +26,8 @@ const AGENT_RUN_ACCORDION_VALUE = "message-agent-run";
 
 export function MessageAgentRun({
   agentRun,
-  autoCollapseReady,
 }: {
   agentRun: AgentRunSnapshot;
-  autoCollapseReady?: boolean;
 }) {
   const t = useTranslations("chat.agent");
   const locale = useLocale();
@@ -43,10 +41,8 @@ export function MessageAgentRun({
       setAccordionValue(AGENT_RUN_ACCORDION_VALUE);
       return;
     }
-    if (autoCollapseReady) {
-      setAccordionValue("");
-    }
-  }, [active, autoCollapseReady]);
+    setAccordionValue("");
+  }, [active]);
 
   if (!hasAgentRunActivity(agentRun)) {
     return null;

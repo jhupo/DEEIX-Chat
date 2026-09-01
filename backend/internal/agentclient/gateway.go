@@ -42,6 +42,7 @@ const (
 	gatewayInlineTerminalBytes    = 512 << 10
 	historyImageUploadConcurrency = 4
 	historyImageSyncBudget        = 30 * time.Second
+	sessionHistoryPayloadBudget   = agentprotocol.MaxProviderEventBytes - (8 << 10)
 )
 
 type Gateway struct {
@@ -56,6 +57,10 @@ type Gateway struct {
 	logger           *log.Logger
 	wake             chan struct{}
 	sessionUpdates   chan struct{}
+	historyUpdates   chan struct{}
+	historyMu        sync.Mutex
+	pendingHistory   map[string]watchedSession
+	historyRetries   map[string]bool
 	workspaceUpdates chan []Workspace
 	commands         chan queuedCommand
 	activeMu         sync.Mutex
@@ -121,8 +126,10 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	gateway := &Gateway{
 		ctx: runtimeContext, config: config, dataDir: dataDir, identity: identity, state: state, cloud: NewCloudClient(config.CloudURL), logger: logger,
 		agentVersion: strings.TrimSpace(agentVersion),
-		wake:         make(chan struct{}, 1), sessionUpdates: make(chan struct{}, 1), workspaceUpdates: make(chan []Workspace, 1),
-		commands: make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
+		wake:         make(chan struct{}, 1), sessionUpdates: make(chan struct{}, 1), historyUpdates: make(chan struct{}, 1),
+		workspaceUpdates: make(chan []Workspace, 1),
+		commands:         make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
+		pendingHistory: make(map[string]watchedSession), historyRetries: make(map[string]bool),
 	}
 	for _, workspace := range config.Workspaces {
 		if !workspace.Excluded {
@@ -149,6 +156,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	go gateway.refreshWorkspaceLoop(runtimeContext)
 	go gateway.watchSessionStateLoop(runtimeContext)
 	go gateway.sessionSnapshotLoop(runtimeContext)
+	go gateway.sessionHistoryLoop(runtimeContext)
 	if err = gateway.recoverCommands(); err != nil {
 		return err
 	}
@@ -238,8 +246,8 @@ func (gateway *Gateway) refreshWorkspaceLoop(ctx context.Context) {
 func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 	revisions := make(map[string]string)
 	syncSnapshots := func() {
-		scanContext, cancel := context.WithTimeout(ctx, 30*time.Second)
-		snapshots, err := gateway.adapter.SessionSnapshots(scanContext)
+		scanContext, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		snapshots, changedSessions, err := gateway.adapter.SessionSnapshots(scanContext)
 		cancel()
 		if err != nil {
 			if ctx.Err() == nil {
@@ -275,6 +283,7 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 		if appended {
 			gateway.signalWake()
 		}
+		gateway.queueSessionHistoryUpdates(changedSessions)
 	}
 	syncSnapshots()
 	ticker := time.NewTicker(5 * time.Minute)
@@ -306,6 +315,302 @@ func (gateway *Gateway) sessionSnapshotLoop(ctx context.Context) {
 	}
 }
 
+func (gateway *Gateway) sessionHistoryLoop(ctx context.Context) {
+	retryDelays := make(map[string]time.Duration)
+	retry := func(watched watchedSession) {
+		delay := retryDelays[watched.sourceThreadRef]
+		if delay == 0 {
+			delay = time.Second
+		} else if delay < 30*time.Second {
+			delay *= 2
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
+			}
+		}
+		retryDelays[watched.sourceThreadRef] = delay
+		gateway.scheduleSessionHistoryRetry(ctx, watched, delay)
+	}
+	syncHistory := func(sessions []watchedSession) {
+		appended := false
+		for _, watched := range sessions {
+			readContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+			session, err := gateway.adapter.readSessionTail(readContext, watched)
+			cancel()
+			if err != nil {
+				if ctx.Err() == nil {
+					gateway.logger.Printf("refresh Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(err))
+					retry(watched)
+				}
+				continue
+			}
+			gateway.hydrateHistoryImages(ctx, map[string]any{"session": session})
+			delta, nextState, changed, deltaErr := sessionHistoryDelta(session, gateway.state.HistorySyncState(watched.sourceThreadRef))
+			if deltaErr != nil {
+				gateway.logger.Printf("project Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(deltaErr))
+				retry(watched)
+				continue
+			}
+			if !changed {
+				delete(retryDelays, watched.sourceThreadRef)
+				continue
+			}
+			canonical, marshalErr := json.Marshal(delta)
+			if marshalErr != nil {
+				continue
+			}
+			digest := sha256.Sum256(canonical)
+			batchRef := stableSessionSourceRef("history", watched.sourceThreadRef, hex.EncodeToString(digest[:]))
+			payloads, splitErr := splitSessionHistoryPayload(delta, batchRef)
+			if splitErr != nil {
+				gateway.logger.Printf("encode Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(splitErr))
+				retry(watched)
+				continue
+			}
+			persisted := true
+			for _, chunk := range payloads {
+				event, eventErr := json.Marshal(map[string]any{
+					"kind": agentprotocol.SessionHistoryEventKind, "sourceThreadRef": watched.sourceThreadRef,
+					"occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "payload": chunk,
+				})
+				if eventErr != nil || len(event) > agentprotocol.MaxProviderEventBytes {
+					gateway.logger.Printf("encode Codex session tail thread=%s: event exceeds the provider event limit", watched.sourceThreadRef)
+					persisted = false
+					break
+				}
+				if _, appendErr := gateway.state.AppendEvent(event); appendErr != nil {
+					gateway.logger.Printf("persist Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(appendErr))
+					persisted = false
+					break
+				}
+			}
+			if !persisted {
+				retry(watched)
+				continue
+			}
+			appended = true
+			if rememberErr := gateway.state.RememberHistorySyncState(watched.sourceThreadRef, nextState); rememberErr != nil {
+				gateway.logger.Printf("persist Codex session sync state thread=%s: %s", watched.sourceThreadRef, publicMessage(rememberErr))
+				retry(watched)
+				continue
+			}
+			delete(retryDelays, watched.sourceThreadRef)
+		}
+		if appended {
+			gateway.signalWake()
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gateway.historyUpdates:
+			timer := time.NewTimer(250 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			for {
+				select {
+				case <-gateway.historyUpdates:
+					continue
+				default:
+					syncHistory(gateway.takeSessionHistoryUpdates())
+				}
+				break
+			}
+		}
+	}
+}
+
+func sessionHistoryDelta(session map[string]any, previous historySyncState) (map[string]any, historySyncState, bool, error) {
+	messages, ok := session["messages"].([]any)
+	if !ok {
+		return nil, historySyncState{}, false, errors.New("Codex session tail messages are invalid")
+	}
+	metadata := make(map[string]any, len(session))
+	for key, value := range session {
+		if key != "messages" && key != "historyBatchRef" && key != "historyChunkIndex" && key != "historyChunkCount" {
+			metadata[key] = value
+		}
+	}
+	metadataDigest, err := historyValueDigest(metadata)
+	if err != nil {
+		return nil, historySyncState{}, false, err
+	}
+	next := historySyncState{Metadata: metadataDigest, Messages: make(map[string]string), Events: make(map[string]string)}
+	deltaMessages := make([]any, 0, len(messages))
+	for _, rawMessage := range messages {
+		message, messageOK := rawMessage.(map[string]any)
+		messageRef := strings.TrimSpace(stringField(message, "sourceMessageRef"))
+		if !messageOK || messageRef == "" {
+			return nil, historySyncState{}, false, errors.New("Codex session tail message is invalid")
+		}
+		base := make(map[string]any, len(message))
+		for key, value := range message {
+			if key != "executionEvents" {
+				base[key] = value
+			}
+		}
+		messageKey := historySyncKey("message", messageRef)
+		messageDigest, digestErr := historyValueDigest(base)
+		if digestErr != nil {
+			return nil, historySyncState{}, false, digestErr
+		}
+		next.Messages[messageKey] = messageDigest
+		events, _ := message["executionEvents"].([]any)
+		changedEvents := make([]any, 0, len(events))
+		for _, rawEvent := range events {
+			event, eventOK := rawEvent.(map[string]any)
+			eventRef := strings.TrimSpace(stringField(event, "sourceEventRef"))
+			if !eventOK || eventRef == "" {
+				return nil, historySyncState{}, false, errors.New("Codex session tail event is invalid")
+			}
+			eventKey := historySyncKey("event", messageRef, eventRef)
+			eventDigest, eventErr := historyValueDigest(event)
+			if eventErr != nil {
+				return nil, historySyncState{}, false, eventErr
+			}
+			next.Events[eventKey] = eventDigest
+			if previous.Events[eventKey] != eventDigest {
+				changedEvents = append(changedEvents, event)
+			}
+		}
+		if previous.Messages[messageKey] == messageDigest && len(changedEvents) == 0 {
+			continue
+		}
+		projected := make(map[string]any, len(base)+1)
+		for key, value := range base {
+			projected[key] = value
+		}
+		if len(changedEvents) > 0 {
+			projected["executionEvents"] = changedEvents
+		}
+		deltaMessages = append(deltaMessages, projected)
+	}
+	delta := make(map[string]any, len(metadata)+1)
+	for key, value := range metadata {
+		delta[key] = value
+	}
+	delta["messages"] = deltaMessages
+	return delta, next, previous.Metadata != metadataDigest || len(deltaMessages) > 0, nil
+}
+
+func historySyncKey(kind string, values ...string) string {
+	digest := sha256.Sum256([]byte(strings.Join(append([]string{kind}, values...), "\x00")))
+	return hex.EncodeToString(digest[:])
+}
+
+func historyValueDigest(value any) (string, error) {
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(canonical)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func splitSessionHistoryPayload(session map[string]any, batchRef string) ([]json.RawMessage, error) {
+	if strings.TrimSpace(batchRef) == "" {
+		return nil, errors.New("Codex session history batch is invalid")
+	}
+	encodeChunk := func(messages []any, index, count int) (json.RawMessage, error) {
+		chunk := make(map[string]any, len(session)+3)
+		for key, value := range session {
+			if key != "messages" {
+				chunk[key] = value
+			}
+		}
+		chunk["messages"] = messages
+		chunk["historyBatchRef"] = batchRef
+		chunk["historyChunkIndex"] = index
+		chunk["historyChunkCount"] = count
+		return json.Marshal(chunk)
+	}
+	messages, ok := session["messages"].([]any)
+	if !ok {
+		return nil, errors.New("Codex session tail messages are invalid")
+	}
+	payload, err := encodeChunk(messages, 0, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) <= sessionHistoryPayloadBudget {
+		return []json.RawMessage{payload}, nil
+	}
+	if len(messages) == 0 {
+		return nil, errors.New("Codex session tail exceeds the provider event limit")
+	}
+	fragments := make([][]any, 0, len(messages))
+	for _, rawMessage := range messages {
+		message, messageOK := rawMessage.(map[string]any)
+		if !messageOK {
+			return nil, errors.New("Codex session history message is invalid")
+		}
+		events, _ := message["executionEvents"].([]any)
+		if len(events) == 0 {
+			candidate, marshalErr := encodeChunk([]any{message}, 4095, 4096)
+			if marshalErr != nil || len(candidate) > sessionHistoryPayloadBudget {
+				return nil, errors.New("Codex session history message exceeds the provider event limit")
+			}
+			fragments = append(fragments, []any{message})
+			continue
+		}
+		base := make(map[string]any, len(message))
+		for key, value := range message {
+			if key != "executionEvents" {
+				base[key] = value
+			}
+		}
+		currentEvents := make([]any, 0, len(events))
+		for _, event := range events {
+			currentEvents = append(currentEvents, event)
+			candidateMessage := make(map[string]any, len(base)+1)
+			for key, value := range base {
+				candidateMessage[key] = value
+			}
+			candidateMessage["executionEvents"] = currentEvents
+			candidate, marshalErr := encodeChunk([]any{candidateMessage}, 4095, 4096)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			if len(candidate) <= sessionHistoryPayloadBudget {
+				continue
+			}
+			currentEvents = currentEvents[:len(currentEvents)-1]
+			if len(currentEvents) == 0 {
+				return nil, errors.New("Codex session history item exceeds the provider event limit")
+			}
+			completedMessage := make(map[string]any, len(base)+1)
+			for key, value := range base {
+				completedMessage[key] = value
+			}
+			completedMessage["executionEvents"] = append([]any(nil), currentEvents...)
+			fragments = append(fragments, []any{completedMessage})
+			currentEvents = []any{event}
+		}
+		completedMessage := make(map[string]any, len(base)+1)
+		for key, value := range base {
+			completedMessage[key] = value
+		}
+		completedMessage["executionEvents"] = append([]any(nil), currentEvents...)
+		fragments = append(fragments, []any{completedMessage})
+	}
+	if len(fragments) > 4096 {
+		return nil, errors.New("Codex session history batch exceeds the chunk limit")
+	}
+	chunks := make([]json.RawMessage, len(fragments))
+	for index, fragment := range fragments {
+		chunk, marshalErr := encodeChunk(fragment, index, len(fragments))
+		if marshalErr != nil || len(chunk) > sessionHistoryPayloadBudget {
+			return nil, errors.New("Codex session history chunk exceeds the provider event limit")
+		}
+		chunks[index] = chunk
+	}
+	return chunks, nil
+}
+
 func (gateway *Gateway) watchSessionStateLoop(ctx context.Context) {
 	codexHome := filepath.Clean(strings.TrimSpace(gateway.adapter.codexHome))
 	if codexHome == "." || !filepath.IsAbs(codexHome) {
@@ -318,7 +623,7 @@ func (gateway *Gateway) watchSessionStateLoop(ctx context.Context) {
 		return
 	}
 	defer watcher.Close()
-	if err = runAsConfiguredUser(func() error { return watcher.Add(codexHome) }); err != nil {
+	if err = runAsConfiguredUser(func() error { return addCodexSessionWatches(watcher, codexHome) }); err != nil {
 		gateway.logger.Printf("watch Codex session state: %s", publicMessage(err))
 		return
 	}
@@ -330,9 +635,14 @@ func (gateway *Gateway) watchSessionStateLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if codexSessionStateEvent(event) {
-				gateway.signalSessionUpdate()
+			if event.Op&fsnotify.Create != 0 {
+				if info, statErr := os.Stat(event.Name); statErr == nil && info.IsDir() {
+					if addErr := runAsConfiguredUser(func() error { return addCodexWatchTree(watcher, event.Name) }); addErr != nil {
+						gateway.logger.Printf("watch new Codex session directory: %s", publicMessage(addErr))
+					}
+				}
 			}
+			gateway.routeCodexSessionStateEvent(event, codexHome)
 		case watchErr, ok := <-watcher.Errors:
 			if !ok {
 				return
@@ -342,12 +652,61 @@ func (gateway *Gateway) watchSessionStateLoop(ctx context.Context) {
 	}
 }
 
-func codexSessionStateEvent(event fsnotify.Event) bool {
+func (gateway *Gateway) routeCodexSessionStateEvent(event fsnotify.Event, codexHome string) {
+	if !codexSessionStateEvent(event, codexHome) {
+		return
+	}
+	structural := event.Op&(fsnotify.Create|fsnotify.Remove|fsnotify.Rename) != 0
+	if !structural {
+		if session, found := gateway.adapter.watchedSessionForPath(event.Name); found {
+			gateway.queueSessionHistoryUpdates([]watchedSession{session})
+			return
+		}
+	}
+	gateway.signalSessionUpdate()
+}
+
+func codexSessionStateEvent(event fsnotify.Event, codexHome string) bool {
 	if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Remove|fsnotify.Rename) == 0 {
 		return false
 	}
-	name := strings.ToLower(filepath.Base(strings.TrimSpace(event.Name)))
-	return name == ".codex-global-state.json" || strings.HasPrefix(name, "state_") && strings.Contains(name, ".sqlite")
+	path := filepath.Clean(strings.TrimSpace(event.Name))
+	name := strings.ToLower(filepath.Base(path))
+	if name == ".codex-global-state.json" || strings.HasPrefix(name, "state_") && strings.Contains(name, ".sqlite") {
+		return true
+	}
+	if filepath.Ext(name) != ".jsonl" {
+		return false
+	}
+	return pathWithin(filepath.Join(codexHome, "sessions"), path) || pathWithin(filepath.Join(codexHome, "archived_sessions"), path)
+}
+
+func addCodexSessionWatches(watcher *fsnotify.Watcher, codexHome string) error {
+	if err := watcher.Add(codexHome); err != nil {
+		return err
+	}
+	for _, directory := range []string{filepath.Join(codexHome, "sessions"), filepath.Join(codexHome, "archived_sessions")} {
+		if info, err := os.Stat(directory); err == nil && info.IsDir() {
+			if err = addCodexWatchTree(watcher, directory); err != nil {
+				return err
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func addCodexWatchTree(watcher *fsnotify.Watcher, root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return watcher.Add(path)
+		}
+		return nil
+	})
 }
 
 func sessionSnapshotTrigger(event json.RawMessage) bool {
@@ -1334,6 +1693,56 @@ func (gateway *Gateway) signalSessionUpdate() {
 	case gateway.sessionUpdates <- struct{}{}:
 	default:
 	}
+}
+
+func (gateway *Gateway) queueSessionHistoryUpdates(sessions []watchedSession) {
+	if len(sessions) == 0 {
+		return
+	}
+	gateway.historyMu.Lock()
+	for _, session := range sessions {
+		gateway.pendingHistory[session.sourceThreadRef] = session
+	}
+	gateway.historyMu.Unlock()
+	select {
+	case gateway.historyUpdates <- struct{}{}:
+	default:
+	}
+}
+
+func (gateway *Gateway) scheduleSessionHistoryRetry(ctx context.Context, session watchedSession, delay time.Duration) {
+	gateway.historyMu.Lock()
+	if gateway.historyRetries == nil {
+		gateway.historyRetries = make(map[string]bool)
+	}
+	if gateway.historyRetries[session.sourceThreadRef] {
+		gateway.historyMu.Unlock()
+		return
+	}
+	gateway.historyRetries[session.sourceThreadRef] = true
+	gateway.historyMu.Unlock()
+	time.AfterFunc(delay, func() {
+		gateway.historyMu.Lock()
+		delete(gateway.historyRetries, session.sourceThreadRef)
+		gateway.historyMu.Unlock()
+		if ctx.Err() == nil {
+			gateway.queueSessionHistoryUpdates([]watchedSession{session})
+		}
+	})
+}
+
+func (gateway *Gateway) takeSessionHistoryUpdates() []watchedSession {
+	gateway.historyMu.Lock()
+	result := make([]watchedSession, 0, len(gateway.pendingHistory))
+	for _, session := range gateway.pendingHistory {
+		result = append(result, session)
+	}
+	clear(gateway.pendingHistory)
+	gateway.historyMu.Unlock()
+	sort.Slice(result, func(left, right int) bool {
+		return result[left].sourceThreadRef < result[right].sourceThreadRef
+	})
+	return result
 }
 
 func (gateway *Gateway) signalWorkspaceUpdate(workspaces []Workspace) {

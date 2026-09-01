@@ -122,6 +122,7 @@ type Message struct {
 	PublicID                 string     `gorm:"size:32;not null;default:'';uniqueIndex:idx_chat_messages_public_id;comment:公开消息ID"`
 	ParentMessageID          *uint      `gorm:"index:idx_chat_messages_parent_message_id;comment:父消息ID"`
 	RunID                    string     `gorm:"size:64;not null;default:'';index:idx_chat_messages_run_id;comment:会话运行ID"`
+	SourceRef                string     `gorm:"size:96;not null;default:'';comment:外部会话消息稳定来源引用"`
 	Role                     string     `gorm:"size:32;not null;default:'';index:idx_chat_messages_role;comment:消息角色(user/assistant/system/tool)"`
 	ContentType              string     `gorm:"size:32;not null;default:'';comment:消息内容类型"`
 	Content                  string     `gorm:"type:text;not null;default:'';comment:消息内容"`

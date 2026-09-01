@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"slices"
 	"sort"
@@ -29,7 +28,7 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 5
+	historyProjectionVersion     = 7
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -986,9 +985,11 @@ func projectTerminalResult(tx *gorm.DB, device *model.AgentDevice, frame *model.
 
 type workspaceSessionMessage struct {
 	Role             string                       `json:"role"`
+	Status           string                       `json:"status"`
 	Content          string                       `json:"content"`
 	ReasoningContent string                       `json:"reasoningContent"`
 	SourceTurnRef    string                       `json:"sourceTurnRef"`
+	SourceMessageRef string                       `json:"sourceMessageRef"`
 	RunID            string                       `json:"-"`
 	CreatedAt        int64                        `json:"createdAt"`
 	Attachments      []workspaceSessionAttachment `json:"attachments"`
@@ -996,8 +997,9 @@ type workspaceSessionMessage struct {
 }
 
 type workspaceSessionEvent struct {
-	Kind    string          `json:"kind"`
-	Payload json.RawMessage `json:"payload"`
+	Kind           string          `json:"kind"`
+	SourceEventRef string          `json:"sourceEventRef"`
+	Payload        json.RawMessage `json:"payload"`
 }
 
 type workspaceSessionAttachment struct {
@@ -1005,18 +1007,25 @@ type workspaceSessionAttachment struct {
 }
 
 type workspaceSession struct {
-	SourceThreadRef string                    `json:"sourceThreadRef"`
-	Preview         string                    `json:"preview"`
-	Name            string                    `json:"name"`
-	ModelProvider   string                    `json:"modelProvider"`
-	Model           string                    `json:"model"`
-	ReasoningEffort string                    `json:"reasoningEffort"`
-	Status          string                    `json:"status"`
-	CreatedAt       int64                     `json:"createdAt"`
-	UpdatedAt       int64                     `json:"updatedAt"`
-	RecencyAt       int64                     `json:"recencyAt"`
-	HistoryLoaded   bool                      `json:"historyLoaded"`
-	Messages        []workspaceSessionMessage `json:"messages"`
+	SourceThreadRef   string                    `json:"sourceThreadRef"`
+	Preview           string                    `json:"preview"`
+	Name              string                    `json:"name"`
+	ModelProvider     string                    `json:"modelProvider"`
+	Model             string                    `json:"model"`
+	ReasoningEffort   string                    `json:"reasoningEffort"`
+	ApprovalPolicy    string                    `json:"approvalPolicy"`
+	ApprovalsReviewer string                    `json:"approvalsReviewer"`
+	SandboxPolicy     string                    `json:"sandboxPolicy"`
+	Status            string                    `json:"status"`
+	CreatedAt         int64                     `json:"createdAt"`
+	UpdatedAt         int64                     `json:"updatedAt"`
+	RecencyAt         int64                     `json:"recencyAt"`
+	HistoryLoaded     bool                      `json:"historyLoaded"`
+	HistoryDelta      bool                      `json:"historyDelta"`
+	HistoryBatchRef   string                    `json:"historyBatchRef"`
+	HistoryChunkIndex int                       `json:"historyChunkIndex"`
+	HistoryChunkCount int                       `json:"historyChunkCount"`
+	Messages          []workspaceSessionMessage `json:"messages"`
 }
 
 type workspaceSessionSnapshot struct {
@@ -1130,8 +1139,22 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, profileID, wo
 func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
 		len(session.Messages) > maxWorkspaceSessionMessages || len(session.Name) > 1024 || len(session.Preview) > 4096 ||
-		len(session.ModelProvider) > 128 || len(session.Model) > 128 || len(session.ReasoningEffort) > 32 {
+		len(session.ModelProvider) > 128 || len(session.Model) > 128 || len(session.ReasoningEffort) > 32 ||
+		len(session.ApprovalPolicy) > 32 || len(session.ApprovalsReviewer) > 32 || len(session.SandboxPolicy) > 32 {
 		return false
+	}
+	if session.HistoryDelta {
+		if !validRepoRef(session.HistoryBatchRef) || session.HistoryChunkCount < 1 || session.HistoryChunkCount > 4096 ||
+			session.HistoryChunkIndex < 0 || session.HistoryChunkIndex >= session.HistoryChunkCount {
+			return false
+		}
+	} else if session.HistoryBatchRef != "" || session.HistoryChunkIndex != 0 || session.HistoryChunkCount != 0 {
+		return false
+	}
+	if session.ApprovalPolicy != "" || session.ApprovalsReviewer != "" || session.SandboxPolicy != "" {
+		if !validRepoApprovalMode(session.ApprovalPolicy, session.ApprovalsReviewer, session.SandboxPolicy) {
+			return false
+		}
 	}
 	if requireStatus && session.Status != "active" && session.Status != "archived" {
 		return false
@@ -1141,10 +1164,14 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 		if message.Role != "user" && message.Role != "assistant" {
 			return false
 		}
+		if message.Role == "user" && message.Status != "success" ||
+			message.Role == "assistant" && message.Status != "pending" && message.Status != "success" {
+			return false
+		}
 		if len(message.Attachments) > 32 {
 			return false
 		}
-		if !validRepoRef(message.SourceTurnRef) || len(message.ExecutionEvents) > maxWorkspaceSessionEvents ||
+		if !validRepoRef(message.SourceTurnRef) || !validRepoRef(message.SourceMessageRef) || len(message.ExecutionEvents) > maxWorkspaceSessionEvents ||
 			(message.Role != "assistant" && len(message.ExecutionEvents) > 0) {
 			return false
 		}
@@ -1165,7 +1192,9 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 			seenAttachments[attachment.FileID] = struct{}{}
 		}
 		total += len(message.Content) + len(message.ReasoningContent)
-		if strings.TrimSpace(message.Content) == "" || total > maxWorkspaceSessionBytes {
+		if message.Role == "user" && strings.TrimSpace(message.Content) == "" ||
+			message.Role == "assistant" && strings.TrimSpace(message.Content) == "" && strings.TrimSpace(message.ReasoningContent) == "" && len(message.ExecutionEvents) == 0 ||
+			total > maxWorkspaceSessionBytes {
 			return false
 		}
 	}
@@ -1173,10 +1202,10 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 }
 
 func validWorkspaceSessionEvent(event workspaceSessionEvent) bool {
-	if event.Kind != "turn/started" && event.Kind != "item/completed" && event.Kind != "turn/completed" {
+	if event.Kind != "turn/started" && event.Kind != "item/started" && event.Kind != "item/completed" && event.Kind != "turn/completed" {
 		return false
 	}
-	if len(event.Payload) == 0 || len(event.Payload) > 1<<20 {
+	if !validRepoRef(event.SourceEventRef) || len(event.Payload) == 0 || len(event.Payload) > 1<<20 {
 		return false
 	}
 	var payload map[string]any
@@ -1206,7 +1235,7 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		threadUpdates["workspace_id"] = workspace.ID
 		changed = true
 	}
-	if !session.HistoryLoaded && activityAdvanced {
+	if !session.HistoryLoaded && activityAdvanced && thread.HistoryVersion < historyProjectionVersion {
 		threadUpdates["history_status"] = "unloaded"
 		threadUpdates["history_error"] = ""
 		changed = true
@@ -1243,6 +1272,20 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			conversationUpdates["reasoning_effort"] = reasoningEffort
 			changed = true
 		}
+		if validRepoApprovalMode(session.ApprovalPolicy, session.ApprovalsReviewer, session.SandboxPolicy) {
+			if conversation.ApprovalPolicy != session.ApprovalPolicy {
+				conversationUpdates["approval_policy"] = session.ApprovalPolicy
+				changed = true
+			}
+			if conversation.ApprovalsReviewer != session.ApprovalsReviewer {
+				conversationUpdates["approvals_reviewer"] = session.ApprovalsReviewer
+				changed = true
+			}
+			if conversation.SandboxPolicy != session.SandboxPolicy {
+				conversationUpdates["sandbox_policy"] = session.SandboxPolicy
+				changed = true
+			}
+		}
 	}
 	if len(conversationUpdates) > 0 {
 		if err := tx.Model(&conversation).UpdateColumns(conversationUpdates).Error; err != nil {
@@ -1264,33 +1307,43 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	if err := resolveWorkspaceSessionRunIDs(tx, thread, session.Messages); err != nil {
 		return false, err
 	}
-	var stored []model.Message
-	if err := tx.Where("conversation_id = ?", conversation.ID).Order("created_at ASC, id ASC").Find(&stored).Error; err != nil {
-		return false, err
+	replaceHistory := thread.HistoryVersion < historyProjectionVersion
+	if replaceHistory {
+		if err := tx.Unscoped().Where("conversation_id = ?", conversation.ID).Delete(&model.Attachment{}).Error; err != nil {
+			return false, err
+		}
+		if err := tx.Unscoped().Where("conversation_id = ?", conversation.ID).Delete(&model.Message{}).Error; err != nil {
+			return false, err
+		}
 	}
-
-	projectionMatches := len(stored) <= len(session.Messages)
-	if len(stored) > 0 {
-		for index := range stored {
-			if !projectionMatches || !historyMessageMatches(stored[index], session.Messages[index]) {
-				projectionMatches = false
-				break
-			}
+	refs := make([]string, 0, len(session.Messages))
+	for _, source := range session.Messages {
+		refs = append(refs, source.SourceMessageRef)
+	}
+	var stored []model.Message
+	if len(refs) > 0 {
+		if err := tx.Where("conversation_id = ? AND source_ref IN ?", conversation.ID, refs).Find(&stored).Error; err != nil {
+			return false, err
 		}
-		if !projectionMatches {
-			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Attachment{}).Error; err != nil {
-				return false, err
-			}
-			if err := tx.Where("conversation_id = ?", conversation.ID).Delete(&model.Message{}).Error; err != nil {
-				return false, err
-			}
-			stored = nil
-		}
+	}
+	storedByRef := make(map[string]*model.Message, len(stored))
+	for index := range stored {
+		storedByRef[stored[index].SourceRef] = &stored[index]
 	}
 	var parentID *uint
-	for index, source := range session.Messages {
-		if index < len(stored) {
-			storedMessage := &stored[index]
+	if session.HistoryDelta && len(refs) > 0 {
+		var previous model.Message
+		query := tx.Where("conversation_id = ? AND source_ref NOT IN ?", conversation.ID, refs).
+			Order("created_at DESC, id DESC").First(&previous)
+		if query.Error == nil {
+			parentID = &previous.ID
+		} else if !dberror.IsRecordNotFound(query.Error) {
+			return false, query.Error
+		}
+	}
+	for _, source := range session.Messages {
+		messageStatus := workspaceSessionMessageStatus(source)
+		if storedMessage := storedByRef[source.SourceMessageRef]; storedMessage != nil {
 			updates := map[string]any{}
 			if storedMessage.Content != source.Content {
 				updates["content"] = source.Content
@@ -1301,11 +1354,15 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 			if storedMessage.RunID != source.RunID {
 				updates["run_id"] = source.RunID
 			}
+			if storedMessage.Status != messageStatus {
+				updates["status"] = messageStatus
+			}
 			if (parentID == nil && storedMessage.ParentMessageID != nil) ||
 				(parentID != nil && (storedMessage.ParentMessageID == nil || *storedMessage.ParentMessageID != *parentID)) {
 				updates["parent_message_id"] = parentID
 			}
 			if len(updates) > 0 {
+				updates["updated_at"] = now
 				if err := tx.Model(storedMessage).Updates(updates).Error; err != nil {
 					return false, err
 				}
@@ -1320,7 +1377,8 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		message := model.Message{
 			ConversationID: conversation.ID, UserID: thread.UserID, PublicID: newChatPublicID(),
 			ParentMessageID: parentID, Role: source.Role, ContentType: "text", Content: source.Content,
-			RunID: source.RunID, ReasoningContent: source.ReasoningContent, BranchReason: "default", Status: "success",
+			RunID: source.RunID, SourceRef: source.SourceMessageRef, ReasoningContent: source.ReasoningContent,
+			BranchReason: "default", Status: messageStatus,
 			BaseModel: model.BaseModel{CreatedAt: createdAt, UpdatedAt: createdAt},
 		}
 		if err := tx.Create(&message).Error; err != nil {
@@ -1331,20 +1389,27 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		parentID = &message.ID
 	}
-	if err := syncWorkspaceSessionExecutionEvents(tx, &conversation, session.Messages, thread.HistoryVersion < historyProjectionVersion, now); err != nil {
+	if err := syncWorkspaceSessionExecutionEvents(tx, &conversation, session.Messages, replaceHistory, now); err != nil {
 		return false, err
 	}
 	if err := tx.Model(thread).Updates(map[string]any{"history_status": "loaded", "history_error": "", "history_version": historyProjectionVersion, "updated_at": now}).Error; err != nil {
 		return false, err
 	}
-	updates := map[string]any{
-		"message_count": len(session.Messages), "updated_at": sessionActivity,
+	var messageCount int64
+	if err := tx.Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&messageCount).Error; err != nil {
+		return false, err
 	}
+	updates := map[string]any{"message_count": messageCount, "updated_at": sessionActivity}
 	if modelName := strings.TrimSpace(session.Model); modelName != "" {
 		updates["model"] = modelName
 	}
 	if reasoningEffort := strings.TrimSpace(session.ReasoningEffort); reasoningEffort != "" {
 		updates["reasoning_effort"] = reasoningEffort
+	}
+	if validRepoApprovalMode(session.ApprovalPolicy, session.ApprovalsReviewer, session.SandboxPolicy) {
+		updates["approval_policy"] = session.ApprovalPolicy
+		updates["approvals_reviewer"] = session.ApprovalsReviewer
+		updates["sandbox_policy"] = session.SandboxPolicy
 	}
 	if title := strings.TrimSpace(session.Name); title != "" {
 		updates["title"] = truncateRunes(title, 255)
@@ -1416,8 +1481,8 @@ func syncWorkspaceMessageAttachments(tx *gorm.DB, message *model.Message, source
 	return tx.Create(&rows).Error
 }
 
-func historyMessageMatches(stored model.Message, source workspaceSessionMessage) bool {
-	return stored.Role == source.Role && stored.Content == source.Content && stored.ReasoningContent == source.ReasoningContent
+func workspaceSessionMessageStatus(message workspaceSessionMessage) string {
+	return message.Status
 }
 
 func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messages []workspaceSessionMessage) error {
@@ -1456,33 +1521,18 @@ func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messa
 
 func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conversation, messages []workspaceSessionMessage, replaceHistory bool, now time.Time) error {
 	if replaceHistory {
-		if err := tx.Where("conversation_id = ? AND source_key LIKE ?", conversation.ID, "history:%").Delete(&model.ConversationExecutionEvent{}).Error; err != nil {
+		if err := tx.Unscoped().Where("conversation_id = ? AND source_key LIKE ?", conversation.ID, "history:%").Delete(&model.ConversationExecutionEvent{}).Error; err != nil {
 			return err
 		}
 	}
-	runIDs := make([]string, 0, len(messages)/2)
-	seenRunIDs := make(map[string]struct{}, len(messages)/2)
-	for _, message := range messages {
-		if message.Role != "assistant" || message.RunID == "" || len(message.ExecutionEvents) == 0 {
-			continue
-		}
-		if _, exists := seenRunIDs[message.RunID]; exists {
-			continue
-		}
-		seenRunIDs[message.RunID] = struct{}{}
-		runIDs = append(runIDs, message.RunID)
-	}
-	if len(runIDs) == 0 {
-		return nil
-	}
-	var existingRunIDs []string
-	if err := tx.Model(&model.ConversationExecutionEvent{}).Distinct("run_id").
-		Where("conversation_id = ? AND run_id IN ?", conversation.ID, runIDs).Pluck("run_id", &existingRunIDs).Error; err != nil {
+	var existingKeys []string
+	if err := tx.Model(&model.ConversationExecutionEvent{}).
+		Where("conversation_id = ? AND source_key LIKE ?", conversation.ID, "history:%").Pluck("source_key", &existingKeys).Error; err != nil {
 		return err
 	}
-	existing := make(map[string]struct{}, len(existingRunIDs))
-	for _, runID := range existingRunIDs {
-		existing[runID] = struct{}{}
+	existing := make(map[string]struct{}, len(existingKeys))
+	for _, sourceKey := range existingKeys {
+		existing[sourceKey] = struct{}{}
 	}
 
 	sequence := conversation.ExecutionEventSeq
@@ -1490,23 +1540,26 @@ func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conver
 		if message.Role != "assistant" || message.RunID == "" || len(message.ExecutionEvents) == 0 {
 			continue
 		}
-		if _, exists := existing[message.RunID]; exists {
-			continue
-		}
 		occurredAt := validSessionTime(message.CreatedAt, now)
 		rows := make([]model.ConversationExecutionEvent, 0, len(message.ExecutionEvents))
-		for index, event := range message.ExecutionEvents {
+		for _, event := range message.ExecutionEvents {
+			sourceKey := workspaceSessionEventSourceKey(message.RunID, event)
+			if _, exists := existing[sourceKey]; exists {
+				continue
+			}
 			sequence++
 			rows = append(rows, model.ConversationExecutionEvent{
 				ConversationID: conversation.ID, UserID: conversation.UserID, RunID: message.RunID,
-				SourceKey: fmt.Sprintf("history:%s:%d", message.RunID, index), Seq: sequence,
+				SourceKey: sourceKey, Seq: sequence,
 				Kind: event.Kind, PayloadJSON: string(event.Payload), OccurredAt: occurredAt,
 			})
+			existing[sourceKey] = struct{}{}
 		}
-		if err := tx.CreateInBatches(&rows, 500).Error; err != nil {
-			return err
+		if len(rows) > 0 {
+			if err := tx.CreateInBatches(&rows, 500).Error; err != nil {
+				return err
+			}
 		}
-		existing[message.RunID] = struct{}{}
 	}
 	if sequence == conversation.ExecutionEventSeq {
 		return nil
@@ -1515,12 +1568,142 @@ func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conver
 	return tx.Model(conversation).Update("execution_event_seq", sequence).Error
 }
 
+func workspaceSessionEventSourceKey(runID string, event workspaceSessionEvent) string {
+	digest := sha256.Sum256([]byte(runID + "\n" + event.SourceEventRef + "\n" + event.Kind + "\n" + string(event.Payload)))
+	return "history:" + hex.EncodeToString(digest[:])
+}
+
+func collectWorkspaceSessionHistoryBatch(
+	tx *gorm.DB,
+	runtimeProfileID uint,
+	thread *model.AgentThread,
+	current workspaceSession,
+) (workspaceSession, bool, error) {
+	if thread == nil || thread.SourceThreadRef == nil {
+		return workspaceSession{}, false, repository.ErrConflict
+	}
+	var pending []model.AgentEvent
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("runtime_profile_id = ? AND thread_id = ? AND kind = ? AND source_thread_ref = ? AND conversation_projected_at IS NULL",
+			runtimeProfileID, thread.ID, agentprotocol.SessionHistoryEventKind, *thread.SourceThreadRef).
+		Order("id ASC").Find(&pending).Error; err != nil {
+		return workspaceSession{}, false, err
+	}
+	chunks := make(map[int]workspaceSession, current.HistoryChunkCount)
+	for _, event := range pending {
+		var chunk workspaceSession
+		if json.Unmarshal([]byte(event.PayloadJSON), &chunk) != nil || chunk.HistoryBatchRef != current.HistoryBatchRef {
+			continue
+		}
+		if !chunk.HistoryLoaded || !chunk.HistoryDelta || !validWorkspaceSession(chunk, false) ||
+			chunk.SourceThreadRef != current.SourceThreadRef || chunk.HistoryChunkCount != current.HistoryChunkCount {
+			return workspaceSession{}, false, repository.ErrConflict
+		}
+		if existing, duplicate := chunks[chunk.HistoryChunkIndex]; duplicate {
+			left, _ := json.Marshal(existing)
+			right, _ := json.Marshal(chunk)
+			if string(left) != string(right) {
+				return workspaceSession{}, false, repository.ErrConflict
+			}
+			continue
+		}
+		chunks[chunk.HistoryChunkIndex] = chunk
+	}
+	if existing, duplicate := chunks[current.HistoryChunkIndex]; duplicate {
+		left, _ := json.Marshal(existing)
+		right, _ := json.Marshal(current)
+		if string(left) != string(right) {
+			return workspaceSession{}, false, repository.ErrConflict
+		}
+	} else {
+		chunks[current.HistoryChunkIndex] = current
+	}
+	if len(chunks) != current.HistoryChunkCount {
+		return workspaceSession{}, false, nil
+	}
+
+	ordered := make([]workspaceSession, current.HistoryChunkCount)
+	for index := range ordered {
+		chunk, exists := chunks[index]
+		if !exists {
+			return workspaceSession{}, false, nil
+		}
+		ordered[index] = chunk
+	}
+	merged, err := mergeWorkspaceSessionHistoryChunks(ordered)
+	if err != nil {
+		return workspaceSession{}, false, err
+	}
+	return merged, true, nil
+}
+
+func mergeWorkspaceSessionHistoryChunks(ordered []workspaceSession) (workspaceSession, error) {
+	if len(ordered) == 0 {
+		return workspaceSession{}, repository.ErrConflict
+	}
+	merged := ordered[0]
+	merged.Messages = nil
+	messageIndexes := make(map[string]int)
+	eventRefs := make(map[string]map[string]struct{})
+	metadata := workspaceSessionBatchMetadata(ordered[0])
+	for _, chunk := range ordered {
+		if string(metadata) != string(workspaceSessionBatchMetadata(chunk)) {
+			return workspaceSession{}, repository.ErrConflict
+		}
+		for _, message := range chunk.Messages {
+			index, exists := messageIndexes[message.SourceMessageRef]
+			if !exists {
+				message.ExecutionEvents = append([]workspaceSessionEvent(nil), message.ExecutionEvents...)
+				merged.Messages = append(merged.Messages, message)
+				index = len(merged.Messages) - 1
+				messageIndexes[message.SourceMessageRef] = index
+				eventRefs[message.SourceMessageRef] = make(map[string]struct{}, len(message.ExecutionEvents))
+				for _, event := range message.ExecutionEvents {
+					if _, duplicate := eventRefs[message.SourceMessageRef][event.SourceEventRef]; duplicate {
+						return workspaceSession{}, repository.ErrConflict
+					}
+					eventRefs[message.SourceMessageRef][event.SourceEventRef] = struct{}{}
+				}
+				continue
+			}
+			stored := &merged.Messages[index]
+			if !sameWorkspaceSessionMessageBase(*stored, message) {
+				return workspaceSession{}, repository.ErrConflict
+			}
+			for _, event := range message.ExecutionEvents {
+				if _, duplicate := eventRefs[message.SourceMessageRef][event.SourceEventRef]; duplicate {
+					return workspaceSession{}, repository.ErrConflict
+				}
+				eventRefs[message.SourceMessageRef][event.SourceEventRef] = struct{}{}
+				stored.ExecutionEvents = append(stored.ExecutionEvents, event)
+			}
+		}
+	}
+	if !validWorkspaceSession(merged, false) {
+		return workspaceSession{}, repository.ErrConflict
+	}
+	return merged, nil
+}
+
+func workspaceSessionBatchMetadata(session workspaceSession) json.RawMessage {
+	session.Messages = nil
+	session.HistoryChunkIndex = 0
+	encoded, _ := json.Marshal(session)
+	return encoded
+}
+
+func sameWorkspaceSessionMessageBase(left, right workspaceSessionMessage) bool {
+	return left.Role == right.Role && left.Status == right.Status && left.Content == right.Content && left.ReasoningContent == right.ReasoningContent &&
+		left.SourceTurnRef == right.SourceTurnRef && left.SourceMessageRef == right.SourceMessageRef &&
+		left.CreatedAt == right.CreatedAt && slices.Equal(left.Attachments, right.Attachments)
+}
+
 func syncThreadHistory(tx *gorm.DB, command *model.AgentCommand, raw json.RawMessage, now time.Time) error {
 	if command.ThreadID == nil || command.WorkspaceID == nil {
 		return repository.ErrConflict
 	}
 	var session workspaceSession
-	if json.Unmarshal(raw, &session) != nil || !session.HistoryLoaded || !validWorkspaceSession(session, false) {
+	if json.Unmarshal(raw, &session) != nil || !session.HistoryLoaded || session.HistoryDelta || !validWorkspaceSession(session, false) {
 		return repository.ErrConflict
 	}
 	var thread model.AgentThread
@@ -1768,6 +1951,53 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 			projected.WorkspaceID = &workspace.ID
 			projected.ConversationProjectedAt = &now
 			applied.ConversationPublicIDs = changed
+		} else if projected.Kind == agentprotocol.SessionHistoryEventKind {
+			var session workspaceSession
+			if json.Unmarshal([]byte(projected.PayloadJSON), &session) != nil || !session.HistoryLoaded || !session.HistoryDelta ||
+				!validWorkspaceSession(session, false) || session.SourceThreadRef != projected.SourceThreadRef {
+				return repository.ErrConflict
+			}
+			var thread model.AgentThread
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("runtime_profile_id = ? AND source_thread_ref = ?", runtimeProfileID, projected.SourceThreadRef).
+				First(&thread).Error; err != nil {
+				return err
+			}
+			projected.ThreadID = &thread.ID
+			projected.WorkspaceID = &thread.WorkspaceID
+			merged, complete, err := collectWorkspaceSessionHistoryBatch(tx, runtimeProfileID, &thread, session)
+			if err != nil {
+				return err
+			}
+			if complete {
+				projected.ConversationProjectedAt = &now
+				var conversation model.Conversation
+				if err := tx.Select("public_id").First(&conversation, thread.ConversationID).Error; err != nil {
+					return err
+				}
+				if thread.HistoryVersion >= historyProjectionVersion {
+					var workspace model.AgentWorkspace
+					if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
+						return err
+					}
+					merged.Status = thread.Status
+					changed, syncErr := syncExistingWorkspaceSession(tx, &thread, &workspace, merged, now)
+					if syncErr != nil {
+						return syncErr
+					}
+					if changed {
+						applied.ConversationPublicIDs = []string{conversation.PublicID}
+					}
+				} else {
+					applied.ConversationPublicIDs = []string{conversation.PublicID}
+				}
+				if err := tx.Model(&model.AgentEvent{}).
+					Where("runtime_profile_id = ? AND thread_id = ? AND kind = ? AND source_thread_ref = ? AND conversation_projected_at IS NULL",
+						runtimeProfileID, thread.ID, agentprotocol.SessionHistoryEventKind, projected.SourceThreadRef).
+					Update("conversation_projected_at", now).Error; err != nil {
+					return err
+				}
+			}
 		} else {
 			if err := projectAgentEvent(tx, &projected); err != nil {
 				return err
@@ -1820,6 +2050,11 @@ func loadAppliedEventFrame(tx *gorm.DB, bridgeFrameID uint, acknowledged uint64,
 		return err
 	}
 	result.ConversationID = thread.ConversationID
+	var conversation model.Conversation
+	if err := tx.Select("public_id").First(&conversation, thread.ConversationID).Error; err != nil {
+		return err
+	}
+	result.ConversationPublicIDs = []string{conversation.PublicID}
 	if event.TurnID == nil {
 		return nil
 	}

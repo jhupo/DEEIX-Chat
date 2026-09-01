@@ -1430,12 +1430,16 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 }
 
 func terminalChangeNotification(identity *ConnectionIdentity, command *domainagent.Command) *ChangeNotification {
-	if identity == nil || command == nil || command.Kind != "thread.read" || strings.TrimSpace(command.ConversationPublicID) == "" {
+	if identity == nil || command == nil || strings.TrimSpace(command.ConversationPublicID) == "" {
 		return nil
+	}
+	kind := "command/terminal"
+	if command.Kind == "thread.read" {
+		kind = agentprotocol.SessionHistoryEventKind
 	}
 	return &ChangeNotification{
 		UserID: identity.UserID, DeviceID: identity.DeviceID,
-		ConversationPublicIDs: []string{command.ConversationPublicID}, Kind: "thread/history/updated",
+		ConversationPublicIDs: []string{command.ConversationPublicID}, Kind: kind,
 	}
 }
 
@@ -1492,16 +1496,12 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 			return applied.Acknowledged, fmt.Errorf("%w: %v", ErrProjectionDeferred, err)
 		}
 	}
-	if envelope.Kind == agentprotocol.SessionSnapshotEventKind {
-		if len(applied.ConversationPublicIDs) > 0 && s.notify != nil {
-			s.notify(ChangeNotification{
-				UserID:                identity.UserID,
-				DeviceID:              identity.DeviceID,
-				ConversationPublicIDs: append([]string(nil), applied.ConversationPublicIDs...),
-				Kind:                  envelope.Kind,
-			})
-		}
-	} else {
+	if len(applied.ConversationPublicIDs) > 0 && s.notify != nil {
+		s.notify(ChangeNotification{
+			UserID: identity.UserID, DeviceID: identity.DeviceID,
+			ConversationPublicIDs: append([]string(nil), applied.ConversationPublicIDs...), Kind: envelope.Kind,
+		})
+	} else if envelope.Kind != agentprotocol.SessionSnapshotEventKind && envelope.Kind != agentprotocol.SessionHistoryEventKind {
 		s.notifyUser(identity.UserID)
 	}
 	return applied.Acknowledged, nil

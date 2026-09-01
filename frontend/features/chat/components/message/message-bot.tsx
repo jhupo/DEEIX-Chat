@@ -270,8 +270,6 @@ export function ChatMessageBot({
     onEditImageAttachment,
     readOnly,
   ]);
-  const processAutoCollapseReady = Boolean(hasStreamdownContent || item.inlineAlert);
-
   if (!readOnly && isEditing) {
     const nextContent = editingValue.trim();
     const unchanged = nextContent === item.content.trim();
@@ -310,7 +308,7 @@ export function ChatMessageBot({
 
   return (
     <div className="group/assistant-message flex w-full flex-col items-start">
-      <MessageAgentRun agentRun={agentRun} autoCollapseReady={processAutoCollapseReady} />
+      <MessageAgentRun agentRun={agentRun} />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

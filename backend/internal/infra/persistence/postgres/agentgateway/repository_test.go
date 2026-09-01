@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -33,10 +34,12 @@ func TestRetriableThreadCreateFailure(t *testing.T) {
 func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
 	events := make([]workspaceSessionEvent, 1509)
 	for index := range events {
-		events[index] = workspaceSessionEvent{Kind: "item/completed", Payload: json.RawMessage(`{}`)}
+		events[index] = workspaceSessionEvent{
+			Kind: "item/completed", SourceEventRef: fmt.Sprintf("event-%d", index), Payload: json.RawMessage(`{}`),
+		}
 	}
 	session := workspaceSession{SourceThreadRef: "thread_source", HistoryLoaded: true, Messages: []workspaceSessionMessage{{
-		Role: "assistant", Content: "done", SourceTurnRef: "turn_source", ExecutionEvents: events,
+		Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn_source", SourceMessageRef: "message-assistant", ExecutionEvents: events,
 	}}}
 	if !validWorkspaceSession(session, false) {
 		t.Fatal("valid Codex turn exceeded the session projection limit")
@@ -66,8 +69,11 @@ func TestSyncWorkspaceSessionExecutionEventsReplacesDerivedHistory(t *testing.T)
 		t.Fatal(err)
 	}
 	messages := []workspaceSessionMessage{{
-		Role: "assistant", RunID: "run_history", CreatedAt: 1,
-		ExecutionEvents: []workspaceSessionEvent{{Kind: "item/completed", Payload: json.RawMessage(`{"itemID":"compact","item":{"kind":"contextCompaction","status":"completed"}}`)}},
+		Role: "assistant", Status: "success", RunID: "run_history", CreatedAt: 1,
+		ExecutionEvents: []workspaceSessionEvent{{
+			Kind: "item/completed", SourceEventRef: "item-compact",
+			Payload: json.RawMessage(`{"itemID":"compact","item":{"kind":"contextCompaction","status":"completed"}}`),
+		}},
 	}}
 	if err := syncWorkspaceSessionExecutionEvents(database, &conversation, messages, true, time.Now().UTC()); err != nil {
 		t.Fatal(err)
@@ -79,6 +85,216 @@ func TestSyncWorkspaceSessionExecutionEventsReplacesDerivedHistory(t *testing.T)
 	if len(events) != 2 || events[0].RunID != "run_live" || events[1].RunID != "run_history" ||
 		events[1].Seq != 3 || events[1].Kind != "item/completed" {
 		t.Fatalf("reprojected execution events = %#v", events)
+	}
+}
+
+func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationRun{},
+		&model.ConversationExecutionEvent{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	conversation := model.Conversation{
+		PublicID: "conversation_history_delta", UserID: 7, Title: "Any project", ExecutionType: "gateway", Status: "active",
+		BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-history-delta", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-history-delta"
+	thread := model.AgentThread{
+		PublicID: "agth_history_delta", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, WorkspaceID: workspace.ID,
+		ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef, Status: "active", HistoryStatus: "loading", HistoryVersion: 5,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	completedEvents := []workspaceSessionEvent{
+		{Kind: "turn/started", SourceEventRef: "turn-started", Payload: json.RawMessage(`{"turn":{"status":"running"}}`)},
+		{Kind: "turn/completed", SourceEventRef: "turn-completed", Payload: json.RawMessage(`{"turn":{"status":"completed"}}`)},
+	}
+	initial := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, Status: "active", UpdatedAt: now.Unix(),
+		Messages: []workspaceSessionMessage{
+			{Role: "user", Status: "success", Content: "first", SourceTurnRef: "turn-first", SourceMessageRef: "message-first-user", CreatedAt: now.Unix()},
+			{Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-first", SourceMessageRef: "message-first-assistant", CreatedAt: now.Unix(), ExecutionEvents: completedEvents},
+		},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, initial, now); err != nil || !changed {
+		t.Fatalf("initial history projection: changed=%v err=%v", changed, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	active := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(time.Second).Unix(),
+		Messages: []workspaceSessionMessage{
+			{Role: "user", Status: "success", Content: "second", SourceTurnRef: "turn-second", SourceMessageRef: "message-second-user", CreatedAt: now.Add(time.Second).Unix()},
+			{Role: "assistant", Status: "pending", ReasoningContent: "planning", SourceTurnRef: "turn-second", SourceMessageRef: "message-second-assistant", CreatedAt: now.Add(time.Second).Unix(), ExecutionEvents: []workspaceSessionEvent{
+				{Kind: "turn/started", SourceEventRef: "turn-started", Payload: json.RawMessage(`{"turn":{"status":"running"}}`)},
+				{Kind: "item/completed", SourceEventRef: "item-reasoning", Payload: json.RawMessage(`{"itemID":"reasoning","item":{"kind":"reasoning","status":"inProgress"}}`)},
+			}},
+		},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, active, now.Add(time.Second)); err != nil || !changed {
+		t.Fatalf("active history delta: changed=%v err=%v", changed, err)
+	}
+	var activeAssistant model.Message
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-assistant").First(&activeAssistant).Error; err != nil ||
+		activeAssistant.Status != "pending" || activeAssistant.Content != "" || activeAssistant.ReasoningContent != "planning" {
+		t.Fatalf("active assistant = %#v err=%v", activeAssistant, err)
+	}
+	completed := active
+	completed.Messages[1].Status = "success"
+	completed.Messages[1].Content = "second done"
+	completed.Messages[1].ExecutionEvents = append(completed.Messages[1].ExecutionEvents, workspaceSessionEvent{
+		Kind: "turn/completed", SourceEventRef: "turn-completed", Payload: json.RawMessage(`{"turn":{"status":"completed"}}`),
+	})
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, completed, now.Add(2*time.Second)); err != nil || !changed {
+		t.Fatalf("completed history delta: changed=%v err=%v", changed, err)
+	}
+	var completedAssistant model.Message
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-assistant").First(&completedAssistant).Error; err != nil ||
+		completedAssistant.ID != activeAssistant.ID || completedAssistant.Status != "success" || completedAssistant.Content != "second done" {
+		t.Fatalf("completed assistant = %#v err=%v", completedAssistant, err)
+	}
+	var liveCount, totalCount int64
+	if err := database.Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&liveCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Unscoped().Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&totalCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if liveCount != 4 || totalCount != 4 {
+		t.Fatalf("message projection created stale rows: live=%d total=%d", liveCount, totalCount)
+	}
+	var secondUser model.Message
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-user").First(&secondUser).Error; err != nil ||
+		secondUser.ParentMessageID == nil || completedAssistant.ParentMessageID == nil || *completedAssistant.ParentMessageID != secondUser.ID {
+		t.Fatalf("delta message lineage = user:%#v assistant:%#v err=%v", secondUser, completedAssistant, err)
+	}
+}
+
+func TestWorkspaceHistoryBatchProjectsOnlyAfterFinalChunk(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{},
+		&model.AgentBridgeFrame{}, &model.AgentEvent{}, &model.AgentTurn{}, &model.Conversation{},
+		&model.Message{}, &model.Attachment{}, &model.ConversationRun{}, &model.ConversationExecutionEvent{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 9, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_history_batch", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("1", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{PublicID: "codex-history-batch", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready"}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-history-batch", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.Conversation{
+		PublicID: "conversation_history_batch", UserID: 7, Title: "All projects", ExecutionType: "gateway", Status: "active",
+		BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-history-batch"
+	thread := model.AgentThread{
+		PublicID: "agth_history_batch", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: "active", HistoryStatus: "loaded", HistoryVersion: historyProjectionVersion,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	base := workspaceSession{
+		SourceThreadRef: sourceThreadRef, Name: "All projects", Model: "gpt-5.6-sol", ReasoningEffort: "high",
+		ApprovalPolicy: "never", ApprovalsReviewer: "user", SandboxPolicy: "danger-full-access",
+		HistoryLoaded: true, HistoryDelta: true, HistoryBatchRef: "history_batch_0123456789abcdef", HistoryChunkCount: 2,
+		UpdatedAt: now.Add(time.Second).Unix(),
+	}
+	chunks := []workspaceSession{base, base}
+	chunks[0].Messages = []workspaceSessionMessage{{
+		Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-source", SourceMessageRef: "message-assistant", CreatedAt: now.Unix(),
+		ExecutionEvents: []workspaceSessionEvent{{Kind: "turn/started", SourceEventRef: "turn:started", Payload: json.RawMessage(`{"turn":{"status":"running"}}`)}},
+	}}
+	chunks[1].HistoryChunkIndex = 1
+	chunks[1].Messages = []workspaceSessionMessage{{
+		Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-source", SourceMessageRef: "message-assistant", CreatedAt: now.Unix(),
+		ExecutionEvents: []workspaceSessionEvent{{Kind: "turn/completed", SourceEventRef: "turn:completed", Payload: json.RawMessage(`{"turn":{"status":"completed"}}`)}},
+	}}
+	repo := NewRepo(database)
+	for index, chunk := range chunks {
+		payload, err := json.Marshal(chunk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		applied, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, uint64(index+1), strings.Repeat(fmt.Sprint(index+2), 64), &domainagent.Event{
+			PublicID: fmt.Sprintf("agev_history_batch_%d", index), Kind: "thread/history/updated",
+			SourceThreadRef: sourceThreadRef, PayloadJSON: string(payload), OccurredAt: now.Add(time.Duration(index+1) * time.Second),
+		}, now.Add(time.Duration(index+1)*time.Second))
+		if err != nil || applied.Acknowledged != uint64(index+1) {
+			t.Fatalf("apply history chunk %d: %#v %v", index, applied, err)
+		}
+		if index == 0 && len(applied.ConversationPublicIDs) != 0 {
+			t.Fatalf("partial batch notified the conversation: %#v", applied)
+		}
+		if index == 1 && !slices.Equal(applied.ConversationPublicIDs, []string{conversation.PublicID}) {
+			t.Fatalf("completed batch notification = %#v", applied)
+		}
+	}
+	var messages []model.Message
+	if err := database.Where("conversation_id = ?", conversation.ID).Find(&messages).Error; err != nil || len(messages) != 1 ||
+		messages[0].Content != "done" || messages[0].Status != "success" {
+		t.Fatalf("atomic history messages = %#v err=%v", messages, err)
+	}
+	var events []model.ConversationExecutionEvent
+	if err := database.Where("conversation_id = ?", conversation.ID).Order("seq ASC").Find(&events).Error; err != nil ||
+		len(events) != 2 || events[0].Kind != "turn/started" || events[1].Kind != "turn/completed" {
+		t.Fatalf("atomic history events = %#v err=%v", events, err)
+	}
+	if err := database.First(&conversation, conversation.ID).Error; err != nil || conversation.Model != "gpt-5.6-sol" ||
+		conversation.ReasoningEffort != "high" || conversation.ApprovalPolicy != "never" || conversation.SandboxPolicy != "danger-full-access" {
+		t.Fatalf("history settings = %#v err=%v", conversation, err)
+	}
+	var staged int64
+	if err := database.Model(&model.AgentEvent{}).Where("thread_id = ? AND conversation_projected_at IS NULL", thread.ID).Count(&staged).Error; err != nil || staged != 0 {
+		t.Fatalf("staged history chunks = %d err=%v", staged, err)
+	}
+}
+
+func TestSessionHistoryBatchRejectsDuplicateEventReferencesWithinChunk(t *testing.T) {
+	event := workspaceSessionEvent{
+		Kind: "item/completed", SourceEventRef: "item-event",
+		Payload: json.RawMessage(`{"item":{"kind":"commandExecution","status":"completed"}}`),
+	}
+	chunk := workspaceSession{
+		SourceThreadRef: "thread-history-duplicate", Status: "active", HistoryLoaded: true, HistoryDelta: true,
+		HistoryBatchRef: "history_batch_duplicate", HistoryChunkCount: 1,
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-source",
+			SourceMessageRef: "message-assistant", ExecutionEvents: []workspaceSessionEvent{event, event},
+		}},
+	}
+	if _, err := mergeWorkspaceSessionHistoryChunks([]workspaceSession{chunk}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("duplicate event references were accepted: %v", err)
 	}
 }
 
@@ -127,13 +343,28 @@ func TestGetCommandReportsDevicePresence(t *testing.T) {
 	}
 }
 
-func TestHistoryMessageMatchesExactProjection(t *testing.T) {
-	content := strings.Repeat("x", 16*1024)
-	if !historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content, RunID: "run_test"}) {
-		t.Fatal("identical history messages did not match")
+func TestWorkspaceSessionProjectionTracksActiveAssistantAndEventRevisions(t *testing.T) {
+	active := workspaceSessionMessage{Role: "assistant", Status: "pending", ExecutionEvents: []workspaceSessionEvent{{
+		Kind: "turn/started", SourceEventRef: "turn-started", Payload: json.RawMessage(`{"turn":{"status":"running"}}`),
+	}}}
+	if status := workspaceSessionMessageStatus(active); status != "pending" {
+		t.Fatalf("active assistant status = %q", status)
 	}
-	if historyMessageMatches(model.Message{Role: "assistant", Content: content}, workspaceSessionMessage{Role: "assistant", Content: content + "suffix"}) {
-		t.Fatal("a message prefix was treated as an exact history match")
+	completed := active
+	completed.Status = "success"
+	completed.ExecutionEvents = append(completed.ExecutionEvents, workspaceSessionEvent{
+		Kind: "turn/completed", SourceEventRef: "turn-completed", Payload: json.RawMessage(`{"turn":{"status":"completed"}}`),
+	})
+	if status := workspaceSessionMessageStatus(completed); status != "success" {
+		t.Fatalf("completed assistant status = %q", status)
+	}
+	first := workspaceSessionEventSourceKey("run_test", active.ExecutionEvents[0])
+	replayed := workspaceSessionEventSourceKey("run_test", active.ExecutionEvents[0])
+	revised := workspaceSessionEventSourceKey("run_test", workspaceSessionEvent{
+		Kind: "turn/started", SourceEventRef: "turn-started", Payload: json.RawMessage(`{"turn":{"status":"running","progress":1}}`),
+	})
+	if first != replayed || first == revised {
+		t.Fatalf("event source keys are not payload-revision stable: %q %q %q", first, replayed, revised)
 	}
 }
 
@@ -167,7 +398,7 @@ func TestWorkspaceHistoryDoesNotReplaceActiveGatewayMessages(t *testing.T) {
 	workspace := model.AgentWorkspace{ControlPlaneModel: model.ControlPlaneModel{ID: 9}, PublicID: "workspace-active"}
 	_, err := syncExistingWorkspaceSession(database, &thread, &workspace, workspaceSession{
 		SourceThreadRef: "source-thread", Name: conversation.Title, Status: "active", HistoryLoaded: true,
-		Messages: []workspaceSessionMessage{{Role: "user", Content: "older history", SourceTurnRef: "source-turn"}},
+		Messages: []workspaceSessionMessage{{Role: "user", Status: "success", Content: "older history", SourceTurnRef: "source-turn"}},
 	}, now.Add(time.Second))
 	if err != nil {
 		t.Fatal(err)
@@ -1062,7 +1293,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","sourceTurnRef":"source-turn-1","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","createdAt":1786615260,"executionEvents":[{"kind":"turn/started","payload":{"turn":{"status":"running"}}},{"kind":"item/completed","payload":{"itemID":"source-item-1","item":{"itemID":"source-item-1","kind":"reasoning","summary":["checked files"],"status":"completed"}}},{"kind":"turn/completed","payload":{"turn":{"status":"completed"}}}] }]}}}`
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260,"executionEvents":[{"kind":"turn/started","sourceEventRef":"turn-started","payload":{"turn":{"status":"running"}}},{"kind":"item/completed","sourceEventRef":"item-source-item-1","payload":{"itemID":"source-item-1","item":{"itemID":"source-item-1","kind":"reasoning","summary":["checked files"],"status":"completed"}}},{"kind":"turn/completed","sourceEventRef":"turn-completed","payload":{"turn":{"status":"completed"}}}] }]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
@@ -1092,7 +1323,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		importedConversation.UpdatedAt.Unix() != 1786615360 {
 		t.Fatalf("imported settings or recency mismatch: %#v %v", importedConversation, err)
 	}
-	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","content":"inspect the repository","sourceTurnRef":"source-turn-1","createdAt":1786615200},{"role":"assistant","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","createdAt":1786615260}]}`
+	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260}]}`
 	if err := syncThreadHistory(database, &storedHistoryCommand, json.RawMessage(blankSettingsHistory), now.Add(11*time.Second)); err != nil {
 		t.Fatalf("refresh thread history without settings: %v", err)
 	}
@@ -1184,7 +1415,8 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		SourceThreadRef: "source-thread-1", SourceTurnRef: "source-turn-1", SourceItemRef: "source-item-1",
 		PayloadJSON: `{"item":{"type":"agentMessage","text":""},"startedAtMs":1}`, OccurredAt: now.Add(13 * time.Second),
 	}
-	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 9, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack.Acknowledged != 9 {
+	if ack, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 9, strings.Repeat("0", 64), itemStarted, now.Add(13*time.Second)); err != nil || ack.Acknowledged != 9 ||
+		!slices.Equal(ack.ConversationPublicIDs, []string{conversation.PublicID}) {
 		t.Fatalf("apply item start: ack=%v err=%v", ack, err)
 	}
 	itemCompleted := &domainagent.Event{

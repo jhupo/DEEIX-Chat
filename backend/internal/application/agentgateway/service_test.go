@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -266,5 +267,13 @@ func TestThreadHistoryTerminalTargetsItsConversation(t *testing.T) {
 	}
 	if terminalChangeNotification(&ConnectionIdentity{UserID: 7}, &domainagent.Command{Kind: "turn.start"}) != nil {
 		t.Fatal("non-history terminal produced a conversation invalidation")
+	}
+	turnChange := terminalChangeNotification(
+		&ConnectionIdentity{UserID: 7, DeviceID: "agd_0123456789abcdef0123456789abcdef"},
+		&domainagent.Command{Kind: "turn.start", ConversationPublicID: "conversation_1"},
+	)
+	if turnChange == nil || turnChange.Kind != "command/terminal" ||
+		!slices.Equal(turnChange.ConversationPublicIDs, []string{"conversation_1"}) {
+		t.Fatalf("turn terminal change notification = %#v", turnChange)
 	}
 }

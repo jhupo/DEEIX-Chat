@@ -5,7 +5,6 @@ import * as React from "react";
 import { applyAgentExecutionEvent } from "@/features/chat/model/agent-run-store";
 import {
   shouldRetryConversationStream,
-  shouldPollConversationHistory,
   shouldRefreshMessagesAfterHistory,
   shouldSurfaceConversationLoadError,
 } from "@/features/chat/model/conversation-load-policy";
@@ -13,7 +12,6 @@ import { buildMediaImagePreviewMarkdown } from "@/features/chat/model/media-imag
 import {
   cancelMessageGeneration,
   ensureConversationHistory,
-  getConversationHistory,
   listMessagesPage,
   resumeMessageGenerationStream,
 } from "@/shared/api/conversation";
@@ -21,8 +19,6 @@ import type { MessageDTO } from "@/shared/api/conversation.types";
 import { resolveAccessToken } from "@/shared/auth/resolve-access-token";
 
 const MESSAGE_PAGE_SIZE = 30;
-const HISTORY_POLL_INTERVAL_MS = 500;
-const HISTORY_POLL_ATTEMPTS = 30;
 const RESUME_TEXT_FLUSH_INTERVAL_MS = 100;
 const RESUME_RETRY_INITIAL_DELAY_MS = 500;
 const RESUME_RETRY_MAX_DELAY_MS = 5_000;
@@ -229,16 +225,9 @@ export function useChatData(
           };
         });
 
-        let history = await ensureConversationHistory(token, conversationID);
-        for (let attempt = 0; shouldPollConversationHistory(initialData.results.length, history.status) && attempt < HISTORY_POLL_ATTEMPTS; attempt += 1) {
-          if (history.status === "error") {
-            throw new Error(history.error || t("loadFailed"));
-          }
-          await new Promise((resolve) => window.setTimeout(resolve, HISTORY_POLL_INTERVAL_MS));
-          if (cancelled) return;
-          history = await getConversationHistory(token, conversationID);
-        }
-        if (initialData.results.length === 0 && history.status !== "loaded") {
+        const history = await ensureConversationHistory(token, conversationID);
+        const initialHistoryStatus = history.status;
+        if (history.status === "error") {
           throw new Error(history.error || t("loadFailed"));
         }
         if (history.status !== "loaded") {
@@ -246,7 +235,7 @@ export function useChatData(
         }
         onHistoryLoadedRef.current?.();
 
-        if (!shouldRefreshMessagesAfterHistory(initialData.results.length)) {
+        if (!shouldRefreshMessagesAfterHistory(initialData.results.length, initialHistoryStatus)) {
           return;
         }
         const data = await listMessagesPage(token, conversationID, {

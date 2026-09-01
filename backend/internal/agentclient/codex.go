@@ -45,8 +45,8 @@ const maxExecutionTextBytes = 1 << 20
 const maxCommandExecutionOutputBytes = 256 << 10
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
-const codexSessionPageSize = 1000
-const codexHistoryPageSize = 8
+const codexSessionPageSize = 100
+const codexHistoryPageSize = 100
 const maxCodexHistoryTurns = 4096
 
 // Decline before app-server's five-minute MCP timeout so it can finish the turn normally.
@@ -76,10 +76,17 @@ var mappedNotifications = map[string]bool{
 	"warning": true, "configWarning": true, "account/login/completed": true,
 }
 
+var sessionExecutionItemKinds = map[string]bool{
+	"agentMessage": true, "reasoning": true, "contextCompaction": true,
+	"commandExecution": true, "fileChange": true, "mcpToolCall": true,
+	"dynamicToolCall": true, "collabToolCall": true, "webSearch": true,
+	"imageGeneration": true,
+}
+
 var dispatchedClientRequests = map[string]bool{
 	"initialize": true, "thread/start": true, "thread/resume": true, "thread/fork": true,
 	"thread/archive": true, "thread/delete": true, "thread/name/set": true, "thread/metadata/update": true,
-	"thread/unarchive": true, "thread/compact/start": true, "thread/list": true, "thread/read": true,
+	"thread/unarchive": true, "thread/unsubscribe": true, "thread/compact/start": true, "thread/list": true, "thread/read": true,
 	"thread/turns/list": true,
 	"skills/list":       true, "hooks/list": true, "plugin/list": true, "app/list": true, "turn/start": true,
 	"turn/steer": true, "turn/interrupt": true, "review/start": true, "model/list": true,
@@ -116,21 +123,32 @@ type workspaceSessionSnapshot struct {
 	Data        []map[string]any `json:"data"`
 }
 
+type watchedSession struct {
+	sourceThreadRef  string
+	providerThreadID string
+	revision         string
+	path             string
+	archived         bool
+}
+
 type CodexAdapter struct {
-	profileID   string
-	state       *StateStore
-	authMu      sync.RWMutex
-	authSummary string
-	codexHome   string
-	workspaceMu sync.RWMutex
-	workspaces  map[string]Workspace
-	threadMu    sync.RWMutex
-	threadCWD   map[string]string
-	rpc         *RPCClient
-	command     *exec.Cmd
-	version     string
-	onEvent     func(json.RawMessage) error
-	done        chan struct{}
+	profileID           string
+	state               *StateStore
+	authMu              sync.RWMutex
+	authSummary         string
+	codexHome           string
+	workspaceMu         sync.RWMutex
+	workspaces          map[string]Workspace
+	threadMu            sync.RWMutex
+	threadCWD           map[string]string
+	sessionMu           sync.Mutex
+	sessionCatalog      map[string]watchedSession
+	sessionCatalogReady bool
+	rpc                 *RPCClient
+	command             *exec.Cmd
+	version             string
+	onEvent             func(json.RawMessage) error
+	done                chan struct{}
 
 	mu                    sync.Mutex
 	pending               map[string]*pendingInteraction
@@ -302,8 +320,8 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 	adapter := &CodexAdapter{
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
-		executionItems: make(map[string]executionItemProjection),
-		workspaces:     make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
+		executionItems: make(map[string]executionItemProjection), sessionCatalog: make(map[string]watchedSession),
+		workspaces: make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -1167,12 +1185,12 @@ func (adapter *CodexAdapter) projectSessions(data any, workspace Workspace) (any
 	return map[string]any{"data": result}, nil
 }
 
-func (adapter *CodexAdapter) SessionSnapshots(ctx context.Context) ([]workspaceSessionSnapshot, error) {
+func (adapter *CodexAdapter) SessionSnapshots(ctx context.Context) ([]workspaceSessionSnapshot, []watchedSession, error) {
 	data, err := adapter.listSessions(ctx, map[string]any{
-		"sortKey": "recency_at", "sourceKinds": codexUserThreadSourceKinds,
+		"sortKey": "updated_at", "sourceKinds": codexUserThreadSourceKinds,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	adapter.workspaceMu.RLock()
 	workspaces := make([]Workspace, 0, len(adapter.workspaces))
@@ -1188,7 +1206,7 @@ func (adapter *CodexAdapter) SessionSnapshots(ctx context.Context) ([]workspaceS
 	return adapter.projectSessionSnapshots(data, workspaces)
 }
 
-func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Workspace) ([]workspaceSessionSnapshot, error) {
+func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Workspace) ([]workspaceSessionSnapshot, []watchedSession, error) {
 	sort.Slice(workspaces, func(left, right int) bool {
 		return workspaces[left].WorkspaceID < workspaces[right].WorkspaceID
 	})
@@ -1216,17 +1234,32 @@ func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Work
 	}
 	sourceRefs, err := adapter.state.PublishSources(adapter.profileID, "thread", providerIDs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sessionsByWorkspace := make([][]map[string]any, len(workspaces))
+	catalog := make([]watchedSession, 0, len(assigned))
 	for _, item := range assigned {
 		id := strings.TrimSpace(item.thread["id"].(string))
 		session, err := adapter.projectSessionSummaryWithRef(item.thread, sourceRefs[id])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if session != nil {
 			sessionsByWorkspace[item.workspaceIndex] = append(sessionsByWorkspace[item.workspaceIndex], session)
+			canonical, marshalErr := json.Marshal(session)
+			if marshalErr != nil {
+				return nil, nil, marshalErr
+			}
+			digest := sha256.Sum256(canonical)
+			sessionPath := canonicalSessionPath(stringField(item.thread, "path"))
+			if !adapter.sessionPathAllowed(sessionPath) {
+				sessionPath = ""
+			}
+			catalog = append(catalog, watchedSession{
+				sourceThreadRef: sourceRefs[id], providerThreadID: id,
+				revision: hex.EncodeToString(digest[:]), path: sessionPath,
+				archived: stringField(item.thread, "status") == "archived",
+			})
 		}
 	}
 	snapshots := make([]workspaceSessionSnapshot, 0, len(workspaces))
@@ -1240,7 +1273,7 @@ func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Work
 		})
 		canonical, err := json.Marshal(sessions)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		digest := sha256.Sum256(canonical)
 		snapshots = append(snapshots, workspaceSessionSnapshot{
@@ -1249,7 +1282,7 @@ func (adapter *CodexAdapter) projectSessionSnapshots(data any, workspaces []Work
 			Data:        sessions,
 		})
 	}
-	return snapshots, nil
+	return snapshots, adapter.updateSessionCatalog(catalog), nil
 }
 
 func (adapter *CodexAdapter) projectSessionSummary(thread map[string]any) (map[string]any, error) {
@@ -1407,6 +1440,39 @@ func (adapter *CodexAdapter) projectSessionDetailWithMessages(detail map[string]
 	}, nil
 }
 
+func applySessionSettings(session map[string]any, settings map[string]any) {
+	if session == nil || settings == nil {
+		return
+	}
+	if model := sessionText(settings["model"], 128); model != "" {
+		session["model"] = model
+	}
+	if effort := sessionText(settings["reasoningEffort"], 32); effort != "" {
+		session["reasoningEffort"] = effort
+	}
+	approvalPolicy := sessionText(settings["approvalPolicy"], 32)
+	approvalsReviewer := sessionText(settings["approvalsReviewer"], 32)
+	sandboxPolicy := codexSessionSandboxPolicy(settings["sandbox"])
+	if (approvalPolicy == "on-request" && (approvalsReviewer == "user" || approvalsReviewer == "auto_review") && sandboxPolicy == "workspace-write") ||
+		(approvalPolicy == "never" && approvalsReviewer == "user" && sandboxPolicy == "danger-full-access") {
+		session["approvalPolicy"] = approvalPolicy
+		session["approvalsReviewer"] = approvalsReviewer
+		session["sandboxPolicy"] = sandboxPolicy
+	}
+}
+
+func codexSessionSandboxPolicy(value any) string {
+	policy, _ := value.(map[string]any)
+	switch stringField(policy, "type") {
+	case "workspaceWrite":
+		return "workspace-write"
+	case "dangerFullAccess":
+		return "danger-full-access"
+	default:
+		return ""
+	}
+}
+
 func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThreadID string) (map[string]any, error) {
 	detail, err := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": providerThreadID, "includeTurns": false})
 	if err != nil {
@@ -1418,6 +1484,7 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 	}
 	messages := make([]any, 0, 64)
 	seenTurnIDs := make(map[string]struct{})
+	var latestTurn map[string]any
 	err = adapter.requestPages(ctx, "thread/turns/list", map[string]any{
 		"threadId": providerThreadID, "limit": codexHistoryPageSize, "sortDirection": "asc", "itemsView": "full",
 	}, maxCodexHistoryTurns, func(turns []any) error {
@@ -1434,6 +1501,7 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 				return errors.New("Codex thread turn history contains duplicate turns")
 			}
 			seenTurnIDs[turnID] = struct{}{}
+			latestTurn = turn
 		}
 		pageDetail := map[string]any{"thread": map[string]any{
 			"id": providerThreadID, "turns": turns,
@@ -1444,7 +1512,139 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 	if err != nil {
 		return nil, err
 	}
-	return adapter.projectSessionDetailWithMessages(detail, providerThreadID, messages)
+	projected, err := adapter.projectSessionDetailWithMessages(detail, providerThreadID, messages)
+	if err != nil {
+		return nil, err
+	}
+	if watched, found := adapter.watchedSessionByProviderID(providerThreadID); found && !watched.archived && sessionTurnTerminal(latestTurn) {
+		applySessionSettings(projected, adapter.readInactiveSessionSettings(ctx, providerThreadID))
+	}
+	return projected, nil
+}
+
+func (adapter *CodexAdapter) readSessionTail(ctx context.Context, session watchedSession) (map[string]any, error) {
+	detail, err := adapter.requestMap(ctx, "thread/read", map[string]any{"threadId": session.providerThreadID, "includeTurns": false})
+	if err != nil {
+		return nil, err
+	}
+	page, err := adapter.requestMap(ctx, "thread/turns/list", map[string]any{
+		"threadId": session.providerThreadID, "limit": 1, "sortDirection": "desc", "itemsView": "full",
+	})
+	if err != nil {
+		return nil, err
+	}
+	turns, ok := page["data"].([]any)
+	if !ok || len(turns) > 1 {
+		return nil, errors.New("Codex thread tail is invalid")
+	}
+	if len(turns) == 1 {
+		turn, turnOK := turns[0].(map[string]any)
+		_, itemsOK := turn["items"].([]any)
+		if !turnOK || strings.TrimSpace(stringField(turn, "id")) == "" || stringField(turn, "itemsView") != "full" || !itemsOK {
+			return nil, errors.New("Codex thread tail is invalid")
+		}
+	}
+	projected, err := adapter.projectSessionDetailWithMessages(detail, session.providerThreadID, adapter.projectSessionMessages(map[string]any{
+		"thread": map[string]any{"id": session.providerThreadID, "turns": turns},
+	}))
+	if err != nil {
+		return nil, err
+	}
+	if projected["sourceThreadRef"] != session.sourceThreadRef {
+		return nil, errors.New("Codex thread tail source does not match the watched session")
+	}
+	projected["historyDelta"] = true
+	return projected, nil
+}
+
+func (adapter *CodexAdapter) readInactiveSessionSettings(ctx context.Context, providerThreadID string) map[string]any {
+	if adapter.isActive(providerThreadID) {
+		return nil
+	}
+	settings, err := adapter.requestMap(ctx, "thread/resume", map[string]any{
+		"threadId": providerThreadID, "excludeTurns": true,
+	})
+	if err != nil {
+		return nil
+	}
+	_, _ = adapter.requestAny(ctx, "thread/unsubscribe", map[string]any{"threadId": providerThreadID})
+	return settings
+}
+
+func (adapter *CodexAdapter) updateSessionCatalog(discovered []watchedSession) []watchedSession {
+	adapter.sessionMu.Lock()
+	defer adapter.sessionMu.Unlock()
+
+	next := make(map[string]watchedSession, len(discovered))
+	changed := make([]watchedSession, 0)
+	for _, session := range discovered {
+		session.sourceThreadRef = strings.TrimSpace(session.sourceThreadRef)
+		session.providerThreadID = strings.TrimSpace(session.providerThreadID)
+		if session.sourceThreadRef == "" || session.providerThreadID == "" || session.revision == "" {
+			continue
+		}
+		next[session.sourceThreadRef] = session
+		previous, exists := adapter.sessionCatalog[session.sourceThreadRef]
+		if !adapter.sessionCatalogReady || !exists || previous.revision != session.revision || previous.path != session.path {
+			changed = append(changed, session)
+		}
+	}
+	adapter.sessionCatalog = next
+	adapter.sessionCatalogReady = true
+	sort.Slice(changed, func(left, right int) bool {
+		return changed[left].sourceThreadRef < changed[right].sourceThreadRef
+	})
+	return changed
+}
+
+func (adapter *CodexAdapter) watchedSessionForPath(path string) (watchedSession, bool) {
+	path = canonicalSessionPath(path)
+	if path == "" {
+		return watchedSession{}, false
+	}
+	adapter.sessionMu.Lock()
+	defer adapter.sessionMu.Unlock()
+	for _, session := range adapter.sessionCatalog {
+		if session.path == path {
+			return session, true
+		}
+	}
+	return watchedSession{}, false
+}
+
+func (adapter *CodexAdapter) watchedSessionByProviderID(providerThreadID string) (watchedSession, bool) {
+	providerThreadID = strings.TrimSpace(providerThreadID)
+	if providerThreadID == "" {
+		return watchedSession{}, false
+	}
+	adapter.sessionMu.Lock()
+	defer adapter.sessionMu.Unlock()
+	for _, session := range adapter.sessionCatalog {
+		if session.providerThreadID == providerThreadID {
+			return session, true
+		}
+	}
+	return watchedSession{}, false
+}
+
+func (adapter *CodexAdapter) sessionPathAllowed(path string) bool {
+	if path == "" {
+		return false
+	}
+	home := canonicalSessionPath(adapter.codexHome)
+	return pathWithin(filepath.Join(home, "sessions"), path) || pathWithin(filepath.Join(home, "archived_sessions"), path)
+}
+
+func canonicalSessionPath(path string) string {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "." {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		path = strings.TrimPrefix(path, `\\?\`)
+		path = strings.ToLower(path)
+	}
+	return path
 }
 
 func (adapter *CodexAdapter) requestPages(ctx context.Context, method string, params map[string]any, maxItems int, consume func([]any) error) error {
@@ -2924,10 +3124,12 @@ func (adapter *CodexAdapter) projectSessionMessages(detail map[string]any) []any
 		reasoningParts := make([]string, 0)
 		assistantParts := make([]string, 0)
 		executionEvents := make([]any, 0)
+		hasUserMessage := false
 		for itemIndex, rawItem := range items {
 			item, _ := rawItem.(map[string]any)
 			switch item["type"] {
 			case "userMessage":
+				hasUserMessage = true
 				parts, _ := item["content"].([]any)
 				textParts := make([]string, 0)
 				localAttachments := make([]any, 0)
@@ -2947,10 +3149,16 @@ func (adapter *CodexAdapter) projectSessionMessages(detail map[string]any) []any
 					}
 				}
 				if len(textParts) > 0 || len(localAttachments) > 0 {
+					providerItemID := strings.TrimSpace(stringField(item, "id"))
+					if providerItemID == "" {
+						providerItemID = fmt.Sprintf("history:%d", itemIndex)
+					}
 					message := map[string]any{
 						"role": "user", "content": sanitizeSessionMessage(strings.Join(textParts, "\n"), maxSessionMessageRunes),
-						"createdAt":     turn["startedAt"],
-						"sourceTurnRef": sourceTurnRef,
+						"status":           "success",
+						"createdAt":        turn["startedAt"],
+						"sourceTurnRef":    sourceTurnRef,
+						"sourceMessageRef": stableSessionSourceRef("message", adapter.profileID, providerThreadID, providerTurnID, "user", providerItemID),
 					}
 					if len(localAttachments) > 0 {
 						message["localAttachments"] = localAttachments
@@ -2970,18 +3178,22 @@ func (adapter *CodexAdapter) projectSessionMessages(detail map[string]any) []any
 				executionEvents = append(executionEvents, projected)
 			}
 		}
-		if len(assistantParts) > 0 {
+		if len(assistantParts) > 0 || len(reasoningParts) > 0 || len(executionEvents) > 0 || hasUserMessage && sessionTurnPending(turn) {
+			messageStatus := "pending"
+			if sessionTurnTerminal(turn) {
+				messageStatus = "success"
+			}
 			message := map[string]any{
 				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), maxSessionMessageRunes),
-				"createdAt":     firstValue(turn["completedAt"], turn["startedAt"]),
-				"sourceTurnRef": sourceTurnRef,
+				"status":           messageStatus,
+				"createdAt":        firstValue(turn["completedAt"], turn["startedAt"]),
+				"sourceTurnRef":    sourceTurnRef,
+				"sourceMessageRef": stableSessionSourceRef("message", adapter.profileID, providerThreadID, providerTurnID, "assistant"),
 			}
 			if len(reasoningParts) > 0 {
 				message["reasoningContent"] = sanitizeSessionMessage(strings.Join(reasoningParts, "\n\n"), maxSessionMessageRunes)
 			}
-			if turn["completedAt"] != nil {
-				message["executionEvents"] = sessionExecutionEvents(turn, executionEvents)
-			}
+			message["executionEvents"] = sessionExecutionEvents(turn, executionEvents)
 			messages = append(messages, message)
 		}
 	}
@@ -2993,7 +3205,7 @@ func (adapter *CodexAdapter) projectSessionExecutionItem(item map[string]any, pr
 	if kind == "agentMessage" && agentMessagePhase(item["phase"]) != "commentary" {
 		return nil
 	}
-	if kind != "reasoning" && kind != "agentMessage" && kind != "contextCompaction" && !strings.Contains(strings.ToLower(kind), "command") && !strings.Contains(strings.ToLower(kind), "file") {
+	if !sessionExecutionItemKinds[kind] {
 		return nil
 	}
 	providerItemID, _ := item["id"].(string)
@@ -3006,8 +3218,12 @@ func (adapter *CodexAdapter) projectSessionExecutionItem(item map[string]any, pr
 	if stringField(projected, "status") == "" {
 		projected["status"] = "completed"
 	}
+	eventKind := "item/completed"
+	if stringField(projected, "status") == "inProgress" {
+		eventKind = "item/started"
+	}
 	return map[string]any{
-		"kind": "item/completed",
+		"kind": eventKind, "sourceEventRef": "item:" + sourceItemRef,
 		"payload": map[string]any{
 			"itemID": sourceItemRef,
 			"item":   projected,
@@ -3029,9 +3245,18 @@ func stableSessionSourceRef(kind string, values ...string) string {
 
 func sessionExecutionEvents(turn map[string]any, items []any) []any {
 	events := make([]any, 0, len(items)+2)
-	events = append(events, map[string]any{"kind": "turn/started", "payload": map[string]any{"turn": map[string]any{"status": "running"}}})
+	events = append(events, map[string]any{
+		"kind": "turn/started", "sourceEventRef": "turn:started",
+		"payload": map[string]any{"turn": map[string]any{"status": "running"}},
+	})
 	events = append(events, items...)
+	if !sessionTurnTerminal(turn) {
+		return events
+	}
 	completed := map[string]any{"status": "completed"}
+	if status := strings.TrimSpace(stringField(turn, "status")); status != "" {
+		completed["status"] = status
+	}
 	startedAt, startedOK := executionTimestamp(turn["startedAt"])
 	completedAt, completedOK := executionTimestamp(turn["completedAt"])
 	if startedOK && completedOK {
@@ -3039,8 +3264,23 @@ func sessionExecutionEvents(turn map[string]any, items []any) []any {
 			completed["durationMs"] = (completedAt - startedAt) * 1000
 		}
 	}
-	events = append(events, map[string]any{"kind": "turn/completed", "payload": map[string]any{"turn": completed}})
+	events = append(events, map[string]any{
+		"kind": "turn/completed", "sourceEventRef": "turn:completed",
+		"payload": map[string]any{"turn": completed},
+	})
 	return events
+}
+
+func sessionTurnTerminal(turn map[string]any) bool {
+	return turn["completedAt"] != nil
+}
+
+func sessionTurnPending(turn map[string]any) bool {
+	if sessionTurnTerminal(turn) {
+		return false
+	}
+	status := strings.TrimSpace(stringField(turn, "status"))
+	return status == "inProgress" || status == "interrupted"
 }
 
 func executionTimestamp(value any) (float64, bool) {

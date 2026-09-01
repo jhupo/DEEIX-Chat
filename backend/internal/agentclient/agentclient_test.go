@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -1659,9 +1660,21 @@ func TestEqualWorkspacesIncludesSessionRoots(t *testing.T) {
 
 func TestCodexSessionStateWatcherSignalsDatabaseChanges(t *testing.T) {
 	directory := t.TempDir()
+	sessionDirectory := filepath.Join(directory, "sessions", "2026", "09", "02")
+	if err := os.MkdirAll(sessionDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	gateway := &Gateway{
-		adapter: &CodexAdapter{codexHome: directory}, sessionUpdates: make(chan struct{}, 1),
-		logger: log.New(io.Discard, "", 0),
+		adapter: &CodexAdapter{
+			codexHome: directory,
+			sessionCatalog: map[string]watchedSession{"thread-source": {
+				sourceThreadRef: "thread-source", providerThreadID: "thread-provider",
+				path: canonicalSessionPath(filepath.Join(sessionDirectory, "rollout-thread.jsonl")),
+			}},
+		},
+		sessionUpdates: make(chan struct{}, 1), historyUpdates: make(chan struct{}, 1),
+		pendingHistory: make(map[string]watchedSession),
+		logger:         log.New(io.Discard, "", 0),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1675,8 +1688,182 @@ func TestCodexSessionStateWatcherSignalsDatabaseChanges(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Codex state database change did not trigger a session refresh")
 	}
-	if codexSessionStateEvent(fsnotify.Event{Name: filepath.Join(directory, "unrelated.txt"), Op: fsnotify.Write}) {
+	if err := os.WriteFile(filepath.Join(sessionDirectory, "rollout-thread.jsonl"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gateway.sessionUpdates:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Codex session file change did not trigger a session refresh")
+	}
+	select {
+	case <-gateway.historyUpdates:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Codex session file change did not trigger a history refresh")
+	}
+	updates := gateway.takeSessionHistoryUpdates()
+	if len(updates) != 1 || updates[0].providerThreadID != "thread-provider" {
+		t.Fatalf("history updates = %#v", updates)
+	}
+	if codexSessionStateEvent(fsnotify.Event{Name: filepath.Join(directory, "unrelated.txt"), Op: fsnotify.Write}, directory) {
 		t.Fatal("unrelated Codex home file triggered a session refresh")
+	}
+}
+
+func TestCodexSessionWriteRoutesOnlyToItsHistoryTail(t *testing.T) {
+	directory := t.TempDir()
+	sessionPath := filepath.Join(directory, "sessions", "2026", "09", "02", "rollout-thread.jsonl")
+	gateway := &Gateway{
+		adapter: &CodexAdapter{
+			codexHome: directory,
+			sessionCatalog: map[string]watchedSession{"thread-source": {
+				sourceThreadRef: "thread-source", providerThreadID: "thread-provider",
+				path: canonicalSessionPath(sessionPath),
+			}},
+		},
+		sessionUpdates: make(chan struct{}, 1), historyUpdates: make(chan struct{}, 1),
+		pendingHistory: make(map[string]watchedSession),
+	}
+	gateway.routeCodexSessionStateEvent(fsnotify.Event{Name: sessionPath, Op: fsnotify.Write}, directory)
+	select {
+	case <-gateway.historyUpdates:
+	default:
+		t.Fatal("known Codex session write did not trigger its history refresh")
+	}
+	if updates := gateway.takeSessionHistoryUpdates(); len(updates) != 1 || updates[0].providerThreadID != "thread-provider" {
+		t.Fatalf("history updates = %#v", updates)
+	}
+	select {
+	case <-gateway.sessionUpdates:
+		t.Fatal("known Codex session write triggered a complete catalog refresh")
+	default:
+	}
+}
+
+func TestSplitSessionHistoryPayloadPreservesLargeActivityTimeline(t *testing.T) {
+	events := make([]any, 0, 40)
+	for index := 0; index < 40; index++ {
+		events = append(events, map[string]any{
+			"kind": "item/completed", "sourceEventRef": fmt.Sprintf("event-%d", index),
+			"payload": map[string]any{"itemID": fmt.Sprintf("item-%d", index), "output": strings.Repeat("x", 96<<10)},
+		})
+	}
+	session := map[string]any{
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"messages": []any{
+			map[string]any{"role": "user", "content": "inspect", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-user"},
+			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-assistant", "executionEvents": events},
+		},
+	}
+	chunks, err := splitSessionHistoryPayload(session, "history_0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("large activity timeline was not chunked: %d", len(chunks))
+	}
+	projectedEvents := 0
+	for _, chunk := range chunks {
+		if len(chunk) > sessionHistoryPayloadBudget {
+			t.Fatalf("history payload exceeds budget: %d", len(chunk))
+		}
+		var projected map[string]any
+		if err = json.Unmarshal(chunk, &projected); err != nil {
+			t.Fatal(err)
+		}
+		if projected["historyBatchRef"] != "history_0123456789abcdef0123456789abcdef" ||
+			int(projected["historyChunkIndex"].(float64)) < 0 ||
+			int(projected["historyChunkCount"].(float64)) != len(chunks) {
+			t.Fatalf("history batch metadata = %#v", projected)
+		}
+		messages := projected["messages"].([]any)
+		for _, rawMessage := range messages {
+			message := rawMessage.(map[string]any)
+			messageEvents, _ := message["executionEvents"].([]any)
+			projectedEvents += len(messageEvents)
+		}
+	}
+	if projectedEvents != len(events) {
+		t.Fatalf("projected event count = %d, want %d", projectedEvents, len(events))
+	}
+}
+
+func TestSessionHistoryDeltaSendsOnlyChangedRecords(t *testing.T) {
+	session := map[string]any{
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"updatedAt": int64(1),
+		"messages": []any{
+			map[string]any{"role": "user", "content": "inspect", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-user"},
+			map[string]any{"role": "assistant", "content": "", "reasoningContent": "planning", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-assistant", "executionEvents": []any{
+				map[string]any{"kind": "turn/started", "sourceEventRef": "turn:started", "payload": map[string]any{"turn": map[string]any{"status": "running"}}},
+				map[string]any{"kind": "item/started", "sourceEventRef": "item:command", "payload": map[string]any{"itemID": "command", "item": map[string]any{"status": "inProgress"}}},
+			}},
+		},
+	}
+	first, firstState, changed, err := sessionHistoryDelta(session, historySyncState{})
+	if err != nil || !changed || len(first["messages"].([]any)) != 2 || len(firstState.Events) != 2 {
+		t.Fatalf("initial delta = %#v state=%#v changed=%v err=%v", first, firstState, changed, err)
+	}
+	if _, _, changed, err = sessionHistoryDelta(session, firstState); err != nil || changed {
+		t.Fatalf("unchanged tail produced a delta: changed=%v err=%v", changed, err)
+	}
+
+	assistant := session["messages"].([]any)[1].(map[string]any)
+	events := assistant["executionEvents"].([]any)
+	events[1] = map[string]any{"kind": "item/completed", "sourceEventRef": "item:command", "payload": map[string]any{"itemID": "command", "item": map[string]any{"status": "completed", "output": "ok"}}}
+	second, secondState, changed, err := sessionHistoryDelta(session, firstState)
+	if err != nil || !changed || len(second["messages"].([]any)) != 1 || len(secondState.Events) != 2 {
+		t.Fatalf("revised delta = %#v state=%#v changed=%v err=%v", second, secondState, changed, err)
+	}
+	changedAssistant := second["messages"].([]any)[0].(map[string]any)
+	changedEvents := changedAssistant["executionEvents"].([]any)
+	if len(changedEvents) != 1 || changedEvents[0].(map[string]any)["kind"] != "item/completed" {
+		t.Fatalf("revised events = %#v", changedEvents)
+	}
+}
+
+func TestHistorySyncStateSurvivesAgentRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := historySyncState{
+		Metadata: strings.Repeat("a", 64),
+		Messages: map[string]string{strings.Repeat("b", 64): strings.Repeat("c", 64)},
+		Events:   map[string]string{strings.Repeat("d", 64): strings.Repeat("e", 64)},
+	}
+	if err = store.RememberHistorySyncState("thread_source", state); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual := reopened.HistorySyncState("thread_source"); !reflect.DeepEqual(actual, state) {
+		t.Fatalf("history sync state = %#v, want %#v", actual, state)
+	}
+}
+
+func TestApplySessionSettingsUsesThreadResumeSchema(t *testing.T) {
+	session := map[string]any{}
+	applySessionSettings(session, map[string]any{
+		"model": "gpt-5.6-sol", "reasoningEffort": "xhigh", "approvalPolicy": "on-request",
+		"approvalsReviewer": "auto_review", "sandbox": map[string]any{"type": "workspaceWrite"},
+	})
+	if session["model"] != "gpt-5.6-sol" || session["reasoningEffort"] != "xhigh" ||
+		session["approvalPolicy"] != "on-request" || session["approvalsReviewer"] != "auto_review" ||
+		session["sandboxPolicy"] != "workspace-write" {
+		t.Fatalf("session settings = %#v", session)
+	}
+
+	unsupported := map[string]any{}
+	applySessionSettings(unsupported, map[string]any{
+		"approvalPolicy":    map[string]any{"granular": map[string]any{"rules": true}},
+		"approvalsReviewer": "guardian_subagent", "sandbox": map[string]any{"type": "readOnly"},
+	})
+	if _, exists := unsupported["approvalPolicy"]; exists {
+		t.Fatalf("unsupported settings were guessed: %#v", unsupported)
 	}
 }
 
@@ -1758,6 +1945,74 @@ func TestProjectSessionMessagesMergesAssistantItemsWithinTurn(t *testing.T) {
 	projectedItem, _ := payload["item"].(map[string]any)
 	if projectedItem["kind"] != "contextCompaction" || projectedItem["status"] != "completed" {
 		t.Fatalf("projected context compaction = %#v", compaction)
+	}
+}
+
+func TestProjectSessionMessagesPreservesActiveReasoningAndTools(t *testing.T) {
+	detail := map[string]any{"thread": map[string]any{"id": "provider-thread", "turns": []any{
+		map[string]any{"id": "active-turn", "startedAt": 1786615200, "items": []any{
+			map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "inspect"}}},
+			map[string]any{"id": "reasoning-1", "type": "reasoning", "summary": []any{"planning"}},
+			map[string]any{"id": "mcp-1", "type": "mcpToolCall", "server": "docs", "tool": "search", "status": "inProgress"},
+			map[string]any{"id": "dynamic-1", "type": "dynamicToolCall", "tool": "browser", "status": "inProgress"},
+			map[string]any{"id": "web-1", "type": "webSearch", "query": "Codex app-server", "status": "inProgress"},
+		}},
+	}}}
+	messages := mustProjectSessionMessages(t, detail)
+	if len(messages) != 2 {
+		t.Fatalf("active projected messages = %#v", messages)
+	}
+	user, _ := messages[0].(map[string]any)
+	assistant, _ := messages[1].(map[string]any)
+	events, _ := assistant["executionEvents"].([]any)
+	if user["sourceMessageRef"] == "" || assistant["sourceMessageRef"] == "" ||
+		assistant["content"] != "" || assistant["reasoningContent"] != "planning" || len(events) != 5 {
+		t.Fatalf("active assistant projection = %#v", assistant)
+	}
+	for _, raw := range events {
+		event, _ := raw.(map[string]any)
+		if event["sourceEventRef"] == "" || event["kind"] == "turn/completed" {
+			t.Fatalf("active execution event = %#v", event)
+		}
+	}
+	if events[2].(map[string]any)["kind"] != "item/started" || events[3].(map[string]any)["kind"] != "item/started" ||
+		events[4].(map[string]any)["kind"] != "item/started" {
+		t.Fatalf("active tools were not projected as started items: %#v", events)
+	}
+}
+
+func TestProjectSessionMessagesCreatesPendingAssistantBeforeFirstActivity(t *testing.T) {
+	detail := map[string]any{"thread": map[string]any{"id": "provider-thread", "turns": []any{
+		map[string]any{"id": "active-turn", "status": "inProgress", "startedAt": 1786615200, "items": []any{
+			map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "inspect"}}},
+		}},
+	}}}
+	messages := mustProjectSessionMessages(t, detail)
+	if len(messages) != 2 {
+		t.Fatalf("pending projected messages = %#v", messages)
+	}
+	assistant, _ := messages[1].(map[string]any)
+	events, _ := assistant["executionEvents"].([]any)
+	if assistant["content"] != "" || len(events) != 1 || events[0].(map[string]any)["kind"] != "turn/started" {
+		t.Fatalf("pending assistant projection = %#v", assistant)
+	}
+}
+
+func TestProjectSessionMessagesDoesNotTrustUncompletedInterruptedSnapshot(t *testing.T) {
+	detail := map[string]any{"thread": map[string]any{"id": "provider-thread", "turns": []any{
+		map[string]any{"id": "active-turn", "status": "interrupted", "startedAt": 1786615200, "items": []any{
+			map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "inspect"}}},
+			map[string]any{"id": "reasoning-1", "type": "reasoning", "summary": []any{"planning"}},
+		}},
+	}}}
+	messages := mustProjectSessionMessages(t, detail)
+	assistant, _ := messages[1].(map[string]any)
+	events, _ := assistant["executionEvents"].([]any)
+	for _, raw := range events {
+		event, _ := raw.(map[string]any)
+		if event["kind"] == "turn/completed" {
+			t.Fatalf("uncompleted desktop snapshot was projected as terminal: %#v", events)
+		}
 	}
 }
 
@@ -1958,9 +2213,12 @@ func TestSessionSnapshotsUseStableWorkspaceAssignmentAndRevision(t *testing.T) {
 		thread("thread-explicit", "explicit", nested, 3),
 		thread("thread-unassigned", "outside", filepath.Dir(root), 4),
 	}}
-	first, err := adapter.projectSessionSnapshots(data, workspaces)
+	first, firstChanged, err := adapter.projectSessionSnapshots(data, workspaces)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(firstChanged) != 2 {
+		t.Fatalf("initial catalog did not schedule every history tail: %#v", firstChanged)
 	}
 	if len(first) != 2 || len(first[0].Data) != 1 || first[0].Data[0]["name"] != "nested" ||
 		len(first[1].Data) != 1 || first[1].Data[0]["name"] != "explicit" {
@@ -1970,9 +2228,12 @@ func TestSessionSnapshotsUseStableWorkspaceAssignmentAndRevision(t *testing.T) {
 		thread("thread-explicit", "explicit", nested, 3),
 		thread("thread-nested", "nested", nested, 2),
 	}}
-	second, err := adapter.projectSessionSnapshots(reversed, []Workspace{workspaces[1], workspaces[0]})
+	second, secondChanged, err := adapter.projectSessionSnapshots(reversed, []Workspace{workspaces[1], workspaces[0]})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(secondChanged) != 0 {
+		t.Fatalf("unchanged catalog scheduled history tails: %#v", secondChanged)
 	}
 	if first[0].Revision != second[0].Revision || first[1].Revision != second[1].Revision {
 		t.Fatalf("stable snapshot revision changed: %#v %#v", first, second)
@@ -1981,12 +2242,15 @@ func TestSessionSnapshotsUseStableWorkspaceAssignmentAndRevision(t *testing.T) {
 		thread("thread-explicit", "explicit", nested, 3),
 		thread("thread-nested", "nested", nested, 5),
 	}}
-	third, err := adapter.projectSessionSnapshots(changed, workspaces)
+	third, thirdChanged, err := adapter.projectSessionSnapshots(changed, workspaces)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first[0].Revision == third[0].Revision || first[1].Revision != third[1].Revision {
 		t.Fatalf("snapshot revision did not isolate activity change: %#v %#v", first, third)
+	}
+	if len(thirdChanged) != 1 || thirdChanged[0].providerThreadID != "thread-nested" {
+		t.Fatalf("catalog activity change did not isolate the changed thread: %#v", thirdChanged)
 	}
 }
 
@@ -2031,16 +2295,26 @@ func TestSessionSnapshotsReadCompleteStateDBCatalogAcrossWorkspaces(t *testing.T
 		scanner := bufio.NewScanner(serverReads)
 		scanner.Buffer(make([]byte, 64*1024), maxRPCIncomingLineBytes)
 		encoder := json.NewEncoder(serverWrites)
-		pages := []struct {
+		type sessionPage struct {
 			archived bool
 			cursor   string
 			data     []any
 			next     any
-		}{
-			{data: active[:600], next: "active-next"},
-			{cursor: "active-next", data: active[600:]},
-			{archived: true, data: archived},
 		}
+		pages := make([]sessionPage, 0, 9)
+		cursor := ""
+		for offset := 0; offset < len(active); offset += codexSessionPageSize {
+			end := min(offset+codexSessionPageSize, len(active))
+			next := any(nil)
+			if end < len(active) {
+				next = fmt.Sprintf("active-%d", end)
+			}
+			pages = append(pages, sessionPage{cursor: cursor, data: active[offset:end], next: next})
+			if value, ok := next.(string); ok {
+				cursor = value
+			}
+		}
+		pages = append(pages, sessionPage{archived: true, data: archived})
 		for _, expected := range pages {
 			if !scanner.Scan() {
 				serverResult <- errors.New("session catalog request was not received")
@@ -2054,7 +2328,7 @@ func TestSessionSnapshotsReadCompleteStateDBCatalogAcrossWorkspaces(t *testing.T
 			params, _ := request["params"].(map[string]any)
 			cursor, _ := params["cursor"].(string)
 			if request["method"] != "thread/list" || params["useStateDbOnly"] != true ||
-				fmt.Sprint(params["limit"]) != "1000" || params["archived"] != expected.archived ||
+				fmt.Sprint(params["limit"]) != "100" || params["archived"] != expected.archived ||
 				cursor != expected.cursor {
 				serverResult <- fmt.Errorf("unexpected session catalog request: %#v", request)
 				return
@@ -2078,7 +2352,7 @@ func TestSessionSnapshotsReadCompleteStateDBCatalogAcrossWorkspaces(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	snapshots, err := adapter.SessionSnapshots(ctx)
+	snapshots, changedSessions, err := adapter.SessionSnapshots(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2087,6 +2361,9 @@ func TestSessionSnapshotsReadCompleteStateDBCatalogAcrossWorkspaces(t *testing.T
 	}
 	if len(snapshots) != 2 || len(snapshots[0].Data) != 376 || len(snapshots[1].Data) != 376 {
 		t.Fatalf("complete session snapshots were not retained: %#v", snapshots)
+	}
+	if len(changedSessions) != 752 {
+		t.Fatalf("initial complete catalog history tails = %d, want 752", len(changedSessions))
 	}
 	if len(state.state.Sources) != 752 {
 		t.Fatalf("source mappings = %d, want 752", len(state.state.Sources))
@@ -2529,7 +2806,7 @@ func runFakeAppServer() {
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)
 			if params["threadId"] != "thread-1" || params["sortDirection"] != "asc" ||
-				params["itemsView"] != "full" || fmt.Sprint(params["limit"]) != "8" {
+				params["itemsView"] != "full" || fmt.Sprint(params["limit"]) != "100" {
 				result = map[string]any{"data": []any{}, "nextCursor": nil}
 				break
 			}

@@ -467,7 +467,7 @@ func (h *Handler) serveBridge(baseContext context.Context, connection *websocket
 				if !validTerminalFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext(baseContext)
+				ctx, cancel = socketProjectionContext(baseContext)
 				acknowledged, err := h.service.ApplyTerminalFrame(
 					ctx, identity, frame.BridgeSeq, frame.ServerSeq, frame.CommandID, frame.Outcome,
 				)
@@ -494,7 +494,7 @@ func (h *Handler) serveBridge(baseContext context.Context, connection *websocket
 				if !validEventFrame(frame) {
 					return
 				}
-				ctx, cancel = socketOperationContext(baseContext)
+				ctx, cancel = socketProjectionContext(baseContext)
 				acknowledged, err := h.service.ApplyEventFrame(ctx, identity, challenge.Profile.ID, frame.BridgeSeq, frame.Event)
 				cancel()
 				if err != nil && !errors.Is(err, appagent.ErrProjectionDeferred) {
@@ -741,6 +741,10 @@ func (h *Handler) sendCommands(baseContext context.Context, connection *websocke
 
 func socketOperationContext(baseContext context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(baseContext, 5*time.Second)
+}
+
+func socketProjectionContext(baseContext context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(baseContext, 25*time.Second)
 }
 
 func socketRuntimeAuthContext(baseContext context.Context) (context.Context, context.CancelFunc) {

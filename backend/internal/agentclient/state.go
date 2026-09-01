@@ -19,17 +19,28 @@ import (
 )
 
 type durableState struct {
-	Version            int                      `json:"version"`
-	AckServerSeq       uint64                   `json:"ackServerSeq"`
-	AckBridgeSeq       uint64                   `json:"ackBridgeSeq"`
-	NextBridgeSeq      uint64                   `json:"nextBridgeSeq"`
-	Commands           map[string]commandRecord `json:"commands"`
-	Outgoing           []outgoingFrame          `json:"outgoing"`
-	Sources            []sourceMapping          `json:"sources"`
-	HistoryAttachments map[string]string        `json:"historyAttachments,omitempty"`
+	Version            int                         `json:"version"`
+	AckServerSeq       uint64                      `json:"ackServerSeq"`
+	AckBridgeSeq       uint64                      `json:"ackBridgeSeq"`
+	NextBridgeSeq      uint64                      `json:"nextBridgeSeq"`
+	Commands           map[string]commandRecord    `json:"commands"`
+	Outgoing           []outgoingFrame             `json:"outgoing"`
+	Sources            []sourceMapping             `json:"sources"`
+	HistoryAttachments map[string]string           `json:"historyAttachments,omitempty"`
+	HistorySync        map[string]historySyncState `json:"historySync,omitempty"`
 }
 
-const maxHistoryAttachmentMappings = 4096
+const (
+	maxHistoryAttachmentMappings = 4096
+	maxHistorySyncThreads        = 2048
+	maxHistorySyncItemsPerThread = 8192
+)
+
+type historySyncState struct {
+	Metadata string            `json:"metadata"`
+	Messages map[string]string `json:"messages,omitempty"`
+	Events   map[string]string `json:"events,omitempty"`
+}
 
 type commandRecord struct {
 	ServerSeq uint64          `json:"serverSeq"`
@@ -66,6 +77,7 @@ type StateStore struct {
 func OpenStateStore(path string) (*StateStore, error) {
 	store := &StateStore{path: path, state: durableState{
 		Version: 1, Commands: make(map[string]commandRecord), HistoryAttachments: make(map[string]string),
+		HistorySync: make(map[string]historySyncState),
 	}}
 	data, err := readFileAtomic(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -82,6 +94,9 @@ func OpenStateStore(path string) (*StateStore, error) {
 	}
 	if store.state.HistoryAttachments == nil {
 		store.state.HistoryAttachments = make(map[string]string)
+	}
+	if store.state.HistorySync == nil {
+		store.state.HistorySync = make(map[string]historySyncState)
 	}
 	if err = store.validateLocked(); err != nil {
 		return nil, err
@@ -514,6 +529,33 @@ func (store *StateStore) RememberHistoryAttachments(items map[string]string) err
 	return nil
 }
 
+func (store *StateStore) HistorySyncState(sourceThreadRef string) historySyncState {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return cloneHistorySyncState(store.state.HistorySync[sourceThreadRef])
+}
+
+func (store *StateStore) RememberHistorySyncState(sourceThreadRef string, next historySyncState) error {
+	if !validRef(sourceThreadRef, 256) || !validHistorySyncState(next) {
+		return errors.New("history sync state is invalid")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if _, exists := store.state.HistorySync[sourceThreadRef]; !exists && len(store.state.HistorySync) >= maxHistorySyncThreads {
+		return errors.New("history sync state limit was exceeded")
+	}
+	if reflect.DeepEqual(store.state.HistorySync[sourceThreadRef], next) {
+		return nil
+	}
+	previous := cloneDurableState(store.state)
+	store.state.HistorySync[sourceThreadRef] = cloneHistorySyncState(next)
+	if err := store.persistLocked(); err != nil {
+		store.state = previous
+		return err
+	}
+	return nil
+}
+
 func (store *StateStore) validateLocked() error {
 	if store.state.Version != 1 || store.state.AckBridgeSeq > store.state.NextBridgeSeq || store.state.Commands == nil {
 		return errors.New("agent state is invalid")
@@ -562,7 +604,40 @@ func (store *StateStore) validateLocked() error {
 			return errors.New("agent history attachment state is invalid")
 		}
 	}
+	if len(store.state.HistorySync) > maxHistorySyncThreads {
+		return errors.New("agent history sync state is invalid")
+	}
+	for sourceThreadRef, state := range store.state.HistorySync {
+		if !validRef(sourceThreadRef, 256) || !validHistorySyncState(state) {
+			return errors.New("agent history sync state is invalid")
+		}
+	}
 	return nil
+}
+
+func validHistorySyncState(state historySyncState) bool {
+	if !validSHA256(state.Metadata) || len(state.Messages) > maxHistorySyncItemsPerThread || len(state.Events) > maxHistorySyncItemsPerThread {
+		return false
+	}
+	for key, digest := range state.Messages {
+		if !validSHA256(key) || !validSHA256(digest) {
+			return false
+		}
+	}
+	for key, digest := range state.Events {
+		if !validSHA256(key) || !validSHA256(digest) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSHA256(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil && strings.ToLower(value) == value
 }
 
 func validHistoryAttachmentKey(value string) bool {
@@ -637,6 +712,23 @@ func cloneDurableState(value durableState) durableState {
 	result.HistoryAttachments = make(map[string]string, len(value.HistoryAttachments))
 	for key, fileID := range value.HistoryAttachments {
 		result.HistoryAttachments[key] = fileID
+	}
+	result.HistorySync = make(map[string]historySyncState, len(value.HistorySync))
+	for sourceThreadRef, state := range value.HistorySync {
+		result.HistorySync[sourceThreadRef] = cloneHistorySyncState(state)
+	}
+	return result
+}
+
+func cloneHistorySyncState(value historySyncState) historySyncState {
+	result := value
+	result.Messages = make(map[string]string, len(value.Messages))
+	for key, digest := range value.Messages {
+		result.Messages[key] = digest
+	}
+	result.Events = make(map[string]string, len(value.Events))
+	for key, digest := range value.Events {
+		result.Events[key] = digest
 	}
 	return result
 }

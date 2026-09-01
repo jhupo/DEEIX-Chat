@@ -2,12 +2,8 @@ export function shouldSurfaceConversationLoadError(messageCount: number): boolea
   return messageCount <= 0;
 }
 
-export function shouldRefreshMessagesAfterHistory(messageCount: number): boolean {
-  return messageCount <= 0;
-}
-
-export function shouldPollConversationHistory(messageCount: number, historyStatus: string): boolean {
-  return messageCount <= 0 && historyStatus !== "loaded" && historyStatus !== "error";
+export function shouldRefreshMessagesAfterHistory(messageCount: number, initialHistoryStatus: string): boolean {
+  return messageCount <= 0 || initialHistoryStatus !== "loaded";
 }
 
 export function shouldReloadMessagesForExecutionBoundary(
