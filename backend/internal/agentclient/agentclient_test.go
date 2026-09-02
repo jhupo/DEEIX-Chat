@@ -1790,7 +1790,7 @@ func TestSplitSessionHistoryPayloadPreservesLargeActivityTimeline(t *testing.T) 
 		})
 	}
 	session := map[string]any{
-		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyProjectionVersion": agentprotocol.CodexSessionProjectionVersion, "historyDelta": true,
 		"messages": []any{
 			map[string]any{"role": "user", "content": "inspect", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-user"},
 			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-assistant", "executionEvents": events},
@@ -1813,6 +1813,7 @@ func TestSplitSessionHistoryPayloadPreservesLargeActivityTimeline(t *testing.T) 
 			t.Fatal(err)
 		}
 		if projected["historyBatchRef"] != "history_0123456789abcdef0123456789abcdef" ||
+			int(projected["historyProjectionVersion"].(float64)) != agentprotocol.CodexSessionProjectionVersion ||
 			int(projected["historyChunkIndex"].(float64)) < 0 ||
 			int(projected["historyChunkCount"].(float64)) != len(chunks) {
 			t.Fatalf("history batch metadata = %#v", projected)
@@ -1831,7 +1832,7 @@ func TestSplitSessionHistoryPayloadPreservesLargeActivityTimeline(t *testing.T) 
 
 func TestSessionHistoryDeltaSendsOnlyChangedRecords(t *testing.T) {
 	session := map[string]any{
-		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyProjectionVersion": agentprotocol.CodexSessionProjectionVersion, "historyDelta": true,
 		"updatedAt": int64(1),
 		"messages": []any{
 			map[string]any{"role": "user", "content": "inspect", "sourceTurnRef": "turn-source", "sourceMessageRef": "message-user"},
@@ -1869,7 +1870,7 @@ func TestSessionHistoryDeltaSendsOnlyChangedRecords(t *testing.T) {
 
 func TestSessionHistoryDeltaCarriesPredecessorAcrossTurns(t *testing.T) {
 	previousTail := map[string]any{
-		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyProjectionVersion": agentprotocol.CodexSessionProjectionVersion, "historyDelta": true,
 		"messages": []any{
 			map[string]any{"role": "user", "content": "first", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-user-one"},
 			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-assistant-one"},
@@ -1880,7 +1881,7 @@ func TestSessionHistoryDeltaCarriesPredecessorAcrossTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextTail := map[string]any{
-		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyProjectionVersion": agentprotocol.CodexSessionProjectionVersion, "historyDelta": true,
 		"messages": []any{
 			map[string]any{"role": "user", "content": "first", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-user-one"},
 			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-assistant-one"},
@@ -2828,7 +2829,7 @@ func TestCodexAdapterUsesNativeProcessAndAPIKeyProof(t *testing.T) {
 	}
 	session, _ := detail["session"].(map[string]any)
 	messages, _ := session["messages"].([]any)
-	if session["historyLoaded"] != true || len(messages) != 2 {
+	if session["historyLoaded"] != true || session["historyProjectionVersion"] != agentprotocol.CodexSessionProjectionVersion || len(messages) != 2 {
 		t.Fatalf("thread detail did not project messages: %#v", session)
 	}
 	if _, exists := session["model"]; exists {

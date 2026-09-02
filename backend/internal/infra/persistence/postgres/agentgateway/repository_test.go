@@ -39,7 +39,7 @@ func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
 			Kind: "item/completed", SourceEventRef: fmt.Sprintf("event-%d", index), Payload: json.RawMessage(`{}`),
 		}
 	}
-	session := workspaceSession{SourceThreadRef: "thread_source", HistoryLoaded: true, Messages: []workspaceSessionMessage{{
+	session := workspaceSession{SourceThreadRef: "thread_source", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, Messages: []workspaceSessionMessage{{
 		Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn_source", SourceMessageRef: "message-assistant", ExecutionEvents: events,
 	}}}
 	if !validWorkspaceSession(session, false) {
@@ -48,6 +48,11 @@ func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
 	session.Messages[0].ExecutionEvents = make([]workspaceSessionEvent, maxWorkspaceSessionEvents+1)
 	if validWorkspaceSession(session, false) {
 		t.Fatal("unbounded Codex turn was accepted")
+	}
+	session.Messages[0].ExecutionEvents = nil
+	session.HistoryProjectionVersion = historyProjectionVersion + 1
+	if validWorkspaceSession(session, false) {
+		t.Fatal("future Codex session projection was accepted")
 	}
 }
 
@@ -280,7 +285,7 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 		{Kind: "turn/completed", SourceEventRef: "turn-completed", Payload: json.RawMessage(`{"turn":{"status":"completed"}}`)},
 	}
 	initial := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, Status: "active", UpdatedAt: now.Unix(),
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, Status: "active", UpdatedAt: now.Unix(),
 		Messages: []workspaceSessionMessage{
 			{Role: "user", Status: "success", Content: "first", SourceTurnRef: "turn-first", SourceMessageRef: "message-first-user", CreatedAt: now.Unix()},
 			{Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-first", SourceMessageRef: "message-first-assistant", CreatedAt: now.Unix(), ExecutionEvents: completedEvents},
@@ -293,7 +298,7 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 		t.Fatal(err)
 	}
 	active := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(time.Second).Unix(),
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(time.Second).Unix(),
 		Messages: []workspaceSessionMessage{
 			{Role: "user", Status: "success", Content: "second", SourceTurnRef: "turn-second", SourceMessageRef: "message-second-user", CreatedAt: now.Add(time.Second).Unix()},
 			{Role: "assistant", Status: "pending", ReasoningContent: "planning", SourceTurnRef: "turn-second", SourceMessageRef: "message-second-assistant", CreatedAt: now.Add(time.Second).Unix(), ExecutionEvents: []workspaceSessionEvent{
@@ -344,7 +349,7 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	assistantContext := completed.Messages[1]
 	assistantContext.ExecutionEvents = nil
 	steered := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(3 * time.Second).Unix(),
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(3 * time.Second).Unix(),
 		Messages: []workspaceSessionMessage{
 			secondUserContext,
 			{Role: "user", Status: "success", Content: "steer", SourceTurnRef: "turn-second", SourceMessageRef: "message-steer-user", CreatedAt: now.Add(time.Second).Unix()},
@@ -364,7 +369,7 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	}
 
 	nextTurn := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(4 * time.Second).Unix(),
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(4 * time.Second).Unix(),
 		Messages: []workspaceSessionMessage{
 			assistantContext,
 			{Role: "user", Status: "success", Content: "third", SourceTurnRef: "turn-third", SourceMessageRef: "message-third-user", CreatedAt: now.Add(2 * time.Second).Unix()},
@@ -417,7 +422,7 @@ func TestWorkspaceHistoryDeltaDoesNotReplaceOlderProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	delta := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active",
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, Status: "active",
 		UpdatedAt: now.Add(time.Second).Unix(),
 		Messages: []workspaceSessionMessage{{
 			Role: "assistant", Status: "interrupted", Content: "last turn", SourceTurnRef: "turn-last",
@@ -440,6 +445,77 @@ func TestWorkspaceHistoryDeltaDoesNotReplaceOlderProjection(t *testing.T) {
 	if err := database.First(&thread, thread.ID).Error; err != nil || thread.HistoryStatus != "unloaded" ||
 		thread.HistoryVersion != historyProjectionVersion-1 {
 		t.Fatalf("projection upgrade state = %#v err=%v", thread, err)
+	}
+}
+
+func TestWorkspaceHistoryProjectionRequiresCurrentProducerVersion(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationRun{},
+		&model.ConversationExecutionEvent{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 11, 0, 0, 0, time.UTC)
+	conversation := model.Conversation{
+		PublicID: "conversation_producer_upgrade", UserID: 7, Title: "Producer upgrade",
+		ExecutionType: "gateway", Status: "active", BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-producer-upgrade", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-producer-upgrade"
+	thread := model.AgentThread{
+		PublicID: "agth_producer_upgrade", UserID: 7, DeviceID: 1, RuntimeProfileID: 1,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: "active", HistoryStatus: "loading", HistoryVersion: historyProjectionVersion - 1,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	existing := model.Message{
+		ConversationID: conversation.ID, UserID: 7, PublicID: "message_producer_existing", Role: "assistant",
+		ContentType: "text", Content: "authoritative old history", SourceRef: "source-producer-existing", Status: "success",
+	}
+	if err := database.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	outdated := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, Status: "active", UpdatedAt: now.Add(time.Second).Unix(),
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "interrupted", Content: "premature terminal",
+			SourceTurnRef: "turn-current", SourceMessageRef: "message-current-assistant", CreatedAt: now.Add(time.Second).Unix(),
+		}},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, outdated, now.Add(time.Second)); err != nil || !changed {
+		t.Fatalf("outdated producer projection: changed=%v err=%v", changed, err)
+	}
+	var messages []model.Message
+	if err := database.Where("conversation_id = ?", conversation.ID).Find(&messages).Error; err != nil ||
+		len(messages) != 1 || messages[0].Content != existing.Content {
+		t.Fatalf("outdated producer replaced history: %#v err=%v", messages, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.HistoryVersion != historyProjectionVersion-1 || thread.HistoryStatus != "unloaded" {
+		t.Fatalf("outdated producer advanced projection: %#v err=%v", thread, err)
+	}
+
+	current := outdated
+	current.HistoryProjectionVersion = historyProjectionVersion
+	current.Messages[0].Status = "success"
+	current.Messages[0].Content = "authoritative current history"
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, current, now.Add(2*time.Second)); err != nil || !changed {
+		t.Fatalf("current producer projection: changed=%v err=%v", changed, err)
+	}
+	if err := database.Where("conversation_id = ?", conversation.ID).Find(&messages).Error; err != nil ||
+		len(messages) != 1 || messages[0].Content != "authoritative current history" {
+		t.Fatalf("current producer did not replace history: %#v err=%v", messages, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.HistoryVersion != historyProjectionVersion || thread.HistoryStatus != "loaded" {
+		t.Fatalf("current producer projection state: %#v err=%v", thread, err)
 	}
 }
 
@@ -488,7 +564,7 @@ func TestWorkspaceHistoryBatchProjectsOnlyAfterFinalChunk(t *testing.T) {
 	base := workspaceSession{
 		SourceThreadRef: sourceThreadRef, Name: "All projects", Model: "gpt-5.6-sol", ReasoningEffort: "high",
 		ApprovalPolicy: "never", ApprovalsReviewer: "user", SandboxPolicy: "danger-full-access",
-		HistoryLoaded: true, HistoryDelta: true, HistoryBatchRef: "history_batch_0123456789abcdef", HistoryChunkCount: 2,
+		HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, HistoryBatchRef: "history_batch_0123456789abcdef", HistoryChunkCount: 2,
 		UpdatedAt: now.Add(time.Second).Unix(),
 	}
 	chunks := []workspaceSession{base, base}
@@ -539,6 +615,30 @@ func TestWorkspaceHistoryBatchProjectsOnlyAfterFinalChunk(t *testing.T) {
 	if err := database.Model(&model.AgentEvent{}).Where("thread_id = ? AND conversation_projected_at IS NULL", thread.ID).Count(&staged).Error; err != nil || staged != 0 {
 		t.Fatalf("staged history chunks = %d err=%v", staged, err)
 	}
+
+	outdated := base
+	outdated.HistoryProjectionVersion = 0
+	outdated.HistoryBatchRef = "history_batch_outdated_producer"
+	outdated.HistoryChunkCount = 1
+	outdated.Messages = []workspaceSessionMessage{{
+		Role: "assistant", Status: "interrupted", Content: "premature terminal", SourceTurnRef: "turn-source",
+		SourceMessageRef: "message-assistant", CreatedAt: now.Unix(),
+	}}
+	payload, err := json.Marshal(outdated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := repo.ApplyEventFrame(context.Background(), device.ID, profile.ID, 3, strings.Repeat("4", 64), &domainagent.Event{
+		PublicID: "agev_history_batch_outdated", Kind: agentprotocol.SessionHistoryEventKind,
+		SourceThreadRef: sourceThreadRef, PayloadJSON: string(payload), OccurredAt: now.Add(3 * time.Second),
+	}, now.Add(3*time.Second))
+	if err != nil || applied.Acknowledged != 3 || len(applied.ConversationPublicIDs) != 0 {
+		t.Fatalf("outdated history event was not ignored: %#v %v", applied, err)
+	}
+	if err := database.Where("conversation_id = ?", conversation.ID).Find(&messages).Error; err != nil || len(messages) != 1 ||
+		messages[0].Content != "done" || messages[0].Status != "success" {
+		t.Fatalf("outdated history event changed messages: %#v err=%v", messages, err)
+	}
 }
 
 func TestWorkspaceHistoryDeltaBeforeCatalogSnapshotIsAcknowledged(t *testing.T) {
@@ -564,7 +664,7 @@ func TestWorkspaceHistoryDeltaBeforeCatalogSnapshotIsAcknowledged(t *testing.T) 
 		t.Fatal(err)
 	}
 	session := workspaceSession{
-		SourceThreadRef: "thread-before-catalog", HistoryLoaded: true, HistoryDelta: true,
+		SourceThreadRef: "thread-before-catalog", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true,
 		HistoryBatchRef: "history_before_catalog", HistoryChunkCount: 1,
 		Messages: []workspaceSessionMessage{{
 			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-before-catalog",
@@ -637,7 +737,7 @@ func TestWorkspaceHistoryDeltaForMissingThreadIsAcknowledged(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := workspaceSession{
-		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true,
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true,
 		HistoryBatchRef: "history_missing_thread", HistoryChunkCount: 1,
 		Messages: []workspaceSessionMessage{{
 			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-history-missing",
@@ -686,7 +786,7 @@ func TestSessionHistoryBatchRejectsDuplicateEventReferencesWithinChunk(t *testin
 		Payload: json.RawMessage(`{"item":{"kind":"commandExecution","status":"completed"}}`),
 	}
 	chunk := workspaceSession{
-		SourceThreadRef: "thread-history-duplicate", Status: "active", HistoryLoaded: true, HistoryDelta: true,
+		SourceThreadRef: "thread-history-duplicate", Status: "active", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true,
 		HistoryBatchRef: "history_batch_duplicate", HistoryChunkCount: 1,
 		Messages: []workspaceSessionMessage{{
 			Role: "assistant", Status: "success", Content: "done", SourceTurnRef: "turn-source",
@@ -763,12 +863,12 @@ func TestWorkspaceSessionProjectionTracksActiveAssistantAndEventRevisions(t *tes
 	interrupted.SourceTurnRef = "turn-interrupted"
 	interrupted.SourceMessageRef = "message-interrupted"
 	if !validWorkspaceSession(workspaceSession{
-		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, Messages: []workspaceSessionMessage{interrupted},
+		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, Messages: []workspaceSessionMessage{interrupted},
 	}, false) {
 		t.Fatal("interrupted assistant history was rejected")
 	}
 	statusOnlyDelta := workspaceSession{
-		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, HistoryDelta: true,
+		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true,
 		HistoryBatchRef: "history_interrupted", HistoryChunkCount: 1,
 		Messages: []workspaceSessionMessage{{
 			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-interrupted",
@@ -827,7 +927,7 @@ func TestWorkspaceHistoryDoesNotReplaceActiveGatewayMessages(t *testing.T) {
 	thread := model.AgentThread{UserID: 7, ConversationID: conversation.ID, WorkspaceID: 9, Status: "active"}
 	workspace := model.AgentWorkspace{ControlPlaneModel: model.ControlPlaneModel{ID: 9}, PublicID: "workspace-active"}
 	_, err := syncExistingWorkspaceSession(database, &thread, &workspace, workspaceSession{
-		SourceThreadRef: "source-thread", Name: conversation.Title, Status: "active", HistoryLoaded: true,
+		SourceThreadRef: "source-thread", Name: conversation.Title, Status: "active", HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion,
 		Messages: []workspaceSessionMessage{{Role: "user", Status: "success", Content: "older history", SourceTurnRef: "source-turn"}},
 	}, now.Add(time.Second))
 	if err != nil {
@@ -1723,7 +1823,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260,"executionEvents":[{"kind":"turn/started","sourceEventRef":"turn-started","payload":{"turn":{"status":"running"}}},{"kind":"item/completed","sourceEventRef":"item-source-item-1","payload":{"itemID":"source-item-1","item":{"itemID":"source-item-1","kind":"reasoning","summary":["checked files"],"status":"completed"}}},{"kind":"turn/completed","sourceEventRef":"turn-completed","payload":{"turn":{"status":"completed"}}}] }]}}}`
+	historyTerminal := `{"kind":"result","result":{"kind":"thread-read","session":{"sourceThreadRef":"source-thread-2","name":"Imported session","model":"gpt-test","reasoningEffort":"high","historyLoaded":true,"historyProjectionVersion":11,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200,"attachments":[{"fileID":"file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260,"executionEvents":[{"kind":"turn/started","sourceEventRef":"turn-started","payload":{"turn":{"status":"running"}}},{"kind":"item/completed","sourceEventRef":"item-source-item-1","payload":{"itemID":"source-item-1","item":{"itemID":"source-item-1","kind":"reasoning","summary":["checked files"],"status":"completed"}}},{"kind":"turn/completed","sourceEventRef":"turn-completed","payload":{"turn":{"status":"completed"}}}] }]}}}`
 	if err := projectTerminalResult(database, &device, &model.AgentBridgeFrame{}, &storedHistoryCommand, historyTerminal, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("project thread history: %v", err)
 	}
@@ -1753,7 +1853,7 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 		importedConversation.UpdatedAt.Unix() != 1786615360 {
 		t.Fatalf("imported settings or recency mismatch: %#v %v", importedConversation, err)
 	}
-	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260}]}`
+	blankSettingsHistory := `{"sourceThreadRef":"source-thread-2","name":"Imported session","historyLoaded":true,"historyProjectionVersion":11,"createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"messages":[{"role":"user","status":"success","content":"inspect the repository","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-user-1","createdAt":1786615200},{"role":"assistant","status":"success","content":"ready","reasoningContent":"checked files","sourceTurnRef":"source-turn-1","sourceMessageRef":"message-assistant-1","createdAt":1786615260}]}`
 	if err := syncThreadHistory(database, &storedHistoryCommand, json.RawMessage(blankSettingsHistory), now.Add(11*time.Second)); err != nil {
 		t.Fatalf("refresh thread history without settings: %v", err)
 	}

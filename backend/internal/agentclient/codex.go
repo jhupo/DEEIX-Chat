@@ -1432,15 +1432,16 @@ func (adapter *CodexAdapter) projectSessionDetailWithMessages(detail map[string]
 		return nil, err
 	}
 	return map[string]any{
-		"sourceThreadRef": sourceRef,
-		"preview":         sessionText(thread["preview"], 512),
-		"name":            sessionText(thread["name"], 256),
-		"modelProvider":   sessionText(thread["modelProvider"], 128),
-		"createdAt":       thread["createdAt"],
-		"updatedAt":       thread["updatedAt"],
-		"recencyAt":       thread["recencyAt"],
-		"historyLoaded":   true,
-		"messages":        messages,
+		"sourceThreadRef":          sourceRef,
+		"preview":                  sessionText(thread["preview"], 512),
+		"name":                     sessionText(thread["name"], 256),
+		"modelProvider":            sessionText(thread["modelProvider"], 128),
+		"createdAt":                thread["createdAt"],
+		"updatedAt":                thread["updatedAt"],
+		"recencyAt":                thread["recencyAt"],
+		"historyLoaded":            true,
+		"historyProjectionVersion": agentprotocol.CodexSessionProjectionVersion,
+		"messages":                 messages,
 	}, nil
 }
 

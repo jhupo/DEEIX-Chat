@@ -29,7 +29,7 @@ const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
 	threadStatusMissing          = "missing"
-	historyProjectionVersion     = 11
+	historyProjectionVersion     = agentprotocol.CodexSessionProjectionVersion
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -1012,25 +1012,26 @@ type workspaceSessionAttachment struct {
 }
 
 type workspaceSession struct {
-	SourceThreadRef   string                    `json:"sourceThreadRef"`
-	Preview           string                    `json:"preview"`
-	Name              string                    `json:"name"`
-	ModelProvider     string                    `json:"modelProvider"`
-	Model             string                    `json:"model"`
-	ReasoningEffort   string                    `json:"reasoningEffort"`
-	ApprovalPolicy    string                    `json:"approvalPolicy"`
-	ApprovalsReviewer string                    `json:"approvalsReviewer"`
-	SandboxPolicy     string                    `json:"sandboxPolicy"`
-	Status            string                    `json:"status"`
-	CreatedAt         int64                     `json:"createdAt"`
-	UpdatedAt         int64                     `json:"updatedAt"`
-	RecencyAt         int64                     `json:"recencyAt"`
-	HistoryLoaded     bool                      `json:"historyLoaded"`
-	HistoryDelta      bool                      `json:"historyDelta"`
-	HistoryBatchRef   string                    `json:"historyBatchRef"`
-	HistoryChunkIndex int                       `json:"historyChunkIndex"`
-	HistoryChunkCount int                       `json:"historyChunkCount"`
-	Messages          []workspaceSessionMessage `json:"messages"`
+	SourceThreadRef          string                    `json:"sourceThreadRef"`
+	Preview                  string                    `json:"preview"`
+	Name                     string                    `json:"name"`
+	ModelProvider            string                    `json:"modelProvider"`
+	Model                    string                    `json:"model"`
+	ReasoningEffort          string                    `json:"reasoningEffort"`
+	ApprovalPolicy           string                    `json:"approvalPolicy"`
+	ApprovalsReviewer        string                    `json:"approvalsReviewer"`
+	SandboxPolicy            string                    `json:"sandboxPolicy"`
+	Status                   string                    `json:"status"`
+	CreatedAt                int64                     `json:"createdAt"`
+	UpdatedAt                int64                     `json:"updatedAt"`
+	RecencyAt                int64                     `json:"recencyAt"`
+	HistoryLoaded            bool                      `json:"historyLoaded"`
+	HistoryProjectionVersion int                       `json:"historyProjectionVersion"`
+	HistoryDelta             bool                      `json:"historyDelta"`
+	HistoryBatchRef          string                    `json:"historyBatchRef"`
+	HistoryChunkIndex        int                       `json:"historyChunkIndex"`
+	HistoryChunkCount        int                       `json:"historyChunkCount"`
+	Messages                 []workspaceSessionMessage `json:"messages"`
 }
 
 type workspaceSessionSnapshot struct {
@@ -1209,6 +1210,7 @@ func reconcileMissingWorkspaceSessions(
 
 func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 	if !validRepoRef(strings.TrimSpace(session.SourceThreadRef)) ||
+		session.HistoryProjectionVersion < 0 || session.HistoryProjectionVersion > historyProjectionVersion ||
 		len(session.Messages) > maxWorkspaceSessionMessages || len(session.Name) > 1024 || len(session.Preview) > 4096 ||
 		len(session.ModelProvider) > 128 || len(session.Model) > 128 || len(session.ReasoningEffort) > 32 ||
 		len(session.ApprovalPolicy) > 32 || len(session.ApprovalsReviewer) > 32 || len(session.SandboxPolicy) > 32 {
@@ -1375,6 +1377,18 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 	}
 	if !session.HistoryLoaded {
+		return changed, nil
+	}
+	if session.HistoryProjectionVersion != historyProjectionVersion {
+		if thread.HistoryVersion < historyProjectionVersion &&
+			(thread.HistoryStatus != "unloaded" || thread.HistoryError != "") {
+			if err := tx.Model(thread).Updates(map[string]any{
+				"history_status": "unloaded", "history_error": "", "updated_at": now,
+			}).Error; err != nil {
+				return false, err
+			}
+			changed = true
+		}
 		return changed, nil
 	}
 	if session.HistoryDelta && thread.HistoryVersion < historyProjectionVersion {
@@ -2110,7 +2124,7 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 					}
 					if complete {
 						projected.ConversationProjectedAt = &now
-						if thread.HistoryVersion >= historyProjectionVersion {
+						if merged.HistoryProjectionVersion == historyProjectionVersion && thread.HistoryVersion >= historyProjectionVersion {
 							var workspace model.AgentWorkspace
 							if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
 								return err
@@ -2123,7 +2137,7 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 							if changed {
 								applied.ConversationPublicIDs = []string{conversation.PublicID}
 							}
-						} else {
+						} else if merged.HistoryProjectionVersion == historyProjectionVersion {
 							applied.ConversationPublicIDs = []string{conversation.PublicID}
 						}
 						if err := tx.Model(&model.AgentEvent{}).
