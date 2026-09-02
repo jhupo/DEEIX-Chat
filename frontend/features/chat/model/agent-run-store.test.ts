@@ -214,6 +214,19 @@ test("keeps compacted command output and reasoning when terminal items omit text
   assert.equal(reasoning?.kind === "reasoning" ? reasoning.text : "", "checked history");
 });
 
+test("hides internal Codex reasoning without splitting adjacent operations", () => {
+  setAgentRunContext("internal-reasoning-context", "conversation-internal-reasoning");
+  applyAgentExecutionEvents([
+    { runID: "run-internal", seq: 1, kind: "item/completed", payload: { itemID: "command-1", item: { itemID: "command-1", kind: "commandExecution", status: "completed", command: "git status" } }, occurredAt: "2026-09-02T00:00:01Z" },
+    { runID: "run-internal", seq: 2, kind: "item/completed", payload: { itemID: "reasoning-1", item: { itemID: "reasoning-1", kind: "reasoning", status: "completed", summary: ["Planning browser selection"] } }, occurredAt: "2026-09-02T00:00:02Z" },
+    { runID: "run-internal", seq: 3, kind: "item/completed", payload: { itemID: "reasoning-1", item: { itemID: "reasoning-1", kind: "reasoning", presentation: "hidden", status: "completed", summary: ["Planning browser selection"] } }, occurredAt: "2026-09-02T00:00:03Z" },
+    { runID: "run-internal", seq: 4, kind: "item/reasoning/summaryTextDelta", payload: { itemID: "reasoning-1", delta: "Planning browser selection" }, occurredAt: "2026-09-02T00:00:04Z" },
+    { runID: "run-internal", seq: 5, kind: "item/completed", payload: { itemID: "command-2", item: { itemID: "command-2", kind: "commandExecution", status: "completed", command: "go test ./..." } }, occurredAt: "2026-09-02T00:00:05Z" },
+  ], "conversation-internal-reasoning");
+
+  assert.deepEqual(getAgentRunSnapshot("run-internal").items.map((item) => item.kind), ["command", "command"]);
+});
+
 test("bounds command output accumulated from live events", () => {
   setAgentRunContext("command-output-context", "conversation-output");
   applyAgentExecutionEvents([

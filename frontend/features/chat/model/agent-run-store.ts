@@ -256,6 +256,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
     };
   }
   if (kind === "reasoning") {
+    if (item.presentation === "hidden") return null;
     return {
       itemID: id,
       seq,
@@ -420,6 +421,11 @@ function reduceAgentExecutionEvent(
       break;
     case "item/started":
     case "item/completed": {
+      if (payload.item?.presentation === "hidden") {
+        const id = itemID(payload);
+        if (id) next.items = next.items.filter((item) => item.itemID !== id);
+        break;
+      }
       const item = normalizeItem(payload, event.seq, event.kind === "item/completed");
       if (item) next.items = upsertItem(next.items, item);
       break;
@@ -470,6 +476,7 @@ function reduceAgentExecutionEvent(
       const currentItem = next.items.find(
         (item) => item.itemID === id && item.kind === "reasoning",
       ) as AgentTextActivity | undefined;
+      if (!currentItem) break;
       next.items = upsertItem(next.items, {
         itemID: id,
         seq: currentItem?.seq ?? event.seq,

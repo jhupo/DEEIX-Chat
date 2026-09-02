@@ -145,6 +145,8 @@ type CodexAdapter struct {
 	sessionMu           sync.Mutex
 	sessionCatalog      map[string]watchedSession
 	sessionCatalogReady bool
+	sessionTaskMu       sync.Mutex
+	sessionTasks        map[string]codexSessionTaskState
 	rpc                 *RPCClient
 	command             *exec.Cmd
 	version             string
@@ -322,7 +324,8 @@ func StartCodexAdapter(ctx context.Context, config Config, state *StateStore, st
 		profileID: config.ProfileID, state: state, rpc: NewRPCClient(stdin, stdout), command: command,
 		version: version, onEvent: onEvent, pending: make(map[string]*pendingInteraction), active: make(map[string]bool),
 		executionItems: make(map[string]executionItemProjection), sessionCatalog: make(map[string]watchedSession),
-		workspaces: make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
+		sessionTasks: make(map[string]codexSessionTaskState),
+		workspaces:   make(map[string]Workspace, len(config.Workspaces)), threadCWD: make(map[string]string), done: make(chan struct{}),
 	}
 	for _, workspace := range config.Workspaces {
 		adapter.workspaces[workspace.WorkspaceID] = workspace
@@ -1486,6 +1489,10 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 	messages := make([]any, 0, 64)
 	seenTurnIDs := make(map[string]struct{})
 	var latestTurn map[string]any
+	taskState, err := adapter.sessionTaskStateForProvider(providerThreadID)
+	if err != nil {
+		return nil, err
+	}
 	err = adapter.requestPages(ctx, "thread/turns/list", map[string]any{
 		"threadId": providerThreadID, "limit": codexHistoryPageSize, "sortDirection": "asc", "itemsView": "full",
 	}, maxCodexHistoryTurns, func(turns []any) error {
@@ -1504,6 +1511,7 @@ func (adapter *CodexAdapter) readSessionHistory(ctx context.Context, providerThr
 			seenTurnIDs[turnID] = struct{}{}
 			latestTurn = turn
 		}
+		applyCodexSessionTaskState(turns, taskState)
 		pageDetail := map[string]any{"thread": map[string]any{
 			"id": providerThreadID, "turns": turns,
 		}}
@@ -1538,6 +1546,11 @@ func (adapter *CodexAdapter) readSessionTail(ctx context.Context, session watche
 	if err != nil {
 		return nil, err
 	}
+	taskState, err := adapter.sessionTaskState(session.path)
+	if err != nil {
+		return nil, err
+	}
+	applyCodexSessionTaskState(turns, taskState)
 	projected, err := adapter.projectSessionDetailWithMessages(detail, session.providerThreadID, adapter.projectSessionMessages(map[string]any{
 		"thread": map[string]any{"id": session.providerThreadID, "turns": turns},
 	}))
@@ -1709,6 +1722,9 @@ func (adapter *CodexAdapter) notification(notification RPCNotification) error {
 	threadID := identityValue(params, "threadId", "thread")
 	turnID := identityValue(params, "turnId", "turn")
 	itemID := identityValue(params, "itemId", "item")
+	if notification.Method == "turn/completed" && adapter.sessionTaskStillRunning(threadID, turnID) {
+		return nil
+	}
 	if notification.Method == "item/started" {
 		item, _ := params["item"].(map[string]any)
 		adapter.rememberExecutionItem(itemID, turnID, item)
@@ -2367,6 +2383,7 @@ func (adapter *CodexAdapter) projectExecutionItem(item map[string]any, sourceIte
 			result["text"], result["truncated"] = boundedText(text, maxExecutionTextBytes)
 		}
 	case "reasoning":
+		result["presentation"] = "hidden"
 		result["summary"] = projectExecutionTextParts(item["summary"])
 		result["content"] = projectExecutionTextParts(item["content"])
 	case "mcpToolCall":

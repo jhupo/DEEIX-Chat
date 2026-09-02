@@ -219,6 +219,7 @@ export type AgentFileChangeDTO = {
 export type AgentExecutionItemDTO = {
   itemID: string;
   kind: string;
+  presentation?: "hidden";
   status?: string;
   command?: string;
   cwd?: string;

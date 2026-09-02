@@ -1917,6 +1917,104 @@ func TestSessionTailTurnsNormalizesNewestFirstPage(t *testing.T) {
 	}
 }
 
+func TestCodexSessionTaskStateFollowsLogicalTaskBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	started := `{"timestamp":"2026-09-02T12:19:28Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-active","started_at":1788351568}}` + "\n"
+	toolOutput := `{"timestamp":"2026-09-02T12:20:00Z","type":"response_item","payload":{"type":"custom_tool_call_output","output":"embedded \\"type\\":\\"task_complete\\" text"}}` + "\n"
+	if err := os.WriteFile(path, []byte(started+toolOutput), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := initializeCodexSessionTaskState(file, int64(len(started+toolOutput)))
+	_ = file.Close()
+	if err != nil || state.status != "inProgress" || state.turnID != "turn-active" {
+		t.Fatalf("initial task state = %#v err=%v", state, err)
+	}
+
+	completed := `{"timestamp":"2026-09-02T12:21:00Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-active","started_at":1788351568,"completed_at":1788351660,"error":null}}` + "\n"
+	appendFile, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = appendFile.WriteString(completed); err != nil {
+		t.Fatal(err)
+	}
+	_ = appendFile.Close()
+	file, err = os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = advanceCodexSessionTaskState(file, int64(len(started+toolOutput+completed)), state)
+	_ = file.Close()
+	if err != nil || state.status != "completed" || state.completedAt != 1788351660 {
+		t.Fatalf("completed task state = %#v err=%v", state, err)
+	}
+
+	turns := []any{map[string]any{
+		"id": "turn-active", "status": "interrupted", "completedAt": float64(1788351568), "items": []any{},
+	}}
+	applyCodexSessionTaskState(turns, codexSessionTaskState{
+		turnID: "turn-active", status: "inProgress", startedAt: 1788351568,
+	})
+	turn := turns[0].(map[string]any)
+	if turn["status"] != "inProgress" || turn["completedAt"] != nil {
+		t.Fatalf("active turn correction = %#v", turn)
+	}
+}
+
+func TestCodexNotificationSuppressesPrematureTurnCompletion(t *testing.T) {
+	codexHome := t.TempDir()
+	sessionDirectory := filepath.Join(codexHome, "sessions", "2026", "09", "02")
+	if err := os.MkdirAll(sessionDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(sessionDirectory, "rollout.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-active"}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stateStore, err := OpenStateStore(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]json.RawMessage, 0, 1)
+	adapter := &CodexAdapter{
+		profileID: "codex-default", codexHome: codexHome, state: stateStore,
+		sessionCatalog: map[string]watchedSession{"thread-source": {
+			providerThreadID: "thread-provider", path: canonicalSessionPath(sessionPath),
+		}},
+		sessionTasks: make(map[string]codexSessionTaskState),
+		onEvent: func(event json.RawMessage) error {
+			events = append(events, append(json.RawMessage(nil), event...))
+			return nil
+		},
+	}
+	err = adapter.notification(RPCNotification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"thread-provider","turn":{"id":"turn-active","status":"interrupted"}}`,
+	)})
+	if err != nil || len(events) != 0 {
+		t.Fatalf("premature terminal notification events=%d err=%v", len(events), err)
+	}
+
+	completed := `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-active","error":null}}` + "\n"
+	file, err := os.OpenFile(sessionPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = file.WriteString(completed); err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	err = adapter.notification(RPCNotification{Method: "turn/completed", Params: json.RawMessage(
+		`{"threadId":"thread-provider","turn":{"id":"turn-active","status":"completed"}}`,
+	)})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("logical terminal notification events=%d err=%v", len(events), err)
+	}
+}
+
 func TestHistorySyncStateSurvivesAgentRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	store, err := OpenStateStore(path)

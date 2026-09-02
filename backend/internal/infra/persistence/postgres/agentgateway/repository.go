@@ -29,7 +29,7 @@ const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
 	threadStatusMissing          = "missing"
-	historyProjectionVersion     = 10
+	historyProjectionVersion     = 11
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
