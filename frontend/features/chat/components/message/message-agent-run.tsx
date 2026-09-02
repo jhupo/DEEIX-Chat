@@ -19,6 +19,7 @@ import {
   type AgentRunSnapshot,
   hasAgentRunActivity,
 } from "@/features/chat/model/agent-run-store";
+import { isConversationAgentRunActive } from "@/features/chat/model/conversation-load-policy";
 import { cn } from "@/lib/utils";
 
 const AGENT_RUN_ROOT_CLASS = "chat-screenshot-omit mb-2 w-full max-w-[900px]";
@@ -41,8 +42,7 @@ export function MessageAgentRun({
 }) {
   const t = useTranslations("chat.agent");
   const locale = useLocale();
-  const hydratedActive = agentRun.status === "running" || agentRun.status === "waiting_interaction";
-  const active = messageActive || hydratedActive;
+  const active = isConversationAgentRunActive(messageActive, messageStatus, agentRun.status);
   const [accordionValue, setAccordionValue] = React.useState(() =>
     active ? AGENT_RUN_ACCORDION_VALUE : "",
   );

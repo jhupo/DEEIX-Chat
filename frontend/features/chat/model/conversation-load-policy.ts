@@ -1,5 +1,17 @@
+import type { AgentRunStatus } from "@/features/chat/model/agent-run-store";
+
 export function shouldSurfaceConversationLoadError(messageCount: number): boolean {
   return messageCount <= 0;
+}
+
+export function isConversationAgentRunActive(
+  messageActive: boolean,
+  messageStatus: string | null | undefined,
+  agentRunStatus: AgentRunStatus,
+): boolean {
+  const status = messageStatus?.trim().toLowerCase();
+  return messageActive || status === "pending" ||
+    agentRunStatus === "running" || agentRunStatus === "waiting_interaction";
 }
 
 export function shouldRefreshMessagesAfterHistory(messageCount: number, initialHistoryStatus: string): boolean {

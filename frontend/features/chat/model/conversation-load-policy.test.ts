@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error Node's TypeScript runner requires an explicit extension.
-import { isConversationStreamDisconnect, shouldRefreshMessagesAfterHistory, shouldReloadMessagesForExecutionBoundary, shouldRetryConversationStream, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
+import { isConversationAgentRunActive, isConversationStreamDisconnect, shouldRefreshMessagesAfterHistory, shouldReloadMessagesForExecutionBoundary, shouldRetryConversationStream, shouldSurfaceConversationLoadError } from "./conversation-load-policy.ts";
+
+test("keeps a device-projected pending run active after a page reload", () => {
+  assert.equal(isConversationAgentRunActive(false, "pending", "idle"), true);
+  assert.equal(isConversationAgentRunActive(false, "success", "running"), true);
+  assert.equal(isConversationAgentRunActive(false, "success", "waiting_interaction"), true);
+  assert.equal(isConversationAgentRunActive(false, "success", "completed"), false);
+});
 
 test("keeps persisted messages visible when gateway history synchronization fails", () => {
   assert.equal(shouldSurfaceConversationLoadError(12), false);
