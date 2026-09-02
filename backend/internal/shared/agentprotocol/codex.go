@@ -8,4 +8,7 @@ const (
 	SessionSnapshotEventKind   = "workspace/sessions/updated"
 	SessionHistoryEventKind    = "thread/history/updated"
 	MaxProviderEventBytes      = 2 << 20
+	MaxTerminalOutcomeBytes    = 256 << 20
+	MaxTerminalUploadBytes     = 64 << 20
+	MaxSessionHistoryBytes     = 256 << 20
 )

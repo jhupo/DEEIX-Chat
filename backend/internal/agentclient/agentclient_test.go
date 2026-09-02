@@ -50,6 +50,38 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestEnqueueRoutesThreadReadsToBoundedHistoryQueue(t *testing.T) {
+	gateway := &Gateway{
+		ctx: context.Background(), commands: make(chan queuedCommand, 1), historyCommands: make(chan queuedCommand, 1), active: make(map[string]bool),
+	}
+	history := commandRecord{Command: json.RawMessage(`{"kind":"thread.read","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-1","threadId":"agth_0123456789abcdef0123456789abcdef","sourceThreadRef":"source-thread-1"}`)}
+	gateway.enqueue("history-command", history, false)
+	select {
+	case item := <-gateway.historyCommands:
+		if item.ID != "history-command" {
+			t.Fatalf("history queue item = %#v", item)
+		}
+	default:
+		t.Fatal("thread.read was not routed to the history queue")
+	}
+	select {
+	case item := <-gateway.commands:
+		t.Fatalf("thread.read blocked the foreground command queue: %#v", item)
+	default:
+	}
+
+	foreground := commandRecord{Command: json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"models"}}`)}
+	gateway.enqueue("foreground-command", foreground, false)
+	select {
+	case item := <-gateway.commands:
+		if item.ID != "foreground-command" {
+			t.Fatalf("foreground queue item = %#v", item)
+		}
+	default:
+		t.Fatal("foreground command was not routed to the primary queue")
+	}
+}
+
 func TestResolveCodexEnforcesSupportedVersionRangeBeforeAppServer(t *testing.T) {
 	t.Setenv("DEEIX_AGENT_WINDOWS_USER_SID", "")
 	executable, err := os.Executable()
@@ -1104,6 +1136,15 @@ func TestUploadTerminalOutcomeUsesAuthenticatedBulkEndpoint(t *testing.T) {
 	}
 }
 
+func TestTerminalOutcomeBulkLimitsRemainSeparateFromWebSocketFrames(t *testing.T) {
+	if agentprotocol.MaxTerminalOutcomeBytes <= bridgeMaxPayload {
+		t.Fatalf("terminal outcome limit = %d, want greater than WebSocket limit %d", agentprotocol.MaxTerminalOutcomeBytes, bridgeMaxPayload)
+	}
+	if agentprotocol.MaxTerminalUploadBytes != bridgeMaxPayload {
+		t.Fatalf("compressed upload limit = %d, want %d", agentprotocol.MaxTerminalUploadBytes, bridgeMaxPayload)
+	}
+}
+
 func TestFlushOutgoingWaitsForWebSocketAckBeforeBulkUpload(t *testing.T) {
 	received := make(chan bridgeFrame, 1)
 	server := httptest.NewServer(websocket.Handler(func(connection *websocket.Conn) {
@@ -1812,13 +1853,67 @@ func TestSessionHistoryDeltaSendsOnlyChangedRecords(t *testing.T) {
 	events := assistant["executionEvents"].([]any)
 	events[1] = map[string]any{"kind": "item/completed", "sourceEventRef": "item:command", "payload": map[string]any{"itemID": "command", "item": map[string]any{"status": "completed", "output": "ok"}}}
 	second, secondState, changed, err := sessionHistoryDelta(session, firstState)
-	if err != nil || !changed || len(second["messages"].([]any)) != 1 || len(secondState.Events) != 2 {
+	if err != nil || !changed || len(second["messages"].([]any)) != 2 || len(secondState.Events) != 2 {
 		t.Fatalf("revised delta = %#v state=%#v changed=%v err=%v", second, secondState, changed, err)
 	}
-	changedAssistant := second["messages"].([]any)[0].(map[string]any)
+	contextUser := second["messages"].([]any)[0].(map[string]any)
+	if contextUser["sourceMessageRef"] != "message-user" || contextUser["executionEvents"] != nil {
+		t.Fatalf("revised delta context = %#v", contextUser)
+	}
+	changedAssistant := second["messages"].([]any)[1].(map[string]any)
 	changedEvents := changedAssistant["executionEvents"].([]any)
 	if len(changedEvents) != 1 || changedEvents[0].(map[string]any)["kind"] != "item/completed" {
 		t.Fatalf("revised events = %#v", changedEvents)
+	}
+}
+
+func TestSessionHistoryDeltaCarriesPredecessorAcrossTurns(t *testing.T) {
+	previousTail := map[string]any{
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"messages": []any{
+			map[string]any{"role": "user", "content": "first", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-user-one"},
+			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-assistant-one"},
+		},
+	}
+	_, previousState, _, err := sessionHistoryDelta(previousTail, historySyncState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextTail := map[string]any{
+		"sourceThreadRef": "thread-source", "historyLoaded": true, "historyDelta": true,
+		"messages": []any{
+			map[string]any{"role": "user", "content": "first", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-user-one"},
+			map[string]any{"role": "assistant", "content": "done", "sourceTurnRef": "turn-one", "sourceMessageRef": "message-assistant-one"},
+			map[string]any{"role": "user", "content": "second", "sourceTurnRef": "turn-two", "sourceMessageRef": "message-user-two"},
+		},
+	}
+	delta, _, changed, err := sessionHistoryDelta(nextTail, previousState)
+	if err != nil || !changed {
+		t.Fatalf("next-turn delta: changed=%v err=%v", changed, err)
+	}
+	messages := delta["messages"].([]any)
+	if len(messages) != 2 || messages[0].(map[string]any)["sourceMessageRef"] != "message-assistant-one" ||
+		messages[1].(map[string]any)["sourceMessageRef"] != "message-user-two" {
+		t.Fatalf("next-turn lineage context = %#v", messages)
+	}
+}
+
+func TestSessionTailTurnsNormalizesNewestFirstPage(t *testing.T) {
+	page := map[string]any{"data": []any{
+		map[string]any{"id": "turn-two", "itemsView": "full", "items": []any{}},
+		map[string]any{"id": "turn-one", "itemsView": "full", "items": []any{}},
+	}}
+	turns, err := sessionTailTurns(page)
+	if err != nil || len(turns) != 2 || stringField(turns[0].(map[string]any), "id") != "turn-one" ||
+		stringField(turns[1].(map[string]any), "id") != "turn-two" {
+		t.Fatalf("normalized tail = %#v err=%v", turns, err)
+	}
+	if _, err = sessionTailTurns(map[string]any{"data": []any{
+		map[string]any{"id": "turn-three", "itemsView": "full", "items": []any{}},
+		map[string]any{"id": "turn-two", "itemsView": "full", "items": []any{}},
+		map[string]any{"id": "turn-one", "itemsView": "full", "items": []any{}},
+	}}); err == nil {
+		t.Fatal("oversized tail page was accepted")
 	}
 }
 
@@ -1998,7 +2093,7 @@ func TestProjectSessionMessagesCreatesPendingAssistantBeforeFirstActivity(t *tes
 	}
 }
 
-func TestProjectSessionMessagesDoesNotTrustUncompletedInterruptedSnapshot(t *testing.T) {
+func TestProjectSessionMessagesProjectsInterruptedSnapshotAsTerminal(t *testing.T) {
 	detail := map[string]any{"thread": map[string]any{"id": "provider-thread", "turns": []any{
 		map[string]any{"id": "active-turn", "status": "interrupted", "startedAt": 1786615200, "items": []any{
 			map[string]any{"id": "user-1", "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": "inspect"}}},
@@ -2008,11 +2103,14 @@ func TestProjectSessionMessagesDoesNotTrustUncompletedInterruptedSnapshot(t *tes
 	messages := mustProjectSessionMessages(t, detail)
 	assistant, _ := messages[1].(map[string]any)
 	events, _ := assistant["executionEvents"].([]any)
-	for _, raw := range events {
-		event, _ := raw.(map[string]any)
-		if event["kind"] == "turn/completed" {
-			t.Fatalf("uncompleted desktop snapshot was projected as terminal: %#v", events)
-		}
+	if assistant["status"] != "interrupted" || len(events) < 2 {
+		t.Fatalf("interrupted assistant projection = %#v", assistant)
+	}
+	completed, _ := events[len(events)-1].(map[string]any)
+	payload, _ := completed["payload"].(map[string]any)
+	turn, _ := payload["turn"].(map[string]any)
+	if completed["kind"] != "turn/completed" || turn["status"] != "interrupted" {
+		t.Fatalf("interrupted terminal event = %#v", completed)
 	}
 }
 
@@ -2806,7 +2904,7 @@ func runFakeAppServer() {
 			var params map[string]any
 			_ = json.Unmarshal(request["params"], &params)
 			if params["threadId"] != "thread-1" || params["sortDirection"] != "asc" ||
-				params["itemsView"] != "full" || fmt.Sprint(params["limit"]) != "100" {
+				params["itemsView"] != "full" || fmt.Sprint(params["limit"]) != "20" {
 				result = map[string]any{"data": []any{}, "nextCursor": nil}
 				break
 			}

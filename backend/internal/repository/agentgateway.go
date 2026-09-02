@@ -3,10 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 )
+
+var ErrAgentDeviceUnavailable = errors.New("agent device unavailable")
 
 type AgentGatewayRepository interface {
 	CreateEnrollmentChallenge(context.Context, *domainagent.DeviceEnrollmentChallenge) error

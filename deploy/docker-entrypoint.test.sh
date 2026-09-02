@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=sh
 set -eu
 
 entrypoint=$(CDPATH= cd -- "$(dirname "$0")" && pwd)/docker-entrypoint.sh

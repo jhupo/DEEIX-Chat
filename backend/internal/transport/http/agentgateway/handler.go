@@ -14,6 +14,7 @@ import (
 	"time"
 
 	appagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/application/agentgateway"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/response"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/transport/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -153,10 +154,11 @@ type renameWorkspaceRequest struct {
 }
 
 const (
-	smallJSONBodyLimit       = int64(8 * 1024)
-	agentJSONBodyLimit       = int64(1024*1024 + 128*1024)
-	terminalOutcomeBodyLimit = int64(64 << 20)
-	timeLayout               = "2006-01-02T15:04:05.000Z07:00"
+	smallJSONBodyLimit          = int64(8 * 1024)
+	agentJSONBodyLimit          = int64(1024*1024 + 128*1024)
+	terminalOutcomeBodyLimit    = int64(agentprotocol.MaxTerminalUploadBytes)
+	terminalOutcomeDecodedLimit = int64(agentprotocol.MaxTerminalOutcomeBytes)
+	timeLayout                  = "2006-01-02T15:04:05.000Z07:00"
 )
 
 func bindStrictJSON(c *gin.Context, destination any, limit int64) error {
@@ -613,9 +615,9 @@ func (h *Handler) UploadTerminalOutcome(c *gin.Context) {
 		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
 		return
 	}
-	outcome, readErr := io.ReadAll(io.LimitReader(compressed, terminalOutcomeBodyLimit+1))
+	outcome, readErr := io.ReadAll(io.LimitReader(compressed, terminalOutcomeDecodedLimit+1))
 	closeErr := compressed.Close()
-	if readErr != nil || closeErr != nil || len(outcome) == 0 || int64(len(outcome)) > terminalOutcomeBodyLimit {
+	if readErr != nil || closeErr != nil || len(outcome) == 0 || int64(len(outcome)) > terminalOutcomeDecodedLimit {
 		writeError(c, appagent.ErrInvalidInput, "upload terminal outcome failed")
 		return
 	}

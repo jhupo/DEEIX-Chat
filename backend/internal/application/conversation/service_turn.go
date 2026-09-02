@@ -471,8 +471,18 @@ func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEve
 			latest[event.RunID+":"+event.Kind] = event
 		case "item/fileChange/patchUpdated":
 			latest[event.Kind+":"+key] = event
-		case "item/started", "item/completed":
-			retained = append(retained, event)
+		case "item/started":
+			if itemID == "" {
+				retained = append(retained, event)
+			} else if _, exists := first[event.Kind+":"+key]; !exists {
+				first[event.Kind+":"+key] = event
+			}
+		case "item/completed":
+			if itemID == "" {
+				retained = append(retained, event)
+			} else {
+				latest[event.Kind+":"+key] = compactExecutionItemEvent(event)
+			}
 		}
 	}
 	for _, event := range first {
@@ -500,6 +510,54 @@ func compactExecutionHistory(events []model.ExecutionEvent) []model.ExecutionEve
 }
 
 const maxExecutionHistoryTextBytes = 256 << 10
+
+const maxExecutionHistoryToolFieldBytes = 16 << 10
+
+func compactExecutionItemEvent(event model.ExecutionEvent) model.ExecutionEvent {
+	var payload struct {
+		Item map[string]any `json:"item"`
+	}
+	if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil || payload.Item == nil {
+		return event
+	}
+	kind, _ := payload.Item["kind"].(string)
+	switch strings.TrimSpace(kind) {
+	case "mcpToolCall", "dynamicToolCall", "collabToolCall", "webSearch", "imageGeneration":
+	default:
+		return event
+	}
+	truncated := false
+	for _, field := range []string{"arguments", "result", "error"} {
+		value, ok := payload.Item[field].(string)
+		if !ok {
+			continue
+		}
+		value, clipped := truncateExecutionHistoryText(value, maxExecutionHistoryToolFieldBytes)
+		if clipped {
+			payload.Item[field] = value
+			truncated = true
+		}
+	}
+	if !truncated {
+		return event
+	}
+	payload.Item["truncated"] = true
+	encoded, err := json.Marshal(payload)
+	if err == nil {
+		event.PayloadJSON = string(encoded)
+	}
+	return event
+}
+
+func truncateExecutionHistoryText(value string, limit int) (string, bool) {
+	if len(value) <= limit {
+		return value, false
+	}
+	for limit > 0 && !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return value[:limit], true
+}
 
 func executionEventItemID(event model.ExecutionEvent) string {
 	var payload struct {

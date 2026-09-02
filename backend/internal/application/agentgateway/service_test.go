@@ -5,13 +5,32 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
+
+func TestBridgeApplyErrorSeparatesAuthenticationFromProjectionState(t *testing.T) {
+	backendFailure := errors.New("backend failure")
+	for _, test := range []struct {
+		input error
+		want  error
+	}{
+		{repository.ErrAgentDeviceUnavailable, ErrCredential},
+		{repository.ErrConflict, ErrStateConflict},
+		{repository.ErrNotFound, ErrStateConflict},
+		{backendFailure, backendFailure},
+	} {
+		if got := bridgeApplyError(test.input); !errors.Is(got, test.want) {
+			t.Fatalf("bridgeApplyError(%v) = %v, want %v", test.input, got, test.want)
+		}
+	}
+}
 
 func TestCredentialDerivationAndDeviceSignature(t *testing.T) {
 	service := &Service{secret: []byte("01234567890123456789012345678901")}

@@ -94,6 +94,7 @@ type ChatAreaProps = {
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
+  onHydrateAgentRun?: (runID: string) => void;
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onToggleStar?: () => void | Promise<void>;
   onRename?: (title: string) => void | Promise<void>;
@@ -256,6 +257,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onCycleMessageBranch,
   onReactAssistantMessage,
   onOpenCodeArtifact,
+  onHydrateAgentRun,
   markdownRender,
   showModelInfo,
   showLatency,
@@ -282,6 +284,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   onCycleMessageBranch: (parentPublicID: string | null, direction: "previous" | "next") => void;
   onReactAssistantMessage: (publicID: string, reaction: AssistantReaction) => void;
   onOpenCodeArtifact?: (message: ChatAreaMessage, artifact: OpenCodeArtifactInput) => void;
+  onHydrateAgentRun?: (runID: string) => void;
   markdownRender: boolean;
   showModelInfo: boolean;
   showLatency: boolean;
@@ -355,6 +358,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
         attachmentContentLoader={attachmentContentLoader}
         onEditImageAttachment={onEditImageAttachment}
         artifactActions={artifactActions}
+        onHydrateAgentRun={onHydrateAgentRun}
         markdownRender={markdownRender}
         showModelInfo={showModelInfo}
         showLatency={showLatency}
@@ -396,6 +400,7 @@ const ChatMessageRow = React.memo(function ChatMessageRow({
   previous.attachmentContentLoader === next.attachmentContentLoader &&
   previous.onEditImageAttachment === next.onEditImageAttachment &&
   previous.onOpenCodeArtifact === next.onOpenCodeArtifact &&
+  previous.onHydrateAgentRun === next.onHydrateAgentRun &&
   areChatAreaMessagesRenderEqual(previous.item, next.item)
 ));
 
@@ -422,6 +427,7 @@ export function ChatArea({
   attachmentContentLoader,
   onEditImageAttachment,
   onOpenCodeArtifact,
+  onHydrateAgentRun,
   onCycleMessageBranch,
   onToggleStar,
   onRename,
@@ -582,26 +588,6 @@ export function ChatArea({
                 className={cn("mx-auto w-full gap-0", contentWidthClassName)}
                 style={{ fontFamily: "var(--font-chat)", fontWeight: "var(--font-chat-weight)" }}
               >
-                <ChatScreenshotBrandMark placement="top" />
-                {loadingOlder || olderErrorMsg ? (
-                  <div
-                    className="mb-3 flex min-h-8 items-center justify-center gap-2 text-xs text-muted-foreground"
-                    role={olderErrorMsg ? "alert" : "status"}
-                  >
-                    {loadingOlder ? <Spinner className="size-3.5" /> : <AlertCircle className="size-3.5" />}
-                    <span>{loadingOlder ? t("data.loadingOlder") : olderErrorMsg}</span>
-                    {olderErrorMsg ? (
-                      <button
-                        type="button"
-                        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                        onClick={() => void onRetryOlder()}
-                      >
-                        <RotateCcw className="size-3" />
-                        {t("data.retryLoadOlder")}
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
                 {messages.map((item, index) => {
                   const previousItem = index > 0 ? messages[index - 1] : null;
                   const spacingClass =
@@ -637,6 +623,7 @@ export function ChatArea({
                       onCycleMessageBranch={stableOnCycleMessageBranch}
                       onReactAssistantMessage={stableOnReactAssistantMessage}
                       onOpenCodeArtifact={onOpenCodeArtifact}
+                      onHydrateAgentRun={onHydrateAgentRun}
                       markdownRender={markdownRender}
                       showModelInfo={showModelInfo}
                       showLatency={showLatency}
@@ -706,16 +693,38 @@ export function ChatArea({
                       className={spacingClass}
                       data-message-public-id={publicID || undefined}
                     >
+                      {index === 0 ? <ChatScreenshotBrandMark placement="top" /> : null}
                       <div>
                         {compactDivider}
                         {rowContent}
                       </div>
+                      {index === messages.length - 1 ? <ChatScreenshotBrandMark placement="bottom" /> : null}
                     </MessageScrollerItem>
                   );
                 })}
-                <ChatScreenshotBrandMark placement="bottom" />
               </MessageScrollerContent>
             </MessageScrollerViewport>
+            {loadingOlder || olderErrorMsg ? (
+              <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-3">
+                <div
+                  className="pointer-events-auto flex min-h-8 items-center gap-2 rounded-md bg-background/95 px-2 text-xs text-muted-foreground shadow-sm backdrop-blur-sm"
+                  role={olderErrorMsg ? "alert" : "status"}
+                >
+                  {loadingOlder ? <Spinner className="size-3.5" /> : <AlertCircle className="size-3.5" />}
+                  <span>{loadingOlder ? t("data.loadingOlder") : olderErrorMsg}</span>
+                  {olderErrorMsg ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                      onClick={() => void onRetryOlder()}
+                    >
+                      <RotateCcw className="size-3" />
+                      {t("data.retryLoadOlder")}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <MessageScrollerButton
               aria-label={t("messages.scrollToBottom")}
               title={t("messages.scrollToBottom")}

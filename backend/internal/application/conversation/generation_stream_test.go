@@ -10,8 +10,18 @@ import (
 	"testing"
 	"time"
 
+	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 )
+
+type activeGenerationRepoStub struct {
+	repository.ConversationRepository
+	statuses []model.RunStatus
+}
+
+func (s *activeGenerationRepoStub) ListConversationRunStatusesByRunIDs(context.Context, uint, []string) ([]model.RunStatus, error) {
+	return s.statuses, nil
+}
 
 func TestGenerationStreamRegistryReplayAndTerminal(t *testing.T) {
 	registry := newGenerationStreamRegistry(newTestGenerationStreamStore(), generationStreamOptions{
@@ -379,6 +389,28 @@ func TestServiceListActiveMessageGenerationsDelegatesToRegistry(t *testing.T) {
 	var nilService *Service
 	if items, err = nilService.ListActiveMessageGenerations(ctx, 7); err != nil || len(items) != 0 {
 		t.Fatalf("nil service snapshot = %+v err = %v, want empty", items, err)
+	}
+}
+
+func TestServiceFiltersStaleActiveGenerationLeases(t *testing.T) {
+	registry := newGenerationStreamRegistry(nil, generationStreamOptions{})
+	registry.register(context.Background(), "run_local", 7, "conv_local", func() {})
+	defer registry.finish(context.Background(), "run_local")
+	svc := &Service{
+		generationStreams: registry,
+		repo: &activeGenerationRepoStub{statuses: []model.RunStatus{
+			{RunID: "run_running", Status: "running"},
+			{RunID: "run_completed", Status: "success"},
+		}},
+	}
+	items, err := svc.filterActiveMessageGenerations(context.Background(), 7, []ActiveMessageGeneration{
+		{RunID: "run_running", ConversationPublicID: "conv_running"},
+		{RunID: "run_completed", ConversationPublicID: "conv_completed"},
+		{RunID: "run_missing", ConversationPublicID: "conv_missing"},
+		{RunID: "run_local", ConversationPublicID: "conv_local"},
+	})
+	if err != nil || len(items) != 2 || items[0].RunID != "run_running" || items[1].RunID != "run_local" {
+		t.Fatalf("filtered active generations = %+v err=%v", items, err)
 	}
 }
 

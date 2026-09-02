@@ -42,6 +42,8 @@ const (
 	gatewayInlineTerminalBytes    = 512 << 10
 	historyImageUploadConcurrency = 4
 	historyImageSyncBudget        = 30 * time.Second
+	historyCommandWorkerCount     = 4
+	sessionHistoryWorkerCount     = 4
 	sessionHistoryPayloadBudget   = agentprotocol.MaxProviderEventBytes - (8 << 10)
 )
 
@@ -63,6 +65,7 @@ type Gateway struct {
 	historyRetries   map[string]bool
 	workspaceUpdates chan []Workspace
 	commands         chan queuedCommand
+	historyCommands  chan queuedCommand
 	activeMu         sync.Mutex
 	active           map[string]bool
 	registerMu       sync.Mutex
@@ -128,7 +131,8 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 		agentVersion: strings.TrimSpace(agentVersion),
 		wake:         make(chan struct{}, 1), sessionUpdates: make(chan struct{}, 1), historyUpdates: make(chan struct{}, 1),
 		workspaceUpdates: make(chan []Workspace, 1),
-		commands:         make(chan queuedCommand, 128), active: make(map[string]bool), workspaces: make(map[string]Workspace),
+		commands:         make(chan queuedCommand, 128), historyCommands: make(chan queuedCommand, 128),
+		active: make(map[string]bool), workspaces: make(map[string]Workspace),
 		pendingHistory: make(map[string]watchedSession), historyRetries: make(map[string]bool),
 	}
 	for _, workspace := range config.Workspaces {
@@ -152,7 +156,13 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	gateway.adapter = adapter
 	defer adapter.Close()
 	defer func() { _ = gateway.writeStatus("stopped", "") }()
-	go gateway.commandWorker(runtimeContext)
+	if err = gateway.refreshWorkspaces(runtimeContext); err != nil {
+		return fmt.Errorf("discover Codex workspaces: %w", err)
+	}
+	go gateway.commandWorker(runtimeContext, gateway.commands)
+	for range historyCommandWorkerCount {
+		go gateway.commandWorker(runtimeContext, gateway.historyCommands)
+	}
 	go gateway.refreshWorkspaceLoop(runtimeContext)
 	go gateway.watchSessionStateLoop(runtimeContext)
 	go gateway.sessionSnapshotLoop(runtimeContext)
@@ -230,7 +240,6 @@ func (gateway *Gateway) refreshWorkspaceLoop(ctx context.Context) {
 			gateway.logger.Printf("refresh Codex workspaces: %s", publicMessage(err))
 		}
 	}
-	refresh()
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -330,70 +339,90 @@ func (gateway *Gateway) sessionHistoryLoop(ctx context.Context) {
 		retryDelays[watched.sourceThreadRef] = delay
 		gateway.scheduleSessionHistoryRetry(ctx, watched, delay)
 	}
+	type syncResult struct {
+		watched  watchedSession
+		appended bool
+		err      error
+	}
+	syncSession := func(watched watchedSession) (bool, error) {
+		readContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+		session, err := gateway.adapter.readSessionTail(readContext, watched)
+		cancel()
+		if err != nil {
+			return false, err
+		}
+		gateway.hydrateHistoryImages(ctx, map[string]any{"session": session})
+		delta, nextState, changed, deltaErr := sessionHistoryDelta(session, gateway.state.HistorySyncState(watched.sourceThreadRef))
+		if deltaErr != nil {
+			return false, fmt.Errorf("project session tail: %w", deltaErr)
+		}
+		if !changed {
+			return false, nil
+		}
+		canonical, marshalErr := json.Marshal(delta)
+		if marshalErr != nil {
+			return false, marshalErr
+		}
+		digest := sha256.Sum256(canonical)
+		batchRef := stableSessionSourceRef("history", watched.sourceThreadRef, hex.EncodeToString(digest[:]))
+		payloads, splitErr := splitSessionHistoryPayload(delta, batchRef)
+		if splitErr != nil {
+			return false, fmt.Errorf("encode session tail: %w", splitErr)
+		}
+		for _, chunk := range payloads {
+			event, eventErr := json.Marshal(map[string]any{
+				"kind": agentprotocol.SessionHistoryEventKind, "sourceThreadRef": watched.sourceThreadRef,
+				"occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "payload": chunk,
+			})
+			if eventErr != nil || len(event) > agentprotocol.MaxProviderEventBytes {
+				return false, errors.New("session tail event exceeds the provider event limit")
+			}
+			if _, appendErr := gateway.state.AppendEvent(event); appendErr != nil {
+				return false, fmt.Errorf("persist session tail: %w", appendErr)
+			}
+		}
+		if rememberErr := gateway.state.RememberHistorySyncState(watched.sourceThreadRef, nextState); rememberErr != nil {
+			return false, fmt.Errorf("persist session sync state: %w", rememberErr)
+		}
+		return true, nil
+	}
 	syncHistory := func(sessions []watchedSession) {
+		if len(sessions) == 0 {
+			return
+		}
+		jobs := make(chan watchedSession)
+		results := make(chan syncResult, len(sessions))
+		workers := min(sessionHistoryWorkerCount, len(sessions))
+		var workersDone sync.WaitGroup
+		workersDone.Add(workers)
+		for range workers {
+			go func() {
+				defer workersDone.Done()
+				for watched := range jobs {
+					appended, err := syncSession(watched)
+					results <- syncResult{watched: watched, appended: appended, err: err}
+				}
+			}()
+		}
+		go func() {
+			for _, watched := range sessions {
+				jobs <- watched
+			}
+			close(jobs)
+			workersDone.Wait()
+			close(results)
+		}()
 		appended := false
-		for _, watched := range sessions {
-			readContext, cancel := context.WithTimeout(ctx, 20*time.Second)
-			session, err := gateway.adapter.readSessionTail(readContext, watched)
-			cancel()
-			if err != nil {
+		for result := range results {
+			if result.err != nil {
 				if ctx.Err() == nil {
-					gateway.logger.Printf("refresh Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(err))
-					retry(watched)
+					gateway.logger.Printf("refresh Codex session tail thread=%s: %s", result.watched.sourceThreadRef, publicMessage(result.err))
+					retry(result.watched)
 				}
 				continue
 			}
-			gateway.hydrateHistoryImages(ctx, map[string]any{"session": session})
-			delta, nextState, changed, deltaErr := sessionHistoryDelta(session, gateway.state.HistorySyncState(watched.sourceThreadRef))
-			if deltaErr != nil {
-				gateway.logger.Printf("project Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(deltaErr))
-				retry(watched)
-				continue
-			}
-			if !changed {
-				delete(retryDelays, watched.sourceThreadRef)
-				continue
-			}
-			canonical, marshalErr := json.Marshal(delta)
-			if marshalErr != nil {
-				continue
-			}
-			digest := sha256.Sum256(canonical)
-			batchRef := stableSessionSourceRef("history", watched.sourceThreadRef, hex.EncodeToString(digest[:]))
-			payloads, splitErr := splitSessionHistoryPayload(delta, batchRef)
-			if splitErr != nil {
-				gateway.logger.Printf("encode Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(splitErr))
-				retry(watched)
-				continue
-			}
-			persisted := true
-			for _, chunk := range payloads {
-				event, eventErr := json.Marshal(map[string]any{
-					"kind": agentprotocol.SessionHistoryEventKind, "sourceThreadRef": watched.sourceThreadRef,
-					"occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "payload": chunk,
-				})
-				if eventErr != nil || len(event) > agentprotocol.MaxProviderEventBytes {
-					gateway.logger.Printf("encode Codex session tail thread=%s: event exceeds the provider event limit", watched.sourceThreadRef)
-					persisted = false
-					break
-				}
-				if _, appendErr := gateway.state.AppendEvent(event); appendErr != nil {
-					gateway.logger.Printf("persist Codex session tail thread=%s: %s", watched.sourceThreadRef, publicMessage(appendErr))
-					persisted = false
-					break
-				}
-			}
-			if !persisted {
-				retry(watched)
-				continue
-			}
-			appended = true
-			if rememberErr := gateway.state.RememberHistorySyncState(watched.sourceThreadRef, nextState); rememberErr != nil {
-				gateway.logger.Printf("persist Codex session sync state thread=%s: %s", watched.sourceThreadRef, publicMessage(rememberErr))
-				retry(watched)
-				continue
-			}
-			delete(retryDelays, watched.sourceThreadRef)
+			delete(retryDelays, result.watched.sourceThreadRef)
+			appended = appended || result.appended
 		}
 		if appended {
 			gateway.signalWake()
@@ -441,6 +470,8 @@ func sessionHistoryDelta(session map[string]any, previous historySyncState) (map
 	}
 	next := historySyncState{Metadata: metadataDigest, Messages: make(map[string]string), Events: make(map[string]string)}
 	deltaMessages := make([]any, 0, len(messages))
+	pendingContext := make([]any, 0, 1)
+	deltaStarted := false
 	for _, rawMessage := range messages {
 		message, messageOK := rawMessage.(map[string]any)
 		messageRef := strings.TrimSpace(stringField(message, "sourceMessageRef"))
@@ -478,8 +509,15 @@ func sessionHistoryDelta(session map[string]any, previous historySyncState) (map
 			}
 		}
 		if previous.Messages[messageKey] == messageDigest && len(changedEvents) == 0 {
+			if deltaStarted {
+				pendingContext = append(pendingContext, base)
+			} else {
+				pendingContext = append(pendingContext[:0], base)
+			}
 			continue
 		}
+		deltaMessages = append(deltaMessages, pendingContext...)
+		pendingContext = pendingContext[:0]
 		projected := make(map[string]any, len(base)+1)
 		for key, value := range base {
 			projected[key] = value
@@ -488,6 +526,12 @@ func sessionHistoryDelta(session map[string]any, previous historySyncState) (map
 			projected["executionEvents"] = changedEvents
 		}
 		deltaMessages = append(deltaMessages, projected)
+		deltaStarted = true
+	}
+	if deltaStarted && len(pendingContext) > 0 {
+		// The first unchanged successor is part of the lineage even when its
+		// content did not change, for example after steering an active turn.
+		deltaMessages = append(deltaMessages, pendingContext[0])
 	}
 	delta := make(map[string]any, len(metadata)+1)
 	for key, value := range metadata {
@@ -756,6 +800,7 @@ func (gateway *Gateway) refreshWorkspaces(ctx context.Context) error {
 	gateway.adapter.replaceWorkspaces(persisted)
 	gateway.workspaceMu.Unlock()
 	gateway.signalWorkspaceUpdate(discovered)
+	gateway.signalSessionUpdate()
 	return nil
 }
 
@@ -1140,12 +1185,12 @@ func validateRuntimeLeaseExpiry(value string, now time.Time) error {
 	return nil
 }
 
-func (gateway *Gateway) commandWorker(ctx context.Context) {
+func (gateway *Gateway) commandWorker(ctx context.Context, commands <-chan queuedCommand) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case item := <-gateway.commands:
+		case item := <-commands:
 			gateway.executeCommand(ctx, item)
 		}
 	}
@@ -1164,7 +1209,11 @@ func (gateway *Gateway) enqueue(id string, record commandRecord, concurrent bool
 		go gateway.executeCommand(gateway.ctx, item)
 		return
 	}
-	gateway.commands <- item
+	commands := gateway.commands
+	if command, err := parseAgentCommand(record.Command); err == nil && command.Kind == "thread.read" && gateway.historyCommands != nil {
+		commands = gateway.historyCommands
+	}
+	commands <- item
 }
 
 func (gateway *Gateway) executeCommand(parent context.Context, item queuedCommand) {

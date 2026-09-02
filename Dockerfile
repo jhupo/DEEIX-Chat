@@ -105,6 +105,7 @@ RUN find /app/image-runtime -type f -print0 \
   | cut -d ' ' -f 1 > /tmp/deeix-image-digest \
   && mv /tmp/deeix-image-digest /app/image-runtime/IMAGE_DIGEST
 COPY --chmod=0755 deploy/docker-entrypoint.sh /usr/local/bin/deeix-chat-entrypoint
+RUN ! grep -q "$(printf '\r')" /usr/local/bin/deeix-chat-entrypoint
 COPY LICENSE NOTICE /app/licenses/DEEIX-Chat/
 
 ENV FRONTEND_DIST_DIR=/app/runtime/current/frontend/out

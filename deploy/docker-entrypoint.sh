@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=sh
 set -eu
 
 image_runtime=${DEEIX_IMAGE_RUNTIME_DIR:-/app/image-runtime}

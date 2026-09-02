@@ -26,12 +26,23 @@ const AGENT_RUN_ACCORDION_VALUE = "message-agent-run";
 
 export function MessageAgentRun({
   agentRun,
+  available,
+  messageActive,
+  messageStatus,
+  messageDurationMS,
+  onRequestHydration,
 }: {
   agentRun: AgentRunSnapshot;
+  available: boolean;
+  messageActive: boolean;
+  messageStatus?: string;
+  messageDurationMS?: number;
+  onRequestHydration?: () => void;
 }) {
   const t = useTranslations("chat.agent");
   const locale = useLocale();
-  const active = agentRun.status === "running" || agentRun.status === "waiting_interaction";
+  const hydratedActive = agentRun.status === "running" || agentRun.status === "waiting_interaction";
+  const active = messageActive || hydratedActive;
   const [accordionValue, setAccordionValue] = React.useState(() =>
     active ? AGENT_RUN_ACCORDION_VALUE : "",
   );
@@ -39,23 +50,45 @@ export function MessageAgentRun({
   React.useEffect(() => {
     if (active) {
       setAccordionValue(AGENT_RUN_ACCORDION_VALUE);
+      onRequestHydration?.();
       return;
     }
     setAccordionValue("");
-  }, [active]);
+  }, [active, onRequestHydration]);
 
-  if (!hasAgentRunActivity(agentRun)) {
+  const handleValueChange = React.useCallback((value: string) => {
+    const nextValue = value || "";
+    setAccordionValue(nextValue);
+    if (nextValue === AGENT_RUN_ACCORDION_VALUE) {
+      onRequestHydration?.();
+    }
+  }, [onRequestHydration]);
+
+  if (!available && !hasAgentRunActivity(agentRun)) {
     return null;
   }
 
-  const duration = formatAgentRunDuration(agentRun.durationMS, locale);
+  const durationMS = agentRun.durationMS !== null && agentRun.durationMS > 0
+    ? agentRun.durationMS
+    : messageDurationMS !== undefined && messageDurationMS > 0
+      ? messageDurationMS
+      : null;
+  const duration = formatAgentRunDuration(durationMS, locale);
+  const normalizedMessageStatus = messageStatus?.trim().toLowerCase();
+  const status = agentRun.status !== "idle"
+    ? agentRun.status
+    : normalizedMessageStatus === "error" || normalizedMessageStatus === "failed"
+      ? "failed"
+      : normalizedMessageStatus === "interrupted"
+        ? "interrupted"
+        : active
+          ? "running"
+          : "completed";
   const title = active
     ? t("activity.title.running")
     : duration
       ? t("activity.elapsed", { duration })
-      : t(
-          `activity.title.${agentRun.status === "idle" || agentRun.status === "waiting_interaction" ? "completed" : agentRun.status}`,
-        );
+      : t(`activity.title.${status === "waiting_interaction" ? "completed" : status}`);
   const open = accordionValue === AGENT_RUN_ACCORDION_VALUE;
 
   return (
@@ -64,7 +97,7 @@ export function MessageAgentRun({
         type="single"
         collapsible
         value={accordionValue}
-        onValueChange={(value) => setAccordionValue(value || "")}
+        onValueChange={handleValueChange}
         className="w-full"
       >
         <AccordionItem value={AGENT_RUN_ACCORDION_VALUE} className="border-b-0">

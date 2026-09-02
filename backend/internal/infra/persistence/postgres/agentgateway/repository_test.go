@@ -15,6 +15,7 @@ import (
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/testutil"
 )
 
@@ -47,6 +48,131 @@ func TestValidWorkspaceSessionAcceptsLargeCodexTurn(t *testing.T) {
 	session.Messages[0].ExecutionEvents = make([]workspaceSessionEvent, maxWorkspaceSessionEvents+1)
 	if validWorkspaceSession(session, false) {
 		t.Fatal("unbounded Codex turn was accepted")
+	}
+}
+
+func TestWorkspaceSessionSnapshotsReconcileEveryWorkspace(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.Conversation{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_snapshot_reconcile", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("7", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-snapshot-reconcile", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready",
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspaces := []model.AgentWorkspace{
+		{PublicID: "workspace-snapshot-a", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Name: "A", Status: "available", LastSeenAt: now},
+		{PublicID: "workspace-snapshot-b", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Name: "B", Status: "available", LastSeenAt: now},
+	}
+	if err := database.Create(&workspaces).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := func(ref, name string) workspaceSession {
+		return workspaceSession{SourceThreadRef: ref, Name: name, Status: "active", CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
+	}
+	alpha, beta, gamma := session("thread-alpha", "Alpha"), session("thread-beta", "Beta"), session("thread-gamma", "Gamma")
+	if _, err := syncWorkspaceSessions(database, &device, profile.ID, workspaces[0].ID, []workspaceSession{alpha, beta}, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := syncWorkspaceSessions(database, &device, profile.ID, workspaces[1].ID, []workspaceSession{gamma}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	var alphaThread, betaThread, gammaThread model.AgentThread
+	if err := database.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, alpha.SourceThreadRef).First(&alphaThread).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, beta.SourceThreadRef).First(&betaThread).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, gamma.SourceThreadRef).First(&gammaThread).Error; err != nil {
+		t.Fatal(err)
+	}
+	alphaConversationID := alphaThread.ConversationID
+	changed, err := syncWorkspaceSessions(database, &device, profile.ID, workspaces[0].ID, []workspaceSession{beta}, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alphaConversation model.Conversation
+	if err := database.Unscoped().First(&alphaConversation, alphaConversationID).Error; err != nil ||
+		alphaConversation.DeletedAt.Valid != true || !slices.Equal(changed, []string{alphaConversation.PublicID}) {
+		t.Fatalf("missing conversation = %#v changed=%#v err=%v", alphaConversation, changed, err)
+	}
+	if err := database.First(&alphaThread, alphaThread.ID).Error; err != nil || alphaThread.Status != threadStatusMissing {
+		t.Fatalf("missing thread = %#v err=%v", alphaThread, err)
+	}
+	if err := database.First(&gammaThread, gammaThread.ID).Error; err != nil || gammaThread.Status != "active" {
+		t.Fatalf("other workspace thread changed = %#v err=%v", gammaThread, err)
+	}
+
+	changed, err = syncWorkspaceSessions(database, &device, profile.ID, workspaces[1].ID, []workspaceSession{alpha, gamma}, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.First(&alphaThread, alphaThread.ID).Error; err != nil || alphaThread.Status != "active" ||
+		alphaThread.WorkspaceID != workspaces[1].ID || alphaThread.ConversationID != alphaConversationID {
+		t.Fatalf("restored moved thread = %#v err=%v", alphaThread, err)
+	}
+	if err := database.First(&alphaConversation, alphaConversationID).Error; err != nil ||
+		alphaConversation.ExecutionWorkspaceID != workspaces[1].PublicID || !slices.Equal(changed, []string{alphaConversation.PublicID}) {
+		t.Fatalf("restored moved conversation = %#v changed=%#v err=%v", alphaConversation, changed, err)
+	}
+	var betaConversation model.Conversation
+	if err := database.First(&betaConversation, betaThread.ConversationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	changed, err = syncWorkspaceSessions(database, &device, profile.ID, workspaces[0].ID, nil, now.Add(3*time.Second))
+	if err != nil || !slices.Equal(changed, []string{betaConversation.PublicID}) {
+		t.Fatalf("empty workspace snapshot changed=%#v err=%v", changed, err)
+	}
+	if err := database.First(&betaThread, betaThread.ID).Error; err != nil || betaThread.Status != threadStatusMissing {
+		t.Fatalf("empty workspace snapshot thread = %#v err=%v", betaThread, err)
+	}
+	if err := database.Model(&betaThread).Update("status", "active").Error; err != nil {
+		t.Fatal(err)
+	}
+	changed, err = syncWorkspaceSessions(database, &device, profile.ID, workspaces[0].ID, []workspaceSession{beta}, now.Add(4*time.Second))
+	if err != nil || !slices.Equal(changed, []string{betaConversation.PublicID}) {
+		t.Fatalf("repair inconsistent active session changed=%#v err=%v", changed, err)
+	}
+	if err := database.First(&betaConversation, betaConversation.ID).Error; err != nil || betaConversation.DeletedAt.Valid {
+		t.Fatalf("active session conversation was not restored = %#v err=%v", betaConversation, err)
+	}
+
+	if err := database.Model(&alphaThread).Update("status", "deleted").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Model(&alphaConversation).Update("deleted_at", now.Add(4*time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Model(&gammaThread).Update("status", threadStatusDeletingActive).Error; err != nil {
+		t.Fatal(err)
+	}
+	changed, err = syncWorkspaceSessions(database, &device, profile.ID, workspaces[1].ID, []workspaceSession{alpha, gamma}, now.Add(5*time.Second))
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("delete-protected snapshot changed=%#v err=%v", changed, err)
+	}
+	if err := database.First(&alphaThread, alphaThread.ID).Error; err != nil || alphaThread.Status != "deleted" {
+		t.Fatalf("deleted thread was revived = %#v err=%v", alphaThread, err)
+	}
+	if err := database.Unscoped().First(&alphaConversation, alphaConversationID).Error; err != nil || !alphaConversation.DeletedAt.Valid {
+		t.Fatalf("deleted conversation was revived = %#v err=%v", alphaConversation, err)
+	}
+	if err := database.First(&gammaThread, gammaThread.ID).Error; err != nil || gammaThread.Status != threadStatusDeletingActive {
+		t.Fatalf("deleting thread was revived = %#v err=%v", gammaThread, err)
 	}
 }
 
@@ -213,6 +339,108 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 		secondUser.ParentMessageID == nil || completedAssistant.ParentMessageID == nil || *completedAssistant.ParentMessageID != secondUser.ID {
 		t.Fatalf("delta message lineage = user:%#v assistant:%#v err=%v", secondUser, completedAssistant, err)
 	}
+
+	secondUserContext := active.Messages[0]
+	assistantContext := completed.Messages[1]
+	assistantContext.ExecutionEvents = nil
+	steered := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(3 * time.Second).Unix(),
+		Messages: []workspaceSessionMessage{
+			secondUserContext,
+			{Role: "user", Status: "success", Content: "steer", SourceTurnRef: "turn-second", SourceMessageRef: "message-steer-user", CreatedAt: now.Add(time.Second).Unix()},
+			assistantContext,
+		},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, steered, now.Add(3*time.Second)); err != nil || !changed {
+		t.Fatalf("steered history delta: changed=%v err=%v", changed, err)
+	}
+	var steeringUser model.Message
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-steer-user").First(&steeringUser).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-assistant").First(&completedAssistant).Error; err != nil ||
+		completedAssistant.ParentMessageID == nil || *completedAssistant.ParentMessageID != steeringUser.ID {
+		t.Fatalf("steered assistant lineage = steer:%#v assistant:%#v err=%v", steeringUser, completedAssistant, err)
+	}
+
+	nextTurn := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(4 * time.Second).Unix(),
+		Messages: []workspaceSessionMessage{
+			assistantContext,
+			{Role: "user", Status: "success", Content: "third", SourceTurnRef: "turn-third", SourceMessageRef: "message-third-user", CreatedAt: now.Add(2 * time.Second).Unix()},
+		},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, nextTurn, now.Add(4*time.Second)); err != nil || !changed {
+		t.Fatalf("next-turn history delta: changed=%v err=%v", changed, err)
+	}
+	var thirdUser model.Message
+	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-third-user").First(&thirdUser).Error; err != nil ||
+		thirdUser.ParentMessageID == nil || *thirdUser.ParentMessageID != completedAssistant.ID {
+		t.Fatalf("next-turn lineage = assistant:%#v user:%#v err=%v", completedAssistant, thirdUser, err)
+	}
+}
+
+func TestWorkspaceHistoryDeltaDoesNotReplaceOlderProjection(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationRun{},
+		&model.ConversationExecutionEvent{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
+	conversation := model.Conversation{
+		PublicID: "conversation_projection_upgrade", UserID: 7, Title: "Every project",
+		ExecutionType: "gateway", Status: "active", BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-projection-upgrade", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-projection-upgrade"
+	thread := model.AgentThread{
+		PublicID: "agth_projection_upgrade", UserID: 7, DeviceID: 1, RuntimeProfileID: 1,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: "active", HistoryStatus: "loaded", HistoryVersion: historyProjectionVersion - 1,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	existing := []model.Message{
+		{ConversationID: conversation.ID, UserID: 7, PublicID: "message_projection_user", Role: "user", ContentType: "text", Content: "first", SourceRef: "source-existing-user", Status: "success"},
+		{ConversationID: conversation.ID, UserID: 7, PublicID: "message_projection_assistant", Role: "assistant", ContentType: "text", Content: "complete history", SourceRef: "source-existing-assistant", Status: "success"},
+	}
+	if err := database.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	delta := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true, Status: "active",
+		UpdatedAt: now.Add(time.Second).Unix(),
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "interrupted", Content: "last turn", SourceTurnRef: "turn-last",
+			SourceMessageRef: "message-last-assistant", CreatedAt: now.Add(time.Second).Unix(),
+			ExecutionEvents: []workspaceSessionEvent{
+				{Kind: "turn/started", SourceEventRef: "turn:started", Payload: json.RawMessage(`{"turn":{"status":"running"}}`)},
+				{Kind: "turn/completed", SourceEventRef: "turn:completed", Payload: json.RawMessage(`{"turn":{"status":"interrupted"}}`)},
+			},
+		}},
+	}
+	changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, delta, now.Add(time.Second))
+	if err != nil || !changed {
+		t.Fatalf("defer projection upgrade delta: changed=%v err=%v", changed, err)
+	}
+	var messages []model.Message
+	if err := database.Where("conversation_id = ?", conversation.ID).Order("id ASC").Find(&messages).Error; err != nil ||
+		len(messages) != 2 || messages[0].Content != "first" || messages[1].Content != "complete history" {
+		t.Fatalf("older projection was replaced by a tail delta: %#v err=%v", messages, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.HistoryStatus != "unloaded" ||
+		thread.HistoryVersion != historyProjectionVersion-1 {
+		t.Fatalf("projection upgrade state = %#v err=%v", thread, err)
+	}
 }
 
 func TestWorkspaceHistoryBatchProjectsOnlyAfterFinalChunk(t *testing.T) {
@@ -313,6 +541,145 @@ func TestWorkspaceHistoryBatchProjectsOnlyAfterFinalChunk(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHistoryDeltaBeforeCatalogSnapshotIsAcknowledged(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentBridgeFrame{}, &model.AgentEvent{},
+		&model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{}, &model.Conversation{},
+		&model.Message{}, &model.Attachment{}, &model.ConversationRun{}, &model.ConversationExecutionEvent{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_history_before_catalog", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("2", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{PublicID: "codex-history-before-catalog", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready"}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := workspaceSession{
+		SourceThreadRef: "thread-before-catalog", HistoryLoaded: true, HistoryDelta: true,
+		HistoryBatchRef: "history_before_catalog", HistoryChunkCount: 1,
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-before-catalog",
+			SourceMessageRef: "message-before-catalog",
+		}},
+	}
+	payload, err := json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := domainagent.Event{
+		PublicID: "agev_history_before_catalog", UserID: 7, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
+		Kind: agentprotocol.SessionHistoryEventKind, SourceThreadRef: session.SourceThreadRef,
+		PayloadJSON: string(payload), OccurredAt: now,
+	}
+	applied, err := NewRepo(database).ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("a", 64), &event, now)
+	if err != nil || applied.Acknowledged != 1 {
+		t.Fatalf("early history delta: applied=%#v err=%v", applied, err)
+	}
+	var stored model.AgentEvent
+	if err := database.Where("public_id = ?", event.PublicID).First(&stored).Error; err != nil ||
+		stored.ThreadID != nil || stored.WorkspaceID != nil || stored.ConversationProjectedAt == nil {
+		t.Fatalf("stored early history delta = %#v err=%v", stored, err)
+	}
+}
+
+func TestWorkspaceHistoryDeltaForMissingThreadIsAcknowledged(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentBridgeFrame{}, &model.AgentEvent{},
+		&model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{}, &model.Conversation{},
+		&model.Message{}, &model.Attachment{}, &model.ConversationRun{}, &model.ConversationExecutionEvent{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_history_missing_thread", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("3", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{PublicID: "codex-history-missing-thread", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready"}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-history-missing-thread", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.Conversation{
+		PublicID: "conversation_history_missing", UserID: 7, Title: "Missing", ExecutionType: "gateway", Status: "active",
+		BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Delete(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-history-missing"
+	thread := model.AgentThread{
+		PublicID: "agth_history_missing", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: threadStatusMissing, HistoryStatus: "loaded", HistoryVersion: historyProjectionVersion,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryDelta: true,
+		HistoryBatchRef: "history_missing_thread", HistoryChunkCount: 1,
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-history-missing",
+			SourceMessageRef: "message-history-missing",
+		}},
+	}
+	payload, err := json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := domainagent.Event{
+		PublicID: "agev_history_missing_thread", UserID: 7, DeviceID: device.ID, RuntimeProfileID: &profile.ID,
+		Kind: agentprotocol.SessionHistoryEventKind, SourceThreadRef: sourceThreadRef,
+		PayloadJSON: string(payload), OccurredAt: now,
+	}
+	applied, err := NewRepo(database).ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("b", 64), &event, now)
+	if err != nil || applied.Acknowledged != 1 {
+		t.Fatalf("missing thread history delta: applied=%#v err=%v", applied, err)
+	}
+	var stored model.AgentEvent
+	if err := database.Where("public_id = ?", event.PublicID).First(&stored).Error; err != nil || stored.ConversationProjectedAt == nil {
+		t.Fatalf("stored missing thread delta = %#v err=%v", stored, err)
+	}
+	if err := database.Model(&thread).Update("status", "active").Error; err != nil {
+		t.Fatal(err)
+	}
+	session.HistoryBatchRef = "history_active_deleted_conversation"
+	payload, err = json.Marshal(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.PublicID = "agev_history_active_deleted_conversation"
+	event.PayloadJSON = string(payload)
+	applied, err = NewRepo(database).ApplyEventFrame(context.Background(), device.ID, profile.ID, 2, strings.Repeat("c", 64), &event, now.Add(time.Second))
+	if err != nil || applied.Acknowledged != 2 {
+		t.Fatalf("active thread with deleted conversation history delta: applied=%#v err=%v", applied, err)
+	}
+	if err := database.Where("public_id = ?", event.PublicID).First(&stored).Error; err != nil || stored.ConversationProjectedAt == nil {
+		t.Fatalf("stored active/deleted history delta = %#v err=%v", stored, err)
+	}
+}
+
 func TestSessionHistoryBatchRejectsDuplicateEventReferencesWithinChunk(t *testing.T) {
 	event := workspaceSessionEvent{
 		Kind: "item/completed", SourceEventRef: "item-event",
@@ -390,6 +757,36 @@ func TestWorkspaceSessionProjectionTracksActiveAssistantAndEventRevisions(t *tes
 	})
 	if status := workspaceSessionMessageStatus(completed); status != "success" {
 		t.Fatalf("completed assistant status = %q", status)
+	}
+	interrupted := completed
+	interrupted.Status = "interrupted"
+	interrupted.SourceTurnRef = "turn-interrupted"
+	interrupted.SourceMessageRef = "message-interrupted"
+	if !validWorkspaceSession(workspaceSession{
+		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, Messages: []workspaceSessionMessage{interrupted},
+	}, false) {
+		t.Fatal("interrupted assistant history was rejected")
+	}
+	statusOnlyDelta := workspaceSession{
+		SourceThreadRef: "thread-interrupted", HistoryLoaded: true, HistoryDelta: true,
+		HistoryBatchRef: "history_interrupted", HistoryChunkCount: 1,
+		Messages: []workspaceSessionMessage{{
+			Role: "assistant", Status: "interrupted", SourceTurnRef: "turn-interrupted",
+			SourceMessageRef: "message-interrupted",
+		}},
+	}
+	if !validWorkspaceSession(statusOnlyDelta, false) {
+		t.Fatal("status-only interrupted assistant delta was rejected")
+	}
+	statusOnlyDelta.Messages[0].Status = "success"
+	if !validWorkspaceSession(statusOnlyDelta, false) {
+		t.Fatal("status-only successful assistant delta was rejected")
+	}
+	statusOnlyDelta.HistoryDelta = false
+	statusOnlyDelta.HistoryBatchRef = ""
+	statusOnlyDelta.HistoryChunkCount = 0
+	if validWorkspaceSession(statusOnlyDelta, false) {
+		t.Fatal("empty assistant was accepted outside a history delta")
 	}
 	first := workspaceSessionEventSourceKey("conversation_test", "run_test", active.ExecutionEvents[0])
 	replayed := workspaceSessionEventSourceKey("conversation_test", "run_test", active.ExecutionEvents[0])
@@ -1575,6 +1972,26 @@ func TestInvalidResourceTerminalAdvancesBridgeCursor(t *testing.T) {
 	var snapshots int64
 	if err := database.Model(&model.AgentResourceSnapshot{}).Count(&snapshots).Error; err != nil || snapshots != 0 {
 		t.Fatalf("invalid resource snapshot was persisted: count=%d err=%v", snapshots, err)
+	}
+
+	missingWorkspaceID := workspace.ID + 1000
+	missingTarget := model.AgentCommand{
+		PublicID: "agcmd_1123456789abcdef0123456789abcdef", UserID: 7, DeviceID: device.ID,
+		RuntimeProfileID: &profile.ID, WorkspaceID: &missingWorkspaceID, ServerSeq: 2, Kind: "resource.refresh",
+		PayloadJSON: `{"resource":{"scope":"workspace","name":"sessions"}}`, State: "acked", TerminalJSON: "{}",
+	}
+	if err := database.Create(&missingTarget).Error; err != nil {
+		t.Fatal(err)
+	}
+	validTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[]}}}`
+	ack, err = repo.ApplyTerminalFrame(
+		context.Background(), device.ID, 2, 2, missingTarget.PublicID, strings.Repeat("c", 64), validTerminal, now.Add(2*time.Second),
+	)
+	if err != nil || ack != 2 {
+		t.Fatalf("missing resource target blocked bridge: ack=%d err=%v", ack, err)
+	}
+	if err := database.First(&missingTarget, missingTarget.ID).Error; err != nil || missingTarget.State != "completed" || missingTarget.CompletedAt == nil {
+		t.Fatalf("missing-target resource command did not complete: %#v %v", missingTarget, err)
 	}
 }
 

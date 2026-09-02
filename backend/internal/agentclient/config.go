@@ -294,23 +294,7 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if err = temporary.Close(); err != nil {
 		return err
 	}
-	if runtime.GOOS == "windows" {
-		backup := path + ".previous"
-		_ = os.Remove(backup)
-		if _, statErr := os.Stat(path); statErr == nil {
-			if err = os.Rename(path, backup); err != nil {
-				return err
-			}
-			if err = os.Rename(temporaryPath, path); err != nil {
-				_ = os.Rename(backup, path)
-				return err
-			}
-			_ = os.Remove(backup)
-			committed = true
-			return nil
-		}
-	}
-	if err = os.Rename(temporaryPath, path); err != nil {
+	if err = replaceFileAtomic(temporaryPath, path); err != nil {
 		return err
 	}
 	committed = true
@@ -318,17 +302,6 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 func readFileAtomic(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if !errors.Is(err, os.ErrNotExist) || runtime.GOOS != "windows" {
-		return data, err
-	}
-	backup := path + ".previous"
-	if _, backupErr := os.Stat(backup); backupErr != nil {
-		return nil, err
-	}
-	if restoreErr := os.Rename(backup, path); restoreErr != nil {
-		return nil, fmt.Errorf("restore interrupted atomic write: %w", restoreErr)
-	}
 	return os.ReadFile(path)
 }
 

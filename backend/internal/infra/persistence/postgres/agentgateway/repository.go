@@ -28,7 +28,8 @@ type Repo struct{ db *gorm.DB }
 const (
 	threadStatusDeletingActive   = "deleting_active"
 	threadStatusDeletingArchived = "deleting_archived"
-	historyProjectionVersion     = 8
+	threadStatusMissing          = "missing"
+	historyProjectionVersion     = 10
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -572,6 +573,9 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			if dberror.IsRecordNotFound(err) {
+				return repository.ErrAgentDeviceUnavailable
+			}
 			return err
 		}
 		acknowledged = device.LastAckedBridgeSeq
@@ -612,7 +616,8 @@ func (r *Repo) ApplyTerminalFrame(ctx context.Context, deviceID uint, bridgeSeq,
 			})
 			if projectionErr != nil {
 				if command.Kind != "resource.refresh" ||
-					(!errors.Is(projectionErr, repository.ErrConflict) && !errors.Is(projectionErr, repository.ErrInvalidInput)) {
+					(!errors.Is(projectionErr, repository.ErrConflict) && !errors.Is(projectionErr, repository.ErrInvalidInput) &&
+						!dberror.IsRecordNotFound(projectionErr) && !errors.Is(projectionErr, repository.ErrNotFound)) {
 					return projectionErr
 				}
 			}
@@ -1041,7 +1046,7 @@ type workspaceSessionUpdate struct {
 const (
 	maxWorkspaceSessionMessages = 4096
 	maxWorkspaceSessionEvents   = 4096
-	maxWorkspaceSessionBytes    = 48 << 20
+	maxWorkspaceSessionBytes    = agentprotocol.MaxSessionHistoryBytes
 )
 
 func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, profileID, workspaceID uint, sessions []workspaceSession, now time.Time) ([]string, error) {
@@ -1057,20 +1062,28 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, profileID, wo
 		return nil, err
 	}
 	changedConversations := make(map[string]struct{})
+	seenSourceRefs := make(map[string]struct{}, len(sessions))
 	for _, session := range sessions {
 		if !validWorkspaceSession(session, true) || session.HistoryLoaded || len(session.Messages) != 0 {
 			return nil, repository.ErrConflict
 		}
+		if _, duplicate := seenSourceRefs[session.SourceThreadRef]; duplicate {
+			return nil, repository.ErrConflict
+		}
+		seenSourceRefs[session.SourceThreadRef] = struct{}{}
 		var existing model.AgentThread
 		err := tx.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, session.SourceThreadRef).First(&existing).Error
 		if err == nil {
+			if threadDeletionProtected(existing.Status) {
+				continue
+			}
 			changed, syncErr := syncExistingWorkspaceSession(tx, &existing, &workspace, session, now)
 			if syncErr != nil {
 				return nil, syncErr
 			}
 			if changed {
 				var conversation model.Conversation
-				if err := tx.Select("public_id").Where("id = ? AND user_id = ?", existing.ConversationID, device.UserID).First(&conversation).Error; err != nil {
+				if err := tx.Unscoped().Select("public_id").Where("id = ? AND user_id = ?", existing.ConversationID, device.UserID).First(&conversation).Error; err != nil {
 					return nil, err
 				}
 				changedConversations[conversation.PublicID] = struct{}{}
@@ -1128,9 +1141,67 @@ func syncWorkspaceSessions(tx *gorm.DB, device *model.AgentDevice, profileID, wo
 		}
 		changedConversations[conversation.PublicID] = struct{}{}
 	}
+	missingConversations, err := reconcileMissingWorkspaceSessions(tx, device.UserID, profile.ID, workspace.ID, seenSourceRefs, now)
+	if err != nil {
+		return nil, err
+	}
+	for _, publicID := range missingConversations {
+		changedConversations[publicID] = struct{}{}
+	}
 	publicIDs := make([]string, 0, len(changedConversations))
 	for publicID := range changedConversations {
 		publicIDs = append(publicIDs, publicID)
+	}
+	sort.Strings(publicIDs)
+	return publicIDs, nil
+}
+
+func reconcileMissingWorkspaceSessions(
+	tx *gorm.DB,
+	userID, profileID, workspaceID uint,
+	seenSourceRefs map[string]struct{},
+	now time.Time,
+) ([]string, error) {
+	query := tx.Where(
+		"user_id = ? AND runtime_profile_id = ? AND workspace_id = ? AND source_thread_ref IS NOT NULL AND status IN ?",
+		userID, profileID, workspaceID, []string{"active", "archived"},
+	)
+	if len(seenSourceRefs) > 0 {
+		refs := make([]string, 0, len(seenSourceRefs))
+		for ref := range seenSourceRefs {
+			refs = append(refs, ref)
+		}
+		query = query.Where("source_thread_ref NOT IN ?", refs)
+	}
+	var missing []model.AgentThread
+	if err := query.Find(&missing).Error; err != nil || len(missing) == 0 {
+		return nil, err
+	}
+
+	threadIDs := make([]uint, 0, len(missing))
+	conversationIDs := make([]uint, 0, len(missing))
+	for _, thread := range missing {
+		threadIDs = append(threadIDs, thread.ID)
+		conversationIDs = append(conversationIDs, thread.ConversationID)
+	}
+	var conversations []model.Conversation
+	if err := tx.Unscoped().Select("id", "public_id", "deleted_at").
+		Where("id IN ? AND user_id = ? AND execution_type = ?", conversationIDs, userID, "gateway").
+		Find(&conversations).Error; err != nil {
+		return nil, err
+	}
+	publicIDs := make([]string, 0, len(conversations))
+	for _, conversation := range conversations {
+		if !conversation.DeletedAt.Valid {
+			publicIDs = append(publicIDs, conversation.PublicID)
+		}
+	}
+	if err := tx.Model(&model.AgentThread{}).Where("id IN ? AND status IN ?", threadIDs, []string{"active", "archived"}).
+		Updates(map[string]any{"status": threadStatusMissing, "updated_at": now}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&model.Conversation{}).Where("id IN ?", conversationIDs).UpdateColumn("deleted_at", now).Error; err != nil {
+		return nil, err
 	}
 	sort.Strings(publicIDs)
 	return publicIDs, nil
@@ -1165,7 +1236,8 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 			return false
 		}
 		if message.Role == "user" && message.Status != "success" ||
-			message.Role == "assistant" && message.Status != "pending" && message.Status != "success" {
+			message.Role == "assistant" && message.Status != "pending" && message.Status != "success" &&
+				message.Status != "interrupted" && message.Status != "error" {
 			return false
 		}
 		if len(message.Attachments) > 32 {
@@ -1192,8 +1264,10 @@ func validWorkspaceSession(session workspaceSession, requireStatus bool) bool {
 			seenAttachments[attachment.FileID] = struct{}{}
 		}
 		total += len(message.Content) + len(message.ReasoningContent)
+		statusOnlyAssistantDelta := session.HistoryDelta && message.Role == "assistant"
 		if message.Role == "user" && strings.TrimSpace(message.Content) == "" ||
-			message.Role == "assistant" && strings.TrimSpace(message.Content) == "" && strings.TrimSpace(message.ReasoningContent) == "" && len(message.ExecutionEvents) == 0 ||
+			message.Role == "assistant" && strings.TrimSpace(message.Content) == "" && strings.TrimSpace(message.ReasoningContent) == "" &&
+				len(message.ExecutionEvents) == 0 && !statusOnlyAssistantDelta ||
 			total > maxWorkspaceSessionBytes {
 			return false
 		}
@@ -1213,8 +1287,12 @@ func validWorkspaceSessionEvent(event workspaceSessionEvent) bool {
 }
 
 func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, workspace *model.AgentWorkspace, session workspaceSession, now time.Time) (bool, error) {
+	sessionPresent := session.Status == "active" || session.Status == "archived"
+	if threadDeletionProtected(thread.Status) || thread.Status == threadStatusMissing && !sessionPresent {
+		return false, nil
+	}
 	var conversation model.Conversation
-	if err := tx.Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").First(&conversation).Error; err != nil {
+	if err := tx.Unscoped().Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").First(&conversation).Error; err != nil {
 		if dberror.IsRecordNotFound(err) {
 			return false, nil
 		}
@@ -1227,7 +1305,7 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	activityAdvanced := sessionActivity.After(conversation.UpdatedAt)
 	changed := false
 	threadUpdates := map[string]any{}
-	if (session.Status == "active" || session.Status == "archived") && thread.Status != session.Status {
+	if sessionPresent && thread.Status != session.Status {
 		threadUpdates["status"] = session.Status
 		changed = true
 	}
@@ -1247,7 +1325,7 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 	}
 	conversationUpdates := map[string]any{}
-	if (session.Status == "active" || session.Status == "archived") && conversation.Status != session.Status {
+	if sessionPresent && conversation.Status != session.Status {
 		conversationUpdates["status"] = session.Status
 		changed = true
 	}
@@ -1261,6 +1339,10 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	}
 	if activityAdvanced {
 		conversationUpdates["updated_at"] = sessionActivity
+		changed = true
+	}
+	if conversation.DeletedAt.Valid && sessionPresent {
+		conversationUpdates["deleted_at"] = nil
 		changed = true
 	}
 	if session.HistoryLoaded {
@@ -1288,11 +1370,22 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 	}
 	if len(conversationUpdates) > 0 {
-		if err := tx.Model(&conversation).UpdateColumns(conversationUpdates).Error; err != nil {
+		if err := tx.Unscoped().Model(&conversation).UpdateColumns(conversationUpdates).Error; err != nil {
 			return false, err
 		}
 	}
 	if !session.HistoryLoaded {
+		return changed, nil
+	}
+	if session.HistoryDelta && thread.HistoryVersion < historyProjectionVersion {
+		if thread.HistoryStatus != "unloaded" || thread.HistoryError != "" {
+			if err := tx.Model(thread).Updates(map[string]any{
+				"history_status": "unloaded", "history_error": "", "updated_at": now,
+			}).Error; err != nil {
+				return false, err
+			}
+			changed = true
+		}
 		return changed, nil
 	}
 	var activeGatewayRuns int64
@@ -1420,6 +1513,10 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	return true, nil
 }
 
+func threadDeletionProtected(status string) bool {
+	return status == "deleted" || status == threadStatusDeletingActive || status == threadStatusDeletingArchived
+}
+
 func syncWorkspaceMessageAttachments(tx *gorm.DB, message *model.Message, source workspaceSessionMessage, now time.Time) error {
 	if message == nil || len(source.Attachments) == 0 {
 		return nil
@@ -1525,10 +1622,30 @@ func syncWorkspaceSessionExecutionEvents(tx *gorm.DB, conversation *model.Conver
 			return err
 		}
 	}
+	incomingKeys := make([]string, 0)
+	if !replaceHistory {
+		seenIncoming := make(map[string]struct{})
+		for _, message := range messages {
+			if message.Role != "assistant" || message.RunID == "" {
+				continue
+			}
+			for _, event := range message.ExecutionEvents {
+				sourceKey := workspaceSessionEventSourceKey(conversation.PublicID, message.RunID, event)
+				if _, exists := seenIncoming[sourceKey]; exists {
+					continue
+				}
+				seenIncoming[sourceKey] = struct{}{}
+				incomingKeys = append(incomingKeys, sourceKey)
+			}
+		}
+	}
 	var existingKeys []string
-	if err := tx.Model(&model.ConversationExecutionEvent{}).
-		Where("conversation_id = ? AND source_key LIKE ?", conversation.ID, "history:%").Pluck("source_key", &existingKeys).Error; err != nil {
-		return err
+	if len(incomingKeys) > 0 {
+		if err := tx.Model(&model.ConversationExecutionEvent{}).
+			Where("conversation_id = ? AND source_key IN ?", conversation.ID, incomingKeys).
+			Pluck("source_key", &existingKeys).Error; err != nil {
+			return err
+		}
 	}
 	existing := make(map[string]struct{}, len(existingKeys))
 	for _, sourceKey := range existingKeys {
@@ -1906,6 +2023,9 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var device model.AgentDevice
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", deviceID, domainagent.DeviceStatusActive).First(&device).Error; err != nil {
+			if dberror.IsRecordNotFound(err) {
+				return repository.ErrAgentDeviceUnavailable
+			}
 			return err
 		}
 		applied.Acknowledged = device.LastAckedBridgeSeq
@@ -1958,44 +2078,61 @@ func (r *Repo) ApplyEventFrame(ctx context.Context, deviceID, runtimeProfileID u
 				return repository.ErrConflict
 			}
 			var thread model.AgentThread
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			threadErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("runtime_profile_id = ? AND source_thread_ref = ?", runtimeProfileID, projected.SourceThreadRef).
-				First(&thread).Error; err != nil {
-				return err
-			}
-			projected.ThreadID = &thread.ID
-			projected.WorkspaceID = &thread.WorkspaceID
-			merged, complete, err := collectWorkspaceSessionHistoryBatch(tx, runtimeProfileID, &thread, session)
-			if err != nil {
-				return err
-			}
-			if complete {
+				First(&thread).Error
+			if dberror.IsRecordNotFound(threadErr) {
+				// A restart can enqueue a derived tail delta before the authoritative
+				// catalog snapshot that creates its thread. The full history remains
+				// reconstructible through thread.read, so acknowledge the stale hint.
 				projected.ConversationProjectedAt = &now
-				var conversation model.Conversation
-				if err := tx.Select("public_id").First(&conversation, thread.ConversationID).Error; err != nil {
-					return err
+			} else {
+				if threadErr != nil {
+					return threadErr
 				}
-				if thread.HistoryVersion >= historyProjectionVersion {
-					var workspace model.AgentWorkspace
-					if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
+				projected.ThreadID = &thread.ID
+				projected.WorkspaceID = &thread.WorkspaceID
+				var conversation model.Conversation
+				conversationErr := tx.Unscoped().Select("id", "public_id", "deleted_at").
+					Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, device.UserID, "gateway").
+					First(&conversation).Error
+				if conversationErr != nil && !dberror.IsRecordNotFound(conversationErr) {
+					return conversationErr
+				}
+				if conversationErr != nil || conversation.DeletedAt.Valid || thread.Status == threadStatusMissing {
+					// A catalog snapshot owns thread presence. Ignore a tail hint for a
+					// missing projection until a later authoritative snapshot restores it.
+					projected.ConversationProjectedAt = &now
+				} else {
+					merged, complete, err := collectWorkspaceSessionHistoryBatch(tx, runtimeProfileID, &thread, session)
+					if err != nil {
 						return err
 					}
-					merged.Status = thread.Status
-					changed, syncErr := syncExistingWorkspaceSession(tx, &thread, &workspace, merged, now)
-					if syncErr != nil {
-						return syncErr
+					if complete {
+						projected.ConversationProjectedAt = &now
+						if thread.HistoryVersion >= historyProjectionVersion {
+							var workspace model.AgentWorkspace
+							if err := tx.First(&workspace, thread.WorkspaceID).Error; err != nil {
+								return err
+							}
+							merged.Status = thread.Status
+							changed, syncErr := syncExistingWorkspaceSession(tx, &thread, &workspace, merged, now)
+							if syncErr != nil {
+								return syncErr
+							}
+							if changed {
+								applied.ConversationPublicIDs = []string{conversation.PublicID}
+							}
+						} else {
+							applied.ConversationPublicIDs = []string{conversation.PublicID}
+						}
+						if err := tx.Model(&model.AgentEvent{}).
+							Where("runtime_profile_id = ? AND thread_id = ? AND kind = ? AND source_thread_ref = ? AND conversation_projected_at IS NULL",
+								runtimeProfileID, thread.ID, agentprotocol.SessionHistoryEventKind, projected.SourceThreadRef).
+							Update("conversation_projected_at", now).Error; err != nil {
+							return err
+						}
 					}
-					if changed {
-						applied.ConversationPublicIDs = []string{conversation.PublicID}
-					}
-				} else {
-					applied.ConversationPublicIDs = []string{conversation.PublicID}
-				}
-				if err := tx.Model(&model.AgentEvent{}).
-					Where("runtime_profile_id = ? AND thread_id = ? AND kind = ? AND source_thread_ref = ? AND conversation_projected_at IS NULL",
-						runtimeProfileID, thread.ID, agentprotocol.SessionHistoryEventKind, projected.SourceThreadRef).
-					Update("conversation_projected_at", now).Error; err != nil {
-					return err
 				}
 			}
 		} else {

@@ -18,6 +18,7 @@ const EXECUTION_EVENT_RETRY_MAX_MS = 15_000;
 const INTERACTION_RETRY_MAX_MS = 15_000;
 const LATEST_SYNC_DEBOUNCE_MS = 100;
 const HISTORY_INVALIDATION_DEBOUNCE_MS = 100;
+const HISTORY_BATCH_SIZE = 4;
 const THREAD_HISTORY_EVENT_KIND = "thread/history/updated";
 
 type AgentRunHydrationScope = {
@@ -25,7 +26,6 @@ type AgentRunHydrationScope = {
   deviceID?: string;
   profileID?: string;
   workspaceID?: string;
-  runIDs?: string[];
   agentEvent?: AgentStreamEvent | null;
   onExecutionBoundary?: (event: ConversationExecutionEventDTO) => void;
   onConversationInvalidated?: () => void;
@@ -36,13 +36,11 @@ export function useAgentRunHydration({
   deviceID = "",
   profileID = "",
   workspaceID = "",
-  runIDs = [],
   agentEvent = null,
   onExecutionBoundary,
   onConversationInvalidated,
 }: AgentRunHydrationScope) {
   const normalizedConversationID = conversationID?.trim() || "";
-  const runIDKey = [...new Set(runIDs.map((runID) => runID.trim()).filter(Boolean))].slice(-64).join(",");
   const contextKey = JSON.stringify([
     normalizedConversationID,
     deviceID.trim(),
@@ -51,18 +49,29 @@ export function useAgentRunHydration({
   ]);
   const requestExecutionSyncRef = React.useRef<(() => void) | null>(null);
   const requestLatestSyncRef = React.useRef<(() => void) | null>(null);
+  const requestHistorySyncRef = React.useRef<((runID: string) => void) | null>(null);
   const onExecutionBoundaryRef = React.useRef(onExecutionBoundary);
   const onConversationInvalidatedRef = React.useRef(onConversationInvalidated);
   const invalidationTimerRef = React.useRef<number | null>(null);
+  const pendingHistoryRef = React.useRef({ contextKey, runIDs: new Set<string>() });
+  if (pendingHistoryRef.current.contextKey !== contextKey) {
+    pendingHistoryRef.current = { contextKey, runIDs: new Set<string>() };
+  }
   React.useLayoutEffect(() => {
     onExecutionBoundaryRef.current = onExecutionBoundary;
     onConversationInvalidatedRef.current = onConversationInvalidated;
   }, [onConversationInvalidated, onExecutionBoundary]);
 
+  const requestRunHydration = React.useCallback((runID: string) => {
+    const normalizedRunID = runID.trim();
+    if (!normalizedRunID) return;
+    pendingHistoryRef.current.runIDs.add(normalizedRunID);
+    requestHistorySyncRef.current?.(normalizedRunID);
+  }, [contextKey]);
+
   React.useEffect(() => {
     setAgentRunContext(contextKey, normalizedConversationID);
     if (!normalizedConversationID) return;
-    const hydratedRunIDs = runIDKey ? runIDKey.split(",") : [];
 
     let cancelled = false;
     let accessToken = "";
@@ -76,6 +85,61 @@ export function useAgentRunHydration({
     let interactionRetryTimer: number | null = null;
     let interactionRetryDelay = 1_000;
     let latestSyncTimer: number | null = null;
+    let historySync: Promise<void> | null = null;
+    let historySyncTimer: number | null = null;
+    let historyRetryTimer: number | null = null;
+    let historyRetryDelay = 1_000;
+    const queuedRunIDs = new Set<string>();
+    const hydratedRunIDs = new Set<string>();
+
+    const scheduleHistorySync = (delay = 0) => {
+      if (!accessToken || cancelled || historySync || historySyncTimer !== null) return;
+      historySyncTimer = window.setTimeout(() => {
+        historySyncTimer = null;
+        if (cancelled || historySync || queuedRunIDs.size === 0) return;
+        const batch = [...queuedRunIDs].slice(0, HISTORY_BATCH_SIZE);
+        for (const runID of batch) queuedRunIDs.delete(runID);
+        historySync = listConversationExecutionEvents(
+          accessToken,
+          normalizedConversationID,
+          0,
+          batch,
+        ).then((page) => {
+          if (cancelled) return;
+          applyAgentExecutionEvents(
+            page.events.slice().sort((left, right) => left.seq - right.seq),
+            normalizedConversationID,
+          );
+          for (const runID of batch) hydratedRunIDs.add(runID);
+          historyRetryDelay = 1_000;
+        }).catch(() => {
+          if (cancelled) return;
+          for (const runID of batch) queuedRunIDs.add(runID);
+          if (historyRetryTimer === null) {
+            historyRetryTimer = window.setTimeout(() => {
+              historyRetryTimer = null;
+              scheduleHistorySync();
+            }, historyRetryDelay);
+            historyRetryDelay = Math.min(historyRetryDelay * 2, EXECUTION_EVENT_RETRY_MAX_MS);
+          }
+        }).finally(() => {
+          historySync = null;
+          if (!cancelled && queuedRunIDs.size > 0 && historyRetryTimer === null) {
+            scheduleHistorySync();
+          }
+        });
+      }, delay);
+    };
+
+    const requestHistorySync = (value: string) => {
+      const runID = value.trim();
+      if (!runID || cancelled) return;
+      if (hydratedRunIDs.has(runID)) return;
+      queuedRunIDs.add(runID);
+      scheduleHistorySync(50);
+    };
+    requestHistorySyncRef.current = requestHistorySync;
+    for (const runID of pendingHistoryRef.current.runIDs) requestHistorySync(runID);
 
     const syncEvents = () => {
       eventSyncRequested = true;
@@ -84,18 +148,17 @@ export function useAgentRunHydration({
         while (eventSyncRequested && !cancelled) {
           eventSyncRequested = false;
           while (!cancelled) {
-            const historical = executionCursor === 0;
             const page = await listConversationExecutionEvents(
               accessToken,
               normalizedConversationID,
               executionCursor,
-              historical ? hydratedRunIDs : [],
+              [],
             );
             if (cancelled) break;
             const sortedEvents = page.events.slice().sort((left, right) => left.seq - right.seq);
             applyAgentExecutionEvents(sortedEvents, normalizedConversationID);
             for (const event of sortedEvents) {
-              if (!historical && (event.kind === "turn/started" || event.kind === "turn/completed")) {
+              if (event.kind === "turn/started" || event.kind === "turn/completed") {
                 onExecutionBoundaryRef.current?.(event);
               }
             }
@@ -195,6 +258,7 @@ export function useAgentRunHydration({
       accessToken = (await resolveAccessToken()) ?? "";
       if (!accessToken || cancelled) return;
       syncLatest();
+      scheduleHistorySync();
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
 
@@ -203,12 +267,15 @@ export function useAgentRunHydration({
       cancelled = true;
       requestExecutionSyncRef.current = null;
       requestLatestSyncRef.current = null;
+      requestHistorySyncRef.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (eventRetryTimer !== null) window.clearTimeout(eventRetryTimer);
       if (interactionRetryTimer !== null) window.clearTimeout(interactionRetryTimer);
       if (latestSyncTimer !== null) window.clearTimeout(latestSyncTimer);
+      if (historySyncTimer !== null) window.clearTimeout(historySyncTimer);
+      if (historyRetryTimer !== null) window.clearTimeout(historyRetryTimer);
     };
-  }, [contextKey, normalizedConversationID, runIDKey]);
+  }, [contextKey, normalizedConversationID]);
 
   React.useEffect(() => () => {
     if (invalidationTimerRef.current !== null) {
@@ -238,4 +305,6 @@ export function useAgentRunHydration({
       }, HISTORY_INVALIDATION_DEBOUNCE_MS);
     }
   }, [agentEvent, deviceID, normalizedConversationID]);
+
+  return requestRunHydration;
 }

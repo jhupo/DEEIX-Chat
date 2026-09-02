@@ -43,6 +43,7 @@ export type AgentToolActivity = {
   toolType: string;
   input: string;
   output: string;
+  outputTruncated: boolean;
   error: string;
   durationMS: number | null;
 };
@@ -280,6 +281,7 @@ function normalizeItem(payload: AgentExecutionEventPayloadDTO, seq: number, term
       toolType: stringValue(item.toolType),
       input: rawString(item.arguments),
       output: rawString(item.result),
+      outputTruncated: item.truncated === true,
       error: rawString(item.error),
       durationMS: finiteNumber(item.durationMs),
     };
@@ -356,6 +358,7 @@ function upsertItem(items: AgentActivityItem[], item: AgentActivityItem): AgentA
       toolType: item.toolType || current.toolType,
       input: item.input || current.input,
       output: item.output || current.output,
+      outputTruncated: current.outputTruncated || item.outputTruncated,
       error: item.error || current.error,
       durationMS: item.durationMS ?? current.durationMS,
     };

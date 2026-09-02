@@ -87,6 +87,8 @@ export function areChatAreaMessagesRenderEqual(
     previous.contentType === next.contentType &&
     previous.content === next.content &&
     previous.branchReason === next.branchReason &&
+    previous.status === next.status &&
+    previous.runID === next.runID &&
     previous.platformModelName === next.platformModelName &&
     previous.serverMessageID === next.serverMessageID &&
     previous.createdAt === next.createdAt &&

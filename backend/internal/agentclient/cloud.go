@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
 )
 
 type CloudClient struct {
@@ -322,7 +324,7 @@ func (client *CloudClient) UploadHistoryImage(ctx context.Context, config Config
 
 func (client *CloudClient) UploadTerminalOutcome(ctx context.Context, config Config, identity *DeviceIdentity, frame outgoingFrame) (uint64, error) {
 	if frame.Type != "terminal" || frame.BridgeSeq == 0 || frame.ServerSeq == 0 ||
-		!validPublicID(frame.CommandID, "agcmd") || len(frame.Outcome) == 0 || len(frame.Outcome) > bridgeMaxPayload {
+		!validPublicID(frame.CommandID, "agcmd") || len(frame.Outcome) == 0 || len(frame.Outcome) > agentprotocol.MaxTerminalOutcomeBytes {
 		return 0, errors.New("terminal outcome upload is invalid")
 	}
 	token, err := client.ConnectionToken(ctx, config, identity)
@@ -336,6 +338,9 @@ func (client *CloudClient) UploadTerminalOutcome(ctx context.Context, config Con
 	}
 	if err = compressor.Close(); err != nil {
 		return 0, err
+	}
+	if compressed.Len() > agentprotocol.MaxTerminalUploadBytes {
+		return 0, errors.New("compressed terminal outcome exceeds the upload limit")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/api/v1/agent/bridge/terminal-outcomes", bytes.NewReader(compressed.Bytes()))
 	if err != nil {

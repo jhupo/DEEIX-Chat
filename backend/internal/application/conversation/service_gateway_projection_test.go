@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/conversation"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
@@ -400,6 +401,46 @@ func TestCompactExecutionHistoryKeepsLatestRunTokenUsageSnapshot(t *testing.T) {
 	}
 	if compacted[0].PayloadJSON != events[1].PayloadJSON {
 		t.Fatalf("compacted token usage = %s, want latest snapshot %s", compacted[0].PayloadJSON, events[1].PayloadJSON)
+	}
+}
+
+func TestCompactExecutionHistoryDeduplicatesAndBoundsCompletedToolItems(t *testing.T) {
+	largeResult := strings.Repeat("界", maxExecutionHistoryToolFieldBytes)
+	completedPayload := func(status, result string) string {
+		encoded, err := json.Marshal(map[string]any{
+			"itemID": "tool_1",
+			"item": map[string]any{
+				"itemID": "tool_1", "kind": "mcpToolCall", "status": status,
+				"tool": "search", "result": result,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	events := []model.ExecutionEvent{
+		{RunID: "run_tool", Seq: 1, Kind: "item/completed", PayloadJSON: completedPayload("failed", "old")},
+		{RunID: "run_tool", Seq: 2, Kind: "item/completed", PayloadJSON: completedPayload("completed", largeResult)},
+	}
+
+	compacted := compactExecutionHistory(events)
+	if len(compacted) != 1 || compacted[0].Seq != 2 {
+		t.Fatalf("compacted tool events = %#v", compacted)
+	}
+	var payload struct {
+		Item struct {
+			Status    string `json:"status"`
+			Result    string `json:"result"`
+			Truncated bool   `json:"truncated"`
+		} `json:"item"`
+	}
+	if err := json.Unmarshal([]byte(compacted[0].PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Item.Status != "completed" || !payload.Item.Truncated ||
+		len(payload.Item.Result) > maxExecutionHistoryToolFieldBytes || !utf8.ValidString(payload.Item.Result) {
+		t.Fatalf("compacted tool payload = %#v", payload.Item)
 	}
 }
 

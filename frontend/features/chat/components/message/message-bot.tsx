@@ -134,6 +134,7 @@ type ChatMessageBotProps = {
   attachmentContentLoader?: (file: PreviewDialogFile) => Promise<FileContentResult>;
   onEditImageAttachment?: (attachment: MessageAttachment, sourceModelName?: string) => void;
   artifactActions?: MarkdownArtifactActions;
+  onHydrateAgentRun?: (runID: string) => void;
   showBranchNavigator?: boolean;
   contentWidthClassName?: string;
   screenshotMeta?: React.ReactNode;
@@ -158,6 +159,7 @@ export function ChatMessageBot({
   attachmentContentLoader,
   onEditImageAttachment,
   artifactActions,
+  onHydrateAgentRun,
   showBranchNavigator = true,
   contentWidthClassName = "max-w-[1080px]",
   screenshotMeta,
@@ -190,6 +192,12 @@ export function ChatMessageBot({
       setEditingValue(item.content);
     }
   }, [isEditing, item.content]);
+  const runID = item.runID?.trim() || "";
+  const requestAgentRunHydration = React.useCallback(() => {
+    if (runID) {
+      onHydrateAgentRun?.(runID);
+    }
+  }, [onHydrateAgentRun, runID]);
   const agentRun = useAgentRunSnapshot(item.runID);
   const metaItem = React.useMemo(
     () => ({
@@ -308,7 +316,14 @@ export function ChatMessageBot({
 
   return (
     <div className="group/assistant-message flex w-full flex-col items-start">
-      <MessageAgentRun agentRun={agentRun} />
+      <MessageAgentRun
+        agentRun={agentRun}
+        available={Boolean(runID)}
+        messageActive={Boolean(item.isPending || item.isStreaming)}
+        messageStatus={item.status}
+        messageDurationMS={item.latencyMS}
+        onRequestHydration={onHydrateAgentRun ? requestAgentRunHydration : undefined}
+      />
 
       <div
         className="w-full min-w-0 max-w-none overflow-hidden text-[15px] leading-8 text-foreground [overflow-wrap:anywhere]"

@@ -123,6 +123,7 @@ function CommandRow({ item }: { item: AgentCommandActivity }) {
 }
 
 function ToolRow({ item }: { item: AgentToolActivity }) {
+  const t = useTranslations("chat.agent");
   const locale = useLocale();
   const [open, setOpen] = React.useState(false);
   const hasDetails = Boolean(item.input || item.output || item.error || item.durationMS !== null);
@@ -150,6 +151,7 @@ function ToolRow({ item }: { item: AgentToolActivity }) {
         <div className="ml-5 mt-1.5 space-y-2 border-l border-border/45 pl-2.5 text-[11px] leading-5 text-muted-foreground/88">
           {item.input ? <pre className="max-h-48 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{item.input}</pre> : null}
           {item.output ? <pre className="max-h-64 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]">{item.output}</pre> : null}
+          {item.outputTruncated ? <p className="text-[11px] text-muted-foreground/60">{t("activity.truncated")}</p> : null}
           {item.error ? <pre className="whitespace-pre-wrap text-destructive/80 [overflow-wrap:anywhere]">{item.error}</pre> : null}
         </div>
       ) : null}

@@ -49,7 +49,16 @@ func (s *Service) SubscribeActiveMessageGenerations(
 	if s == nil || s.generationStreams == nil || userID == 0 {
 		return []ActiveMessageGeneration{}, nil, func() {}, nil
 	}
-	return s.generationStreams.subscribeActive(ctx, userID)
+	snapshot, events, cancel, err := s.generationStreams.subscribeActive(ctx, userID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	filtered, err := s.filterActiveMessageGenerations(ctx, userID, snapshot)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
+	return filtered, events, cancel, nil
 }
 
 // ListActiveMessageGenerations 返回用户当前活跃生成的权威快照。
@@ -61,7 +70,43 @@ func (s *Service) ListActiveMessageGenerations(
 	if s == nil || s.generationStreams == nil || userID == 0 {
 		return []ActiveMessageGeneration{}, nil
 	}
-	return s.generationStreams.listActive(ctx, userID)
+	items, err := s.generationStreams.listActive(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterActiveMessageGenerations(ctx, userID, items)
+}
+
+func (s *Service) filterActiveMessageGenerations(
+	ctx context.Context,
+	userID uint,
+	items []ActiveMessageGeneration,
+) ([]ActiveMessageGeneration, error) {
+	if len(items) == 0 || s.repo == nil {
+		return items, nil
+	}
+	runIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		runIDs = append(runIDs, item.RunID)
+	}
+	statuses, err := s.repo.ListConversationRunStatusesByRunIDs(ctx, userID, runIDs)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[string]struct{}, len(statuses))
+	for _, item := range statuses {
+		if item.Status == "queued" || item.Status == "running" {
+			active[item.RunID] = struct{}{}
+		}
+	}
+	filtered := make([]ActiveMessageGeneration, 0, len(items))
+	for _, item := range items {
+		_, persisted := active[item.RunID]
+		if persisted || s.generationStreams.locallyActiveForUser(item.RunID, userID) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered, nil
 }
 
 func (r *generationStreamRegistry) listActive(ctx context.Context, userID uint) ([]ActiveMessageGeneration, error) {
@@ -91,6 +136,16 @@ func (r *generationStreamRegistry) listActive(ctx context.Context, userID uint) 
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].RunID < items[j].RunID })
 	return items, nil
+}
+
+func (r *generationStreamRegistry) locallyActiveForUser(runID string, userID uint) bool {
+	if r == nil || runID == "" || userID == 0 {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item := r.active[runID]
+	return item != nil && item.userID == userID
 }
 
 func (r *generationStreamRegistry) publishActiveEvent(

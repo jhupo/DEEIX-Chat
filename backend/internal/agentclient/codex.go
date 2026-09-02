@@ -46,7 +46,8 @@ const maxCommandExecutionOutputBytes = 256 << 10
 const maxInteractionPreviewBytes = 8 << 10
 const maxExecutionItemProjections = 256
 const codexSessionPageSize = 100
-const codexHistoryPageSize = 100
+const codexHistoryPageSize = 20
+const codexHistoryTailTurnCount = 2
 const maxCodexHistoryTurns = 4096
 
 // Decline before app-server's five-minute MCP timeout so it can finish the turn normally.
@@ -1528,21 +1529,14 @@ func (adapter *CodexAdapter) readSessionTail(ctx context.Context, session watche
 		return nil, err
 	}
 	page, err := adapter.requestMap(ctx, "thread/turns/list", map[string]any{
-		"threadId": session.providerThreadID, "limit": 1, "sortDirection": "desc", "itemsView": "full",
+		"threadId": session.providerThreadID, "limit": codexHistoryTailTurnCount, "sortDirection": "desc", "itemsView": "full",
 	})
 	if err != nil {
 		return nil, err
 	}
-	turns, ok := page["data"].([]any)
-	if !ok || len(turns) > 1 {
-		return nil, errors.New("Codex thread tail is invalid")
-	}
-	if len(turns) == 1 {
-		turn, turnOK := turns[0].(map[string]any)
-		_, itemsOK := turn["items"].([]any)
-		if !turnOK || strings.TrimSpace(stringField(turn, "id")) == "" || stringField(turn, "itemsView") != "full" || !itemsOK {
-			return nil, errors.New("Codex thread tail is invalid")
-		}
+	turns, err := sessionTailTurns(page)
+	if err != nil {
+		return nil, err
 	}
 	projected, err := adapter.projectSessionDetailWithMessages(detail, session.providerThreadID, adapter.projectSessionMessages(map[string]any{
 		"thread": map[string]any{"id": session.providerThreadID, "turns": turns},
@@ -1555,6 +1549,22 @@ func (adapter *CodexAdapter) readSessionTail(ctx context.Context, session watche
 	}
 	projected["historyDelta"] = true
 	return projected, nil
+}
+
+func sessionTailTurns(page map[string]any) ([]any, error) {
+	turns, ok := page["data"].([]any)
+	if !ok || len(turns) > codexHistoryTailTurnCount {
+		return nil, errors.New("Codex thread tail is invalid")
+	}
+	for _, rawTurn := range turns {
+		turn, turnOK := rawTurn.(map[string]any)
+		_, itemsOK := turn["items"].([]any)
+		if !turnOK || strings.TrimSpace(stringField(turn, "id")) == "" || stringField(turn, "itemsView") != "full" || !itemsOK {
+			return nil, errors.New("Codex thread tail is invalid")
+		}
+	}
+	slices.Reverse(turns)
+	return turns, nil
 }
 
 func (adapter *CodexAdapter) readInactiveSessionSettings(ctx context.Context, providerThreadID string) map[string]any {
@@ -3181,7 +3191,14 @@ func (adapter *CodexAdapter) projectSessionMessages(detail map[string]any) []any
 		if len(assistantParts) > 0 || len(reasoningParts) > 0 || len(executionEvents) > 0 || hasUserMessage && sessionTurnPending(turn) {
 			messageStatus := "pending"
 			if sessionTurnTerminal(turn) {
-				messageStatus = "success"
+				switch strings.TrimSpace(stringField(turn, "status")) {
+				case "interrupted":
+					messageStatus = "interrupted"
+				case "failed":
+					messageStatus = "error"
+				default:
+					messageStatus = "success"
+				}
 			}
 			message := map[string]any{
 				"role": "assistant", "content": sanitizeSessionMessage(strings.Join(assistantParts, "\n\n"), maxSessionMessageRunes),
@@ -3272,15 +3289,22 @@ func sessionExecutionEvents(turn map[string]any, items []any) []any {
 }
 
 func sessionTurnTerminal(turn map[string]any) bool {
-	return turn["completedAt"] != nil
+	if turn["completedAt"] != nil {
+		return true
+	}
+	switch strings.TrimSpace(stringField(turn, "status")) {
+	case "completed", "interrupted", "failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func sessionTurnPending(turn map[string]any) bool {
 	if sessionTurnTerminal(turn) {
 		return false
 	}
-	status := strings.TrimSpace(stringField(turn, "status"))
-	return status == "inProgress" || status == "interrupted"
+	return strings.TrimSpace(stringField(turn, "status")) == "inProgress"
 }
 
 func executionTimestamp(value any) (float64, bool) {

@@ -47,7 +47,7 @@ const (
 	runtimeChallengeTTL  = time.Minute
 	runtimeLeaseTTL      = 10 * time.Minute
 	runtimePresenceTTL   = 75 * time.Second
-	maxTerminalOutcome   = 64 << 20
+	maxTerminalOutcome   = agentprotocol.MaxTerminalOutcomeBytes
 )
 
 type RuntimeUserResolver interface {
@@ -1409,13 +1409,7 @@ func (s *Service) ApplyTerminalFrame(ctx context.Context, identity *ConnectionId
 		hex.EncodeToString(payloadHash[:]), string(normalized), s.now().UTC(),
 	)
 	if err != nil {
-		if errors.Is(err, repository.ErrConflict) {
-			return 0, ErrStateConflict
-		}
-		if errors.Is(err, repository.ErrNotFound) {
-			return 0, ErrCredential
-		}
-		return 0, err
+		return 0, bridgeApplyError(err)
 	}
 	if err := s.flushPendingConversationEvents(ctx, identity.InternalDeviceID); err != nil {
 		return acknowledged, fmt.Errorf("%w: %v", ErrProjectionDeferred, err)
@@ -1486,10 +1480,7 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		}, s.now().UTC(),
 	)
 	if err != nil {
-		if errors.Is(err, repository.ErrConflict) || errors.Is(err, repository.ErrNotFound) {
-			return 0, ErrCredential
-		}
-		return 0, err
+		return 0, bridgeApplyError(err)
 	}
 	if applied.ConversationID != 0 && applied.RunID != "" {
 		if err := s.projectConversationEvent(ctx, *applied); err != nil {
@@ -1505,6 +1496,17 @@ func (s *Service) ApplyEventFrame(ctx context.Context, identity *ConnectionIdent
 		s.notifyUser(identity.UserID)
 	}
 	return applied.Acknowledged, nil
+}
+
+func bridgeApplyError(err error) error {
+	switch {
+	case errors.Is(err, repository.ErrAgentDeviceUnavailable):
+		return ErrCredential
+	case errors.Is(err, repository.ErrConflict), errors.Is(err, repository.ErrNotFound):
+		return ErrStateConflict
+	default:
+		return err
+	}
 }
 
 type sessionSnapshotPayload struct {
