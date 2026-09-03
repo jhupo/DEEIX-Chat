@@ -30,6 +30,7 @@ const (
 	threadStatusDeletingArchived = "deleting_archived"
 	threadStatusMissing          = "missing"
 	historyProjectionVersion     = agentprotocol.CodexSessionProjectionVersion
+	resourceRefreshReuseWindow   = 30 * time.Second
 )
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
@@ -1402,17 +1403,22 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		}
 		return changed, nil
 	}
+	turnStateChanged, err := syncWorkspaceSessionTurns(tx, thread, session.Messages, now)
+	if err != nil {
+		return false, err
+	}
+	changed = changed || turnStateChanged
 	var activeGatewayRuns int64
-	if err := tx.Model(&model.ConversationRun{}).
-		Where("conversation_id = ? AND endpoint = ? AND status IN ?", conversation.ID, "local_gateway", []string{"queued", "running"}).
+	if err := tx.Table("chat_runs AS runs").
+		Where("runs.conversation_id = ? AND runs.endpoint = ? AND runs.status IN ?", conversation.ID, "local_gateway", []string{"queued", "running"}).
+		Where("runs.deleted_at IS NULL").
+		Where("EXISTS (SELECT 1 FROM agent_turns AS turns WHERE turns.thread_id = ? AND turns.user_id = runs.user_id AND turns.run_id = runs.run_id AND turns.status IN ?)",
+			thread.ID, []string{"awaiting_thread", "queued", "running"}).
 		Count(&activeGatewayRuns).Error; err != nil {
 		return false, err
 	}
 	if activeGatewayRuns > 0 {
 		return changed, nil
-	}
-	if err := resolveWorkspaceSessionRunIDs(tx, thread, session.Messages); err != nil {
-		return false, err
 	}
 	replaceHistory := thread.HistoryVersion < historyProjectionVersion
 	if replaceHistory {
@@ -1596,7 +1602,7 @@ func workspaceSessionMessageStatus(message workspaceSessionMessage) string {
 	return message.Status
 }
 
-func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messages []workspaceSessionMessage) error {
+func syncWorkspaceSessionTurns(tx *gorm.DB, thread *model.AgentThread, messages []workspaceSessionMessage, now time.Time) (bool, error) {
 	refs := make([]string, 0, len(messages))
 	seenRefs := make(map[string]struct{}, len(messages))
 	for _, message := range messages {
@@ -1606,26 +1612,150 @@ func resolveWorkspaceSessionRunIDs(tx *gorm.DB, thread *model.AgentThread, messa
 		seenRefs[message.SourceTurnRef] = struct{}{}
 		refs = append(refs, message.SourceTurnRef)
 	}
-	type turnRun struct {
-		SourceTurnRef string
-		RunID         string
-	}
-	rows := make([]turnRun, 0)
-	if err := tx.Model(&model.AgentTurn{}).Select("source_turn_ref, run_id").
+	rows := make([]model.AgentTurn, 0)
+	if err := tx.Model(&model.AgentTurn{}).
 		Where("thread_id = ? AND source_turn_ref IN ?", thread.ID, refs).Find(&rows).Error; err != nil {
-		return err
+		return false, err
 	}
-	byRef := make(map[string]string, len(rows))
-	for _, row := range rows {
-		byRef[row.SourceTurnRef] = row.RunID
+	byRef := make(map[string]*model.AgentTurn, len(rows))
+	for index := range rows {
+		if rows[index].SourceTurnRef != nil {
+			byRef[*rows[index].SourceTurnRef] = &rows[index]
+		}
 	}
+	changed := false
 	for index := range messages {
-		if runID := byRef[messages[index].SourceTurnRef]; runID != "" {
-			messages[index].RunID = runID
+		turn := byRef[messages[index].SourceTurnRef]
+		if turn != nil {
+			messages[index].RunID = turn.RunID
+		} else {
+			digest := sha256.Sum256([]byte(messages[index].SourceTurnRef))
+			messages[index].RunID = "run_" + hex.EncodeToString(digest[:16])
+		}
+		if turn == nil || messages[index].Role != "assistant" {
 			continue
 		}
-		digest := sha256.Sum256([]byte(messages[index].SourceTurnRef))
-		messages[index].RunID = "run_" + hex.EncodeToString(digest[:16])
+		status, code, message := workspaceSessionAgentTurnState(messages[index])
+		if status == "" || turn.Status == status {
+			continue
+		}
+		if status == "running" {
+			if turn.Status == "completed" || turn.Status == "interrupted" || turn.Status == "failed" {
+				continue
+			}
+			if err := tx.Model(turn).Updates(map[string]any{
+				"status": "running", "error_code": "", "error_message": "", "updated_at": now,
+			}).Error; err != nil {
+				return false, err
+			}
+		} else {
+			if err := tx.Model(turn).Updates(map[string]any{
+				"status": status, "error_code": code, "error_message": message, "updated_at": now,
+			}).Error; err != nil {
+				return false, err
+			}
+			if err := resolveTurnInteractions(tx, turn.ID, now); err != nil {
+				return false, err
+			}
+		}
+		changed = true
+	}
+	return changed, nil
+}
+
+func workspaceSessionAgentTurnState(message workspaceSessionMessage) (string, string, string) {
+	switch message.Status {
+	case "pending":
+		return "running", "", ""
+	case "success":
+		return "completed", "", ""
+	case "interrupted":
+		return "interrupted", "", ""
+	case "error":
+		for index := len(message.ExecutionEvents) - 1; index >= 0; index-- {
+			event := message.ExecutionEvents[index]
+			if event.Kind != "turn/completed" {
+				continue
+			}
+			status, code, text, err := agentTurnTerminal(string(event.Payload))
+			if err == nil && status == "failed" {
+				return status, code, text
+			}
+		}
+		return "failed", "gateway_failed", "local execution failed"
+	default:
+		return "", "", ""
+	}
+}
+
+func reconcileThreadAgentTurns(tx *gorm.DB, threadID uint, now time.Time) error {
+	type terminalMessage struct {
+		TurnID       uint
+		Status       string
+		ErrorCode    string
+		ErrorMessage string
+		UpdatedAt    time.Time
+	}
+	var messages []terminalMessage
+	if err := tx.Table("agent_turns AS turns").
+		Select("turns.id AS turn_id, messages.status, messages.error_code, messages.error_message, messages.updated_at").
+		Joins("JOIN agent_threads AS threads ON threads.id = turns.thread_id").
+		Joins("JOIN chat_messages AS messages ON messages.user_id = turns.user_id AND messages.conversation_id = threads.conversation_id AND messages.run_id = turns.run_id").
+		Where("turns.thread_id = ? AND turns.status IN ? AND messages.role = ? AND messages.status IN ?", threadID,
+			[]string{"awaiting_thread", "queued", "running"}, "assistant", []string{"success", "interrupted", "error"}).
+		Where("messages.deleted_at IS NULL").
+		Order("turns.id ASC, messages.updated_at DESC, messages.id DESC").
+		Find(&messages).Error; err != nil {
+		return err
+	}
+	reconciled := make(map[uint]struct{}, len(messages))
+	for _, message := range messages {
+		if _, exists := reconciled[message.TurnID]; exists {
+			continue
+		}
+		reconciled[message.TurnID] = struct{}{}
+		status := map[string]string{"success": "completed", "interrupted": "interrupted", "error": "failed"}[message.Status]
+		updatedAt := message.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = now
+		}
+		if err := updateAgentTurnTerminal(tx, message.TurnID, status, message.ErrorCode, message.ErrorMessage, updatedAt); err != nil {
+			return err
+		}
+		if err := resolveTurnInteractions(tx, message.TurnID, updatedAt); err != nil {
+			return err
+		}
+	}
+
+	type terminalRun struct {
+		TurnID       uint
+		Status       string
+		ErrorCode    string
+		ErrorMessage string
+		EndedAt      *time.Time
+	}
+	var rows []terminalRun
+	if err := tx.Table("agent_turns AS turns").
+		Select("turns.id AS turn_id, runs.status, runs.error_code, runs.error_message, runs.ended_at").
+		Joins("JOIN chat_runs AS runs ON runs.user_id = turns.user_id AND runs.run_id = turns.run_id").
+		Where("turns.thread_id = ? AND turns.status IN ? AND runs.status IN ?", threadID,
+			[]string{"awaiting_thread", "queued", "running"}, []string{"success", "interrupted", "error"}).
+		Where("runs.deleted_at IS NULL").
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		status := map[string]string{"success": "completed", "interrupted": "interrupted", "error": "failed"}[row.Status]
+		updatedAt := now
+		if row.EndedAt != nil && !row.EndedAt.IsZero() {
+			updatedAt = *row.EndedAt
+		}
+		if err := updateAgentTurnTerminal(tx, row.TurnID, status, row.ErrorCode, row.ErrorMessage, updatedAt); err != nil {
+			return err
+		}
+		if err := resolveTurnInteractions(tx, row.TurnID, updatedAt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -3169,6 +3299,20 @@ func (r *Repo) QueueResourceRefresh(
 		} else if !dberror.IsRecordNotFound(err) {
 			return err
 		}
+		recent := tx.Where(
+			"device_id = ? AND runtime_profile_id = ? AND kind = ? AND state = ? AND completed_at >= ? AND terminal_json ->> 'kind' = ? AND payload_json -> 'resource' ->> 'name' = ?",
+			device.ID, profile.ID, "resource.refresh", "completed", now.Add(-resourceRefreshReuseWindow), "result", resourceName,
+		)
+		if workspaceID == nil {
+			recent = recent.Where("workspace_id IS NULL")
+		} else {
+			recent = recent.Where("workspace_id = ?", *workspaceID)
+		}
+		if err := recent.Order("completed_at DESC").First(&created).Error; err == nil {
+			return tx.Model(&operation).Update("result_public_id", created.PublicID).Error
+		} else if !dberror.IsRecordNotFound(err) {
+			return err
+		}
 		payload := map[string]any{
 			"kind": "resource.refresh", "deviceId": device.PublicID, "profileId": profile.PublicID,
 			"resource": map[string]string{"scope": "profile", "name": resourceName},
@@ -3993,6 +4137,9 @@ func (r *Repo) StartTurn(ctx context.Context, idempotencyKey, requestHash string
 		if thread.SourceThreadRef == nil || thread.Status != "active" ||
 			(thread.HistoryStatus != "" && thread.HistoryStatus != "loaded") {
 			return repository.ErrConflict
+		}
+		if err := reconcileThreadAgentTurns(tx, thread.ID, now); err != nil {
+			return err
 		}
 		var activeTurns int64
 		if err := tx.Model(&model.AgentTurn{}).Where("thread_id = ? AND status IN ?", thread.ID, []string{"awaiting_thread", "queued", "running"}).Count(&activeTurns).Error; err != nil {

@@ -66,6 +66,7 @@ type Gateway struct {
 	workspaceUpdates chan []Workspace
 	commands         chan queuedCommand
 	historyCommands  chan queuedCommand
+	resourceCommands chan queuedCommand
 	activeMu         sync.Mutex
 	active           map[string]bool
 	registerMu       sync.Mutex
@@ -131,7 +132,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 		agentVersion: strings.TrimSpace(agentVersion),
 		wake:         make(chan struct{}, 1), sessionUpdates: make(chan struct{}, 1), historyUpdates: make(chan struct{}, 1),
 		workspaceUpdates: make(chan []Workspace, 1),
-		commands:         make(chan queuedCommand, 128), historyCommands: make(chan queuedCommand, 128),
+		commands:         make(chan queuedCommand, 128), historyCommands: make(chan queuedCommand, 128), resourceCommands: make(chan queuedCommand, 128),
 		active: make(map[string]bool), workspaces: make(map[string]Workspace),
 		pendingHistory: make(map[string]watchedSession), historyRetries: make(map[string]bool),
 	}
@@ -163,6 +164,7 @@ func runGatewayRuntime(ctx context.Context, dataDir string, logger *log.Logger, 
 	for range historyCommandWorkerCount {
 		go gateway.commandWorker(runtimeContext, gateway.historyCommands)
 	}
+	go gateway.commandWorker(runtimeContext, gateway.resourceCommands)
 	go gateway.refreshWorkspaceLoop(runtimeContext)
 	go gateway.watchSessionStateLoop(runtimeContext)
 	go gateway.sessionSnapshotLoop(runtimeContext)
@@ -1210,8 +1212,17 @@ func (gateway *Gateway) enqueue(id string, record commandRecord, concurrent bool
 		return
 	}
 	commands := gateway.commands
-	if command, err := parseAgentCommand(record.Command); err == nil && command.Kind == "thread.read" && gateway.historyCommands != nil {
-		commands = gateway.historyCommands
+	if command, err := parseAgentCommand(record.Command); err == nil {
+		switch command.Kind {
+		case "thread.read":
+			if gateway.historyCommands != nil {
+				commands = gateway.historyCommands
+			}
+		case "resource.refresh":
+			if gateway.resourceCommands != nil {
+				commands = gateway.resourceCommands
+			}
+		}
 	}
 	commands <- item
 }

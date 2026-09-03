@@ -297,6 +297,14 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	if err := database.First(&thread, thread.ID).Error; err != nil {
 		t.Fatal(err)
 	}
+	activeSourceTurnRef := "turn-second"
+	activeTurn := model.AgentTurn{
+		PublicID: "agturn_history_delta_active", UserID: 7, ThreadID: thread.ID,
+		RunID: "run_history_delta_active", SourceTurnRef: &activeSourceTurnRef, Status: "queued", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&activeTurn).Error; err != nil {
+		t.Fatal(err)
+	}
 	active := workspaceSession{
 		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion, HistoryDelta: true, Status: "active", UpdatedAt: now.Add(time.Second).Unix(),
 		Messages: []workspaceSessionMessage{
@@ -312,8 +320,17 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	}
 	var activeAssistant model.Message
 	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-assistant").First(&activeAssistant).Error; err != nil ||
-		activeAssistant.Status != "pending" || activeAssistant.Content != "" || activeAssistant.ReasoningContent != "planning" {
+		activeAssistant.Status != "pending" || activeAssistant.Content != "" || activeAssistant.ReasoningContent != "planning" ||
+		activeAssistant.RunID != activeTurn.RunID {
 		t.Fatalf("active assistant = %#v err=%v", activeAssistant, err)
+	}
+	if err := database.First(&activeTurn, activeTurn.ID).Error; err != nil || activeTurn.Status != "running" {
+		t.Fatalf("active Agent turn = %#v err=%v", activeTurn, err)
+	}
+	if err := database.Model(&activeTurn).Updates(map[string]any{
+		"status": "interrupted", "error_code": "gateway_interrupted", "error_message": "connection closed",
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
 	completed := active
 	completed.Messages[1].Status = "success"
@@ -328,6 +345,10 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-second-assistant").First(&completedAssistant).Error; err != nil ||
 		completedAssistant.ID != activeAssistant.ID || completedAssistant.Status != "success" || completedAssistant.Content != "second done" {
 		t.Fatalf("completed assistant = %#v err=%v", completedAssistant, err)
+	}
+	if err := database.First(&activeTurn, activeTurn.ID).Error; err != nil || activeTurn.Status != "completed" ||
+		activeTurn.ErrorCode != "" || activeTurn.ErrorMessage != "" {
+		t.Fatalf("completed Agent turn = %#v err=%v", activeTurn, err)
 	}
 	var liveCount, totalCount int64
 	if err := database.Model(&model.Message{}).Where("conversation_id = ?", conversation.ID).Count(&liveCount).Error; err != nil {
@@ -382,6 +403,119 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	if err := database.Where("conversation_id = ? AND source_ref = ?", conversation.ID, "message-third-user").First(&thirdUser).Error; err != nil ||
 		thirdUser.ParentMessageID == nil || *thirdUser.ParentMessageID != completedAssistant.ID {
 		t.Fatalf("next-turn lineage = assistant:%#v user:%#v err=%v", completedAssistant, thirdUser, err)
+	}
+}
+
+func TestStartTurnRepairsStaleAgentTurnsFromMessageBeforeRun(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{},
+		&model.AgentTurn{}, &model.AgentInteraction{}, &model.AgentCommand{}, &model.AgentIdempotencyRecord{},
+		&model.Conversation{}, &model.Message{}, &model.ConversationRun{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 3, 3, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_start_turn_repair_0123456789ab", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: bytes.Repeat([]byte("k"), 32), PublicKeyFingerprint: strings.Repeat("a", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive, NextServerSeq: 1,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	leaseExpiresAt := now.Add(time.Hour)
+	profile := model.AgentRuntimeProfile{
+		PublicID: "codex-default", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: domainagent.RuntimeStatusReady,
+		LeaseExpiresAt: &leaseExpiresAt,
+		ManifestJSON:   `{"commands":["turn.start"],"threadSettings":{"model":true,"reasoningEffort":["high"],"approvalPolicy":["on-request"],"approvalsReviewer":["user"],"sandboxPolicy":["workspace-write"]}}`,
+	}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-start-turn-repair", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "project", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.Conversation{
+		PublicID: "conversation_start_turn_repair", UserID: 7, Title: "Repair", ExecutionType: "gateway", Status: "active",
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-start-turn-repair"
+	thread := model.AgentThread{
+		PublicID: "agth_start_turn_repair_0123456789a", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: "active", HistoryStatus: "loaded", HistoryVersion: historyProjectionVersion,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	staleSourceTurnRef := "turn-stale-running"
+	staleTurn := model.AgentTurn{
+		PublicID: "agturn_stale_running_0123456789ab", UserID: 7, ThreadID: thread.ID,
+		RunID: "run_stale_running", SourceTurnRef: &staleSourceTurnRef, Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&staleTurn).Error; err != nil {
+		t.Fatal(err)
+	}
+	endedAt := now.Add(-time.Minute)
+	if err := database.Create(&model.ConversationRun{
+		RunID: staleTurn.RunID, UserID: 7, ConversationID: conversation.ID, Endpoint: "local_gateway",
+		Status: "interrupted", ErrorCode: "gateway_interrupted", ErrorMessage: "local execution was interrupted",
+		StartedAt: now.Add(-2 * time.Minute), EndedAt: &endedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	messageUpdatedAt := now.Add(-30 * time.Second)
+	if err := database.Create(&model.Message{
+		ConversationID: conversation.ID, UserID: 7, PublicID: "msg_completed_projection", RunID: staleTurn.RunID,
+		Role: "assistant", ContentType: "text", Content: "completed on device", Status: "success", BranchReason: "default",
+		BaseModel: model.BaseModel{CreatedAt: messageUpdatedAt, UpdatedAt: messageUpdatedAt},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	fallbackSourceTurnRef := "turn-fallback-running"
+	fallbackTurn := model.AgentTurn{
+		PublicID: "agturn_fallback_running_0123456789", UserID: 7, ThreadID: thread.ID,
+		RunID: "run_fallback_running", SourceTurnRef: &fallbackSourceTurnRef, Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&fallbackTurn).Error; err != nil {
+		t.Fatal(err)
+	}
+	fallbackEndedAt := now.Add(-15 * time.Second)
+	if err := database.Create(&model.ConversationRun{
+		RunID: fallbackTurn.RunID, UserID: 7, ConversationID: conversation.ID, Endpoint: "local_gateway",
+		Status: "error", ErrorCode: "gateway_failed", ErrorMessage: "local execution failed",
+		StartedAt: now.Add(-time.Minute), EndedAt: &fallbackEndedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"model":"gpt-test","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","sandboxPolicy":"workspace-write"}`
+	repo := NewRepo(database)
+	created, err := repo.StartTurn(
+		context.Background(), "41234567-89ab-4def-8123-456789abcdef", strings.Repeat("d", 64),
+		&domainagent.Turn{
+			PublicID: "agturn_new_after_repair_0123456789a", UserID: 7, ThreadPublicID: thread.PublicID,
+			RunID: "run_new_after_repair", Status: "queued", InputJSON: `[{"kind":"text","text":"continue"}]`, SettingsJSON: settings,
+		},
+		&domainagent.Command{PublicID: "agcmd_new_after_repair_0123456789ab", Kind: "turn.start"}, now,
+	)
+	if err != nil || created == nil || created.RunID != "run_new_after_repair" {
+		t.Fatalf("StartTurn() = %#v, %v", created, err)
+	}
+	if err := database.First(&staleTurn, staleTurn.ID).Error; err != nil || staleTurn.Status != "completed" ||
+		staleTurn.ErrorCode != "" || staleTurn.ErrorMessage != "" || !staleTurn.UpdatedAt.Equal(messageUpdatedAt) {
+		t.Fatalf("stale Agent turn was not repaired: %#v err=%v", staleTurn, err)
+	}
+	if err := database.First(&fallbackTurn, fallbackTurn.ID).Error; err != nil || fallbackTurn.Status != "failed" ||
+		fallbackTurn.ErrorCode != "gateway_failed" || fallbackTurn.ErrorMessage != "local execution failed" ||
+		!fallbackTurn.UpdatedAt.Equal(fallbackEndedAt) {
+		t.Fatalf("fallback Agent turn was not repaired: %#v err=%v", fallbackTurn, err)
 	}
 }
 
@@ -1778,6 +1912,14 @@ func TestThreadProjectionIsOrderedAndIdempotent(t *testing.T) {
 	resourceTerminal := `{"kind":"result","result":{"kind":"resource","resource":"sessions","data":{"data":[{"sourceThreadRef":"source-thread-1","name":"Local session","status":"active","historyLoaded":false},{"sourceThreadRef":"source-thread-2","name":"Imported session","modelProvider":"openai","status":"archived","createdAt":1786615200,"updatedAt":1786615260,"recencyAt":1786615360,"historyLoaded":false}]}}}`
 	if ack, err := repo.ApplyTerminalFrame(context.Background(), device.ID, 6, 4, resourceCommand.PublicID, strings.Repeat("9", 64), resourceTerminal, now.Add(8*time.Second)); err != nil || ack != 6 {
 		t.Fatalf("apply resource terminal: ack=%d err=%v", ack, err)
+	}
+	recentResource, err := repo.QueueResourceRefresh(
+		context.Background(), "51234567-89ab-4def-8123-456789abcdef", strings.Repeat("c", 64), 7,
+		device.PublicID, "", workspace.PublicID, "sessions",
+		&domainagent.Command{PublicID: "agcmd_recent_refresh_0123456789abcdef", Kind: "resource.refresh"}, now.Add(9*time.Second),
+	)
+	if err != nil || recentResource.PublicID != queued.PublicID || recentResource.State != "completed" {
+		t.Fatalf("recent successful resource refresh was not reused: %#v %v", recentResource, err)
 	}
 	snapshot, err := repo.GetResourceSnapshot(context.Background(), 7, device.PublicID, "", workspace.PublicID, "sessions")
 	if err != nil || snapshot.WorkspacePublicID != workspace.PublicID || snapshot.ProfilePublicID != profile.PublicID ||

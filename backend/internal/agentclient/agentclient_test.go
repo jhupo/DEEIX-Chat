@@ -50,9 +50,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestEnqueueRoutesThreadReadsToBoundedHistoryQueue(t *testing.T) {
+func TestEnqueueRoutesBackgroundCommandsAwayFromForegroundQueue(t *testing.T) {
 	gateway := &Gateway{
-		ctx: context.Background(), commands: make(chan queuedCommand, 1), historyCommands: make(chan queuedCommand, 1), active: make(map[string]bool),
+		ctx: context.Background(), commands: make(chan queuedCommand, 1), historyCommands: make(chan queuedCommand, 1),
+		resourceCommands: make(chan queuedCommand, 1), active: make(map[string]bool),
 	}
 	history := commandRecord{Command: json.RawMessage(`{"kind":"thread.read","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-1","threadId":"agth_0123456789abcdef0123456789abcdef","sourceThreadRef":"source-thread-1"}`)}
 	gateway.enqueue("history-command", history, false)
@@ -70,7 +71,23 @@ func TestEnqueueRoutesThreadReadsToBoundedHistoryQueue(t *testing.T) {
 	default:
 	}
 
-	foreground := commandRecord{Command: json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"models"}}`)}
+	resource := commandRecord{Command: json.RawMessage(`{"kind":"resource.refresh","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","resource":{"scope":"profile","name":"models"}}`)}
+	gateway.enqueue("resource-command", resource, false)
+	select {
+	case item := <-gateway.resourceCommands:
+		if item.ID != "resource-command" {
+			t.Fatalf("resource queue item = %#v", item)
+		}
+	default:
+		t.Fatal("resource.refresh was not routed to the resource queue")
+	}
+	select {
+	case item := <-gateway.commands:
+		t.Fatalf("resource.refresh blocked the foreground command queue: %#v", item)
+	default:
+	}
+
+	foreground := commandRecord{Command: json.RawMessage(`{"kind":"turn.start","deviceId":"agd_0123456789abcdef0123456789abcdef","profileId":"codex-default","workspaceId":"workspace-0123456789abcdef01234567","threadId":"agth_0123456789abcdef0123456789abcdef","turnId":"agturn_0123456789abcdef0123456789abcdef","input":[{"kind":"artifact","artifactRef":"artifact-0123456789abcdef"}],"settings":{"model":"gpt-5.6"}}`)}
 	gateway.enqueue("foreground-command", foreground, false)
 	select {
 	case item := <-gateway.commands:

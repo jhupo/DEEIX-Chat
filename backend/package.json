@@ -1,6 +1,6 @@
 {
   "name": "@deeix/api",
-  "version": "0.4.139",
+  "version": "0.4.140",
   "private": true,
   "scripts": {
     "build": "make build",
