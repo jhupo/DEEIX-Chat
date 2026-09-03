@@ -478,6 +478,96 @@ func TestWorkspaceHistoryDeltaUpdatesActiveTurnInPlace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHistoryDeltaBindsGatewayMessagePair(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.Conversation{}, &model.Message{}, &model.Attachment{}, &model.ConversationRun{},
+		&model.ConversationExecutionEvent{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 3, 5, 22, 25, 0, time.UTC)
+	conversation := model.Conversation{
+		PublicID: "conversation_bind_gateway_pair", UserID: 7, Title: "Gateway", ExecutionType: "gateway", Status: "active",
+		BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-bind-gateway-pair", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-bind-gateway-pair"
+	thread := model.AgentThread{
+		PublicID: "agth_bind_gateway_pair", UserID: 7, DeviceID: 1, RuntimeProfileID: 1, WorkspaceID: workspace.ID,
+		ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef, Status: "active", HistoryStatus: "loaded", HistoryVersion: historyProjectionVersion,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	previous := model.Message{
+		ConversationID: conversation.ID, UserID: 7, PublicID: "msg_bind_previous", Role: "assistant", ContentType: "text",
+		Content: "previous", RunID: "run_previous", SourceRef: "message-previous", BranchReason: "default", Status: "success",
+		BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+	}
+	if err := database.Create(&previous).Error; err != nil {
+		t.Fatal(err)
+	}
+	runID := "run_bind_gateway_pair"
+	placeholderUser := model.Message{
+		ConversationID: conversation.ID, UserID: 7, PublicID: "msg_bind_user", ParentMessageID: &previous.ID,
+		Role: "user", ContentType: "text", Content: "reply exactly", RunID: runID, BranchReason: "default", Status: "success",
+		BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&placeholderUser).Error; err != nil {
+		t.Fatal(err)
+	}
+	placeholderAssistant := model.Message{
+		ConversationID: conversation.ID, UserID: 7, PublicID: "msg_bind_assistant", ParentMessageID: &placeholderUser.ID,
+		Role: "assistant", ContentType: "text", RunID: runID, BranchReason: "default", Status: "pending",
+		BaseModel: model.BaseModel{CreatedAt: now, UpdatedAt: now},
+	}
+	if err := database.Create(&placeholderAssistant).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceTurnRef := "turn-bind-gateway-pair"
+	turn := model.AgentTurn{
+		PublicID: "agturn_bind_gateway_pair", UserID: 7, ThreadID: thread.ID, RunID: runID,
+		SourceTurnRef: &sourceTurnRef, Status: "completed", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := workspaceSession{
+		SourceThreadRef: sourceThreadRef, HistoryLoaded: true, HistoryProjectionVersion: historyProjectionVersion,
+		HistoryDelta: true, Status: "active", UpdatedAt: now.Add(10 * time.Second).Unix(),
+		Messages: []workspaceSessionMessage{
+			{Role: "user", Status: "success", Content: "reply exactly", SourceTurnRef: sourceTurnRef, SourceMessageRef: "message-bind-user", CreatedAt: now.Add(3 * time.Second).Unix()},
+			{Role: "assistant", Status: "success", Content: "done", ReasoningContent: "checked", SourceTurnRef: sourceTurnRef, SourceMessageRef: "message-bind-assistant", CreatedAt: now.Add(9 * time.Second).Unix()},
+		},
+	}
+	if changed, err := syncExistingWorkspaceSession(database, &thread, &workspace, session, now.Add(10*time.Second)); err != nil || !changed {
+		t.Fatalf("bind gateway pair: changed=%v err=%v", changed, err)
+	}
+	var messages []model.Message
+	if err := database.Where("conversation_id = ?", conversation.ID).Order("id ASC").Find(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("gateway pair was duplicated: %#v", messages)
+	}
+	if messages[1].ID != placeholderUser.ID || messages[1].PublicID != placeholderUser.PublicID || messages[1].SourceRef != "message-bind-user" ||
+		messages[1].ParentMessageID == nil || *messages[1].ParentMessageID != previous.ID {
+		t.Fatalf("gateway user placeholder was not bound: %#v", messages[1])
+	}
+	if messages[2].ID != placeholderAssistant.ID || messages[2].PublicID != placeholderAssistant.PublicID || messages[2].SourceRef != "message-bind-assistant" ||
+		messages[2].Content != "done" || messages[2].ReasoningContent != "checked" || messages[2].Status != "success" ||
+		messages[2].ParentMessageID == nil || *messages[2].ParentMessageID != placeholderUser.ID {
+		t.Fatalf("gateway assistant placeholder was not bound: %#v", messages[2])
+	}
+}
+
 func TestStartTurnRepairsStaleAgentTurnsFromMessageBeforeRun(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(

@@ -1446,11 +1446,18 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 	for index := range stored {
 		storedByRef[stored[index].SourceRef] = &stored[index]
 	}
+	placeholderIDs, err := bindWorkspaceMessagePlaceholders(tx, conversation.ID, session.Messages, storedByRef, replaceHistory)
+	if err != nil {
+		return false, err
+	}
 	var parentID *uint
 	if session.HistoryDelta && len(refs) > 0 {
 		var previous model.Message
-		query := tx.Where("conversation_id = ? AND source_ref NOT IN ?", conversation.ID, refs).
-			Order("created_at DESC, id DESC").First(&previous)
+		query := tx.Where("conversation_id = ? AND source_ref NOT IN ?", conversation.ID, refs)
+		if len(placeholderIDs) > 0 {
+			query = query.Where("id NOT IN ?", placeholderIDs)
+		}
+		query = query.Order("created_at DESC, id DESC").First(&previous)
 		if query.Error == nil {
 			parentID = &previous.ID
 		} else if !dberror.IsRecordNotFound(query.Error) {
@@ -1461,6 +1468,9 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		messageStatus := workspaceSessionMessageStatus(source)
 		if storedMessage := storedByRef[source.SourceMessageRef]; storedMessage != nil {
 			updates := map[string]any{}
+			if storedMessage.SourceRef != source.SourceMessageRef {
+				updates["source_ref"] = source.SourceMessageRef
+			}
 			if storedMessage.Content != source.Content {
 				updates["content"] = source.Content
 			}
@@ -1534,6 +1544,59 @@ func syncExistingWorkspaceSession(tx *gorm.DB, thread *model.AgentThread, worksp
 		return false, err
 	}
 	return true, nil
+}
+
+func bindWorkspaceMessagePlaceholders(
+	tx *gorm.DB,
+	conversationID uint,
+	sources []workspaceSessionMessage,
+	storedByRef map[string]*model.Message,
+	replaceHistory bool,
+) ([]uint, error) {
+	if replaceHistory {
+		return nil, nil
+	}
+	runIDs := make([]string, 0, len(sources))
+	seenRunIDs := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		if source.RunID == "" || storedByRef[source.SourceMessageRef] != nil {
+			continue
+		}
+		if _, exists := seenRunIDs[source.RunID]; exists {
+			continue
+		}
+		seenRunIDs[source.RunID] = struct{}{}
+		runIDs = append(runIDs, source.RunID)
+	}
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+	var placeholders []model.Message
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("conversation_id = ? AND run_id IN ? AND source_ref = ? AND role IN ?", conversationID, runIDs, "", []string{"user", "assistant"}).
+		Order("created_at ASC, id ASC").Find(&placeholders).Error; err != nil {
+		return nil, err
+	}
+	placeholderIDs := make([]uint, 0, len(placeholders))
+	byRunAndRole := make(map[string][]*model.Message, len(placeholders))
+	for index := range placeholders {
+		key := placeholders[index].RunID + "\x00" + placeholders[index].Role
+		byRunAndRole[key] = append(byRunAndRole[key], &placeholders[index])
+		placeholderIDs = append(placeholderIDs, placeholders[index].ID)
+	}
+	for _, source := range sources {
+		if storedByRef[source.SourceMessageRef] != nil {
+			continue
+		}
+		key := source.RunID + "\x00" + source.Role
+		candidates := byRunAndRole[key]
+		if len(candidates) == 0 {
+			continue
+		}
+		storedByRef[source.SourceMessageRef] = candidates[0]
+		byRunAndRole[key] = candidates[1:]
+	}
+	return placeholderIDs, nil
 }
 
 func threadDeletionProtected(status string) bool {
