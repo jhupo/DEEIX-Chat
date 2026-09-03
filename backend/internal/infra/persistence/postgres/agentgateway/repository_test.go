@@ -13,6 +13,7 @@ import (
 	"time"
 
 	domainagent "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/domain/agentgateway"
+	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/dberror"
 	model "github.com/DEEIX-AI/DEEIX-Chat/backend/internal/infra/persistence/models"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/repository"
 	"github.com/DEEIX-AI/DEEIX-Chat/backend/internal/shared/agentprotocol"
@@ -60,6 +61,7 @@ func TestWorkspaceSessionSnapshotsReconcileEveryWorkspace(t *testing.T) {
 	database := testutil.Postgres(t)
 	if err := database.AutoMigrate(
 		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{}, &model.Conversation{},
+		&model.AgentTurn{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +180,76 @@ func TestWorkspaceSessionSnapshotsReconcileEveryWorkspace(t *testing.T) {
 	}
 	if err := database.First(&gammaThread, gammaThread.ID).Error; err != nil || gammaThread.Status != threadStatusDeletingActive {
 		t.Fatalf("deleting thread was revived = %#v err=%v", gammaThread, err)
+	}
+}
+
+func TestWorkspaceSessionSnapshotPreservesThreadWithActiveTurn(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentWorkspace{}, &model.AgentThread{},
+		&model.AgentTurn{}, &model.Conversation{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 3, 4, 0, 0, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_snapshot_active_turn", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("7", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{PublicID: "codex-snapshot-active-turn", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready"}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{
+		PublicID: "workspace-snapshot-active-turn", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		Name: "project", Status: "available", LastSeenAt: now,
+	}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := workspaceSession{SourceThreadRef: "thread-snapshot-active-turn", Name: "Active", Status: "active", CreatedAt: now.Unix(), UpdatedAt: now.Unix()}
+	if _, err := syncWorkspaceSessions(database, &device, profile.ID, workspace.ID, []workspaceSession{session}, now); err != nil {
+		t.Fatal(err)
+	}
+	var thread model.AgentThread
+	if err := database.Where("runtime_profile_id = ? AND source_thread_ref = ?", profile.ID, session.SourceThreadRef).First(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceTurnRef := "turn-snapshot-active"
+	turn := model.AgentTurn{
+		PublicID: "agturn_snapshot_active_turn", UserID: 7, ThreadID: thread.ID, RunID: "run_snapshot_active_turn",
+		SourceTurnRef: &sourceTurnRef, Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	changed, err := syncWorkspaceSessions(database, &device, profile.ID, workspace.ID, nil, now.Add(time.Second))
+	if err != nil || len(changed) != 0 {
+		t.Fatalf("active turn snapshot changed=%#v err=%v", changed, err)
+	}
+	var conversation model.Conversation
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.Status != "active" {
+		t.Fatalf("active turn thread was hidden: %#v err=%v", thread, err)
+	}
+	if err := database.First(&conversation, thread.ConversationID).Error; err != nil {
+		t.Fatalf("active turn conversation was hidden: %#v err=%v", conversation, err)
+	}
+	if err := database.Model(&turn).Update("status", "completed").Error; err != nil {
+		t.Fatal(err)
+	}
+	changed, err = syncWorkspaceSessions(database, &device, profile.ID, workspace.ID, nil, now.Add(2*time.Second))
+	if err != nil || !slices.Equal(changed, []string{conversation.PublicID}) {
+		t.Fatalf("terminal turn snapshot changed=%#v err=%v", changed, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.Status != threadStatusMissing {
+		t.Fatalf("terminal turn thread was retained: %#v err=%v", thread, err)
+	}
+	if err := database.Unscoped().First(&conversation, conversation.ID).Error; err != nil || !conversation.DeletedAt.Valid {
+		t.Fatalf("terminal turn conversation was retained: %#v err=%v", conversation, err)
 	}
 }
 
@@ -911,6 +983,110 @@ func TestWorkspaceHistoryDeltaForMissingThreadIsAcknowledged(t *testing.T) {
 	}
 	if err := database.Where("public_id = ?", event.PublicID).First(&stored).Error; err != nil || stored.ConversationProjectedAt == nil {
 		t.Fatalf("stored active/deleted history delta = %#v err=%v", stored, err)
+	}
+}
+
+func TestLiveTurnEventRestoresThreadHiddenByStaleSnapshot(t *testing.T) {
+	database := testutil.Postgres(t)
+	if err := database.AutoMigrate(
+		&model.AgentDevice{}, &model.AgentRuntimeProfile{}, &model.AgentBridgeFrame{}, &model.AgentEvent{},
+		&model.AgentWorkspace{}, &model.AgentThread{}, &model.AgentTurn{}, &model.AgentItem{}, &model.Conversation{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 3, 4, 19, 12, 0, time.UTC)
+	device := model.AgentDevice{
+		PublicID: "agd_live_event_restore", UserID: 7, Name: "desktop", Platform: "windows",
+		PublicKey: []byte("public-key"), PublicKeyFingerprint: strings.Repeat("4", 64),
+		CredentialVersion: 1, Status: domainagent.DeviceStatusActive,
+	}
+	if err := database.Create(&device).Error; err != nil {
+		t.Fatal(err)
+	}
+	profile := model.AgentRuntimeProfile{PublicID: "codex-live-event-restore", UserID: 7, DeviceID: device.ID, Provider: "codex", Status: "ready"}
+	if err := database.Create(&profile).Error; err != nil {
+		t.Fatal(err)
+	}
+	workspace := model.AgentWorkspace{PublicID: "workspace-live-event-restore", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID, Status: "available"}
+	if err := database.Create(&workspace).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := model.Conversation{
+		PublicID: "conversation_live_event_restore", UserID: 7, Title: "Live", ExecutionType: "gateway", Status: "active",
+		BaseModel: model.BaseModel{CreatedAt: now.Add(-time.Minute), UpdatedAt: now.Add(-time.Minute)},
+	}
+	if err := database.Create(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Delete(&conversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceThreadRef := "thread-live-event-restore"
+	thread := model.AgentThread{
+		PublicID: "agth_live_event_restore", UserID: 7, DeviceID: device.ID, RuntimeProfileID: profile.ID,
+		WorkspaceID: workspace.ID, ConversationID: conversation.ID, SourceThreadRef: &sourceThreadRef,
+		Status: threadStatusMissing, HistoryStatus: "error", HistoryError: "not found", HistoryVersion: historyProjectionVersion,
+	}
+	if err := database.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourceTurnRef := "turn-live-event-restore"
+	turn := model.AgentTurn{
+		PublicID: "agturn_live_event_restore", UserID: 7, ThreadID: thread.ID, RunID: "run_live_event_restore",
+		SourceTurnRef: &sourceTurnRef, Status: "running", InputJSON: "[]", SettingsJSON: "{}",
+	}
+	if err := database.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	event := domainagent.Event{
+		PublicID: "agev_live_event_restore", Kind: "item/started",
+		SourceThreadRef: sourceThreadRef, SourceTurnRef: sourceTurnRef, SourceItemRef: "item-live-event-restore",
+		PayloadJSON: `{"item":{"itemID":"item-live-event-restore","kind":"userMessage","status":"inProgress"},"itemID":"item-live-event-restore"}`,
+		OccurredAt:  now,
+	}
+	applied, err := NewRepo(database).ApplyEventFrame(context.Background(), device.ID, profile.ID, 1, strings.Repeat("d", 64), &event, now)
+	if err != nil || applied.Acknowledged != 1 || applied.ConversationID != conversation.ID || applied.RunID != turn.RunID ||
+		!slices.Equal(applied.ConversationPublicIDs, []string{conversation.PublicID}) {
+		t.Fatalf("live event was not applied: applied=%#v err=%v", applied, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.Status != "active" ||
+		thread.HistoryStatus != "unloaded" || thread.HistoryError != "" || thread.LastEventSeq != 1 {
+		t.Fatalf("missing thread was not restored: %#v err=%v", thread, err)
+	}
+	var restoredConversation model.Conversation
+	if err := database.First(&restoredConversation, conversation.ID).Error; err != nil || restoredConversation.Status != "active" || restoredConversation.DeletedAt.Valid {
+		t.Fatalf("deleted conversation was not restored: %#v err=%v", restoredConversation, err)
+	}
+	var item model.AgentItem
+	if err := database.Where("runtime_profile_id = ? AND source_item_ref = ?", profile.ID, event.SourceItemRef).First(&item).Error; err != nil ||
+		item.ThreadID != thread.ID || item.TurnID == nil || *item.TurnID != turn.ID || item.Kind != "userMessage" || item.Status != "running" {
+		t.Fatalf("live item was not projected: %#v err=%v", item, err)
+	}
+	if err := database.Model(&turn).Update("status", "completed").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Model(&thread).Updates(map[string]any{"status": threadStatusMissing, "last_event_seq": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Delete(&restoredConversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	lateEvent := event
+	lateEvent.PublicID = "agev_late_event_missing_thread"
+	lateEvent.SourceItemRef = "item-late-event-missing-thread"
+	lateEvent.PayloadJSON = `{"item":{"itemID":"item-late-event-missing-thread","kind":"agentMessage","status":"inProgress"},"itemID":"item-late-event-missing-thread"}`
+	late, err := NewRepo(database).ApplyEventFrame(context.Background(), device.ID, profile.ID, 2, strings.Repeat("e", 64), &lateEvent, now.Add(time.Second))
+	if err != nil || late.Acknowledged != 2 || late.ConversationID != 0 || len(late.ConversationPublicIDs) != 0 || late.RunID != "" {
+		t.Fatalf("late event blocked the bridge: applied=%#v err=%v", late, err)
+	}
+	if err := database.First(&thread, thread.ID).Error; err != nil || thread.Status != threadStatusMissing || thread.LastEventSeq != 1 {
+		t.Fatalf("late event restored terminal thread: %#v err=%v", thread, err)
+	}
+	if err := database.Unscoped().First(&restoredConversation, restoredConversation.ID).Error; err != nil || !restoredConversation.DeletedAt.Valid {
+		t.Fatalf("late event restored terminal conversation: %#v err=%v", restoredConversation, err)
+	}
+	if err := database.Where("runtime_profile_id = ? AND source_item_ref = ?", profile.ID, lateEvent.SourceItemRef).First(&model.AgentItem{}).Error; !dberror.IsRecordNotFound(err) {
+		t.Fatalf("late event projected an item: %v", err)
 	}
 }
 

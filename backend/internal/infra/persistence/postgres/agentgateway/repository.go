@@ -1167,7 +1167,10 @@ func reconcileMissingWorkspaceSessions(
 	query := tx.Where(
 		"user_id = ? AND runtime_profile_id = ? AND workspace_id = ? AND source_thread_ref IS NOT NULL AND status IN ?",
 		userID, profileID, workspaceID, []string{"active", "archived"},
-	)
+	).Where(`NOT EXISTS (
+		SELECT 1 FROM agent_turns AS turns
+		WHERE turns.thread_id = agent_threads.id AND turns.status IN ?
+	)`, []string{"awaiting_thread", "queued", "running"})
 	if len(seenSourceRefs) > 0 {
 		refs := make([]string, 0, len(seenSourceRefs))
 		for ref := range seenSourceRefs {
@@ -2425,6 +2428,18 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 		}
 		return err
 	}
+	if thread.Status == threadStatusMissing {
+		restored, err := restoreMissingThreadForLiveEvent(tx, &thread, event)
+		if err != nil {
+			return err
+		}
+		if !restored {
+			event.ThreadID, event.WorkspaceID = &thread.ID, &thread.WorkspaceID
+			projectedAt := event.OccurredAt
+			event.ConversationProjectedAt = &projectedAt
+			return nil
+		}
+	}
 	next := thread.LastEventSeq + 1
 	event.ThreadID, event.WorkspaceID, event.ThreadSeq = &thread.ID, &thread.WorkspaceID, &next
 	if event.Kind == "thread/archived" || event.Kind == "thread/unarchived" {
@@ -2551,6 +2566,47 @@ func projectAgentEvent(tx *gorm.DB, event *model.AgentEvent) error {
 		}
 	}
 	return nil
+}
+
+func restoreMissingThreadForLiveEvent(tx *gorm.DB, thread *model.AgentThread, event *model.AgentEvent) (bool, error) {
+	if thread == nil || event == nil || thread.Status != threadStatusMissing || event.SourceTurnRef == "" {
+		return false, nil
+	}
+	var turn model.AgentTurn
+	err := tx.Select("id", "status").
+		Where("thread_id = ? AND source_turn_ref = ?", thread.ID, event.SourceTurnRef).
+		First(&turn).Error
+	if dberror.IsRecordNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !slices.Contains([]string{"awaiting_thread", "queued", "running"}, turn.Status) {
+		return false, nil
+	}
+	if err := tx.Model(thread).Updates(map[string]any{
+		"status": "active", "history_status": "unloaded", "history_error": "",
+		"updated_at": gorm.Expr("GREATEST(updated_at, ?)", event.OccurredAt),
+	}).Error; err != nil {
+		return false, err
+	}
+	result := tx.Unscoped().Model(&model.Conversation{}).
+		Where("id = ? AND user_id = ? AND execution_type = ?", thread.ConversationID, thread.UserID, "gateway").
+		UpdateColumns(map[string]any{
+			"status": "active", "deleted_at": nil,
+			"updated_at": gorm.Expr("GREATEST(updated_at, ?)", event.OccurredAt),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return false, repository.ErrConflict
+	}
+	thread.Status = "active"
+	thread.HistoryStatus = "unloaded"
+	thread.HistoryError = ""
+	return true, nil
 }
 
 func agentTurnTerminal(payloadJSON string) (string, string, string, error) {
